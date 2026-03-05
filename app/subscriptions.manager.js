@@ -13,6 +13,7 @@ window.SubscriptionsManager = (function () {
   let quickRun10dBtn = null;
   let quickRun30dBtn = null;
   let quickRun30dStandardBtn = null;
+  let quickRunOpenWorkflowPanelBtn = null;
   let quickRunConferenceBtn = null;
   let quickRunYearSelect = null;
   let quickRunConferenceSelect = null;
@@ -450,7 +451,10 @@ window.SubscriptionsManager = (function () {
           <div id="arxiv-search-quick-run-divider" aria-hidden="true"></div>
 
           <div id="arxiv-search-quick-run-side">
-            <div class="chat-quick-run-title">快速抓取</div>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px;">
+              <div class="chat-quick-run-title" style="margin:0;">快速抓取</div>
+              <button id="arxiv-admin-open-workflow-panel-btn" class="arxiv-tool-btn" type="button" style="padding:2px 8px;">打开工作流面板</button>
+            </div>
             <button id="arxiv-admin-quick-run-10d-btn" class="chat-quick-run-item" type="button">立即搜寻十天内论文</button>
             <button id="arxiv-admin-quick-run-30d-btn" class="chat-quick-run-item" type="button">立即搜寻三十天内论文（全速览）</button>
             <button id="arxiv-admin-quick-run-30d-standard-btn" class="chat-quick-run-item" type="button">立即搜寻三十天内论文（全标准）</button>
@@ -668,6 +672,7 @@ window.SubscriptionsManager = (function () {
     quickRun10dBtn = document.getElementById('arxiv-admin-quick-run-10d-btn');
     quickRun30dBtn = document.getElementById('arxiv-admin-quick-run-30d-btn');
     quickRun30dStandardBtn = document.getElementById('arxiv-admin-quick-run-30d-standard-btn');
+    quickRunOpenWorkflowPanelBtn = document.getElementById('arxiv-admin-open-workflow-panel-btn');
     quickRunConferenceBtn = document.getElementById(
       'arxiv-admin-quick-run-conference-run-btn',
     );
@@ -726,6 +731,24 @@ window.SubscriptionsManager = (function () {
           '已发起 30 天全标准抓取任务。',
           { fetchMode: 'standard' },
         );
+      });
+    }
+
+    if (quickRunOpenWorkflowPanelBtn && !quickRunOpenWorkflowPanelBtn._bound) {
+      quickRunOpenWorkflowPanelBtn._bound = true;
+      quickRunOpenWorkflowPanelBtn.addEventListener('click', () => {
+        try {
+          if (window.DPRWorkflowRunner && typeof window.DPRWorkflowRunner.open === 'function') {
+            window.DPRWorkflowRunner.open();
+            return;
+          }
+        } catch (e) {
+          console.error(e);
+        }
+        if (quickRunMsgEl) {
+          quickRunMsgEl.textContent = '工作流触发面板未加载，请刷新页面后重试。';
+          quickRunMsgEl.style.color = '#c00';
+        }
       });
     }
 
