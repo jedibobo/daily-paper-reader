@@ -1,0 +1,938 @@
+Title: Kirin: Improving ANN efficiency with SNN Hybridization
+
+URL Source: https://arxiv.org/pdf/2602.08817v1
+
+Published Time: Tue, 10 Feb 2026 03:24:46 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# Kirin: Improving ANN efficiency with SNN Hybridization 
+
+# Chenyu Wang 
+
+Sun Yat-sen University Guangzhou, Guangdong, China wangcy236@mail2.sysu.edu.cn 
+
+# Zhanglu Yan ∗
+
+National University of Singapore Singapore zlyan@nus.edu.sg 
+
+# Zhi Zhou ∗
+
+Sun Yat-sen University Guangzhou, Guangdong, China zhouzhi9@mail.sysu.edu.cn 
+
+# Xu Chen 
+
+Sun Yat-sen University Guangzhou, Guangdong, China chenxu35@mail.sysu.edu.cn 
+
+# Weng-Fai Wong 
+
+National University of Singapore Singapore wongwf@nus.edu.sg 
+
+## Abstract 
+
+Artificial neural networks (ANNs), particularly large language mod-els (LLMs), demonstrate powerful inference capabilities but con-sume substantial energy. Conversely, spiking neural networks (SNNs) exhibit exceptional energy efficiency due to their binary and event-driven characteristics, thus motivating the study of ANN-to-SNN conversion. In this process, quantization plays a pivotal role, map-ping LLMs’ floating-point parameters to discrete SNN parameters via the temporal dimension of the time window. However, several challenges remain in the conversion process: (i) converting high bit-width quantization values into binary spikes requires longer time windows, increasing system latency; and (ii) the inherent trade-off between the information loss of single-spike schemes and the en-ergy costs of multi-spike ones in SNN. To address these challenges, we propose Kirin, a integer and spike hybrid based SNN to achieve accuracy lossless ANN-to-SNN conversion with time and energy efficiency. Specifically, we first propose a Spike Matrix Hybridiza-tion strategy that encoding low bit-width parameters that leading to small time window size into binary spikes while preserving the rest in integer format, thereby reducing the overall latency of SNN execution. Second, we introduce a silence threshold mechanism to regulate the timing of single-spike firing, ensuring the output is mathematically equivalent to the LLM’s output and preserves accu-racy. Experimental results demonstrate that Kirin, under a W4A4&8 quantization setting, achieves near-FP16 accuracy while reducing energy consumption by up to 84.66% and shortening time steps by 93.75%. 
+
+## Keywords 
+
+Large Language Models, Spiking Neural Networks, ANN-to-SNN Conversion, Time Efficiency Inference, Energy Efficient Inference 
+
+## 1 Introduction 
+
+Artificial Neural Networks (ANNs) represented by Large Language Models (LLMs) currently stand at the forefront of modern AI. These models have demonstrated exceptional proficiency in extracting in-sights from massive data repositories, revolutionizing fields such as natural language processing [ 1 ], code generation [ 2 ], and medical diagnosis [ 3]. However, the emergent capabilities arising from bil-lions of parameters come at the cost of substantial inference energy consumption, which scales with the processing of massive input 
+
+> ∗Corresponding authors are Zhi Zhou and Zhanglu Yan.
+
+data. For instance, a 10-second ChatGPT interaction consumes ap-proximately 10 kJ of energy (operating at 1000 watts) [ 4], vastly exceeding the human brain’s consumption of <200 J (<20 watts) for similar cognitive tasks [ 5]. Based on this observation, brain-inspired Spiking Neural Networks (SNNs) [ 6 ] have emerged to bridge this energy gap. SNNs leverage binary, event-driven representations and the Integrate-and-Fire (IF) mechanism to replace intensive Multiply-Accumulate (MAC) operations with energy-efficient temporal Ac-cumulate (ACC) operations, while simultaneously minimizing data movement overhead through sparse communication, thus offering a viable path for sustainable large-scale inference [7]. Quantization-based ANN-to-SNN conversion typically involves two stages: parameter encoding and the Integrate-and-Fire (IF) pro-cess. In the encoding phase, floating-point parameters are quantized using mixed precision to mitigate information loss: outliers in pa-rameters are assigned high bit-widths, while normal parameters retain low bit-widths [ 8– 10 ]. These parameters are then encoded into binary spikes over 𝑇 = 2𝑏𝑖𝑡 time steps, commonly utilizing temporal coding schemes such as Time-to-First-Spike (TTFS) [ 11 ]or rate-based coding [ 12 ]. Subsequently, the IF neurons process the resulting spike trains and synaptic weights through temporal potential accumulation and threshold-based firing. However, this mechanism creates a critical bottleneck: achieving high informa-tion fidelity via quantization and encoding will lead to excessive latency and energy consumption. For instance, 8-bit quantization necessitates an extended time window ( 𝑇 = 256 ), introducing sub-stantial latency as the system must accommodate the maximum potential spiking time. Furthermore, existing coding schemes face inherent limitations in balancing precision and cost: while TTFS is energy-efficient but prone to information loss due to its over spar-sity problem, maintains high accuracy but triggers heavy energy consumption due to dense spike trains. Consequently, navigating the trade-off between representation accuracy and energy efficiency becomes essential. Current efforts to address the latency challenges of long time windows largely rely on lowering quantization precision or prun-ing information. For example, QFFS [ 13 ] aggressively compresses activations to 2-bit to reduce time steps, while Wu et al. [ 14 ] apply a dynamic cutoff during inference to drop later spikes carrying less information. Nevertheless, such strategies will sacrifice precision, leading to a degradation in model performance. Moreover, balancing the trade-off between the information loss of TTFS and the energy inefficiency of rate-encoding presents a persistent challenge.  
+
+> arXiv:2602.08817v1 [cs.LG] 9 Feb 2026 Trovato et al. t
+> t
+> t
+> 111 0111
+> 00 10100
+> 101011 01 2 3 4 5 6 7
+> Time-step
+> Membral Potential
+> Float point value Quantization value
+> 7.93
+> 2.66
+> 5.02
+> 6
+> 2
+> 4
+
+IF        
+
+> 8
+> Count rate encoding
+> 10010000
+> Fire Fire
+> -
+> -
+> End
+> (a) Rate encoding and Integrate-and-Fire mechanism. t
+> t
+> t
+> 100000
+> 10
+> 1000 1 2 3 4 5 6 7
+> Time-step
+> Membral Potential
+> Float point value Quantization value
+> 7.93
+> 2.66
+> 5.02
+> 6
+> 2
+> 4
+
+IF  
+
+> 8
+> TTFS encoding
+> 10
+> Fire
+> End (b) Time-to-First-Spike encoding and Integrate-and-Fire mecha-nism.
+
+Figure 1: From Floating-Point Values to Spike Encoding and Integrate-and-Fire mechanism. Ten floating-point values are randomly sampled and quantized (scale = 1.42, zero-point = 0); three examples are shown with their binary codes and corre-sponding spike trains. 
+
+To address these challenges, we propose Kirin 1, the first frame-work that leverages integer spike hybridization to simultaneously optimize the time and energy efficiency of ANN-to-SNN accuracy-lossless conversion. In Kirin, we formulate the matrix operations within LLMs, including Attention and MLP modules, as multiplica-tions between a spike train matrix and a weight matrix. To address the latency caused by a small number of high bit-width values, we decompose matrix multiplications into a hybrid strategy combin-ing dominant SNN accumulations with a small fraction of integer multiplications. Specifically, our proposed spike matrix hybridiza-tion strategy selectively retains quantization outliers that would necessitate long time windows are retained as integers and are not converted into spike trains. To minimize the overhead of integer MAC operations, we select the matrix with fewer quantized outliers necessitating integer retention as the spike matrix. Furthermore, to achieve an optimal trade-off between accuracy and energy effi-ciency, we introduce a Silence Threshold mechanism based on the energy-efficient TTFS, inspired by Rate encoding. We employ TTFS for temporal encoding and define the threshold in the IF phase as a function of the quantization scale, thereby mathematically ensuring equivalence to de-quantization. When the threshold is reached, the TTFS fire time increments while keeping the output silent by not firing an actual spike, continuing until no new po-tential accumulates. This process retains the energy efficiency of TTFS while incorporating the high inter-layer information fidelity of Rate encoding. Our contributions are summarized as follows: 
+
+• We propose Kirin, the first integer-spike hybridization frame-work for spiking LLMs, designed to simultaneously opti-mize time and energy efficiency. 
+
+• Through the Spike Matrix Hybridization strategy and Si-lence Threshold mechanism, we resolve the long time win-dow issue induced by high-bit quantization with minimal energy overhead and achieve lossless accuracy with low energy cost. 
+
+> 1We named our methods Kirin (or Qilin), which blending a hybridization of the lion and dragon.
+
+• Extensive experiments demonstrate that the proposed method achieves lossless conversion accuracy, outperforming state-of-the-art SNNs and quantized ANNs in both energy and time efficiency. Specifically, it attains near FP16 accuracy while reducing energy costs by 84.66% and the time window by 93.75%. 
+
+## 2 Preliminary 2.1 ANN-to-SNN parameters mapping and encoding 
+
+ANN-to-SNN conversion aims to transform a pre-trained ANN into a functionally equivalent SNN while preserving inference accu-racy and improving energy efficiency. In this process, we adopt a quantize-then-encode paradigm, where ANN parameters are first quantized into integers and subsequently mapped to spike-based encodings, as shown in Fig. 1. By discretizing continuous-valued ANN parameters into low-bit integers, quantization establishes a fundamental bridge to discrete spiking mechanisms. Currently, two integers-to-spike train encoding paradigms are widely used in SNNs [ 15 ]: rate-based encoding, represented by Rate Encoding [16], and temporal encoding, represented by TTFS Encoding [17]. 
+
+Rate Encoding. In rate-based encoding, neural weights or acti-vations are represented by the firing frequency of a spiking neu-ron within a fixed time window. A commonly used rate-encoding scheme is Rate, in which the quantized value determines the total number of spikes. Specifically, given an n-bit quantized value 𝑞 , the corresponding neuron 𝑖 generates a spike train whose spike count 
+
+𝑁 𝑖 within a time window of length 𝑇 (typically 𝑇 = 2𝑛 ) satisfies 
+
+𝑞 = 𝑁 𝑖 . The spike rate of Rate Encoding in a time window is: 
+
+𝑟 = 𝑁 𝑖 
+
+𝑇 , (1) 
+
+Time-to-First-Spike Encoding. Temporal coding encodes in-formation in the precise timing of spikes rather than their frequency. The most basic temporal coding scheme is time-to-first-spike (TTFS) encoding. In TTFS encoding, each neuron emits at most one spike, and the quantized relative time of the spike 𝑞 is mapped to the spike latency. In the original TTFS paradigm, larger values trigger spikes earlier (i.e., 𝑡 = 𝑇 − 𝑞 ). This mechanism mimics biological Kirin: Improving ANN efficiency with SNN Hybridization 
+
+neurons, in which stronger stimuli lead to faster accumulation of the membrane potential and earlier firing. However, in the context of ANN-to-SNN conversion, parameter magnitude is equally criti-cal. To make subsequent parameter encoding more intuitive and computationally efficient, we define the spike time as 𝑡 = 𝑞 . The spike rate of TTFS encoding is defined as 
+
+𝑟 = 1
+
+𝑇 , (2) since each neuron fires at most one spike within the time window. 
+
+## 2.2 SNN Integrate-and-Fire paradigm 
+
+Following the transformation of ANN parameters into the binary spike representations required by SNNs, the subsequent inference process adheres to the SNN computational paradigm. Among the diverse spectrum of spiking neuron models, the integrate-and-fire 
+
+(IF) mechanism is widely regarded as a more robust and efficient choice due to its simplified dynamics and reduced computational overhead [18]. The operational semantics of the IF neuron exhibit distinct characteristics when coupled with Rate Encoding and TTFS encoding. 
+
+Count Rate coded IF neuron model. Under the Rate encod-ing paradigm, information is encoded via spike frequency over a time window 𝑇 . The IF neuron integrates weighted spikes into its membrane potential, firing a spike whenever a threshold 𝑉 th is exceeded. This IF cycle repeats until the end of the time window. The discrete-time dynamics of this process can be formulated as follows: 
+
+𝐼 (𝑡 ) =
+
+> 𝑛
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑊 𝑖 𝐼 𝑖 (𝑡 ), (3) 
+
+𝑉 (𝑡 ) = 𝑉 (𝑡 − 1) + 𝐼 (𝑡 ) − 𝑠 (𝑡 ) · 𝑉 th , (4) 
+
+𝑠 (𝑡 ) =
+
+(
+
+0, if 𝑉 (𝑡 − 1) + 𝐼 (𝑡 ) < 𝑉 th ,
+
+1, if 𝑉 (𝑡 − 1) + 𝐼 (𝑡 ) ≥ 𝑉 th . (5) where 𝑉 (𝑡 ) denotes the accumulated membrane potential at time step 𝑡 , while 𝑊 𝑖 and 𝐼 𝑖 (𝑡 ) represent the synaptic weight and the input spike from neuron 𝑖 at time 𝑡 , respectively. In this configura-tion, the output of the SNN maintains the Rate encoding format, as illustrated in Figure 1a. 
+
+TTFS coded IF neuron model. For TTFS encoding, the IF neuron model restricts the neuron to emit only a single spike, using first-spike latency as the sole code and maintaining neuronal silence thereafter . This process formalized as: 
+
+𝑠 (𝑡 ) =
+
+(
+
+1, 𝑉 (𝑡 − 1) + 𝐼 (𝑡 ) ≥ 𝑉 th ∧ Í𝜏 <𝑡 𝑠 (𝜏 ) = 0,
+
+0, otherwise . (6) 
+
+𝑉 (𝑡 ) =
+
+(
+
+𝑉 (𝑡 − 1) + 𝐼 (𝑡 ), Í𝜏 ≤𝑡 𝑠 (𝜏 ) = 0,
+
+0, Í𝜏 ≤𝑡 𝑠 (𝜏 ) = 1. (7) Under standard TTFS semantics, IF neurons are strictly con-strained to emit at most a single spike per time window. Conse-quently, any subsequent threshold crossings driven by accumulated membrane potential are ignored, as illustrated in Fig. 1b. 
+
+## 3 ANN-to-SNN Conversion Workflow 
+
+In this section, we first analyze the challenges in the ANN-to-SNN conversion process (Section 3.1), focusing on parameter encoding and the IF mechanism, and then propose corresponding solutions to each (Section 3.2 and 3.3). Finally, we presents the overall framework of the proposed Kirin (Section 3.4). 
+
+## 3.1 Challenges and Motivation 
+
+Challenge 1). During parameter encoding, a typical ANN-to-SNN conversion pipeline quantizes ANN parameters and then maps them to binary encoding (see Section 2). However, Outliers in weights and activations inflate the quantization range, thereby compressing the effective resolution for the many normal values with similar magnitudes, which degrades accuracy. A common mitigation is to apply high-bit quantization to outliers (typically 8 bit) and low-bit quantization to normal values (typically 4 bit) [ 9, 10 ]. In ANN-to-SNN conversion setting, however, the time-window length serves as an information carrier equivalent to the quantization bit-width and scales exponentially with it ( 𝑇 = 2𝑏𝑖𝑡 ). Consequently, within a group of neurons, outliers quantized at higher bit-widths, when mapped to binary temporal codes (e.g., TTFS), become the bottleneck for the waiting time of the corresponding IF neuron model, substantially increasing inference latency and reducing overall throughput. 
+
+Challenge 2). In IF neuron model, TTFS imposes a structural constraint that permits at most one spike within a time window. An IF neuron fires upon the first threshold crossing and remains inacti-vate for the remainder of the window, even if subsequent weighted membrane-potential accumulation could reach the threshold, it can-not be encoded as additional spikes. This induces severe information truncation across layers, rendering the layer-wise representations mathematically non-closed, which leads to inference failure or sub-stantial performance degradation. Although Rate Count Encoding does not suffer from the aforementioned issue, its encoding scheme yields spike rates that are several times higher than those of TTFS, resulting in multiplicatively increased energy consumption. This outcome runs counter to the original motivation of ANN-to-SNN conversion, which is to reduce energy usage. In summary, a lossless conversion from ANN to time and energy efficient SNNs requires tackling: (i) outlier-driven expansion of the quantization dynamic range and the ensuing heterogeneous bit-width quantization that inflates time windows and creates system-level latency bottlenecks, and (ii) the trade-off between TTFS-induced cross-layer information loss from the single-spike con-straint and the elevated energy cost of higher spike rates, for exam-ple in Rate Count Encoding. 
+
+## 3.2 Spike Matrix Hybridization 
+
+In the parameter encoding phase, to minimize information loss induced by quantization, we first employ the MAD algorithm [ 19 ]—owing to its robustness against extreme values— offline to detect outliers within both weights and activations, subsequently adopt-ing an outlier-aware hybrid precision quantization. Although TTFS introduces limitations at the IF inference stage, we nevertheless choose TTFS for parameter encoding, as its inherently low spike rate yields additional energy savings for the SNN. After the quan-tized parameters are converted into TTFS encoding, the maximum Trovato et al. Embedding 
+
+LayerNorm 
+
+Linear Attention 
+
+LayerNorm 
+
+MLP 
+
+Head 
+
+×N 
+
+> Activation distribution Weight distribution box plot
+> One of activation outliers
+> One of weight outliers
+> Overly wide activation quantization range
+> Overly wide weight quantization range
+
+1. Challenge of long waiting time window 
+
+> Quantization value
+> 0
+> 3
+> 2
+> 1
+> 254
+> 253
+
+2. Challenge of inter-layer information transmission 
+
+Long waiting time     
+
+> 10100000 1000
+> ttt
+
+Severe information loss 
+
+IF neuron model    
+
+> Normal value Outlier value
+> Outlier aware mix precision quantization
+> Low bit
+> High bit
+> TTFS encoding
+> 123… 253 254 255
+> Time-step
+> Waiting T=253 Waiting T=252 Waiting T=254 Waiting T=251
+> ……
+> ANN equivalent output based on silence threshold TTFS encoding
+
+Spiking matrix selection 
+
+Matrix A Matrix B 
+
+Int Int Int Int 
+
+Output = SNN + Int operation operation  
+
+> Expected spike time > Tn
+> ttt
+> 10
+> 100000
+> 1000
+
+IF  
+
+> ANN neuron output
+> t
+> TTFS encoding
+> TTFS output based on
+> silence time threshold
+
+Silence threshold based IF  
+
+> Quantize with scale
+> Quantize with scale
+> st
+> Int
+> Int Int Int Int V Linear
+> Spike Matrix Hybridization  Int
+> Int Int Int Q Linear Int
+> Int Int
+> Int
+> K Linear Int Int
+> SMH
+> Int
+> Int Int Int Attention Int
+> SMH
+
+Final outputs 
+
+> Int Int Int Int
+> Int
+> Int Int Int Int
+> Int
+> O Linear Attention
+
+Figure 2: Overview of the challenges and proposed ANN-to-SNN lossless conversion framework. Top: The two main bottlenecks in current SNN conversion—latency due to activation outliers and data loss in IF neurons. Bottom: The proposed solution utilizing Spike Matrix Hybridization to handle long latency and a Silence Threshold mechanism to ensure lossless outputs. 
+
+time windows for normal values and outlier values are defined as: 
+
+𝑇 𝑛 = 2𝑏 𝑛 , 𝑇 𝑜 = 2𝑏 𝑜 , (8) where 𝑏 𝑛 denotes the low quantization bits for normal values, and 
+
+𝑏 𝑜 denotes the high quantization bits for outlier values. Within a single IF neuron model, the latency bottleneck is typically deter-mined by 𝑇 𝑜 , as illustrated in Fig. 2. Consequently, our work focuses on shortening 𝑇 𝑜 while minimizing losses including accuracy degra-dation and energy cost. A straightforward approach is to bypass TTFS encoding for out-liers with excessively long time windows, and instead use their quantized integer values directly for matrix multiplication. A po-tential concern is whether retaining a significant number of MAC operations might undermine the energy-efficiency advantages of SNNs. However, our empirical analysis alleviates this concern, re-vealing that outliers constitute only a negligible fraction of the total parameters (e.g., merely 2.68% in Llama2-7B). Nevertheless, we re-main committed to minimizing the quantity of retained integer values. In the linear attention and MLP layers, all matrix transfor-mations can be viewed as processes where multiple spike train neurons perform IF operations with their corresponding synaptic weights. In this context, selecting a proper matrix to transform as the spike train neuron is critical for shortening 𝑇 𝑜 .Let the two matrices be 𝐴 and 𝐵 . For any matrix 𝑀 ∈ 𝐴, 𝐵 , and its elements be denoted as 𝑚 𝑖,𝑗 . For any outliers whose converted TTFS spike time would exceed the maximum time step 𝑇 𝑛 of normal values, we bypass the encoding process and retain the element in its quantized integer format. Consequently, the number of such outliers in each matrix can be expressed as: 
+
+𝐶 (𝑀 ) =∑︁ 
+
+> 𝑖,𝑗
+
+I  (𝑖, 𝑗 ) ∈ O 𝑀 ∧ | 𝑚 𝑖,𝑗 | > 𝑇 𝑛 
+
+ , (9) 
+
+O𝑀 = (𝑖, 𝑗 ) | 𝑚 {𝑖, 𝑗 } is an outlier (10) By comparing 𝐶 (𝐴 ) and 𝐶 (𝐵 ), we select the matrix with the smaller 𝐶 value as the spike neuron (while retaining a portion of quantized integers), which implies the minimum number of integer multiplications required. The final matrix multiplication 𝑌 = 𝐴 × 𝐵 
+
+can be reconstructed as the sum of the following two components: 
+
+𝑌 =  𝐼 𝐹 (𝐴 (𝑆 ) , 𝐵 )| {z }
+
+> SNN Operation
+
++  𝐴 (𝐼 ) × 𝐵 | {z }
+
+> INT Operation
+
+. (11) Our experiments demonstrate (see Appendix C) that only a very small fraction of values in the matrix remain as integers, ranging from 1.61% to 2.14%. Kirin: Improving ANN efficiency with SNN Hybridization 
+
+## 3.3 Silence Threshold based TTFS 
+
+Upon the determination of the spike train matrix, the computation proceeds to the IF neuron model stage. In the context of TTFS encoding, the integration phase necessitates waiting for all spiking neurons within the spike matrix to fire, subsequently performing a weighted accumulation onto the membrane potential. Assuming there are 𝑛 spiking neurons, this process can be formulated as follows: 
+
+𝑉 (𝑡 ) = 𝑉 (𝑡 − 1) + 
+
+> 𝑛
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑎 𝑖 (𝑡 )𝑊 𝑖 𝑡 𝑖 (12) 
+
+𝑎 𝑖 (𝑡 ) =
+
+(
+
+1 if neuron 𝑖 spikes at 𝑡 
+
+0 else (13) where 𝑉 (𝑡 ) denotes the accumulated membrane potential at time step 𝑡 , 𝑊 𝑖 represents the quantized synaptic weight corresponding to spiking neuron 𝑖 , and 𝑡 𝑖 indicates the timestamp at which neuron 
+
+𝑖 emits a spike. According to the TTFS encoding rules, 𝑡 𝑖 also signi-fies the quantized value represented by this spike. This potential accumulation process persists until either all spiking neurons have fired or the time window is exhausted. Through the processing of Spike Matrix Hybridization, the maximum duration of potential accumulation is bounded by 𝑇 𝑛 . Regarding the integer parameter components within the spike matrix (assuming 𝑚 components), a matrix multiplication is performed directly with their correspond-ing quantized weights. The resulting products are then directly added, in the form of potential, to the final accumulated membrane potential: 
+
+𝑉 𝑡𝑜𝑡𝑎𝑙 = 𝑉 (𝑇 ) + 
+
+> 𝑚
+
+∑︁ 
+
+> 𝑗 =1
+
+𝑊 𝑗 𝐼 𝑗 (14) where 𝑉 (𝑇 ) is the total potential accumulated from the spiking neurons, while 𝐼 𝑗 and 𝑊 𝑗 represent the neuron value and the corre-sponding weight of the integer component, respectively. In the firing phase, to achieve an output equivalent to that of an ANN and ensure lossless accuracy, we draw inspiration from SpikeQuant [ 20 ] and set the firing threshold 𝑉 𝑡ℎ to 1  
+
+> 𝑆 1·𝑆 2
+
+. Here, 𝑆 1
+
+and 𝑆 2 denote the quantization scales for Matrix A (input neurons, representing either spike trains or integer values) and Matrix B (synaptic weights), respectively. Unlike SpikeQuant, which utilizes Rate encoding for its output, our approach maintains the output of the IF neuron in the more energy-efficient TTFS coding format. In an ANN, the final output of two quantized matrices A and B of length 𝑔 , following matrix multiplication and dequantization, is expressed as: 
+
+𝑂𝑢𝑡𝑝𝑢𝑡 𝐴𝑁 𝑁 = 𝑆 1 · 𝑆 2
+
+|{z} 
+
+> 𝑧 1
+> 𝑔
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑎 𝑖 · 𝑏 𝑖 
+
+| {z }
+
+> 𝑧 2
+
++𝑏𝑖𝑎𝑠 (15) where 𝑎 𝑖 and 𝑏 𝑖 are the quantized values within Matrix A and B. Deriving from Equations (12) and (14), the accumulated potential 
+
+𝑉 𝑡𝑜𝑡𝑎𝑙 resulting from the hybrid execution—combining dominant SNN accumulations with sparse integer multiplications—is identical to the 𝑧 2 component in Equation (15). In SNNs, the firing result is mathematically equivalent to 
+
+j 𝑉 𝑡𝑜𝑡𝑎𝑙 
+
+> 𝑉 𝑡ℎ
+
+k
+
+. By setting 𝑉 𝑡ℎ = 1  
+
+> 𝑆 1·𝑆 2
+
+,the number of times the threshold is reached equals the integer part of 𝑂𝑢𝑡𝑝𝑢𝑡 𝐴𝑁 𝑁 . The residual potential 𝑉 𝑟𝑒𝑠𝑡 that does not reach 
+
+𝑉 𝑡ℎ , when divided by 𝑉 𝑡ℎ , corresponds to the fractional part of 
+
+𝑂𝑢𝑡𝑝𝑢𝑡 𝐴𝑁 𝑁 .In traditional TTFS, the IF process terminates immediately after the potential reaches 𝑉 𝑡ℎ and triggers a spike. Conversely, in Rate encoding, a spike is triggered every time 𝑉 𝑡ℎ is reached until no further potential accumulates. We integrate the firing characteris-tics of both by introducing silence time ( 𝑠𝑡 ) and a silence threshold (𝑆 𝑡ℎ ). Numerically, 𝑆 𝑡ℎ is equal to 𝑉 𝑡ℎ . The distinction lies in the behavior: when the membrane potential reaches 𝑆 𝑡ℎ , the neuron does not fire immediately; instead, 𝑠𝑡 is incremented by 1. This process continues until all spiking neurons have emitted spikes or the maximum time window 𝑇 𝑛 is reached. Only then does the IF neuron model determine the specific time step to fire based on the value of 𝑠𝑡 . Consequently, the final output of the IF neuron model is: 
+
+𝑂𝑢𝑡𝑝𝑢𝑡 𝐼 𝐹 = 𝑠𝑡 + 𝑉 𝑟𝑒𝑠𝑡 
+
+𝑆 𝑡ℎ 
+
++ 𝑏𝑖𝑎𝑠 = 𝑂𝑢𝑡𝑝𝑢𝑡 𝐴𝑁 𝑁 (16) This guarantees that the SNN achieves the same output as the ANN while utilizing the energy-efficient TTFS coding scheme, thereby ensuring lossless accuracy. 
+
+## 3.4 Kirin Overall Workflow 
+
+As illustrated in the bottom panel of Figure 2, within the linear attention module, both the linear projection and attention compu-tation phases can be formulated as matrix multiplications between two matrices. In the linear projection phase, the input activation matrix and the weight matrix are first processed by the Spike Ma-trix Hybridization module. This module dynamically selects the matrix containing fewer quantized values that would necessitate a long inference time window as the spike matrix. Subsequently, quantized values within this spike matrix that are prone to inducing long latencies are retained as integers for subsequent computation, while the remaining values are encoded using TTFS. This hybrid strategy aims to mitigate the long time window challenge inherent in ANN-to-SNN conversion while minimizing energy costs. Following matrix selection, the spike matrix and weight matrix are processed via the SNN’s IF neuron model. Here, a Silence Thresh-old mechanism is employed to ensure that the TTFS-based SNN output is mathematically equivalent to the floating-point output obtained from the dequantized ANN matrix. Thereafter, one set of SNN outputs (e.g., Q linear projection) and its associated set (e.g., K linear projection) are fed back into the Spike Matrix Hybridization module to redetermine the spike and weight matrices. This process iterates until the final output is generated. Although the bottom panel of Figure 2 depicts the workflow of Kirin within the linear attention module of LLMs, the method is equally applicable to the MLP components of LLMs, as Kirin fundamentally optimizes the matrix multiplication operations in ANN-to-SNN conversion. 
+
+## 4 Experiments 4.1 Experimental setup 
+
+Training Details. In the ANN-to-SNN conversion pipeline, quanti-zation of both activations and weights is a prerequisite. We employ Trovato et al. 
+
+Table 1: Perplexity ( ↓) comparison of Llama2 and OPT models using different quantization and SNN methods.                                                                                                                                                         
+
+> (a) Perplexity of Llama2 Models
+> Methods Bits Weight Activation SNN Timestep Llama2-7B Llama2-13B outlier outlier conversion WikiText C4 WikiText C4 Fp16 W16A16 ×××-5.68 7.08 4.88 6.46 SmoothQuant W4A4 ×✓×-22.62 31.21 33.98 41.53 OmniQuant W4A4 ×××-14.61 19.35 12.3 15.87 Atom W4A4 ×✓×-6.16 7.70 5.46 7.03 SpikeLLM W4A(4&8) ×✓✓T=256 11.36 15.87 9.71 12.10 SpikeQuant W4A(4&5) ×✓✓T=32 5.80 7.33 5.04 6.65 Kirin W4A(4&8) ✓✓✓T=16 5.71 7.25 5.03 6.61 (b) Perplexity of OPT Models
+> Methods Bits Weight Activation SNN Timestep Opt1.3B Opt2.7B outlier outlier conversion WikiText C4 WikiText C4 Fp16 W16A16 ×××-14.63 14.72 12.47 13.17 OneBit W1A16 ×××-25.42 22.95 21.86 20.76 LRQuant W2A1 ×××-48.43 69.34 30.59 42.49 GPTQ W3A16 ×××-20.97 21.63 16.88 18.17 Vanilla Quantization W4A4 ×××-35.61 30.52 15.90 16.18 SpikeQuant W4A(4&5) ×✓✓T=32 16.38 16.56 13.15 13.91 Kirin W4A(4&8) ✓✓✓T=16 16.33 16.26 12.89 13.72
+
+a mixed-precision quantization strategy where weights and activa-tions are primarily quantized to 4-bit, while outliers are processed at 8-bit precision. All quantization and conversion experiments were conducted on two NVIDIA A100 40GB GPUs. To evaluate inference energy efficiency, we utilize energy measurements for computation, data movement, and memory access, derived from a commercial 22 nm process. 
+
+Evaluation Baselines. Given the limited number of existing quantization-based ANN-to-SNN conversion methods, we bench-mark our approach against two state-of-the-art SNN conversion methods: SpikeLLM [ 21 ] and SpikeQuant [ 20 ], as well as seven established ANN quantization techniques across various bit-widths. Specifically, for Llama [ 22 ] models, the baselines include three W4A4 quantization methods: SmoothQuant [ 23 ], OmniQuant [ 24 ], and Atom [ 9]. For OPT [ 25 ] models, the baselines consist of OneBit [ 26 ], LRQuant [ 27 ], and GPTQ [ 28 ]. Performance is evaluated us-ing Perplexity and Zero-Shot accuracy, while energy efficiency is measured in picojoules (pJ). 
+
+## 4.2 Comparative study on Accuracy 
+
+For performance evaluation, we report perplexity on WikiText-2 [ 29 ] and C4 [ 30 ], as well as zero-shot performance on PIQA [ 31 ], ARC-easy/challenge [ 32 ], BoolQ [ 33 ], HellaSwag [ 32 ], and Wino-grande [ 34 ]. Due to the limited number of SNN-based LLMs, we benchmark against a broad range of ANN quantization methods. This comparison is critical: since converting ANNs to SNNs inher-ently risks performance degradation, surpassing these quantiza-tion baselines serves as strong evidence that our proposed method achieves a lossless conversion. As shown in Table 2, our proposed Kirin achieves state-of-the-art performance across both Llama2 and OPT model families. In Table 1(a), for Llama2-7B on the Wiki dataset, Kirin achieves a perplexity of 5.71, which is remarkably close to the FP16 baseline (5.68) and significantly outperforms existing W4A4 quantization methods like SmoothQuant (22.62) and OmniQuant (14.61). Notably, compared to the advanced SNN baseline SpikeQuant (T=32), Kirin achieves superior accuracy with only half the inference latency (T=16). Table 1(b) further demonstrates the robustness of our method on OPT models. Kirin consistently outperforms aggressive low-bit quanti-zation methods (e.g., OneBit, LRQuant) and surpasses SpikeQuant. The superior performance can be attributed to our comprehensive handling of outliers in both weights and activations, as indicated in the method configuration columns. Table 2 reports the zero-shot accuracy on six common sense tasks. Kirin achieves near-lossless performance compared to the FP16 baseline, particularly on Llama2-7B (64.01% vs. 64.04%). Further-more, it consistently outperforms both ANN quantization methods (e.g., SmoothQuant, OmniQuant) and state-of-the-art SNN baselines (e.g., SpikeQuant, Atom) across all model scales, demonstrating su-perior preservation of reasoning capabilities. Although SpikeQuant slightly outperforms Kirin on specific tasks (e.g., ARC_e), this is attributed to SpikeQuant retaining floating-point precision for the attention matrix multiplication, whereas Kirin converts all matrix multiplications to spikes. Despite the challenge of full-network conversion, Kirin achieves a higher average accuracy. This success stems from our Spike Matrix Hybridization strategy, which selec-tively quantizes outliers to 8-bit precision. This approach effectively mitigates information loss in sensitive layers while maintaining a low time window, resulting in superior overall robustness. Kirin: Improving ANN efficiency with SNN Hybridization 
+
+Table 2: Zero-shot (%) ( ↑) performance of Llama2 and OPT models on six common sense tasks. 
+
+Model Method PIQA ARC_e ARC_c BoolQ HellaSwag Winogrande Avg. Opt-1.3B Fp16 72.42 50.80 29.69 57.68 53.73 59.67 54.00 SpikeQuant 71.49 49.66 27.22 53.27 51.46 58.56 51.94 Quantization 67.79 42.93 25.26 49.51 45.94 54.93 47.73 OneBit 62.57 41.25 24.06 59.45 34.26 51.14 45.46 LRQuant 60.23 43.22 19.80 57.98 30.71 51.78 43.95 OPTQ 68.34 46.17 27.65 51.57 46.53 55.26 49.25 Kirin 71.86 48.78 28.67 53.66 52.25 57.77 52.17 
+
+Opt-2.7B Fp16 74.81 54.34 31.31 60.28 60.59 60.93 57.04 SpikeQuant 74.21 53.79 31.66 61.19 59.11 59.75 56.62 Quantization 71.16 50.84 28.75 59.85 55.57 60.46 54.44 OneBit 63.87 43.39 24.40 54.28 38.18 51.67 45.97 LRQuant 64.04 47.81 20.65 54.10 33.59 53.51 45.62 OPTQ 71.38 48.19 27.82 55.43 49.86 54.82 51.25 Kirin 74.81 53.91 31.48 61.69 58.83 59.91 56.77 
+
+Llama2-7B Fp16 77.37 52.53 41.38 73.12 72.99 66.85 64.04 SpikeQuant 77.09 55.39 40.36 73.49 72.09 65.27 63.95 Quantization 75.46 53.96 40.19 68.07 69.21 61.56 61.41 SmoothQuant 63.11 40.03 31.57 58.47 43.38 52.80 48.23 OmniQuant 66.15 45.20 31.14 63.51 56.44 53.43 52.65 Atom 76.28 52.10 38.99 69.79 69.81 63.69 61.78 SpikeLLM 64.47 48.74 27.30 63.27 43.29 56.83 50.65 Kirin 76.77 54.55 40.53 73.91 72.10 66.22 64.01 
+
+Llama2-13B Fp16 79.05 59.85 44.62 68.53 76.22 70.09 66.39 SpikeQuant 79.33 56.48 44.03 66.15 75.53 68.11 64.94 Quantization 76.71 55.13 41.47 67.03 73.09 65.19 63.10 SmoothQuant 64.47 41.75 30.89 62.29 46.68 51.70 49.63 OmniQuant 69.69 47.39 33.10 62.84 58.96 55.80 54.63 Atom 77.69 57.58 42.92 67.46 73.77 68.51 64.66 SpikeLLM 66.49 55.30 30.12 64.16 47.43 51.54 52.51 Kirin 79.35 56.40 43.94 66.21 75.94 68.98 65.14 
+
+## 4.3 Comparative study on Energy 
+
+Following prior works on SNN energy estimation [ 11 , 20 , 35 ], the total energy consumption of a linear attention module during a single inference pass is primarily composed of computation costs and data movement costs. The computation energy accounts for the MAC and ACC operations. The data movement energy covers the costs associated with reading weights from SRAM and moving data from the previous layer’s output to the current layer for computa-tion. Consequently, the total energy cost is calculated as the sum of the operation counts (MAC or ACC) multiplied by their respective energy costs per operation, plus the total number of data bits read or moved multiplied by the corresponding energy consumption per bit: 
+
+𝐸 𝑡𝑜𝑡𝑎𝑙 =∑︁   
+
+> 𝑜𝑝 ∈ { 𝑀𝐴𝐶,𝐴𝐶𝐶 }
+
+𝑁 𝑜𝑝 · 𝐸 𝑜𝑝 +∑︁   
+
+> 𝑑 ∈ { 𝑟𝑒𝑎𝑑,𝑚𝑜𝑣𝑒 }
+
+𝑁 𝑑 𝑏𝑖𝑡𝑠 · 𝐸 𝑑 (17) Figure 3 illustrates the energy consumption comparison between the proposed Kirin and other SNN or quantization methods within the linear attention block (four linear transformation and two at-tention transformation as shown in Figure 2). Experimental results demonstrate that although a portion of INT values is retained within the spike matrix, the energy consumption increases by a mere 0.283 
+
+𝜇 J compared to a pure spike matrix. However, leveraged by the Spike Matrix Hybridization mechanism, the attention matrix mul-tiplication can be flexibly converted into the SNN computational paradigm, thereby saving 17.458 𝜇 J in a single matrix multiplica-tion operation. Consequently, Kirin achieves the lowest energy consumption among all compared algorithms, delivering energy savings of up to 84%. Detailed energy calculation formulas and computation details are provided in Appendices A, B, and C. 
+
+## 4.4 Ablation study 
+
+Table 3 illustrates that quantization is the primary source of error in ANN-to-SNN conversion. Naively quantizing all components Trovato et al. OPT-1.3B          
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> 120
+> Energy cost (  J)
+> 23.3
+> 31.0
+> 101.3 105.2 105.2
+> 14.8
+> OPT-2.7B
+> 0
+> 25
+> 50
+> 75
+> 100
+> 125
+> 150
+> 175
+> 36.4
+> 48.4
+> 143.1 146.0 149.3
+> 22.9
+> SpikeQuant Quantization OneBit LRQuant GPTQ Kirin
+
+(a) Energy cost comparison on OPT models. Llama2-7B          
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> 120
+> 140
+> 160
+> Energy cost (  J)
+> 93.0
+> 124.0 124.0
+> 135.6 135.8
+> 59.2
+> Llama2-13B
+> 0
+> 50
+> 100
+> 150
+> 200
+> 250
+> 145.2
+> 193.8 193.8
+> 211.0 222.6
+> 91.9
+> SpikeQuant SmoothQuant OmniQuant Atom Spike LLM Kirin
+
+(b) Energy cost comparison on Llama2 models. 
+
+Figure 3: Energy consumption analysis across different model architectures. 
+
+degrades WikiText-2 perplexity from 5.68 to 6.844. While outlier-aware mixed quantization can mitigate this, simultaneously opti-mizing for static weights and dynamic activations remains challeng-ing due to their conflicting distributions and high computational overhead. However, our proposed Spike Matrix Hybridization overcomes this by unifying all operations—whether linear transformations (weight × activation) or attention mechanisms ( 𝑄 × 𝐾 )—into a generic matrix multiplication framework. This perspective allows us to apply comprehensive outlier-aware optimization across all lay-ers. As shown in the table, sequentially enabling outlier awareness for linear activations, weights, and attention matrices significantly recovers performance, reducing perplexity from 6.844 back to 5.798. Finally, the introduction of the silence threshold ensures a seam-less transition to the spiking domain. As evidenced by the final row, the performance change is exactly +0.000, confirming that our specific SNN conversion step is mathematically lossless. 
+
+## 5 Related Works on ANN-to-SNN Conversion 
+
+Recently, brain-inspired SNNs [ 36 ] have emerged to bridge the en-ergy gap between ANN inference and human cognition, and are increasingly recognized as a promising next-generation artificial intelligence paradigm due to their energy-efficient inference capa-bilities. Consequently, ANN-to-SNN conversion techniques have 
+
+Table 3: Ablation study on LLaMA-7B. Values in parentheses indicate the change relative to the previous row. 
+
+Method Perplexity ( ↓)Wikitext C4 FP16 5.68 7.08 +Linear projections quantization 6.054 (+0.374) 7.633 (+0.553) 
+
++Attention MatMul quantization 6.494 (+0.440) 8.126 (+0.493) 
+
++MLP quantization 6.844 (+0.350) 8.516 (+0.390) 
+
++Linear Activation outlier aware 6.467 (-0.377) 8.102 (-0.414) 
+
++Weight outlier aware 6.193 (-0.274) 7.786 (-0.316) 
+
++Attention MatMul outlier aware 5.798 (-0.395) 7.324 (-0.462) 
+
++SNN conversion (Kirin) 5.798 (+0.000) 7.324 (+0.000) 
+
+garnered escalating research interest, yielding substantial advance-ments in the field. With the rapid advancement of machine learning, adapting the ubiquitous Transformer architecture from ANNs to SNNs has emerged as a prominent research hotspot [ 37 – 39 ]. Spikformer [ 40 ]eliminates the Softmax mechanism to linearize attention, allowing matrix multiplication reordering. By computing 𝐾 × 𝑉 first, it con-verts heavy computations into energy-efficient bitwise ANDs and accumulations. Building upon this foundation, subsequent studies have further optimized the spiking integrity of the architecture. Addressing the limitation in Spikformer where non-spiking compu-tations were retained in residual connections and ConvBN layers, Spike-driven Transformer [ 41 ] restructured the residual connec-tions to ensure binary spike signal propagation throughout the entire network. Additionally, Guo et al. [ 42 ] introduced a mixed-precision approach, retaining 𝐾 in floating-point format while quan-tizing 𝑉 to ternary values (-1, 0, 1) to balance accuracy and efficiency. However, a critical limitation persists across these existing works: the linear projection layers within the Transformer (responsible for generating 𝑄 , 𝐾 , and 𝑉 ) remain unprocessed by SNN mechanisms. These layers continue to rely on energy-intensive floating-point matrix multiplications, leaving significant room for further energy reduction in SNN-based Transformers. Traditional ANN-to-SNN methods, limited to smaller architec-tures like ResNet, are inapplicable to massive LLMs. Consequently, recent works like SpikeLLM [ 21 ] and SpikeQuant [ 20 ] adopt a quantization-based conversion paradigm. While SpikeQuant en-sures mathematical equivalence by deriving firing thresholds from quantization scales, both methods overlook the long inference win-dows caused by high bit-widths. Furthermore, their reliance on rate encoding leads to excessive spike rates, significantly increasing computational and energy overheads. 
+
+## 6 Conclusion 
+
+In this paper we present Kirin, the first framework to achieve accuracy-lossless ANN-to-SNN conversion through integer-spike hybridization. By pioneering a hybrid execution strategy, Kirin Kirin: Improving ANN efficiency with SNN Hybridization 
+
+decomposes matrix multiplications into a hybrid path where dom-inant spike-train accumulations are complemented by a minimal fraction of integer multiplications for outliers. To support this, we introduce Spike Matrix Hybridization to minimize integer overhead and a Silence Threshold mechanism to ensure mathematical equiva-lence to the original ANN. This design effectively resolves the long time window bottleneck induced by high bit-width quantization. On OPT-2.7B, Kirin attains near-FP16 accuracy under W4A(4&8) settings while drastically reducing the time window from 256 to 16. Consequently, energy consumption drops from 149.3 𝜇 J to 22.9 𝜇 J. 
+
+## References 
+
+[1] Josh Achiam, Steven Adler, Sandhini Agarwal, Lama Ahmad, Ilge Akkaya, Floren-cia Leoni Aleman, Diogo Almeida, Janko Altenschmidt, Sam Altman, Shyamal Anadkat, et al. Gpt-4 technical report. arXiv preprint arXiv:2303.08774 , 2023. [2] Sathvik Joel, Jie Wu, and Fatemeh Fard. A survey on llm-based code generation for low-resource and domain-specific programming languages. ACM Transactions on Software Engineering and Methodology , 2024. [3] Qianqian Xie, Qingyu Chen, Aokun Chen, Cheng Peng, Yan Hu, Fongci Lin, Xueqing Peng, Jimin Huang, Jeffrey Zhang, Vipina Keloth, Xinyu Zhou, Lingfei Qian, Huan He, Dennis Shung, Lucila Ohno-Machado, Yonghui Wu, Hua Xu, and Jiang Bian. Me llama: Foundation large language models for medical applications, 2024. [4] Alex De Vries. The growing energy footprint of artificial intelligence. Joule ,7(10):2191–2194, 2023. [5] Kaushik Roy, Akhilesh Jaiswal, and Priyadarshini Panda. Towards spike-based machine intelligence with neuromorphic computing. Nature , 575(7784):607–617, 2019. [6] Catherine D Schuman, Shruti R Kulkarni, Maryam Parsa, J Parker Mitchell, Prasanna Date, and Bill Kay. Opportunities for neuromorphic computing algo-rithms and applications. Nature Computational Science , 2(1):10–19, 2022. [7] Zhanglu Yan, Kaiwen Tang, Zixuan Zhu, Zhenyu Bai, Qianhui Liu, and Weng-Fai Wong. Matterhorn: Efficient analog sparse spiking transformer architecture with masked time-to-first-spike encoding, 2026. [8] Patrik Czakó, Gábor Kertész, and Sándor Szénási. Addressing activation outliers in llms: A systematic review of post-training quantization techniques. IEEE Access , 2025. [9] Yilong Zhao, Chien-Yu Lin, Kan Zhu, Zihao Ye, Lequn Chen, Size Zheng, Luis Ceze, Arvind Krishnamurthy, Tianqi Chen, and Baris Kasikci. Atom: Low-bit quantization for efficient and accurate llm serving. In P. Gibbons, G. Pekhimenko, and C. De Sa, editors, Proceedings of Machine Learning and Systems , volume 6, pages 196–209, 2024. [10] Ji Lin, Jiaming Tang, Haotian Tang, Shang Yang, Wei-Ming Chen, Wei-Chen Wang, Guangxuan Xiao, Xingyu Dang, Chuang Gan, and Song Han. Awq: Activation-aware weight quantization for on-device llm compression and ac-celeration. In P. Gibbons, G. Pekhimenko, and C. De Sa, editors, Proceedings of Machine Learning and Systems , volume 6, pages 87–100, 2024. [11] Zhanglu Yan, Jiayi Mao, Qianhui Liu, Fanfan Li, Gang Pan, Tao Luo, Bowen Zhu, and Weng-Fai Wong. Otters: An energy-efficient spikingtransformer via optical time-to-first-spike encoding. arXiv preprint arXiv:2509.18968 , 2025. [12] Kaiwen Tang, Zhanglu Yan, and Weng-Fai Wong. Sorbet: A neuromorphic hardware-compatible transformer-based spiking language model. arXiv preprint arXiv:2409.15298 , 2024. [13] Chen Li, Lei Ma, and Steve Furber. Quantization framework for fast spiking neural networks. Frontiers in Neuroscience , 16:918793, 2022. [14] Dengyu Wu, Gaojie Jin, Han Yu, Xinping Yi, and Xiaowei Huang. Optimizing event-driven spiking neural network with regularization and cutoff. Frontiers in neuroscience , 19:1522788, 2025. [15] Daniel Auge, Julian Hille, Etienne Mueller, and Alois Knoll. A survey of encoding techniques for signal processing in spiking neural networks. Neural Processing Letters , 53(6):4693–4710, 2021. [16] Peter U Diehl, Daniel Neil, Jonathan Binas, Matthew Cook, Shih-Chii Liu, and Michael Pfeiffer. Fast-classifying, high-accuracy spiking deep networks through weight and threshold balancing. In 2015 International joint conference on neural networks (IJCNN) , pages 1–8. ieee, 2015. [17] Hesham Mostafa. Supervised learning based on temporal coding in spiking neural networks. IEEE transactions on neural networks and learning systems ,29(7):3227–3235, 2017. [18] Anthony N Burkitt. A review of the integrate-and-fire neuron model: I. homoge-neous synaptic input. Biological cybernetics , 95(1):1–19, 2006. [19] Peter J. Rousseeuw and Christophe Croux. Alternatives to the median absolute deviation. Journal of the American Statistical Association , 88(424):1273–1283, 1993. [20] Chenyu Wang, Zhanglu Yan, Zhi Zhou, Xu Chen, and Weng-Fai Wong. Energy-efficient and dequantization-free q-llms: A spiking neural network approach to salient value mitigation. arXiv preprint arXiv:2510.19498 , 2025. [21] Xingrun Xing, Boyan Gao, Zheng Zhang, David A Clifton, Shitao Xiao, Li Du, Guoqi Li, and Jiajun Zhang. Spikellm: Scaling up spiking neural network to large language models via saliency-based spiking. arXiv preprint arXiv:2407.04752 ,2024. [22] Hugo Touvron, Louis Martin, Kevin Stone, Peter Albert, Amjad Almahairi, Yas-mine Babaei, Nikolay Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti Bhos-ale, et al. Llama 2: Open foundation and fine-tuned chat models. arXiv preprint arXiv:2307.09288 , 2023. [23] Guangxuan Xiao, Ji Lin, Mickael Seznec, Hao Wu, Julien Demouth, and Song Han. Smoothquant: Accurate and efficient post-training quantization for large language models. In International conference on machine learning , pages 38087– 38099. PMLR, 2023. [24] Wenqi Shao, Mengzhao Chen, Zhaoyang Zhang, Peng Xu, Lirui Zhao, Zhiqian Li, Kaipeng Zhang, Peng Gao, Yu Qiao, and Ping Luo. Omniquant: Omnidirectionally calibrated quantization for large language models. In The Twelfth International Conference on Learning Representations , 2024. [25] Susan Zhang, Stephen Roller, Naman Goyal, Mikel Artetxe, Moya Chen, Shuohui Chen, Christopher Dewan, Mona Diab, Xian Li, Xi Victoria Lin, et al. Opt: Open pre-trained transformer language models. arXiv preprint arXiv:2205.01068 , 2022. [26] Yuzhuang Xu, Xu Han, Zonghan Yang, Shuo Wang, Qingfu Zhu, Zhiyuan Liu, Weidong Liu, and Wanxiang Che. Onebit: Towards extremely low-bit large language models. Advances in Neural Information Processing Systems , 37:66357– 66382, 2024. [27] Jiaqi Zhao, Miao Zhang, Chao Zeng, Ming Wang, Xuebo Liu, and Liqiang Nie. Lrquant: Learnable and robust post-training quantization for large language mod-els. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 2240–2255, 2024. [28] Elias Frantar, Saleh Ashkboos, Torsten Hoefler, and Dan Alistarh. Gptq: Accurate post-training quantization for generative pre-trained transformers. arXiv preprint arXiv:2210.17323 , 2022. [29] Stephen Merity, Caiming Xiong, James Bradbury, and Richard Socher. Pointer sentinel mixture models. In International Conference on Learning Representations ,2017. [30] Colin Raffel, Noam Shazeer, Adam Roberts, Katherine Lee, Sharan Narang, Michael Matena, Yanqi Zhou, Wei Li, and Peter J Liu. Exploring the limits of transfer learning with a unified text-to-text transformer. Journal of machine learning research , 21(140):1–67, 2020. [31] Yonatan Bisk, Rowan Zellers, Jianfeng Gao, Yejin Choi, et al. Piqa: Reasoning about physical commonsense in natural language. In Proceedings of the AAAI conference on artificial intelligence , volume 34, pages 7432–7439, 2020. [32] Peter Clark, Isaac Cowhey, Oren Etzioni, Tushar Khot, Ashish Sabharwal, Carissa Schoenick, and Oyvind Tafjord. Think you have solved question answering? try arc, the ai2 reasoning challenge. arXiv preprint arXiv:1803.05457 , 2018. [33] Christopher Clark, Kenton Lee, Ming-Wei Chang, Tom Kwiatkowski, Michael Collins, and Kristina Toutanova. Boolq: Exploring the surprising difficulty of natural yes/no questions. arXiv preprint arXiv:1905.10044 , 2019. [34] Keisuke Sakaguchi, Ronan Le Bras, Chandra Bhagavatula, and Yejin Choi. Wino-grande: An adversarial winograd schema challenge at scale. Communications of the ACM , 64(9):99–106, 2021. [35] Zhanglu Yan, Zhenyu Bai, and Weng-Fai Wong. Reconsidering the energy efficiency of spiking neural networks. arXiv preprint arXiv:2409.08290 , 2024. [36] Wulfram Gerstner, Werner M Kistler, Richard Naud, and Liam Paninski. Neuronal dynamics: From single neurons to networks and models of cognition . Cambridge University Press, 2014. [37] Nathan Leroux, Jan Finkbeiner, and Emre Neftci. Online transformers with spiking neurons for fast prosthetic hand control. In 2023 IEEE Biomedical Circuits and Systems Conference (BioCAS) , pages 1–6, 2023. [38] Yudong Li, Yunlin Lei, and Xu Yang. Spikeformer: Training high-performance spiking neural network with transformer. Neurocomput. , 574(C), March 2024. [39] Shuai Wang, Malu Zhang, Dehao Zhang, Ammar Belatreche, Yichen Xiao, Yu Liang, Yimeng Shan, Qian Sun, Enqi Zhang, and Yang Yang. Spiking vi-sion transformer with saccadic attention. arXiv preprint arXiv:2502.12677 , 2025. [40] Zhaokun Zhou, Yuesheng Zhu, Chao He, Yaowei Wang, Shuicheng YAN, Yonghong Tian, and Li Yuan. Spikformer: When spiking neural network meets transformer. In The Eleventh International Conference on Learning Representations ,2023. [41] Man Yao, JiaKui Hu, Zhaokun Zhou, Li Yuan, Yonghong Tian, Bo Xu, and Guoqi Li. Spike-driven transformer. In A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt, and S. Levine, editors, Advances in Neural Information Processing Systems , volume 36, pages 64043–64058. Curran Associates, Inc., 2023. [42] Yufei Guo, Xiaode Liu, Yuanpei Chen, Weihang Peng, Yuhan Zhang, and Zhe Ma. Spiking transformer: Introducing accurate addition-only spiking self-attention for transformer. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 24398–24408, June 2025. Trovato et al. 
+
+Symbol Description 
+
+𝐵, 𝐻 𝑖𝑛 , 𝐻 𝑜𝑢𝑡 Batch size, input hidden dimension, and output hidden dimension 
+
+𝑆 Sequence lengths of inputs corresponding to Query, Key, Value and Output 
+
+𝑏 𝑤 , 𝑏 𝑎 Bitwidths of weights and activations 
+
+𝐸 𝑀𝐴𝐶 , 𝐸 𝐴𝐶𝐶 Energy costs per Multiply-Accumulate (MAC) and Accumulate (ACC) operation 
+
+𝐸 𝑟𝑒𝑎𝑑 , 𝐸 𝑚𝑜𝑣𝑒 Energy consumption associated with memory read and data movement 
+
+𝛾 Number of outlier channels within a matrix group 
+
+𝛽 Number of outlier parameters in the spike matrix retained in INT format 
+
+𝑇 ℎ𝑖𝑔ℎ ,𝑇 𝑙𝑜𝑤 Spike time windows for outlier and normal parameters 
+
+𝑆 ℎ𝑖𝑔ℎ 𝑟 , 𝑆 𝑙𝑜𝑤 𝑟 Spike rates corresponding to outlier and normal parameters 
+
+Table 4: Summary of Notations 
+
+## A Notation Definition 
+
+For clarity and ease of reference regarding the mathematical formu-lations and energy estimations, Table 4 provides a comprehensive summary of the notations used throughout this paper. The symbols are organized to cover three primary aspects: general model archi-tecture dimensions (e.g., 𝐵, 𝐻 𝑖𝑛 , 𝑆 ), hardware-related metrics such as bitwidths and energy consumption constants for memory and computation ( 𝐸 𝑀𝐴𝐶 , 𝐸 𝑟𝑒𝑎𝑑 ), and the specific hyperparameters intro-duced by our framework. The latter includes parameters governing the outlier-aware mixed quantization ( 𝛾, 𝛽 ) as well as the configura-tion for the dual-window spiking mechanism ( 𝑇 ℎ𝑖𝑔ℎ /𝑙𝑜𝑤 , 𝑆 ℎ𝑖𝑔ℎ /𝑙𝑜𝑤 𝑟 ). 
+
+## B Energy Cost Formulation 
+
+In this section, we present the detailed methodology for calculat-ing energy costs. The fundamental principle involves multiplying the number of operations in a linear or attention matrix transfor-mation by the corresponding unit energy consumption. In LLM architectures, such as Llama and OPT, the dimensions of the linear activation tensor are typically [𝐵, 𝑆, 𝐻 𝑖𝑛 ], while the weight matrix dimensions are [𝐻 𝑖𝑛 , 𝐻 𝑜𝑢𝑡 ]. Following the linear transformation, the output tensor dimensions become [𝐵, 𝑆, 𝐻 𝑜𝑢𝑡 ], which subse-quently serves as the input for the attention mechanism. Given the disparities in tensor dimensions and computational character-istics between linear transformations and attention mechanisms, we derive separate formulas for the energy consumption of lin-ear transformations ( 𝐸 𝐿𝑖𝑛𝑒𝑎𝑟 ) and attention mechanisms ( 𝐸 𝐴𝑡𝑡𝑛 ). Furthermore, in the context of outlier-aware mixed-precision quan-tization, the high-bit and low-bit components must be calculated independently due to significant differences in element counts and per-bit energy consumption; these are denoted as 𝐸 ℎ𝑖𝑔ℎ and 𝐸 𝑙𝑜𝑤 ,respectively. Based on these computational paradigms, the energy consumption can be categorized into the following four classes: 
+
+Baseline Quantization Energy: In the standard quantization paradigm, the linear layer involves the multiplication of a weight matrix with dimensions [𝐻 𝑖𝑛 , 𝐻 𝑜𝑢𝑡 ] and an activation tensor with dimensions [𝐵, 𝑆, 𝐻 𝑖𝑛 ], resulting in a total of 𝐵 ·𝑆 ·𝐻 𝑖𝑛 ·𝐻 𝑜𝑢𝑡 Multiply-Accumulate (MAC) operations. Beyond computational energy, the total cost must account for memory access overhead, specifically the energy required to read weights from memory and transfer activations from the preceding layer. In contrast, matrix multipli-cation within the attention mechanism entails the product of two tensors, each with dimensions [𝐵, 𝑆, 𝐻 𝑜𝑢𝑡 ], yielding 𝐵 · 𝑆 2 · 𝐻 𝑜𝑢𝑡 
+
+MAC operations. This step requires no weight memory access; rather, it only incurs the energy expenditure associated with mov-ing the two intermediate results generated by the previous linear transformation. 
+
+𝐿𝐸 𝑞 = 𝐵 · 𝑆 · 𝐻 𝑖𝑛 · 𝐻 𝑜𝑢𝑡 · 𝐸 𝑀𝐴𝐶 
+
+| {z }
+
+> 𝐸 𝑐𝑜𝑚𝑝𝑢𝑡𝑒
+
++ 𝐵 · 𝑆 · 𝐻 𝑖𝑛 · 𝐻 𝑜𝑢𝑡 · 𝑏 𝑤 · 𝐸 𝑟𝑒𝑎𝑑 
+
+| {z }
+
+> 𝐸 𝑟𝑒𝑎𝑑 _𝑑𝑎𝑡𝑎
+
++ 𝐵 · 𝑆 · 𝐻 𝑖𝑛 · 𝐻 𝑜𝑢𝑡 · 𝑏 𝑎 · 𝐸 𝑚𝑜𝑣𝑒 
+
+| {z }
+
+> 𝐸 𝑚𝑜𝑣𝑒 _𝑑𝑎𝑡𝑎
+
+(18) 
+
+𝐴𝐸 𝑞 = 𝐵 · 𝑆 2 · 𝐻 𝑜𝑢𝑡 · 𝐸 𝑀𝐴𝐶 
+
+| {z }
+
+> 𝐸 𝑐𝑜𝑚𝑝𝑢𝑡𝑒
+
++ 2 · 𝐵 · 𝑆 · 𝐻 2 
+
+> 𝑜𝑢𝑡
+
+· 𝑏 𝑎 · 𝐸 𝑚𝑜𝑣𝑒 
+
+| {z }
+
+> 𝐸 𝑚𝑜𝑣𝑒 _𝑑𝑎𝑡𝑎
+
+(19) 
+
+Outlier-Aware Quantization Energy: In the context of mixed-precision quantization, the computational framework remains largely consistent with the standard quantization paradigm. The primary distinction lies in the necessity to independently compute the en-ergy consumption for high-bit and low-bit quantized components, respectively, while the remaining operational logic and overhead calculations are preserved. 
+
+𝐿𝐸 𝑚𝑞 = 𝐿𝐸 ℎ𝑖𝑔ℎ 𝑚𝑞 + 𝐿𝐸 𝑙𝑜𝑤 𝑚𝑞 (20) 
+
+𝐿𝐸 ℎ𝑖𝑔ℎ 𝑚𝑞 = 𝐵 · 𝑆 · 𝐻 𝑜𝑢𝑡 · 𝛾 · 𝐸 ℎ𝑖𝑔ℎ 𝑀𝐴𝐶 
+
+| {z }
+
+> 𝐸 𝑐𝑜𝑚𝑝𝑢𝑡𝑒
+
++ 𝐵 · 𝑆 · 𝛾 · 𝐻 𝑜𝑢𝑡 · 𝑏 𝑤 · 𝐸 𝑟𝑒𝑎𝑑 
+
+| {z }
+
+> 𝐸 𝑟𝑒𝑎𝑑 _𝑑𝑎𝑡𝑎
+
++ 𝐵 · 𝑆 · 𝛾 · 𝐻 𝑜𝑢𝑡 · 𝑏 ℎ𝑖𝑔ℎ 𝑎 · 𝐸 𝑚𝑜𝑣𝑒 
+
+| {z }
+
+> 𝐸 𝑚𝑜𝑣𝑒 _𝑑𝑎𝑡𝑎
+
+(21) Kirin: Improving ANN efficiency with SNN Hybridization 
+
+𝐿𝐸 𝑙𝑜𝑤 𝑞 = 𝐵 · 𝑆 · 𝐻 𝑜𝑢𝑡 · ( 𝐻 𝑖𝑛 − 𝛾 ) · 𝐸 𝑙𝑜𝑤 𝑀𝐴𝐶 
+
+| {z }
+
+> 𝐸 𝑐𝑜𝑚𝑝𝑢𝑡𝑒
+
++ 𝐵 · 𝑆 · ( 𝐻 𝑖𝑛 − 𝛾 ) · 𝐻 𝑜𝑢𝑡 · 𝑏 𝑤 · 𝐸 𝑟𝑒𝑎𝑑 
+
+| {z }
+
+> 𝐸 𝑟𝑒𝑎𝑑 _𝑑𝑎𝑡𝑎
+
++ 𝐵 · 𝑆 · ( 𝐻 𝑖𝑛 − 𝛾 ) · 𝐻 𝑜𝑢𝑡 · 𝑏 𝑙𝑜𝑤 𝑎 · 𝐸 𝑚𝑜𝑣𝑒 
+
+| {z }
+
+> 𝐸 𝑚𝑜𝑣𝑒 _𝑑𝑎𝑡𝑎
+
+(22) 
+
+𝐴𝐸 𝑚𝑞 = 𝐴𝐸 ℎ𝑖𝑔ℎ 𝑚𝑞 + 𝐴𝐸 𝑙𝑜𝑤 𝑚𝑞 (23) 
+
+𝐴𝐸 ℎ𝑖𝑔ℎ 𝑚𝑞 = 𝐵 · 𝑆 2 · 𝛾 · 𝐸 ℎ𝑖𝑔ℎ 𝑀𝐴𝐶 
+
+| {z }
+
+> 𝐸 𝑐𝑜𝑚𝑝𝑢𝑡𝑒
+
++ 2 · 𝐵 · 𝑆 · 𝛾 · 𝐻 𝑜𝑢𝑡 · 𝑏 ℎ𝑖𝑔ℎ 𝑎 · 𝐸 𝑚𝑜𝑣𝑒 
+
+| {z }
+
+> 𝐸 𝑚𝑜𝑣𝑒 _𝑑𝑎𝑡𝑎
+
+(24) 
+
+𝐴𝐸 𝑙𝑜𝑤 𝑚𝑞 = 𝐵 · 𝑆 2 · ( 𝐻 𝑜𝑢𝑡 − 𝛾 ) · 𝐸 𝑙𝑜𝑤 𝑀𝐴𝐶 
+
+| {z }
+
+> 𝐸 𝑐𝑜𝑚𝑝𝑢𝑡𝑒
+
++ 2 · 𝐵 · 𝑆 · ( 𝐻 𝑜𝑢𝑡 − 𝛾 ) · 𝐻 𝑜𝑢𝑡 · 𝑏 𝑙𝑜𝑤 𝑎 · 𝐸 𝑚𝑜𝑣𝑒 
+
+| {z }
+
+> 𝐸 𝑚𝑜𝑣𝑒 _𝑑𝑎𝑡𝑎
+
+(25) 
+
+SNN Inference Energy: In SNNs based on mixed-precision quantization, it is essential to account for the additional energy expenditure associated with encoding quantized values into binary spike trains (e.g., Rate encoding or TTFS Encoding). Furthermore, given that data representation within SNNs is fundamentally bi-nary, the energy assessments for computation and data movement must focus on discrete individual spikes rather than full multi-bit quantized values. Since the SNN baselines evaluated in this work do not convert the attention matrix multiplication into the spiking domain, the energy consumption for the attention component is equivalent to 𝐴𝐸 𝑚𝑞 .
+
+𝐿𝐸 𝑠 = 𝐿𝐸 ℎ𝑖𝑔ℎ 𝑠 + 𝐿𝐸 𝑙𝑜𝑤 𝑠 (26) 
+
+𝐿𝐸 ℎ𝑖𝑔ℎ 𝑠 = 𝐵 · 𝑆 · 𝐻 𝑜𝑢𝑡 · 𝛾 · 𝑇 ℎ𝑖𝑔ℎ · 𝑆 ℎ𝑖𝑔ℎ 𝑟 ·  𝐸 ℎ𝑖𝑔ℎ 𝐴𝐶𝐶 + 𝐸 ℎ𝑖𝑔ℎ 𝑀𝐴𝐶 
+
+| {z }
+
+> 𝐸 𝑐𝑜𝑚𝑝𝑢𝑡𝑒
+
++ 𝐵 · 𝑆 · 𝛾 · 𝐻 𝑜𝑢𝑡 · 𝑇 ℎ𝑖𝑔ℎ · 𝑆 ℎ𝑖𝑔ℎ 𝑟 · 𝑏 𝑤 · 𝐸 𝑟𝑒𝑎𝑑 
+
+| {z }
+
+> 𝐸 𝑑𝑎𝑡𝑎 _𝑟𝑒𝑎𝑑
+
++ 𝐵 · 𝑆 · 𝛾 · 𝐻 𝑜𝑢𝑡 · 𝑇 ℎ𝑖𝑔ℎ · 𝑆 ℎ𝑖𝑔ℎ 𝑟 · 𝐸 𝑚𝑜𝑣𝑒 
+
+| {z }
+
+> 𝐸 𝑑𝑎𝑡𝑎 _𝑚𝑜𝑣𝑒
+
+(27) 
+
+𝐿𝐸 𝑙𝑜𝑤 𝑠 = 𝐵 · 𝑆 · 𝐻 𝑜𝑢𝑡 · ( 𝐻 𝑖𝑛 − 𝛾 ) · 𝑇 𝑙𝑜𝑤 · 𝑆 𝑙𝑜𝑤 𝑟 ·  𝐸 𝑙𝑜𝑤 𝐴𝐶𝐶 + 𝐸 𝑙𝑜𝑤 𝑀𝐴𝐶 
+
+| {z }
+
+> 𝐸 𝑐𝑜𝑚𝑝𝑢𝑡𝑒
+
++ 𝐵 · 𝑆 · ( 𝐻 𝑖𝑛 − 𝛾 ) · 𝐻 𝑜𝑢𝑡 · 𝑇 𝑙𝑜𝑤 · 𝑆 𝑙𝑜𝑤 𝑟 · 𝑏 𝑤 · 𝐸 𝑟𝑒𝑎𝑑 
+
+| {z }
+
+> 𝐸 𝑑𝑎𝑡𝑎 _𝑟𝑒𝑎𝑑
+
++ 𝐵 · 𝑆 · ( 𝐻 𝑖𝑛 − 𝛾 ) · 𝐻 𝑜𝑢𝑡 · 𝑇 𝑙𝑜𝑤 · 𝑆 𝑙𝑜𝑤 𝑟 · 𝐸 𝑚𝑜𝑣𝑒 
+
+| {z }
+
+> 𝐸 𝑑𝑎𝑡𝑎 _𝑚𝑜𝑣𝑒
+
+(28) 
+
+Kirin Energy: The proposed Kirin architecture strategically retains quantized values that would typically require long time windows in Integer format. Consequently, this approach eliminates the spike-based energy consumption associated with long time windows ( 𝐿𝐸 ℎ𝑖𝑔ℎ 𝑠 and 𝐴𝐸 ℎ𝑖𝑔ℎ 𝑠 ). Instead, it introduces a marginal en-ergy cost attributed to integer multiplication, denoted as 𝐿𝐸 𝑚𝑞 and 
+
+𝐴𝐸 𝑚𝑞 . Furthermore, within the calculations for 𝐿𝐸 ℎ𝑖𝑔ℎ 𝑚𝑞 and 𝐴𝐸 ℎ𝑖𝑔ℎ 𝑚𝑞 ,the parameter 𝛾 , which originally represented the count of outliers, is substituted by 𝛽 , representing the count of preserved integers. Similarly, for 𝐿𝐸 𝑙𝑜𝑤 𝑠 and 𝐴𝐸 𝑙𝑜𝑤 𝑠 , the terms (𝐻 𝑖𝑛 − 𝛾 ), representing the count of low-bit normal values, is replaced by (𝐻 𝑖𝑛 − 𝛽 ).
+
+𝐿𝐸 𝑆𝑖𝑀 = 𝐿𝐸 ℎ𝑖𝑔ℎ 𝑚𝑞 + 𝐿𝐸 𝑙𝑜𝑤 𝑠 
+
+𝐵 · 𝑆 · 𝐻 𝑜𝑢𝑡 · 𝛽 · 𝐸 ℎ𝑖𝑔ℎ 𝑀𝐴𝐶 
+
+| {z }
+
+> 𝐸 𝑐𝑜𝑚𝑝𝑢𝑡𝑒
+
++ 𝐵 · 𝑆 · 𝛽 · 𝐻 𝑜𝑢𝑡 · 𝑏 𝑤 · 𝐸 𝑟𝑒𝑎𝑑 
+
+| {z }
+
+> 𝐸 𝑟𝑒𝑎𝑑 _𝑑𝑎𝑡𝑎
+
++ 𝐵 · 𝑆 · 𝛽 · 𝐻 𝑜𝑢𝑡 · 𝑏 ℎ𝑖𝑔ℎ 𝑎 · 𝐸 𝑚𝑜𝑣𝑒 
+
+| {z }
+
+> 𝐸 𝑚𝑜𝑣𝑒 _𝑑𝑎𝑡𝑎
+
++ 𝐵 · 𝑆 · 𝐻 𝑜𝑢𝑡 · ( 𝐻 𝑖𝑛 − 𝛽 ) · 𝑇 𝑙𝑜𝑤 · 𝑆 𝑙𝑜𝑤 𝑟 ·  𝐸 𝑙𝑜𝑤 𝐴𝐶𝐶 + 𝐸 𝑙𝑜𝑤 𝑀𝐴𝐶 
+
+| {z }
+
+> 𝐸 𝑐𝑜𝑚𝑝𝑢𝑡𝑒
+
++ 𝐵 · 𝑆 · ( 𝐻 𝑖𝑛 − 𝛽 ) · 𝐻 𝑜𝑢𝑡 · 𝑇 𝑙𝑜𝑤 · 𝑆 𝑙𝑜𝑤 𝑟 · 𝑏 𝑤 · 𝐸 𝑟𝑒𝑎𝑑 
+
+| {z }
+
+> 𝐸 𝑑𝑎𝑡𝑎 _𝑟𝑒𝑎𝑑
+
++ 𝐵 · 𝑆 · ( 𝐻 𝑖𝑛 − 𝛽 ) · 𝐻 𝑜𝑢𝑡 · 𝑇 𝑙𝑜𝑤 · 𝑆 𝑙𝑜𝑤 𝑟 · 𝐸 𝑚𝑜𝑣𝑒 
+
+| {z }
+
+> 𝐸 𝑑𝑎𝑡𝑎 _𝑚𝑜𝑣𝑒
+
+(29) 
+
+𝐴𝐸 𝑆𝑖𝑀 = 𝐴𝐸 ℎ𝑖𝑔ℎ 𝑚𝑞 + 𝐴𝐸 𝑙𝑜𝑤 𝑠 
+
+𝐵 · 𝑆 2 · 𝛽 · 𝐸 ℎ𝑖𝑔ℎ 𝑀𝐴𝐶 
+
+| {z }
+
+> 𝐸 𝑐𝑜𝑚𝑝𝑢𝑡𝑒
+
++ 2 · 𝐵 · 𝑆 · 𝐻 𝑜𝑢𝑡 · 𝛽 · 𝑏 ℎ𝑖𝑔ℎ 𝑎 · 𝐸 𝑚𝑜𝑣𝑒 
+
+| {z }
+
+> 𝐸 𝑚𝑜𝑣𝑒 _𝑑𝑎𝑡𝑎
+
++ 𝐵 · 𝑆 2 · ( 𝐻 𝑜𝑢𝑡 − 𝛽 ) · 𝑇 𝑙𝑜𝑤 · 𝑆 𝑙𝑜𝑤 𝑟 ·  𝐸 𝑙𝑜𝑤 𝐴𝐶𝐶 + 𝐸 𝑙𝑜𝑤 𝑀𝐴𝐶 
+
+| {z }
+
+> 𝐸 𝑐𝑜𝑚𝑝𝑢𝑡𝑒
+
++ 2 · 𝐵 · 𝑆 · ( 𝐻 𝑜𝑢𝑡 − 𝛽 ) · 𝐻 𝑜𝑢𝑡 · 𝑇 𝑙𝑜𝑤 · 𝑆 𝑙𝑜𝑤 𝑟 · 𝐸 𝑚𝑜𝑣𝑒 
+
+| {z }
+
+> 𝐸 𝑑𝑎𝑡𝑎 _𝑚𝑜𝑣𝑒
+
+(30) 
+
+## C Energy Cost Calculation Details 
+
+To fairly evaluate the energy efficiency of the proposed Kirin against other quantization and SNN baselines, we conducted a detailed es-timation based on the formulation derived in Appendix A and B. The calculation relies on specific hardware (22nm commercial chip) energy ratios listed in Table 5. All energy values are normalized to the energy cost of a 4-bit addition (4-4-4 ACC). As SNN-based operations primarily utilize accumulators, the 4-bit ACC serves as our baseline unit ( 1.00 ×), whereas standard quantization methods rely on Multiply-Accumulate (MAC) operations, which consume significantly more energy (e.g., 8.66 × for a 4-4-32 MAC). Addition-ally, we account for the energy cost of reading weights and moving data, which are critical factors in large language models. The energy cost is strictly dependent on the sparsity and out-lier distribution within the specific LLMs. Table 6 summarizes the average outlier ratios and counts for the OPT and Llama2 model families used in our calculations. Parameters such as the outlier count ( 𝛾 ) dictate the number of neurons that must be handled by the Trovato et al. 
+
+Table 5: Energy Ratio of Different Computing Units and Data Movement Operations (Normalized to 4-4-4 ACC) 
+
+Computing Data movement Process 4-4-4 ACC 5-5-5 ACC 1-4-16 MAC 4-4-32 MAC 4-5-32 MAC 4-8-32 MAC 1-16-32 MAC 2-16-32 MAC 3-16-32 MAC Read/bit Move/bit Energy 1.00 1.18 4.06 8.66 9.24 10.94 10.89 11.46 13.28 6.04 11.04 
+
+Table 6: Average ratio and number of outliers ( 𝛾 ) values and integer values ( 𝛽 ) in OPT and Llama2 models 
+
+Methods OPT1.3B (H=2048) OPT2.7B (H=2560) Llama2-7B (H=4096) Llama2-13B (H=5120) Ratio Number Ratio Number Ratio Number Ratio Number SpikeQuant 2.45% 𝛾 =50 2.15% 𝛾 =55 2.68% 𝛾 =110 2.30% 𝛾 =118 Atom 6.25% 𝛾 =128 5.00% 𝛾 =128 3.12% 𝛾 =128 2.50% 𝛾 =128 SpikeLLM 10.00% 𝛾 =205 10.00% 𝛾 =256 10.00% 𝛾 =410 10.00% 𝛾 =512 Kirin 1.96% 𝛽 =40 1.61% 𝛽 =41 2.14% 𝛽 =87 1.95% 𝛽 =99 OPT-1.3B   
+
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> 12
+> 14
+> 16
+> Energy cost (  J)
+> 2.790
+> 4.732
+> 13.237 13.690 14.227
+> 2.851
+
+OPT-2.7B        
+
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 4.358
+> 7.393
+> 20.683 21.390 22.229
+> 4.424
+> SpikeQuant Quantization OneBit LRQuant GPTQ Kirin
+
+(a) OPT Energy (Linear) OPT-1.3B    
+
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> Energy cost (  J)
+> 6.070 6.040
+> 24.160 24.160 24.160
+> 1.698
+
+OPT-2.7B          
+
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> 9.475 9.438
+> 30.199 30.199 30.200
+> 2.595
+> SpikeQuant Quantization OneBit LRQuant GPTQ Kirin
+
+(b) OPT Energy (Attention) Llama2-7B          
+
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> Energy cost (  J)
+> 11.082
+> 18.927 18.927
+> 21.454 20.668
+> 11.363
+> Llama2-13B
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> 40
+> 17.318
+> 29.573 29.573
+> 33.398 34.887
+> 17.688
+> SpikeQuant SmoothQuant OmniQuant Atom Spike LLM Kirin
+
+(c) Llama Energy (Linear) Llama2-7B             
+
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> Energy cost (  J)  24.322 24.160 24.160 24.915
+> 26.578
+> 6.864
+> Llama2-13B
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 37.967 37.749 37.749 38.693
+> 41.524
+> 10.599
+> SpikeQuant SmoothQuant OmniQuant Atom Spike LLM Kirin
+
+(d) Llama Energy (Attention) 
+
+Figure 4: Comparison of energy consumption. Top row: OPT models; Bottom row: Llama models. 
+
+high-precision branch in outlier-aware frameworks. The specific firing rates and integer values ( 𝛽 ) presented in Table 6 are plugged into the energy equations to determine the weighted sum of ACC and MAC operations. A critical distinction in our evaluation concerns the handling of the Attention matrix transformation. Since the SNN baselines evaluated in this work do not convert the attention matrix multi-plication into the spiking domain, the energy consumption for the attention component is equivalent to standard matrix multiplica-tion ( 𝐴𝐸 𝑚𝑞 ). Consequently, the energy cost for SNN baselines in Attention layers remains high, comparable to standard quantization methods, as they cannot leverage the efficiency of sparse additions in this specific module. Figure 4 visualizes the final calculated energy costs. In the Linear layers (Figs. 4a and 4c), the results demonstrate that the proposed integer-spike hybrid mode incurs negligible energy overhead. As Kirin: Improving ANN efficiency with SNN Hybridization 
+
+shown, Kirin’s energy consumption remains comparable to the pure SNN baseline, SpikeQuant, while still being significantly lower than the 13–14 𝜇 𝐽 range of 4-bit quantization methods (e.g., 2.85 𝜇 𝐽 for Kirin on OPT-1.3B). However, the strategic value of this hybrid design is fully realized in the Attention layers (Figs. 4b and 4d). By explicitly handling outliers with integer arithmetic, Kirin enables the vast majority of attention parameters to be converted into energy-efficient spiking operations, whereas baselines are often forced to revert to energy-intensive standard MACs. Consequently, Kirin consumes only ≈ 6.86 𝜇 𝐽 in Llama2-7B attention operations, compared to over 24 𝜇 𝐽 for other baselines. Crucially, this hybrid approach facilitates a drastic reduction in the time window ( 𝑇 ) by resolving the outlier bottleneck. Overall, Kirin achieves an optimal trade-off: it preserves the intrinsic energy efficiency of SNNs while significantly lowering latency and unlocking high-performance conversion for complex attention mechanisms.

@@ -1,0 +1,944 @@
+Title: ZipFlow: a Compiler-based Framework to Unleash Compressed Data Movement for Modern GPUs
+
+URL Source: https://arxiv.org/pdf/2602.08190v1
+
+Published Time: Tue, 10 Feb 2026 02:36:11 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# ZipFlow: a Compiler-based Framework to Unleash Compressed Data Movement for Modern GPUs 
+
+## Gwangoo Yeo 
+
+KAIST Daejeon, South Korea 
+
+## Zhiyang Shen 
+
+Tsinghua University Beijing, China 
+
+## Wei Cui 
+
+Microsoft Research Asia Vancouver, Canada 
+
+## Matteo Interlandi 
+
+Microsoft Gray Systems Lab Los Angeles, United States 
+
+## Rathijit Sen 
+
+Microsoft Gray Systems Lab Redmond, United States 
+
+## Bailu Ding 
+
+Microsoft Research Redmond, United States 
+
+## Qi Chen 
+
+Microsoft Research Asia Vancouver, Canada 
+
+## Minsoo Rhu 
+
+KAIST Daejeon, South Korea 
+
+## ABSTRACT 
+
+In GPU-accelerated data analytics, the overhead of data transfer from CPU to GPU becomes a performance bottleneck when the data scales beyond GPU memory capacity due to the limited PCIe bandwidth. Data compression has come to rescue for reducing the amount of data transfer while taking advantage of the powerful GPU computation for decompression. To optimize the end-to-end query performance, however, the workflow of data compression, transfer, and decompression must be holistically designed based on the compression strategies and hardware characteristics to bal-ance the I/O latency and computational overhead. In this work, we present ZipFlow, a compiler-based framework for optimizing com-pressed data transfer in GPU-accelerated data analytics. ZipFlow classifies compression algorithms into three distinct patterns based on their inherent parallelism. For each pattern, ZipFlow employs generalized scheduling strategies to effectively exploit the compu-tational power of GPUs across diverse architectures. Building on these patterns, ZipFlow delivers flexible, high-performance, and holistic optimization, which substantially advances end-to-end data transfer capabilities. We evaluate the effectiveness of ZipFlow on industry-standard benchmark, TPC-H. Overall, ZipFlow achieves an average improvement of 2.08 × over the state-of-the-art GPU compression library (nvCOMP) and 3.14 × times speedup against CPU-based query processing engines (e.g., DuckDB). 
+
+## 1 INTRODUCTION 
+
+GPUs have become widely available with the rapid development of artificial intelligence, such as deep neural networks and large language models. Interestingly, given the powerful computation capability and high memory bandwidth of modern GPUs, they also exhibit great potential for analytical database workloads. Recent work has demonstrated the promise of leveraging GPUs to speed up analytical database systems, including efforts from both academia and industry [2, 30, 33–35, 37, 38, 43, 56]. Despite such promising results, the constrained GPU memory capacity has been a critical limitation for GPU-accelerated database systems. For example, high-end GPUs such as NVIDIA H100[ 6 ] only have up to 80 GB of memory capacity, while analytical databases often scale to hundreds of GB or even several TBs. Although using 0 5 10 15 20  
+
+> DUCK DB (CPU)
+> SQL Server (CPU)
+> TQP A100
+> TQP A100, compressed
+> TQP H100
+> TQP H100, compressed
+> Seconds
+> I/O Query execution
+
+Figure 1: Latency breakdown of 22 TPC-H queries (SF=100) on CPU (AMD EPYC 7V12) [ 8 , 12 ], A100 (PCIe-4), and H100 (PCIe-5), TQP [33] is used for query processing on GPU. 
+
+multiple GPUs connected with high-performance interconnect (i.e., NVLink [ 14 ]) can increase the memory capacity at high memory bandwidth, such hardware can be prohibitively expensive. As the database cannot be fully cached in the GPU memory, the data often needs to be transferred from CPU to GPU via the PCIe bus on demand during query execution [ 23 , 24 , 29 , 57 , 65 ]. Unfortunately, the data transfer often becomes a performance bottleneck due to the slow PCIe bus. For example, Figure 1 shows the query latency breakdown of the 22 TPC-H queries on CPU-based and GPU-based database systems. Although the query execution on A100 [ 1 ] is more than 15 × faster than that on CPU, due to the slow data transfer from CPU to GPU, the speedup of the end-to-end query latency is much more moderate. Fortunately, analytical database systems typically store data in a compressed format (e.g., Parquet [ 4]). This allows the data to be initially compressed on the CPU and later decompressed by the GPU before query processing. This design choice reduces the amount of data transferred and simultaneously leverages the computational power of the GPU. While data compression has already become the status quo for analytical database systems, we observe that existing data compression techniques are designed for CPU-based database systems and do not fully exploit the unique performance characteristics of GPU-accelerated database systems. First, GPUs offer massive computation that can unlock the power of more aggressive compression strategies for increased compres-sion ratios to improve end-to-end query performance. Existing data compression techniques often limit the choices of compres-sion algorithms and their nesting to strike a balance between the 
+
+> arXiv:2602.08190v1 [cs.DB] 9 Feb 2026 Gwangoo Yeo, Zhiyang Shen, Wei Cui, Matteo Interlandi, Rathijit Sen, Bailu Ding, Qi Chen, and Minsoo Rhu
+
+compression ratio and decompression overhead. For example, the widely used Parquet format only considers compute-efficient com-pression algorithms, such as run-length-encoding (RLE), delta en-coding, dictionary encoding, and bit-packing, while more expensive compression algorithms, such as LZ77-based and entropy-based algorithms, can lead to much higher compression ratios on some workloads. Even state-of-the-art GPU-based compression libraries provide limited support for nested compression schemes. For exam-ple, nvCOMP [ 13 ] provides nesting only for specific combinations of RLE, delta encoding, and bit-packing. Second, compression schemes must be tailored to the target GPU hardware to achieve optimal performance. While specialized algorithms that adapt to data characteristics can be highly effec-tive [ 19 , 22 ], mapping them respectively onto a wide variety of GPU architectures entails a substantial overhead for adapting uti-lization on each target platform. Existing GPU compression frame-works [ 13 , 18 , 57 ] provide libraries of pre-built kernels only for conventional algorithms, while manually extending these frame-works to incorporate new or custom compression techniques is both cumbersome and inefficient. In addition, these frameworks often lack the support for optimizing nested compression schemes, i.e., no kernel fusion for cross-stage optimization with pre-built ker-nels. Furthermore, achieving seamless kernel compatibility across heterogeneous GPU architectures, such as support for NVIDIA GPUs via CUDA [ 5] and AMD GPUs via ROCm [ 10 ], continues to present a formidable challenge for existing frameworks. Finally, optimizing end-to-end query performance requires holis-tic design of the data compression, transfer, and decompression workflow. This includes exploring the tradeoffs between compres-sion ratio, decompression speed, and data transfer schedules to minimize overall latency. While prior work has studied the per-formance of individual components [ 18 , 41 , 46 , 57 ] or examined designs with a limited set of algorithms [ 44 , 48 ], such localized decision-making can lead to suboptimal end-to-end performance. To address these gaps, we propose ZipFlow, a flexible compiler-based compression framework for modern GPUs. ZipFlow abstracts commodity compression algorithms into three parallel compute patterns. These patterns serve as building blocks, enabling flexible and generalized device scheduling of both existing and new custom algorithms. Each pattern is easily optimized to exploit its paral-lelism across diverse GPU architectures with ZipFlow’s matching compiler technique. By holistically exploring the tradeoffs between I/O and computation overhead of the compressed data transfer workflow, ZipFlow delivers optimized end-to-end query perfor-mance. Our evaluation on the industry-standard TPC-H benchmark demonstrates the benefits of ZipFlow. Our custom compression methods provide superior compression ratios, with 1.85 × savings in I/O latency compared to a state-of-the-art compression GPU library [ 13 ]. Meanwhile, ZipFlow also provides a 3.26 × speedup in decompression with automated compiler optimizations. This leads to an average speedup of 2.08 × in end-to-end query latency compared to the baseline. In summary, this work makes the following contributions: 
+
+• We abstract three patterns to encapsulate the core parallelism structures commonly found in (de)compression algorithms (Sec-tion 3). These patterns enable native optimization of existing and custom (de)compression algorithms on GPUs, which can also facilitate development of a broader set of GPU-friendly (de)compression algorithms in the future. 
+
+• For each pattern, we formulate a universal optimization space attuned to GPU execution geometries and the SIMT paradigm (Section 4). Combined with fusion and pipelining, it holistically minimizes the end-to-end compressed data transfer overhead. 
+
+• We conduct a head-to-head comparison between ZipFlow and the state-of-the-art nvCOMP on identical algorithms across a wide range of data distributions (Section 5.2), highlighting that our hardware-aware approach effectively outperforms the state-of-the-art GPU compression library (i.e., nvCOMP). 
+
+• We comprehensively evaluate ZipFlow on the industry-standard TPC-H benchmark (Section 5.4), demonstrating the impact of joint optimization of the compressed data transfer workflow on the end-to-end query performance. Finally, we showcase how ZipFlow enables tailored hardware-aware execution by evaluat-ing its performance on heterogeneous GPUs. 
+
+## 2 BACKGROUND 2.1 Existing Compression Algorithms 
+
+In this section, we present a summary of some of the widely used lossless compression algorithms and discuss the fundamental design principles behind them. We also illustrate an example diagram for each algorithm in Figure 2. 
+
+Dictionary encoding replaces data with a dictionary and an index .The dictionary stores unique values from data, while the index maps original data values to their corresponding entries in the dictionary. 
+
+Delta encoding replaces each value with the difference (delta) be-tween the current value and previous value, while storing the initial value as a base. Delta encoding alone does not provide compression, but it enables further compression with RLE or bit-packing. 
+
+Run-Length Encoding (RLE) minimizes consecutive repeating integer values by replacing them with a value and a count . The 
+
+value stores the repeated value, while the count records the number of repetitions. 
+
+Bit-packing and Frame of Reference (FOR) pack integers into the minimum bit-width required for the given data. The bit-width is calculated using minimum and maximum values, while the mini-mum value is stored separately as a FOR. 
+
+Float2Int separates significant digits and exponents from floating-point values, converting them into integers, enabling further com-pression. This approach is effective for compressing columns with limited decimal precisions. The core idea is shared in several prior works [19, 29, 36, 41], though the name and details differ. 
+
+String-dictionary de-duplicates repeated byte sequences by sub-stituting them with dictionary indices, and the dictionary is con-structed to store high-frequency byte sequences within the target dataset (from prior works [ 22 , 60 ]). The compression ratio depends on how well the generated dictionary de-duplicates the patterns. 
+
+Entropy-based algorithms such as ANS [ 9 , 28 ] and Huffman encoding [ 39 ] compress the data by exploiting the skewness of data occurrences. Fewer bits are assigned to frequently occurring data to reduce overall data size. ZipFlow: a Compiler-based Framework to Unleash Compressed Data Movement for Modern GPUs Map unique 
+
+> values to integer
+
+Dictionary encoding 
+
+> Dictionary
+> Index
+
+A B C
+
+1 2 3
+
+1 2 3 1 1 2 3
+
+> Manually generated to
+> replace data sequence
+> Dictionary
+> Index
+
+A B C1
+
+2
+
+1 2 1
+
+String-dictionary 
+
+A - -
+
+> Encode data to different bit-width,
+> depending on frequencies
+
+Entropy-based 
+
+A B C B CA A
+
+> Replace repeating sequence
+> with history pointer
+
+LZ77-based 
+
+A B C A ptr 
+
+Delta encoding 
+
+> base
+
+1 1 1 -2 0 1 1
+
+RLE  
+
+> Value
+
+1 -2 0 1 
+
+> Count
+
+3 1 1 2
+
+Bit-packing 
+
+3 0 2 3 
+
+> 2 bit Pack values into
+> minimum bits
+
+& FOR 
+
+-2 
+
+A B C A A
+
+Original data 
+
+B C
+
+Float2Int 
+
+1.32 
+
+> Original data
+
+5.21 1.45 132 521 145 2 2 2 
+
+> Significant digits Exponents
+
+Figure 2: Compression algorithms of different families. LZ77-based algorithms such as LZ4 [ 11 ] and Snappy [ 15 ] de-duplicate repeated sequences by encoding them as pointers to pre-vious data. These algorithms are referred to as “general-purpose” due to their broad compatibility. State-of-the-art algorithms such as Deflate [ 27 ] and zstd [ 16 ] combine LZ77 with entropy-based methods for superior compression ratios. 
+
+## 2.2 Existing Approaches in Database Systems 
+
+In modern database systems, achieving efficient data compression is often accomplished through the composition of several lightweight compression techniques , such as run-length encoding (RLE), delta encoding, dictionary encoding, and bit-packing. This paradigm, fre-quently described as cascaded compression , leverages the strengths of individual algorithms by orchestrating them in a sequence, tai-lored to the characteristics of the data at hand. Well-designed nested algorithms for individual data files show an effective compression ratio, while offering simple compute patterns [ 25 ]. BtrBlocks [ 41 ]introduces an automated search mechanism to determine optimized nested algorithms, significantly improving compression ratios. Prominent columnar storage formats such as ORC [ 50 ] and Par-quet [ 4] have embraced this cascaded approach by implementing a variety of well-engineered nested compression schemes, such as combining RLE with dictionary encoding or integrating delta encoding with bit-packing. They support further compression by enabling general-purpose algorithms to be applied on top of pre-defined nesting algorithms. The Fastlanes project [ 17 ] was intro-duced to enhance compressed columnar data formats by enabling increased opportunities for parallel decoding, providing several handcrafted GPU kernels, such as bit-packing, delta encoding [ 18 ], and Float2Int [ 36 ], aiming to leverage the SIMD and SIMT process-ing capabilities of CPUs and GPUs. 
+
+## 3 DESIGN 
+
+We propose ZipFlow, a framework to accelerate compression-based data movement to GPUs. Figure 3 presents a high-level overview of the end-to-end data movement pipeline as optimized by ZipFlow. Raw data in various formats (e.g., Numpy, Parquet, Text, Binary) are first compressed utilizing ZipFlow flexible nesting and customiz-able algorithms, with the resulting compressed representations GPU (A100, MI300x, …) 
+
+> PCIe
+> (16-64 GB/s)
+> Query
+> Execution
+> Kernel
+
+CPU Per Query 
+
+> Data Transfer
+
+ZipFlow 
+
+> Co-designed
+> Compression for
+> Data Blocks
+> Co-designed
+> Compression for
+> Data Blocks
+
+Data-Specific 
+
+Compression 
+
+GPU-Specific 
+
+Decompression   
+
+> RLE
+> Nested Algorithms
+> Customized
+> Algorithms
+> ANS
+> Nested Fusion
+> Device Geometry Scheduling
+> Multiple Data
+> Transfer Scheduling
+> Decomp
+> kernel
+> Decomp
+> Kernel Offline
+> Processing
+> Data
+> Pool Custom
+> Compressed
+> Data Block
+> Custom
+> Compressed
+> Data Block
+> Custom
+> Compressed
+> Data Block
+> Custom
+> Compressed
+> Data Block
+> Custom
+> Compressed
+> Data Block
+> Pattern-based Implementation Pattern-based Compilation
+> …
+
+Figure 3: End-to-end execution pipeline from stored data to ZipFlow. Algorithm-constructed Nesting Compression Tree per Data Tensor 
+
+> Pattern-constructed Single Compression Algorithm
+> Primitive Kernel Design of Compute Patterns
+
++  
+
+> Fully Parallel Pattern Group-Parallel Pattern Non-Parallel Pattern
+> Vendor Prebuilt
+> Hardware-aware Pipelining for Multiple Data Tensors
+> New Algorithm Customization & Exploration
+
+GPU-based Data Analytics 
+
+> Compiled OPs
+> Inline Fusion
+> Native SIMT Scheduling
+> Load Balancing
+> ...
+> torch.sort()
+> torch.cumsum()
+> torch.unique()
+> Pipelining Scheduler to Schedule GPU/PCIe Overlap
+
+Pipelining 
+
+layer 
+
+Nesting 
+
+layer 
+
+Algorithm 
+
+layer 
+
+Pattern 
+
+layer 
+
+Figure 4: ZipFlow Architecture Overview. 
+
+stored in CPU memory. For online data transfer, ZipFlow facilitates the efficient movement of compressed data across the PCIe inter-connect, followed by an ultra-fast, device-specific decompression phase. This end-to-end process is co-designed by ZipFlow to fully exploit the heterogeneity of modern GPUs, incorporating not only hardware-native resource management but also optimized over-lap between PCIe data transfers and on-device decompression to maximize throughput and minimize latency. Figure 4 introduces a four-layer design for ZipFlow. Starting from the bottom, the Pattern Layer enables the design of primi-tive GPU operators based on three predefined compute patterns. Each designed operator corresponds to a GPU kernel and serves as a building block for (de)compression algorithms. These GPU operators enable simple implementation of the target algorithm while exploiting the prevalent parallel patterns in (de)compression algorithms. In the Algorithm Layer , GPU patterns are organized to form primitive compression algorithms such as RLE, dictionary encoding, bit-packing, or ANS. Based on primitive algorithms from the Algorithm Layer, the Nesting Layer explores and customizes the nesting of algorithms applied to data columns (e.g. Dictionary encoding + ANS or RLE + Bit-packing), to achieve optimal end-to-end data movement latency. Finally, at the top is the Pipelining Gwangoo Yeo, Zhiyang Shen, Wei Cui, Matteo Interlandi, Rathijit Sen, Bailu Ding, Qi Chen, and Minsoo Rhu 𝐹 (𝑥 [𝐾 ]) 𝐺 ଵ 𝐺 ଶ 𝐺 ଷ 𝐺 ସ       
+
+> dep dep dep
+> 𝐶ℎ𝑢𝑛𝑘 ଵ𝐶ℎ𝑢𝑛𝑘 ଶ
+> dep dep dep
+> Dictionary encoding / Bit-packing /FOR /… RLE / String-dictionary / DeltaStride / …
+> ANS / Huffman encoding / LZ4 / Snappy / …
+> (a) Fully-Parallel pattern (b) Group-Parallel pattern
+> (c) Non-Parallel pattern
+
+Figure 5: Logical dependencies for ZipFlow parallel patterns. Layer , where our framework schedules the pipelining of I/O opera-tions and GPU decompression latency across multiple data chunks to minimize overall latency. 
+
+## 3.1 Pattern Layer 
+
+We identify three major parallel schemas based on our observa-tions on commodity (de)compression algorithms. To ensure com-prehensive coverage of possible parallelism options, we classify the parallelizable schema into three distinct patterns: Fully-Parallel ,
+
+Group-Parallel , and Non-Parallel . Given an input and output ar-ray, each pattern covers N to 1 , 1 to N , and N to M independent compute blocks in (de)compression algorithms, respectively. 
+
+Fully-Parallel Pattern is tailored for (de)compression opera-tors where each input independently maps to output values with no cross-element dependencies, as shown in Figure 5(a). Although the figure only shows a simple 1:1 scenario, a fixed scalar number of input arrays can exist to support the N to 1 computation block. Any mapping function can be used to define the computation between input and output values, and arbitrary mappings between input and output indices are also supported. Decompression techniques for algorithms such as dictionary encoding, bit-packing, float2int (G-ALP [ 36 ]) and Fastlanes [ 18 ] algorithms, can be implemented using the Fully-Parallel kernel. In Figure 6(a), we present an ex-ample of dictionary-encoded data being decompressed using the Fully-Parallel kernel. The kernel uses a dictionary look-up table as a parallel mapping function, where the Dictionary is provided as metadata. This Fully-Parallel kernel performs parallel dictionary look-ups for each element selected by In and writes the correspond-ing value to Out .
+
+Group-Parallel Pattern focuses on customizing compression operators for spatially non-uniform distributions, where the entire task is segmented into multiple variable-sized groups 𝐺 1, 𝐺 2, .., 𝐺 𝑛 
+
+containing independent subtasks within each group. Different sizes of 𝐺 𝑥 result in an imbalance of execution. For example, Figure 5(b) shows four groups, each containing a different number of elements internally, while the arrows within each group indicate a parallel relationship of 1 to N. Typically, this pattern applies to all RLE-based encoding families including delta encoding, String-dictionary and GSST [ 60 ]. We demonstrate how RLE decoding can be mapped to the A B C A                                 
+
+> (a) Dictionary encoding
+> In
+> Out
+> 123211
+> ABCBAA
+> (b) RLE
+> Value 1-2 01
+> 111-2 011
+> Count 3112
+> G1 G2 G3 G4
+> (c) ANS
+> ABCAGroup-Parallel
+> Chunk 1
+> Decode state
+> Chunk 2
+> …
+> Sequential decoding
+> Chunk 3
+> ……
+> None-Parallel
+> Gx [:count] = values
+> Fully-Parallel
+> Out = Dictionary[In]
+> Dictionary
+> table
+> Decode
+> table
+> …
+> …...
+
+Figure 6: Data mapping example for each pattern. 
+
+Group-Parallel pattern in Figure 6(b). Compressed RLE data consists of a count array and a value array, where the count array specifies the number of occurrences for each group, and each element in the value array corresponds to an input symbol. In this use case, a direct copy function is used as the mapping function when writing to the output, so that the Group-Parallel kernel replicates each element in the value array in parallel, repeating it count times per group, and writes the results to the appropriate group indices. 
+
+Non-Parallel Pattern is reserved for all other compression methods where parallelization is not feasible with Fully-Parallel and Group-Parallel, such as inherently serial algorithms like Snappy and Huffman coding. We leverage the file chunking feature of the compression algorithm, dividing the target file into smaller chunks that are compressed and decompressed independently for parallel processing. This approach enables different processors to handle independent file chunks concurrently, as illustrated in Figure 5(c), allowing a single GPU processor to process serialized code as if it were implemented for a CPU. Similar to many other serial algo-rithms, we take ANS decompression as an example. Each intermedi-ate decode state in ANS depends on its predecessor to construct the corresponding element and recursively contributes its state to its successor. As shown in Figure 6(c), this workflow enforces a strict, sequential progression of the decode state throughout the process within each chunk. However, opportunities for parallelism arise by grouping their intermediate decode states from differ-ent chunks and dispatching them in a SIMT (Single Instruction, Multiple Threads) manner, which is further explained in Section 4. 
+
+## 3.2 Algorithm Layer & Nesting Layer 
+
+The Algorithm Layer incorporates kernels compiled from the Pat-tern Layer to construct primitive (de)compression algorithms. The pool of primitive (de)compression algorithms in ZipFlow includes delta encoding, dictionary encoding, String-dictionary, ANS, bit-packing, and Float2Int, while additional algorithms can be added when necessary, as demonstrated in Section 5. To further simplify the implementation, the framework also supports direct invocation ZipFlow: a Compiler-based Framework to Unleash Compressed Data Movement for Modern GPUs Fully-Parallel    
+
+> Kernel
+> torch.cumsum
+> Group-Parallel
+> Kernel
+> RLE
+> (a) Algorithms
+> (b) Nested algorithms
+> Input
+> Output
+> Count Value
+> Output
+> Bit-packing Dictionary encoding
+> Presum
+> Bit-packing Dictionary
+> encoding
+> Bit-packing RLE
+> Decompressed
+> Compressed
+> Bit-packing + Dictionary encoding
+> Bit-packing + Group-Parallel
+> (c) Optimized Nesting
+> RLE
+> torch.cumsum
+> Compressed
+> Fully-Parallel
+> Kernel
+> Input
+> Output
+> Decompressed
+> Count
+> Value
+
+Figure 7: Execution of Algorithm & Nesting layer in PyTorch. 
+
+of prebuilt operators from PyTorch’s out-of-the-box operations, such as sort, unique, and cumulative sum, as auxiliary operations. Figure 7(a) illustrates the decompression function design of bit-packing, dictionary encoding, and RLE. Decompression of bit-packing and dictionary encoding requires a single Fully-Parallel kernel, whereas RLE requires two-step kernels for decompression. The variable count is first pre-processed with PyTorch’s cumulative sum to calculate the base output index which is stored in a variable named presum . Next, the Group-Parallel kernel is applied for paral-lel expansion of the compressed data. In the Nesting Layer, users can implement nested compression algorithms by combining a pool of primitive algorithms from the Algorithm Layer. These nested algorithms are regarded as the eventual (de)compression for target data columns. In Figure 7(b), we show an example of nested de-compression using sub-algorithms designed from Figure 7(a), while Figure 7(c) further shows optimization by fusing Fully-Parallel pat-terns to nearby patterns. Consecutive Fully-Parallel kernels from the bit-packing and the dictionary encoding are fused to calcu-late the count tensor. Similarly, the bit-packing that generates the 
+
+value tensor is also fused with the Group-Parallel kernel inside the RLE function. Revisiting the Pattern Layer for kernel fusion enables further optimization by eliminating redundant memory movement. 
+
+## 3.3 Pipelining Layer 
+
+GPU-based query processing necessitates transferring multiple blocks of data from CPU →GPU. To address the latency introduced by these data transfers and subsequent GPU-side decompression, ZipFlow introduces a dedicated Pipelining Layer. This layer aims to minimize end-to-end query latency by orchestrating the pipelined execution of CPU →GPU data transfers alongside on-GPU decom-pression tasks, seamlessly overlapping these operations across sev-eral data blocks. Our empirical investigations reveal that the se-quence in which data blocks are pipelined exerts a considerable impact on the achieved performance improvements. As illustrated in Figure 8, consider two representative data blocks, A and B: data A is characterized by high data transfer overhead but rapid de-compression, whereas data B exhibits the converse pattern, with low transfer cost but prolonged decompression time. By systemati-cally comparing alternative data block transfer orders, we observe that initiating the pipeline with data B followed by data A (i.e., B→A) achieves lower overall latency. This performance gain is A
+
+> A
+> B
+> B
+> Time
+> PCIe I/O
+> Decompression
+> A
+> A
+> B
+> B
+> Time
+> PCIe I/O
+> Decompression
+> Data transfer order: A - B
+> Data transfer order: B - A
+
+Figure 8: Transfer latency under different pipelining orders. 
+
+due to the maximum concurrency between the data movement and decompression phases. To generalize this optimization for arbitrary queries, it becomes critical to identify the optimal scheduling order of data transfers for minimum total latency. To this end, we design a specialized pipelin-ing scheduler leveraging Johnson’s algorithm [ 40 ]. This scheduler efficiently determines the optimal data scheduling order with only 
+
+𝑂 (𝑛 ) computational complexity. 
+
+## 4 DEVICE GEOMETRY SCHEDULING 
+
+Enhancing the efficiency of the decompression kernel constitutes another crucial design aspect of ZipFlow. Given the diversity of GPU architectures in terms of on-chip resources such as compute units, memory transaction sizes, wavefront sizes, and cache capaci-ties, compilation plays a key role in enabling fine-grained mapping of computational tasks to these heterogeneous native resources. We introduce a three-dimensional configuration vector, denoted as <L, S, C>. Different tuple specifies a kernel instantiation that per-forms identical computation while leveraging distinct granularity of native hardware resources. This configurable format standardizes kernel scheduling by enabling precise adaptation of vector values to the architectural features of a specific GPU, thereby maximizing efficiency of both on-chip and off-chip resource utilization. 
+
+Scheduling Fully-Parallel with Fusion. Compared with other computational patterns, the lack of cross-element dependencies en-dows the Fully-Parallel pattern with a unique capability for flexible kernel inlining and fusion. This property facilitates the integration of Fully-Parallel with a variety of other operations, such as seam-lessly fusing type casting or dictionary lookups into RLE decoding, thereby improving overall computation efficiency and reducing ker-nel launch overhead. In scenarios where such fusion is infeasible, a separate GPU kernel must be employed during decompression tasks. To exemplify the kernel scheduling strategy for this pattern, Figure 9 presents a representative configuration. In this instance, the variable 𝐶 denotes the number of contiguous data elements jointly processed by a single GPU thread in one memory transaction, which is typically determined by the size of the data type under con-sideration. The parameter 𝑆 specifies the number of GPU threads allocated per block, dictating the degree of intra-block parallelism. 
+
+𝐿 indicates the iteration count of the main processing loop, such that each thread sequentially handles successive regions of data, offset by 𝑆 × 𝐶 elements, for 𝐿 iterations. Collectively, the product 
+
+𝐿 × 𝑆 × 𝐶 effectively defines the “tile size” that represents the total workload assigned to each GPU block. This flexible configuration not only matches the hardware execution model but also allows efficient scaling and adaptation across diverse GPU architectures. Gwangoo Yeo, Zhiyang Shen, Wei Cui, Matteo Interlandi, Rathijit Sen, Bailu Ding, Qi Chen, and Minsoo Rhu .. .. .. .. .. .. .. ..                                    
+
+> recurrent for Ltimes
+> Block0 (0 -15)
+> thread -0 (0 -3)
+> Block1 (16 -31)
+> thread -1 (4 -7)
+> Block2 …
+> thread -0 (8 -11) thread -1 (12 -15) thread -0 (0 -3) .. ..
+> T0T0T1T1T0T0T1.. T0.. .. ..
+> block -0block -1block -2/..
+> Num of Elements
+> Fusion is
+> applicable
+> No
+> Yes Fuse this op. into following Pattern< ?>, e.g.:
+> y = p<A>(x); z = p< ?>(y); àz= p< ?>(p<A>(x))
+> (2ops) (1 op)
+> Optimize this op. by
+> configuration
+> Sthreads
+> Celements
+> Using ceil(Num -of -Element / (L ×S×C)) GPU blocks in total
+> (time )
+
+Figure 9: Fully-Parallel scheduling with < L,S,C>=<2,2,4>. Scheduling Group-Parallel for Load Balance. Efficiently pro-cessing non-uniform data on GPUs is challenging. Choosing RLE decompression as a typical example in this pattern, a straightfor-ward strategy is to evenly distribute different RLE entries among all compute units for parallel execution. However, this approach often suffers from substantial load imbalance, since the workload of each subtask (i.e., the number of elements per RLE entry) can vary dramatically. As a result, some processors are assigned dis-proportionately heavy subtasks, while others complete early and remain idle, under-utilizing available resources. ZipFlow tackles this divergence by combining multiple GPU blocks to co-process within a single group and a single GPU block to process across multiple groups . As illustrated in Figure 10, the computation is organized for a four-group data arranged from left to right, each represented by a vertical bar whose height denotes the independent items within the group that can be processed in parallel. In this configuration, the entire data plane is processed by scheduling 8 GPU blocks (denoted as 𝐿 ), each containing 4 threads (denoted as 𝑆 ). For each group, 16 threads in total (denoted as 𝐶 ), evenly contributed by 4 GPU blocks (i.e., 𝐶 /𝑆 ), collaborate to pro-cess all the subtasks along the vertical axis. Along the horizontal dimension, each GPU block iteratively advances to process sub-sequent groups, skipping over a stride of 2 (i.e., 𝐿 × 𝑆 /𝐶 ) until all groups are exhausted. Notably, 𝑆 can exceed 𝐶 , implying that sur-plus threads from a single GPU block may concurrently process tasks spanning across adjacent 𝑆 /𝐶 groups in a “lockstep” fashion, as opposed to strictly sequential execution from one group to the next. This schedule unblocks imbalanced data to scale along what-ever vertical or horizontal dimension, which can also be achieved just by a one-time data scan. 
+
+Scheduling Non-Parallel towards SIMT. Given that the maxi-mum achievable parallelism in this pattern is inherently bounded by the total number of data chunks, ZipFlow issues 𝐿 GPU blocks and 
+
+𝑆 × 𝐶 threads per block to deal with up to 𝐿 × 𝑆 × 𝐶 chunks of data, with each chunk managed by one thread for sequential execution. 𝐿 
+
+is calculated based on the number of chunks, while 𝑆 is fixed to the hardware warp size (e.g., 32 for all NVIDIA GPUs and 64 for most AMD GPUs). The parameter 𝐶 is architecture-dependent and en-ables each GPU block to handle more than 𝑆 chunks, depending on available register file size per physical compute unit. As illustrated in Figure 11, which presents the physical execution order, a stack of sequential statements is repeatedly executed at different time steps without parallelism. Within each iteration, however, the processing of items from independent chunks are grouped into a SIMT unit, Block0 (0 -3)                                       
+
+> Block1 (4 -7)
+> Block2 (8 -11)
+> Block3 (12 -15)
+> Block4 (0 -3)
+> Block5 (4 -7)
+> Block6 (8 -11)
+> Block7 (12 -15)
+> Block0 (0 -3)
+> Block1 (4 -7)
+> Block2 (8 -11)
+> Block3 (12 -15)
+> Block4 (0 -3)
+> Block5 (4 -7)
+> Block6 (8 -11)
+> Block7 (12 -15)
+> Block0 (0 -3)
+> Block1 (4 -7)
+> Block2 (8 -11)
+> Block3 (12 -15)
+> Block4 (0 -3)
+> Block5 (4 -7)
+> Block6 (8 -11)
+> Block7 (12 -15)
+> Block0 (0 -3)
+> Block1 (4 -7)
+> Block2 (8 -11)
+> Block3 (12 -15)
+> Block4 (0 -3)
+> Block5 (4 -7)
+> Block6 (8 -11)
+> Block7 (12 -15)
+> Num of RLE Entries
+> Num of Elements
+> per RLE Entry
+> T1
+> T1
+> T1
+> T0
+> T0
+> T0
+> T0
+> T1
+> T1
+> T1
+> T1
+> T0
+> T0
+> T0
+> T0
+> T2
+> T2
+> T2
+> T2
+> T2
+> recurrent  every next  C
+> elements
+> recurrent every next
+> L×S / C entries
+> Sthreads Using L GPU blocks in total
+> (time )
+
+Figure 10: Group-Parallel scheduling with < L,S,C>=<8,4,16>. dog. azy_ he_l er_t s_ov jump fox_ own_ k_br quic The_     
+
+> Bloc k0(0 -7)
+> Num of File Chunks
+> l_._ _pvt _cr __yg _xmo_ eibn ezo_ oj_r hu_w hag_ fjse Tqko
+> physical execution orders
+> T0T1T2T3
+> chunk1  chunk2  chunk3  chunk4
+> spill J -th
+> word?
+> spill J -th
+> word?
+> spill J -th
+> word?
+> spill J -th
+> word?
+
+yes 
+
+no 
+
+yes 
+
+yes   
+
+> BALLOT_SYNC (SIMT)
+> Statement at T J:x[N] = ((x[N] << 16) | stream_arr [offset[N].next()] & 0xFFFF).when(x[N] < 0x8000)
+
+2
+
+N/A 
+
+1
+
+0     
+
+> Stream Array I/O
+> x[N] = (x[N] << 16) | ( stream_arr [2] & 0xFFFF)
+> x[N] = x[N] // N.O.P.
+> x[N] = (x[N] << 16) | ( stream_arr [1] & 0xFFFF)
+> x[N] = (x[N] << 16) | ( stream_arr [0] & 0xFFFF)
+> Block1 (8 -10)
+> Warp -0Warp -1Warp -0Warp -1
+> (N.O.P.)
+> lockstep size
+> (S)
+> C warps per GPU Block
+> per lockstep
+> Using L GPU blocks in total
+> (time )
+
+Figure 11: Non-Parallel scheduling with < L,S,C>=<2,4,2>. 
+
+enabling lockstep execution. This approach enhances the consis-tency of I/O and cache accesses across chunks, thereby mitigating divergence and improving overall memory access efficiency. 
+
+## 5 EXPERIMENT 5.1 Experiment Setup 
+
+We assess the compression ratio, decompression throughput, and end-to-end query execution latency of ZipFlow using the TPC-H benchmark. By default, all experiments use a TPC-H scale factor of 100 and are conducted on an NVIDIA A100 GPU [ 1 ] with 80GB HBM2, connected to an AMD EPYC 7V12 64-core processor via PCIe Gen4 (32 GB/s theoretical bandwidth). To evaluate the device utilization of our approach across heterogeneous GPU architectures, we further conduct experiments on an NVIDIA H100 GPU [ 6] with 80GB HBM2e, an AMD MI300X GPU [ 7 ] with 192GB HBM3, and an AMD MI50 GPU [ 3 ] with 32GB HBM2. All measurements are performed with data buffers pinned to CPU memory, and we restrict execution to a single CPU node to minimize NUMA effects. We report the compression ratio as the quotient of compressed size over original size, and decompression throughput as the uncompressed data size divided by the decompression time. For GPU (de)compression baseline, we employ nvCOMP v4.0.1.0 [13 ], which is widely recognized as the state-of-the-art compression ZipFlow: a Compiler-based Framework to Unleash Compressed Data Movement for Modern GPUs 0                 
+
+> 400
+> 800
+> 1200
+> 1600
+> 2000
+> 1357911 13 15 17 19 21 23 25 27 29 31
+> Decompression Throughput (GB/s)
+> Packed bits (from int64)
+> nvCOMP ZipFlow Theoretical Maximum
+
+Figure 12: Throughput of bit-packing (Fully-Parallel) under varying distributions of bit-width to unpack. 
+
+library for NVIDIA GPUs. It provides a comprehensive suite of GPU-optimized algorithms, including standard methods such as LZ4, Snappy, Deflate, Zstandard (ZSTD), Asymmetric Numeral Systems (ANS), and Huffman encoding, as well as specialized techniques tailored for structured data (Cascaded), scientific data (Bitcomp), and GPU-optimized Deflate (GDeflate). Among these, the Cascaded framework in nvCOMP supports configurable nesting of predefined run-length encoding (RLE), delta encoding, and bit-packing. For the end-to-end TPC-H query execution experiment, we com-bine “ZipFlow + TQP [ 33 ]” to form a complete CPU-GPU hybrid query engine fully executed in the Pytorch environment (Python 3.12 + Pytorch 2.6.0). We further compare it with state-of-the-art CPU-based DBMS, specifically, DuckDB v1.4.1 [ 8] and Microsoft SQL Server 2022 RTM [ 12 ], both of which were run with 64 physical threads on the same AMD processor as the GPU baseline. 
+
+## 5.2 Microbenchmark 
+
+We begin with an apples-to-apples comparison against nvCOMP on the same compression patterns. For each primitive pattern, we select bit-packing, RLE, and ANS as representative instances and compare them to the corresponding algorithms in the nvCOMP library across a range of data distributions. Given the closed-source nature of nvCOMP’s implementations, we calibrate algorithm settings of ZipFlow and nvCOMP in terms of same compression ratio, thereby enabling a fair evaluation of performance metrics. 
+
+5.2.1 Fully-Parallel Instance: Bit-packing . Figure 12 compares the decompression performance of the bit-packing implementa-tions in ZipFlow and nvCOMP, with the dashed line for theoretical maximum throughput calculated by Equation 1: 
+
+𝐺𝑝𝑢𝑀𝑒𝑚𝐵𝑎𝑛𝑑𝑤𝑖𝑑𝑡ℎ × (plain size) (compressed size) + (plain size) (1) To ensure a fair evaluation, we generate 4 GB synthetic input with different granularities of bit-width by uniformly sampling int64 values, with calibrated compression ratio. Taking advantage of ZipFlow’s native kernel scheduling for A100, it consistently outperforms nvCOMP as the compressed bit-width increases, and these results indicate that even for identical compression algo-rithms, a commodity library may not always deliver optimal per-formance depending on the input data pattern. For instance, on the 
+
+L_PARTKEY column in TPC-H (compressed to a 25-bit width), our 0      
+
+> 500
+> 1000
+> 1500
+> 2000
+> 2
+> 16
+> 128
+> 1024
+> [1,3]
+> [1,31]
+> [1,255]
+> [1,2047]
+> ratio-1
+> ratio-2
+> ratio-3
+> even+
+> outlier
+> outlier+
+> random
+> even+
+> random
+> even random outlier mixed
+> Decompression Throughput (GB/s)
+> Group distribution
+> ZipFlow nvCOMP Theoretical Maximum
+
+Figure 13: Throughput of RLE (Group-Parallel) under varying group size distributions: even , random , outlier , mixed .
+
+method achieves a 1.63 × improvement in decompression perfor-mance. 
+
+5.2.2 Group-Parallel Instance: RLE . We evaluate RLE decom-pression throughput across various group size distributions (i.e., the distribution of the count array in RLE), considering four repre-sentative scenarios: even , random , outlier , and mixed . In the even-X distribution, all groups contains identical number of elements, specifically of size X. For example, even-2 yields an uncompressed sequence such as A-A-B-B-C-C. The random [L, R] distribution as-signs each group a size selected uniformly at random from the range L to R. The outlier distribution consists predominantly of groups of size 1, interleaved with a small number of significantly larger groups (e.g., of size 1024), thereby simulating highly skewed group sizes. The mixed distribution is generated by concatenating any two of the aforementioned scenarios, enabling the evaluation of performance under hybrid group size patterns. In Figure 13, we provide a comprehensive performance compar-ison of RLE decompression using ZipFlow and nvCOMP across 14 representative data distribution cases. The bars represent the measured throughput, while the points denote the theoretical peak achievable under memory bandwidth constraints. The results show that nvCOMP offers limited adaptability to data distribution vari-ability, maintaining consistently suboptimal performance that re-mains detached from the theoretical upper bound. This limitation primarily arises from nvCOMP’s fixed parallelization approach, which assigns one thread per output element irrespective of group size, resulting in memory read contention and inefficient utilization of available bandwidth [ 49 ]. In contrast, ZipFlow maintains perfor-mance much closer to the theoretical maximum across all tested distributions. This close alignment demonstrates that ZipFlow ef-fectively leverages both data locality and GPU parallelism, leading to improved occupancy and superior bandwidth utilization. 
+
+5.2.3 Non-Parallel Instance: ANS . For the Non-Parallel pattern, we conduct the performance evaluation along two key dimensions: 1) varying the value frequency ratios to manipulate the entropy, as these significantly influence the compression efficacy of ANS (Figure 14); 2) analyzing the optimal chunk size across different total data volumes (Figure 15), as this parameter impacts both the compression ratio and decompression throughput. Our evaluation datasets are constructed to capture the distributional properties Gwangoo Yeo, Zhiyang Shen, Wei Cui, Matteo Interlandi, Rathijit Sen, Bailu Ding, Qi Chen, and Minsoo Rhu 0        
+
+> 0.25
+> 0.5
+> 0.75
+> 1
+> 0
+> 100
+> 200
+> 300
+> 400
+> dist-1 dist-2 dist-3 dist-4 9:11 8:12 7:13 6:14 5:15
+> Compression ratio Value frequency ratio
+> Compression Ratio
+> Decompression
+> Throughput (GB/s)
+> Target data
+> ZipFlow nvCOMP ZipFlow nvCOMP
+> (Calibrated for both)
+
+Figure 14: Throughput of ANS (Non-Parallel) under varying compression ratio (left) & frequency distributions (right). 0.1               
+
+> 0.15
+> 0.2
+> 0.25
+> 0.3
+> 0
+> 100
+> 200
+> 300
+> 400
+> 10MB 50MB 100MB 200MB 600MB 1000MB
+> Compression Ratio
+> Decompression
+> Throughput (GB/s)
+> Data Size
+> 4096 2048 1024 512 256 nvCOMP
+> 4096 2048 1024 512 256 nvCOMP
+> (Line w/ markers, lower is better)
+
+Figure 15: Throughput of ANS using varying chunk sizes (e.g., 4096 = 4KB per chunk, with nvCOMP under opaque setting). 
+
+of the L_RETURNFLAG column from the TPC-H benchmark, where ANS compression is well-suited for encoding values containing distinct frequency distribution. Figure 14 presents the decompression throughput from two di-mensions: four bars on the left depict decompression throughput across increasing compression ratios, while the remaining four bars on the right illustrate decompression throughput as the data fre-quency distribution shifts from balanced to imbalanced. When the data distribution is made more skewed by increasing the frequency ratio of certain values, nvCOMP throughput drops noticeably. In contrast, ZipFlow consistently maintains stable throughput, which has been observed in Fully-Parallel and Group-Parallel, with its performance mostly governed by the compression ratio and shows minimal sensitivity to frequency variation or data skew. Figure 15 depicts a trade-off between employing larger chunk sizes, which yield greater compression ratios, and utilizing smaller chunk sizes that facilitate more parallelism and higher decompres-sion throughput. Given that the chunk size used by nvCOMP is not explicitly documented, we systematically sweep over a range of chunk sizes in the ZipFlow implementation to facilitate a cal-ibrated comparison. Our findings reveal that, for smaller inputs, decreasing the chunk size leads to higher throughput by leveraging finer-grained parallelism. Conversely, for larger inputs, employing larger chunk sizes yields better scalability and improved throughput. Across all evaluated input sizes, our approach consistently identi-fies an optimal chunk size configuration that surpasses nvCOMP in terms of decompression throughput, while simultaneously achiev-ing equal or better compression ratios. 
+
+Table 1: Comparison between ZipFlow and public methods (nvCOMP [ 13 ], Parquet [ 4 ], BTRBLOCKS [ 41 ]), with the ab-breviation of F.P., G.P., and N.P representing different pattern families: Fully-Parallel, Group-Parallel and Non-Parallel.                                                                 
+
+> Support nvCOMP Parquet BTRBLOCKS ZipFlow
+> Nesting Predefined Predefined Extensible Extensible GPU support ✓✗✗✓
+> F.P.  Bit-pack & FOR ✓✓✓✓
+> Delta encoding ✓✓✓✓
+> Dictionary encoding ✗✓✓✓
+> Float2Int ✗✗✓✓
+> G.P.
+> RLE ✓✓✓✓
+> RLE + Delta ✓✗✓✓
+> RLE + Dictionary ✗✓✓✓
+> String-dictionary ✗✗✓✓
+> DeltaStride ✗✗✗✓
+> N.P.  LZ4 ✓✓✗✓
+> ANS ✓✗✗✓
+> Huffman ✓✗✗✓
+> Algorithm extensibility ✗✗✗✓
+
+In summary, the performance comparison among the three pat-tens (Fully-Parallel, Group-Parallel, and Non-Parallel) demonstrates the superior performance of ZipFlow. This improvement primar-ily arises from its fine-grained GPU scheduling adaptability. Such adaptability better aligns with both the characteristics of diverse data distributions and the architectural strengths of modern GPUs. 
+
+## 5.3 Compression Evaluation on TPC-H Dataset 
+
+For this evaluation, we pursue best possible performance for each data column, and design optimized compression algorithms by leveraging our framework’s nesting mechanisms and flexible ker-nel pool customization. We focus on the three largest tables ( L, O,and PS ), which constitute the primary bottleneck for end-to-end query latency in TPC-H. Our custom compression algorithms inte-grate nesting multiple techniques from different pattern families, such as bit-packing, RLE, delta encoding, dictionary encoding, ANS, and Float2Int. We also employ two specialized compression variants to handle particular data patterns. First, DeltaStride (a RLE variant) compresses monotonically increasing integer sequences by repre-senting them as (start, stride, count) triples. Second, we generate a custom dictionary for the String -dictionary compressor, the details of which are presented in Section 5.3.1. The nested compression algorithms we use are given in Table 2. 
+
+5.3.1 Compression Ratio . In this section, we evaluate the com-pression ratios achieved by ZipFlow in comparison to one GPU-based baseline, nvCOMP [ 13 ], and three CPU-based baselines: Par-quet [ 4], Parquet + zstd, and BTRBLOCKS [ 41 ], irrespective of their compatibility for GPU. Table 1 summarizes the set of compression algorithms supported by each framework, while Figure 16 presents their compression ratios. For both nvCOMP and Parquet, we ex-plore their best compression ratio attained across all supported algorithms listed in Table 1. We further provide a detailed analysis of the results for representative column clusters below. As shown in Figure 16, columns containing date values (i.e., four columns plotted in between L_COMMITDATE and O_ORDERDATE ) ben-efit substantially from dictionary encoding. In contrast, nvCOMP does not support this data representation and therefore yields con-sistently lower compression ratios relative to all alternative so-lutions. For numerical columns (i.e., five columns plotted from ZipFlow: a Compiler-based Framework to Unleash Compressed Data Movement for Modern GPUs 0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Compression ratio
+
+Data columns     
+
+> nvCOMP Parquet Parquet + zstd BTRBLOCKS ZipFlow
+
+Figure 16: Compression ratio comparison between ZipFlow and four different baselines. For Parquet and nvCOMP, we iterate through all possible algorithm options and report only the best ratio. For nvCOMP’s cascaded, we iterate through 72 ( 6 × 6 × 2)different possible nesting levels of RLE, delta encoding, and bit-packing. 0
+
+0.25 
+
+0.5 
+
+0.75 
+
+1
+
+1.25 
+
+0
+
+400 
+
+800 
+
+1200 
+
+1600 
+
+2000 
+
+> Normalized compression ratio
+> (vs. nvCOMP)
+> Decompression
+> throughput (GB/s)
+
+Data columns 
+
+nvCOMP ZipFlow ZipFlow compression ratio (normalized) 
+
+Figure 17: Decompression throughput comparison between nvCOMP and ZipFlow, where diamond markers represent ZipFlow ’s compression ratios normalized relative to nvCOMP. 
+
+L_DISCOUNT to PS_SUPPLYCOST ), our framework employs a custom Float2Int compression technique from the Fully-Parallel family, which outperforms other methods in terms of compression effi-ciency. For columns storing primary keys (e.g., O_ORDERKEY ), we adopt a hybrid approach that combines lightweight methods: the nesting of DeltaStride and the bit-packing algorithm respectively from Group-Parallel and Fully-Parallel families. This strategy is well-suited for encoding “nearly” monotonically increasing integer sequences, resulting in substantially improved compression ratios. For string-valued columns like O_COMMENT , we introduce a tailored dictionary construction from the Group-Parallel family by tokeniz-ing on spaces and periods. This yields a compact String-dictionary encompassing 1, 878 unique words, where indices can be further bit-packed into 12 bits. When decompressing, each unique word serve as a group in Group-Parallel and expands according to the lookup dictionary. The String-dictionary approach avoids the expen-sive decompression overheads of LZ77 (Non-Parallel) algorithms. We further cascade our custom String-dictionary encoding with bit-packing and ANS. This approach consistently achieves higher compression ratios than both nvCOMP (zstd) and BTRBLOCKS (FSST[22]), as reflected in our experimental results. Overall, ZipFlow broadens the range of possible nesting combi-nations among a wider range of custom algorithm choices, which is a key factor in discovering better compression schemes across different column types. 
+
+5.3.2 Decompression Throughput . This section evaluates GPU decompression throughput and its influence on file-level data move-ment. In contrast to the compression experiments, nvCOMP serves 
+
+Table 2: Custom compression algorithm for each file. “|” di-vides each nested algorithm. Algorithms with two or more outputs are enclosed with “[,]”.                          
+
+> Data Columns Nested algorithms
+> L_SHIPINSTRUCT Bit-packing
+> L_SHIPMODE Bit-packing
+> L_SUPPKEY Bit-packing
+> L_PARTKEY Bit-packing
+> L_LINESTATUS Bit-packing
+> O_CUSTKEY Bit-packing
+> PS_AVAILQTY Bit-packing
+> L_QUANTITY Bit-packing
+> L_COMMITDATE Dictionary encoding | Bit-packing
+> L_RECEIPTDATE Dictionary encoding | Bit-packing
+> L_SHIPDATE Dictionary encoding | Bit-packing
+> O_ORDERDATE Dictionary encoding | Bit-packing
+> L_DISCOUNT Float2Int | Bit-packing
+> L_EXTENDEDPRICE Float2Int | Bit-packing
+> L_TAX Float2Int | Bit-packing
+> O_TOTALPRICE Float2Int | Bit-packing
+> PS_SUPPLYCOST Float2Int | Bit-packing
+> L_ORDERKEY RLE | [DeltaStride | [Delta encoding | RLE | [Bit-packing,Bit-packing], Bit-packing], Bit-packing] ]
+> O_ORDERKEY DeltaStride | [Delta encoding | RLE | [Bit-packing,Bit-packing], Bit-packing]
+> PS_PARTKEY RLE | [DeltaStride , RLE ] ]
+> PS_SUPPKEY Delta encoding | Dictionary encoding | Bit-packing | Dictionary encoding | Bit-packing
+> O_SHIPPRIORITY RLE
+> L_RETURNFLAG ANS
+> O_COMMENT String-dictionary | Bit-packing | ANS
+
+as the sole state-of-the-art baseline for comparison, since Parquet and BTRBLOCKS lack the capability to perform decompression after the compressed data are transferred to GPU. From the nvCOMP library, we select the algorithm that deliv-ers the highest end-to-end performance by minimizing combined Gwangoo Yeo, Zhiyang Shen, Wei Cui, Matteo Interlandi, Rathijit Sen, Bailu Ding, Qi Chen, and Minsoo Rhu 1 kernel 1 kernel 2 kernels 2 kernels 2 kernels 3 kernels   
+
+> 0
+> 4
+> 8
+> 12
+> Dictionary encoding
+> +Bit-packing
+> Float2Int+Bit-packing RLE+Bit-packing
+> Latency (ms)
+> Decompression methods
+> Fused Non-fused
+
+Figure 18: Kernel fusion on nested decompression kernels. 
+
+I/O and decompression latency among the functions provided. Fig-ure 17 presents the decompression throughput of nvCOMP and ZipFlow across all data columns, and additionally illustrates the compression ratio advantage of ZipFlow over nvCOMP as indicated by the gray diamond markers. The leftmost eight data points cor-respond to columns based on bit-packing. For these columns, the optimal algorithm from nvCOMP is the bit-packing implementation within the Cascaded function, which yields the same compression ratio as our method. For columns ranging from L_COMMITDATE 
+
+to PS_SUPPLYCOST , nvCOMP exhibits notably poor performance. Since nvCOMP lacks support for the dictionary encoding and Float2Int algorithms, it resorts to various alternative techniques to optimize data movement, such as Bitcomp, Gdeflate, ANS, and Cascaded. However, these complex algorithms fail to provide ad-vantages in terms of either compression ratio or decompression throughput, as shown in Figure 17. In contrast, ZipFlow leverages a specialized yet lightweight Fully-Parallel solution, achieving on average a 21% improvement in compression ratio while deliver-ing substantially higher decompression throughput. In summary, ZipFlow achieves an average reduction in file-level data movement overhead by a factor of 2.07 × relative to nvCOMP. 
+
+5.3.3 Impact of Fusion on Decompression . We conduct an ablation study to evaluate the impact of kernel fusion on nested decompression. In Figure 18, we present the latency of fused and non-fused kernels on three nested functions: Float2Int + Bit-packing, Dictionary encoding + Bit-packing, and RLE + Bit-packing. Each algorithm is applied to L_SHIPDATE , L_EXTENDEDPRICE , and 
+
+L_ORDERKEY , respectively, where all three files have the same size. The fused version of the kernel for Dictionary encoding + Bit-packing and Float2Int + Bit-packing executes a single kernel, while RLE + Bit-packing executes two kernels (i.e., PyTorch’s cumulative sum and ZipFlow operator). The non-fused version does not fuse the bit-packing operator, resulting in two, two, and three separate kernel executions. Empirically, kernel fusion yields a performance improvement of 
+
+2.45 × for Dictionary encoding + Bit-packing and 2.08 × for Float2Int + Bit-packing over their non-fused counterparts. This significant performance gap arises from the variances in off-chip memory ac-cess. In Equation 2, we explain the difference of required memory traffic of fused and non-fused kernels for above two cases. Mem-ory traffic of single fused kernel consists of only the compressed size and plain size (i.e. uncompressed size), while non-fused kernel require extra memory round trip of intermediate value. As dictio-nary encoding and Float2Int alone do not compress the data, the intermediate data cost is considered as plain size .
+
+1 × (compressed size) + 3 × (plain size) 
+
+1 × (compressed size) + 1 × (plain size) > 2 (2) This result underscores the substantial penalty incurred by even a single additional memory round trip in non-fused pipelines. In con-trast, we observe only a moderate speedup for RLE + Bit-packing, where kernel fusion increases performance by 1.18 × relative to the non-fused baseline. This is because bit-packing is only applied to the volume count , which has already been compressed by RLE and only constitutes 12 .5% of the original data. As a result, the fused kernel achieves a limited performance boost. 
+
+## 5.4 End-to-end TPC-H Query Performance 
+
+We benchmark ZipFlow against several baselines in a full-pipeline, end-to-end query execution setting using the complete TPC-H workload (all 22 queries). For each query, we transfer only the columns required by that query to the GPU. Compression is applied exclusively to the columns listed in Table 2, while other columns such as nation ID, are small enough that compression would not provide a measurable benefit. After the required data is prepared in GPU memory, we synthetically incorporate query execution laten-cies measured by TQP [ 33 ] on the same A100 GPU. To ensure a fair comparison of end-to-end costs and to equalize the cost of the query processing phase, we employ TQP as the query processing engine across all GPU-based baselines, while varying the compression con-figurations as follows: (1) an approach where no compression is applied (labeled “noCOMP”) and (2) applying the nvCOMP library with the best-performing algorithms identified in Section 5.3.2. For the CPU-based baseline, we compare against state-of-the-art data-base systems, DuckDB and Microsoft SQL Server. 
+
+5.4.1 Overall Query Latency . Figure 19 illustrates the per-query execution times for all configurations. The baseline noComp suf-fers the highest latency because PCIe data transfers dominate the runtime, accounting for an average of 91 .3% of the total execution time. Consequently, both nvCOMP and ZipFlow dramatically cut the PCIe overhead down, yielding latency reductions of 1.91 × and 
+
+4.08 ×, respectively. Across the entire benchmark, ZipFlow consis-tently outperforms nvCOMP, delivering an average end-to-end speedup of 2.08 ×.While GPU-based solutions demonstrate significant performance advantages in most cases, CPU baselines remain competitive for several queries: DuckDB and SQL Server outperform the nvCOMP baseline respectively in 6 and 9 out of 22 queries. This occurs be-cause the data movement overheads of nvCOMP outweigh the benefits provided by GPU acceleration. Based on a deeper data transfer optimization with ZipFlow, GPU-based query execution outperforms DuckDB in all queries except TPC-H 6, and outper-forms SQL Server in all but three queries (TPC-H 6, 17, and 19). Queries such as TPC-H 6 are dominated by a 1-time scan operation and primarily constrained by memory and PCIe bandwidth. Since CPU memory bandwidth far exceeds PCIe bandwidth, these queries are more suitable for CPU execution and gain little benefit from transferring data to the GPU. Overall, ZipFlow delivers average speedups of 3.14 × over DuckDB and 3.32 × over SQL Server. 
+
+5.4.2 Latency During GPU Decompression . Figure 20 decom-poses the query -execution latency of ZipFlow and nvCOMP into ZipFlow: a Compiler-based Framework to Unleash Compressed Data Movement for Modern GPUs 3.04 2.74                          
+
+> 3.62
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> TPCH-1 TPCH-2 TPCH-3 TPCH-4 TPCH-5 TPCH-6 TPCH-7 TPCH-8 TPCH-9 TPCH-10 TPCH-11 TPCH-12 TPCH-13 TPCH-14 TPCH-15 TPCH-16 TPCH-17 TPCH-18 TPCH-19 TPCH-20 TPCH-21 TPCH-22
+> Latancy (s)
+> TPCH queries
+> DuckDB SQL server noCOMP nvCOMP ZipFlow
+
+Figure 19: TPC-H query latency comparison with different CPU and GPU baselines. 0                                                                          
+
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> NCZNCZNCZNCZNCZNCZNCZNCZNCZNCZNCZNCZNCZNCZNCZNCZNCZNCZNCZNCZNCZNCZ
+> TPCH-1 TPCH-2 TPCH-3 TPCH-4 TPCH-5 TPCH-6 TPCH-7 TPCH-8 TPCH-9 TPCH-10 TPCH-11 TPCH-12 TPCH-13 TPCH-14 TPCH-15 TPCH-16 TPCH-17 TPCH-18 TPCH-19 TPCH-20 TPCH-21 TPCH-22
+> Latency (s)
+
+TPCH queries   
+
+> Query processing phase PCIe copy phase Decompression phase
+
+Figure 20: Breakdown of TPC-H query latency by execution phases —— “N” for nvCOMP, “C” for ZipFlow with only (de)compression applied, and “Z” for full ZipFlow implementation including PCIe pipelining. 0 0.2 0.4 0.6 0.8 1 1.2 1.4     
+
+> Latency (s)
+> L_ORDERKEY L_SUPPKEY
+> L_EXTENDEDPRICE L_DISCOUNT
+> L_SHIPDATE O_ORDERKEY
+> O_CUSTKEY decompression
+> others
+
+Figure 21: Breakdown of TPC-H query 7’s execution latency by each input column (“others” refer to the cost spent on query processing kernels and uncompressed data transfer). 
+
+their constituent parts. To make the latency contributions of each part clearer, we plot the bar with label “C” that stands for ZipFlow without pipelining the copy and decompression phases, which clearly shows the latency saved by overlapping those operations. On average, our approach achieves a 3.26 × reduction in GPU kernel latency. Among the 22 queries, we observed that those including the L_TAX and L_DISCOUNT columns (TPCH 1, 3, 5–10, 14, 15, and 19) exhibit significant differences in GPU decompression latency between our solution and nvCOMP. This gap arises because the op-timal algorithm for L_TAX and L_DISCOUNT in nvCOMP is Gdeflate, which has a relatively low decompression speed of an average of 66.6GB/s. In contrast, our proposed solution employs specialized Float2Int decompression, achieving an average speed of 1030GB/s, effectively reducing decompression overhead. 
+
+5.4.3 Latency During PCIe I/O . Attributed to the reduced size of compressed data transferred, ZipFlow achieves a substantial re-duction in PCIe I/O latency, resulting in 1.85 × improvement than that achieved by nvCOMP on average. Since PCIe transfer time is highly sensitive to compression ratio, the observed improve-ment is primarily driven by columns compressed using dictionary encoding and the Float2Int algorithm, for which our framework demonstrates a significant compression ratio advantage (shown in Figure 17). To provide a closer examination, we select TPCH-7 as a representative example and present a further detailed latency breakdown of three different execution scenarios in Figure 21. Our observations reveal that, in the nvCOMP-based compression strat-egy for TPCH-7, L_EXTENDEDPRICE and L_SHIPDATE contribute most significantly to I/O latency. In contrast, our proposed solu-tion employs compression methods optimized for these columns, resulting in a more balanced latency distribution across all columns. Interestingly, even though L_ORDERKEY and L_SUPPKEY have the same original size as the aforementioned columns, they exhibit a far smaller impact on end-to-end latency. This is due to their high compression ratio and decompression speed, resulting in only a small portion of the overall query latency. A similar pattern is ob-served in TPCH-13, where latency is dominated by the O_COMMENT 
+
+column, which constitutes 89 .9% of the total data transfer volume. From the above observations, we conclude that as compressed data movement is an effective solution, the lack of compression support for a few data patterns becomes a noticeable outlier. Specifically, when other columns of similar size are efficiently compressed and decompressed, unsupported data patterns can result in dispropor-tionate latency, making certain columns stand out as bottlenecks in end-to-end query performance. 
+
+5.4.4 Impact of PCIe/GPU Pipelining. We analyze the impact of the Pipelining layer by comparing ZipFlow with and without pipelining, labeled as "Z" and "C" in Figure 20, respectively. For all queries except TPCH-13, pipelining significantly reduces the exposed decompression kernel latency, resulting in an average of 10% reduction in end-to-end query latency compared to non-pipelined execution. We observe that, in our current compression method design, all columns except RLE/Delta-relevant compression are dominated by PCIe I/O latency. This allows for sufficient overlap of most GPU decompression latency, but also indicates that PCIe I/O is still the primary bottleneck in the full query pipeline. This observation highlights a key optimization opportunity for designers: by further nesting complex compression methods to achieve higher compression ratios, PCIe I/O bottlenecks can be mitigated at the cost of decompression throughput. It is also important to note that the tradeoff between I/O and decompression latencies is largely determined by the bandwidth disparity between PCIe and GPU memory, which represents an interesting direction for future work. Gwangoo Yeo, Zhiyang Shen, Wei Cui, Matteo Interlandi, Rathijit Sen, Bailu Ding, Qi Chen, and Minsoo Rhu Native                 
+
+> Native
+> Native
+> Native
+> Native
+> Native
+> Native
+> Native
+> Native
+> Native
+> Native
+> Native
+> 0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1
+> 1.2
+> MI50 A100 MI300X H100 MI50 A100 MI300X H100 MI50 A100 MI300X H100
+> Bit-packing (Fully-Parallel) DeltaStride (Group-Parallel) ANS (Non-Parallel)
+> Normalized kernel throughput
+> Algorithms
+> MI50 config A100 config MI300X config H100 config
+
+Figure 22: Kernel efficiencies under “Native Config” and “Shared Config” across 4 GPU types. All values are normal-ized to the respective kernel efficiency in the “Native Config”. 
+
+## 5.5 Evaluation on Heterogeneous GPUs 
+
+In this section, we analyze the impact of ZipFlow configurations across four different types of GPUs, along with the overhead in-curred when identifying optimal candidates from the configuration space. Although GPUs differ in terms of core counts, cache capac-ity, and other architectural resources, ZipFlow enables a kernel de-signed for one GPU to be executed on another. However, employing a non-optimal configuration typically results in sub-optimal decom-pression performance. Given that the optimal kernel configuration may vary across hardware platforms, we define the configuration tuned for a specific GPU as its “Native Config”, and refer to config-urations originally designed for other GPUs as “Shared Configs”. As illustrated in Figure 22, we first fine-tune the necessary oper-ators on four representative GPUs (MI50 [ 3], A100 [ 1], H100 [ 6], and MI300x [ 7]), obtaining four corresponding “Native Configs”. We then test each of these configurations on the remaining GPUs (as “Shared Config”) to assess their performance impact. Across all scenarios, we observe that a GPU employing a “Shared Config” is unable to fully realize its inherent performance potential, with degradations of up to 35%. In real-world data analytics scenarios, an efficient offline tun-ing approach is required to determine the optimal “Native Config” in advance, thereby preventing performance degradation associ-ated with using a “Shared Config” at runtime. We reduce offline configuration exploration costs through reinforcement learning within a carefully narrowed exploration space, where all values are restricted to powers of 2 which are presented in Table 3. As a base-line, “B.F Search” (alias. Brute-force Search) means exploring all combinations of candidates that are valid in the space. In contrast, “R.L. Search” (alias. Reinforcement learning Search) leverages the hidden monotonicity in the performance distribution to prune the search space, thereby further reducing the actual cost of candidate exploration down to within ten. 
+
+## 6 RELATED WORKS 
+
+GPU accelerated query execution. Several open-source GPU-based database systems have been developed, such as Ocelot [ 35 ], BlazingSQL [ 2], HeavyDB [ 34 ], and RAPIDS [ 53 ]. A large body of work has extensively explored techniques for optimizing query exe-cution on GPU hardware [ 26 , 30 –32 , 42 , 51 , 52 , 58 , 59 , 61 , 62 ]. Some studies have further investigated leveraging PyTorch implementa-tions to accelerate GPU-based query processing [ 20 , 33 ]. Building 
+
+Table 3: Pattern exploration cost on NVIDIA and AMD GPUs. We label the pattern types as F.P.(Fully-Parallel), G.P.(Group-Parallel), and N.P.(Non-Parallel).                                                                                                               
+
+> 𝑟𝑎𝑛𝑔𝑒 (𝐿 )𝑟𝑎𝑛𝑔𝑒 (𝑆 )𝑟𝑎𝑛𝑔𝑒 (𝐶 )
+> F.P.  Config space 20.. 24𝐻 𝑤.𝑊 𝑎𝑟𝑝𝑆𝑖𝑧𝑒.. 210 ⌈4/𝑑𝑡 𝑦𝑝𝑒.𝑠𝑖𝑧𝑒 ⌉
+> B.F. Search 𝑁𝑉 𝐼 𝐷𝐼𝐴 =5×6×1,𝐴𝑀𝐷 =5×7×1
+> R.L. Search 𝑁𝑉 𝐼 𝐷𝐼𝐴 ≈3+4+0,𝐴𝑀𝐷 ≈3+4+0
+> G.P.  Config space 𝐻 𝑤.𝑛𝑢𝑚𝐶𝑈 𝑠 𝐻 𝑤.𝑊 𝑎𝑟𝑝𝑆𝑖𝑧𝑒.. 210 20.. 210
+> B.F. Search 𝑁𝑉 𝐼 𝐷𝐼𝐴 =1×6×11 ,𝐴𝑀𝐷 =1×7×11
+> R.L. Search 𝑁𝑉 𝐼 𝐷𝐼𝐴 ≈0+4+5,𝐴𝑀𝐷 ≈0+4+5
+> N.P.  Config space 𝐻 𝑤.𝑛𝑢𝑚𝐶𝑈 𝑠 𝐻 𝑤.𝑊 𝑎𝑟𝑝𝑆𝑖𝑧𝑒 20.. 210
+> B.F. Search 𝑁𝑉 𝐼 𝐷𝐼𝐴 =1×1×11 ,𝐴𝑀𝐷 =1×1×11
+> R.L. Search 𝑁𝑉 𝐼 𝐷𝐼𝐴 ≈0+0+5,𝐴𝑀𝐷 ≈0+0+5
+
+upon the significant advancements of prior research, our study addresses the next major bottleneck: data movement to GPUs. 
+
+Optimizing data movement to GPUs. Compression has been extensively employed to alleviate data movement bottlenecks to GPUs [ 21 , 29 , 44 , 48 , 57 , 65 , 66 ]. Prior studies [ 29 , 44 ] propose planners that select optimal combinations of lightweight, column-specific algorithms based on compression ratio and decompression throughput for CPU. Several studies emphasize the importance of designing GPU-friendly decompression algorithm [ 18 , 57 ]. More recent work [ 21 ] explores the use of heavyweight compression algorithms combined with on-the-fly data decompression to enable fine-grained pipelining of data transfers. Our framework further complements these efforts by providing a flexible and extensible infrastructure for developing optimized decompression kernels, thereby supporting a broader spectrum of algorithmic designs and their device scheduling. Other solutions to manage memory con-straints of GPU-based data analytics include hybrid use of CPU and GPU [ 45 , 47 , 63 ], pipelining data movements [ 21 , 55 ], minimizing redundant movement by lazy scheduling and transfer sharing [ 54 ], and utilizing all CPU-GPU PCIe links in multi-GPU scenarios [ 64 ]. 
+
+## 7 CONCLUSION 
+
+In this paper, we propose a compiler-based framework ZipFlow to systematically accelerate compressed data movement from CPU to GPU. This approach mitigates the significant PCIe overhead associated with transferring uncompressed data by leveraging both data-specific characteristics and GPU architectural features. Both compression ratio and decompression throughput represent critical and interdependent metrics that must be jointly optimized to maximize end-to-end transfer efficiency. While achieving a high compression ratio largely depends on the diversity and adaptability of the available compression algorithm pool, attaining high de-compression throughput relies on sophisticated kernel scheduling strategies. ZipFlow addresses these challenges by introducing three novel design patterns that facilitate flexible optimization across a wide range of compression families on the GPU. This approach not only enables users to efficiently compose custom algorithms to support novel compression strategies and nesting, but it also guarantees their high decompression throughput on heterogeneous devices. Experimental results demonstrate significant advantages over predefined solutions tailored to a limited set of devices. ZipFlow: a Compiler-based Framework to Unleash Compressed Data Movement for Modern GPUs 
+
+## REFERENCES 
+
+[1] 2020. NVIDIA A100 TENSOR CORE GPU. https://www.nvidia.com/content/dam/ en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet.pdf. Accessed: Jan 04, 2025. [2] 2021. blazingsql. https://github.com/BlazingDB/blazingsql. Accessed: Jan 04, 2025. [3] 2023. Instinct MI50 (32GB) specifications. https://www.amd.com/en/support/ downloads/drivers.html/accelerators/instinct/instinct-mi-series/instinct-mi50-32gb.html#amd_support_product_spec. Accessed: Jan 04, 2025. [4] 2024. Apache Parquet. https://parquet.apache.org/. Accessed: Jan 04, 2025. [5] 2024. CUDA C++ Programming Guide. https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html. [6] 2024. NVIDIA H100 Tensor Core GPU. https://resources.nvidia.com/en-us-tensor-core/nvidia-tensor-core-gpu-datasheet?ncid=no-ncid. Accessed: Jan 04, 2025. [7] 2025. AMD MI300x. https://www.amd.com/content/dam/amd/en/documents/ instinct-tech-docs/data-sheets/amd-instinct-mi300x-data-sheet.pdf. Accessed: Jan 04, 2025. [8] 2025. DuckDB - An in-process SQL OLAP data management system. https: //duckdb.org/. Accessed: Jan 04, 2025. [9] 2025. FiniteStateEntropy. https://github.com/Cyan4973/FiniteStateEntropy. Accessed: Jan 04, 2025. [10] 2025. HIPIFY. https://github.com/ROCm/HIPIFY. Accessed: Jan 04, 2025. [11] 2025. lz4. https://github.com/lz4/lz4. Accessed: Jan 04, 2025. [12] 2025. Microsoft SQL server. https://www.microsoft.com/en-us/sql-server. Ac-cessed: Jan 04, 2025. [13] 2025. nvCOMP, High-Speed Data Compression Using NVIDIA GPUs. https: //developer.nvidia.com/nvcomp. Accessed: Jan 04, 2025. [14] 2025. NVLink and NVSwitch: Fastest HPC Datacenter Platform. https://www. nvidia.com/en-us/data-center/nvlink/. Accessed: Jan 04, 2025. [15] 2025. snappy. https://github.com/google/snappy. Accessed: Jan 04, 2025. [16] 2025. zstd. https://github.com/facebook/zstd. Accessed: Jan 04, 2025. [17] Azim Afroozeh and Peter Boncz. 2023. The FastLanes Compression Layout: Decoding > 100 Billion Integers per Second with Scalar Code. Proc. VLDB Endow. 
+
+16, 9 (May 2023), 2132–2144. https://doi.org/10.14778/3598581.3598587 [18] Azim Afroozeh, Lotte Felius, and Peter Boncz. 2024. Accelerating GPU Data Processing Using FastLanes Compression. In DaMoN ’24: Proceedings of the 20th International Workshop on Data Management on New Hardware . ACM, 1–11. https://doi.org/10.1145/3662010.3663450 [19] Azim Afroozeh, Leonardo Kuffó, and Peter Boncz. 2024. ALP: Adaptive Loss-less Floating-Point Compression. In SIGMOD ’24: Proceedings of the 2024 ACM SIGMOD International Conference on Management of Data . ACM, 1–13. https: //doi.org/10.1145/3626717 [20] Yuki Asada, Victor Fu, Apurva Gandhi, Advitya Gemawat, Lihao Zhang, Dong He, Vivek Gupta, Ehi Nosakhare, Dalitso Banda, Rathijit Sen, and Matteo Interlandi. 2022. Share the tensor tea: how databases can leverage the machine learning ecosystem. Proc. VLDB Endow. 15, 12 (Aug. 2022), 3598–3601. https://doi.org/10. 14778/3554821.3554853 [21] Nils Boeschen, Tobias Ziegler, and Carsten Binnig. 2024. GOLAP: A GPU-in-Data-Path Architecture for High-Speed OLAP. Proc. ACM Manag. Data 2, 6, Article 237 (Dec. 2024), 26 pages. https://doi.org/10.1145/3698812 [22] Peter A. Boncz, Thomas Neumann, and Viktor Leis. 2020. FSST: Fast Random Access String Compression. Proc. VLDB Endow. 13, 11 (2020), 2649–2661. http: //www.vldb.org/pvldb/vol13/p2649-boncz.pdf [23] Jiashen Cao, Rathijit Sen, Matteo Interlandi, Joy Arulraj, and Hyesoon Kim. 2023. GPU Database Systems Characterization and Optimization. Proc. VLDB Endow. 
+
+17, 3 (2023), 441–454. https://doi.org/10.14778/3632093.3632107 [24] Wei Cui, Qianxi Zhang, Jesús Camacho-Rodríguez, Spyros Blanas, Brandon Haynes, Yinan Li, Peng Cheng, Ravishankar Ramamurthy, Rathijit Sen, and Mat-teo Interlandi. 2023. Query Processing on Gaming Consoles. In 19th International Workshop on Data Management on New Hardware (DaMoN ’23), June 18–23, 2023, Seattle, WA, USA . https://www.microsoft.com/en-us/research/publication/query-processing-on-gaming-consoles/ [25] Patrick Damme, Dirk Habich, Juliana Hildebrandt, and Wolfgang Lehner. 2017. Lightweight Data Compression Algorithms: An Experimental Survey (Exper-iments and Analyses). In Proceedings of the 20th International Conference on Extending Database Technology, EDBT 2017, Venice, Italy, March 21-24, 2017 ,Volker Markl, Salvatore Orlando, Bernhard Mitschang, Periklis Andritsos, Kai-Uwe Sattler, and Sebastian Breß (Eds.). OpenProceedings.org, 72–83. https: //doi.org/10.5441/002/EDBT.2017.08 [26] Shaleen Deep, Hangdong Zhao, Austen Z. Fan, and Paraschos Koutris. 2024. Output-sensitive Conjunctive Query Evaluation. Proc. ACM Manag. Data 2, 5 (2024), 220:1–220:24. https://doi.org/10.1145/3695838 [27] L. Peter Deutsch. 1996. DEFLATE Compressed Data Format Specification version 1.3. RFC 1951. https://doi.org/10.17487/RFC1951 [28] Jarek Duda, Khalid Tahboub, Neeraj J. Gadgil, and Edward J. Delp. 2015. The use of asymmetric numeral systems as an accurate replacement for Huffman coding. In 2015 Picture Coding Symposium (PCS) . 65–69. https://doi.org/10.1109/PCS. 2015.7170048 [29] Wenbin Fang, Bingsheng He, and Qiong Luo. 2010. Database Compression on Graphics Processors. Proc. VLDB Endow. 3, 1 (2010), 670–680. https://doi.org/10. 14778/1920841.1920927 [30] Henning Funke, Sebastian Breß, Stefan Noll, Volker Markl, and Jens Teubner. 2018. Pipelined Query Processing in Coprocessor Environments. In Proceed-ings of the 2018 International Conference on Management of Data (Houston, TX, USA) (SIGMOD ’18) . Association for Computing Machinery, New York, NY, USA, 1603–1618. https://doi.org/10.1145/3183713.3183734 [31] Henning Funke and Jens Teubner. 2020. Data-parallel Query Processing on Non-uniform Data. Proc. VLDB Endow. 13, 6 (Feb. 2020), 884–897. https://doi. org/10.14778/3380750.3380758 [32] Bingsheng He, Ke Yang, Rui Fang, Mian Lu, Naga Govindaraju, Qiong Luo, and Pedro Sander. 2008. Relational joins on graphics processors. In Proceedings of the 2008 ACM SIGMOD International Conference on Management of Data (Vancouver, Canada) (SIGMOD ’08) . Association for Computing Machinery, New York, NY, USA, 511–524. https://doi.org/10.1145/1376616.1376670 [33] Dong He, Supun C Nakandala, Dalitso Banda, Rathijit Sen, Karla Saur, Kwanghyun Park, Carlo Curino, Jesús Camacho-Rodríguez, Konstantinos Karana-sos, and Matteo Interlandi. 2022. Query processing on tensor computation run-times. Proc. VLDB Endow. 15, 11 (July 2022), 2811–2825. https://doi.org/10.14778/ 3551793.3551833 [34] HEAVYDB.AI. 2025. World’s Fastest Analytics Database. Powered by GPUs. https://www.heavy.ai/product/heavydb. [35] Max Heimel, Michael Saecker, Holger Pirk, Stefan Manegold, and Volker Markl. 2013. Hardware-oblivious parallelism for in-memory column-stores. Proc. VLDB Endow. 6, 9 (July 2013), 709–720. https://doi.org/10.14778/2536360.2536370 [36] Sven Hepkema, Azim Afroozeh, Charlotte Felius, Peter Boncz, and Stefan Mane-gold. 2025. G-ALP: Rethinking Light-weight Encodings for GPUs. In Proceedings of the 21st International Workshop on Data Management on New Hardware (Da-MoN ’25) . Association for Computing Machinery, New York, NY, USA, Article 11, 10 pages. https://doi.org/10.1145/3736227.3736242 [37] Yu-Ching Hu, Yuliang Li, and Hung-Wei Tseng. 2022. TCUDB: Accelerating Database with Tensor Processors. In SIGMOD ’22: International Conference on Management of Data, Philadelphia, PA, USA, June 12 - 17, 2022 , Zachary G. Ives, Angela Bonifati, and Amr El Abbadi (Eds.). ACM, 1360–1374. https://doi.org/10. 1145/3514221.3517869 [38] Zezhou Huang, Krystian Sakowski, Hans Lehnert, Wei Cui, Carlo Curino, Matteo Interlandi, Marius Dumitru, and Rathijit Sen. 2025. GPU Acceleration of SQL Analytics on Compressed Data. arXiv:2506.10092 [cs.DB] https://arxiv.org/abs/ 2506.10092 [39] David A. Huffman. 1952. A Method for the Construction of Minimum-Redundancy Codes. Proceedings of the IRE 40, 9 (1952), 1098–1101. https: //doi.org/10.1109/JRPROC.1952.273898 [40] Selmer Martin Johnson. 1954. Optimal two-and three-stage production schedules with setup times included. Naval research logistics quarterly 1, 1 (1954), 61–68. [41] Maximilian Kuschewski, David Sauerwein, Adnan Alhomssi, and Viktor Leis. 2023. BtrBlocks: Efficient Columnar Compression for Data Lakes. Proc. ACM Manag. Data 1, 2 (2023), 118:1–118:26. https://doi.org/10.1145/3589263 [42] Harald Lang, Andreas Kipf, Linnea Passing, Peter Boncz, Thomas Neumann, and Alfons Kemper. 2018. Make the Most Out of Your SIMD Investments: Counter Control Flow Divergence in Compiled Query Pipelines. In Proceedings of the 14th International Workshop on Data Management on New Hardware (Houston, Texas) (DAMON ’18) . Association for Computing Machinery, New York, NY, USA, Article 5, 8 pages. https://doi.org/10.1145/3211922.3211928 [43] Rubao Lee, Minghong Zhou, Chi Li, Shenggang Hu, Jianping Teng, Dongyang Li, and Xiaodong Zhang. 2021. The art of balance: a RateupDB ™ experience of building a CPU/GPU hybrid database product. Proc. VLDB Endow. 14, 12 (July 2021), 2999–3013. https://doi.org/10.14778/3476311.3476378 [44] Jing Li, Hung-Wei Tseng, Chunbin Lin, Yannis Papakonstantinou, and Steven Swanson. 2016. HippogriffDB: balancing I/O and GPU bandwidth in big data analytics. Proc. VLDB Endow. 9, 14 (Oct. 2016), 1647–1658. https://doi.org/10. 14778/3007328.3007331 [45] Yinan Li, Bailu Ding, Ziyun Wei, Lukas M. Maas, Momin Al-Ghosien, Spyros Blanas, Nicolas Bruno, Carlo Curino, Matteo Interlandi, Craig Peeper, Kaushik Rajan, Surajit Chaudhuri, and Johannes Gehrke. 2025. Scaling GPU-Accelerated Databases Beyond GPU Memory Size. Proc. VLDB Endow. 18, 11 (Sept. 2025), 4518–4531. https://doi.org/10.14778/3749646.3749710 [46] Hanwen Liu, Mihail Stoian, Alexander van Renen, and Andreas Kipf. 2024. Corra: Correlation-Aware Column Compression. arXiv preprint arXiv:2403.17229 (2024). [47] Haotian Liu, Bo Tang, Jiashu Zhang, Yangshen Deng, Xiao Yan, Xinying Zheng, Qiaomu Shen, Dan Zeng, Zunyao Mao, Chaozu Zhang, Zhengxin You, Zhihao Wang, Runzhe Jiang, Fang Wang, Man Lung Yiu, Huan Li, Mingji Han, Qian Li, and Zhenghai Luo. 2022. GHive: accelerating analytical query processing in apache hive via CPU-GPU heterogeneous computing. In Proceedings of the 13th Symposium on Cloud Computing, SoCC 2022, San Francisco, California, November 7-11, 2022 , Ada Gavrilovska, Deniz Altinbüken, and Carsten Binnig (Eds.). ACM, Gwangoo Yeo, Zhiyang Shen, Wei Cui, Matteo Interlandi, Rathijit Sen, Bailu Ding, Qi Chen, and Minsoo Rhu 
+
+158–172. https://doi.org/10.1145/3542929.3563503 [48] Hamish Nicholson, Konstantinos Chasialis, Antonio Boffa, and Anastasia Ail-amaki. 2025. The Effectiveness of Compression for GPU-Accelerated Queries on Out-of-Memory Datasets. In Proceedings of the 21st International Work-shop on Data Management on New Hardware (DaMoN ’25) . Association for Computing Machinery, New York, NY, USA, Article 10, 10 pages. https: //doi.org/10.1145/3736227.3736240 [49] Nikolay Sakharnykh and Rene Mueller. 2020. Software-Based Compression for Analytical Workloads. Presented at NVIDIA GTC 2020. https://developer.nvidia. com/gtc/2020/video/s21597-vid. [50] Apache ORC. 2025. the smallest, fastest columnar storage for Hadoop workloads. https://orc.apache.org/. [51] Johns Paul, Bingsheng He, Shengliang Lu, and Chiew Tong Lau. 2019. Revisiting Hash Join on Graphics Processors: A Decade Later. In 35th IEEE International Conference on Data Engineering Workshops, ICDE Workshops 2019, Macao, China, April 8-12, 2019 . IEEE, 294–299. https://doi.org/10.1109/ICDEW.2019.00008 [52] Johns Paul, Bingsheng He, Shengliang Lu, and Chiew Tong Lau. 2020. Improving execution efficiency of just-in-time compilation based query processing on GPUs. 
+
+Proc. VLDB Endow. 14, 2 (Oct. 2020), 202–214. https://doi.org/10.14778/3425879. 3425890 [53] RAPIDS. 2025. GPU Accelerated Data Science. https://rapids.ai/. [54] Aunn Raza, Periklis Chrysogelos, Panagiotis Sioulas, Vladimir Indjic, Angelos-Christos G. Anadiotis, and Anastasia Ailamaki. 2020. GPU-accelerated Data Management Under the Test of Time. In 10th Conference on Innovative Data Systems Research, CIDR 2020, Amsterdam, The Netherlands, January 12-15, 2020, Online Proceedings . www.cidrdb.org. http://cidrdb.org/cidr2020/papers/p18-raza-cidr20.pdf [55] Ran Rui, Hao Li, and Yi-Cheng Tu. 2020. Efficient Join Algorithms For Large Database Tables in a Multi-GPU Environment. Proc. VLDB Endow. 14, 4 (2020), 708–720. https://doi.org/10.14778/3436905.3436927 [56] Anil Shanbhag, Samuel Madden, and Xiangyao Yu. 2020. A Study of the Funda-mental Performance Characteristics of GPUs and CPUs for Database Analytics. In Proceedings of the 2020 International Conference on Management of Data, SIG-MOD Conference 2020, online conference [Portland, OR, USA], June 14-19, 2020 ,David Maier, Rachel Pottinger, AnHai Doan, Wang-Chiew Tan, Abdussalam Alawini, and Hung Q. Ngo (Eds.). ACM, 1617–1632. https://doi.org/10.1145/ 3318464.3380595 [57] Anil Shanbhag, Bobbi W. Yogatama, Xiangyao Yu, and Samuel Madden. 2022. Tile-based Lightweight Integer Compression in GPU. In SIGMOD ’22: International Conference on Management of Data, Philadelphia, PA, USA, June 12 - 17, 2022 ,Zachary G. Ives, Angela Bonifati, and Amr El Abbadi (Eds.). ACM, 1390–1403. https://doi.org/10.1145/3514221.3526132 [58] Panagiotis Sioulas, Periklis Chrysogelos, Manos Karpathiotakis, Raja Ap-puswamy, and Anastasia Ailamaki. 2019. Hardware-Conscious Hash-Joins on GPUs. In 35th IEEE International Conference on Data Engineering, ICDE 2019, Macao, China, April 8-11, 2019 . IEEE, 698–709. https://doi.org/10.1109/ICDE. 2019.00068 [59] Elias Stehle and Hans-Arno Jacobsen. 2017. A Memory Bandwidth-Efficient Hybrid Radix Sort on GPUs. In Proceedings of the 2017 ACM International Con-ference on Management of Data (Chicago, Illinois, USA) (SIGMOD ’17) . As-sociation for Computing Machinery, New York, NY, USA, 417–432. https: //doi.org/10.1145/3035918.3064043 [60] Robin Vonk, Joost Hoozemans, and Zaid Al-Ars. 2025. GSST: Parallel string decompression at 191 GB/s on GPU. In Proceedings of the 5th Workshop on Chal-lenges and Opportunities of Efficient and Performant Storage Systems (Rotterdam, Netherlands) (CHEOPS ’25) . Association for Computing Machinery, New York, NY, USA, 8–14. https://doi.org/10.1145/3719330.3721228 [61] Bowen Wu, Wei Cui, Carlo Curino, Matteo Interlandi, and Rathijit Sen. 2025. Terabyte-Scale Analytics in the Blink of an Eye. CoRR abs/2506.09226 (2025). https://doi.org/10.48550/ARXIV.2506.09226 arXiv:2506.09226 [62] Bowen Wu, Dimitrios Koutsoukos, and Gustavo Alonso. 2025. Efficiently Pro-cessing Joins and Grouped Aggregations on GPUs. Proc. ACM Manag. Data 3, 1, Article 39 (Feb. 2025), 27 pages. https://doi.org/10.1145/3709689 [63] Bobbi W. Yogatama, Weiwei Gong, and Xiangyao Yu. 2022. Orchestrating Data Placement and Query Execution in Heterogeneous CPU-GPU DBMS. Proc. VLDB Endow. 15, 11 (2022), 2491–2503. https://doi.org/10.14778/3551793.3551809 [64] Yichao Yuan, Advait Iyer, Lin Ma, and Nishil Talati. 2025. Vortex: Overcoming Memory Capacity Limitations in GPU-Accelerated Large-Scale Data Analytics. 
+
+Proc. VLDB Endow. 18, 4 (May 2025), 1250–1263. https://doi.org/10.14778/3717755. 3717780 [65] Yuan Yuan, Rubao Lee, and Xiaodong Zhang. 2013. The Yin and Yang of Process-ing Data Warehousing Queries on GPU Devices. Proc. VLDB Endow. 6, 10 (2013), 817–828. https://doi.org/10.14778/2536206.2536210 [66] Hongyu Zhu, Ruofan Wu, Yijia Diao, Shanbin Ke, Haoyu Li, Chen Zhang, Jilong Xue, Lingxiao Ma, Yuqing Xia, Wei Cui, Fan Yang, Mao Yang, Lidong Zhou, Asaf Cidon, and Gennady Pekhimenko. 2022. ROLLER: Fast and Efficient Tensor Compilation for Deep Learning. In 16th USENIX Symposium on Operating Systems Design and Implementation, OSDI 2022, Carlsbad, CA, USA, July 11-13, 2022 ,Marcos K. Aguilera and Hakim Weatherspoon (Eds.). USENIX Association, 233– 248. https://www.usenix.org/conference/osdi22/presentation/zhu

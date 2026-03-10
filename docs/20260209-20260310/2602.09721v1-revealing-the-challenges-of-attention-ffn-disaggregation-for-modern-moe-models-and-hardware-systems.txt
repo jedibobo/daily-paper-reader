@@ -1,0 +1,371 @@
+Title: Revealing the Challenges of Attention-FFN Disaggregation for Modern MoE Models and Hardware Systems
+
+URL Source: https://arxiv.org/pdf/2602.09721v1
+
+Published Time: Wed, 11 Feb 2026 02:03:07 GMT
+
+Number of Pages: 17
+
+Markdown Content:
+# Revealing the Challenges of Attention-FFN Disaggregation for Modern MoE Models and Hardware Systems 
+
+Guowei Liu 1, Hongming Li 1, Yaning Guo 1, Yongxi Lyu 1,Mo Zhou 1, Yi Liu ∗
+
+, Zhaogeng Li 1, Yanpeng Wang 11Baige AI Team, Baidu Inc. 
+
+liuguowei03@baidu.com 
+
+# ABSTRACT 
+
+Deploying large-scale MoE models presents challenges in memory capacity and bandwidth for expert activation. While Attention-FFN Disaggregation (AFD) has emerged as a potential architecture to decouple compute and memory resources, its performance boundaries compared to standard large-scale Expert Parallelism (EP) remain underexplored. In this paper, we conduct a systematic analysis of AFD by extending the roofline model to the communication level, correlating interconnect bandwidth, arithmetic intensity, and Hardware FLOPS Utilization (HFU). Our analysis reveals a “dead zone” on standard clusters: increasing FFN instance count fails to improve HFU as computational workload is capped by scale-out bandwidth, causing operator active time to shrink relative to the fixed latency budget. We further show that AFD’s discrete node-level scaling incurs higher imbalance penalties than EP’s continuous batch adjustment. Nevertheless, these limitations diminish under specific conditions: Superpod-class hardware with abundant interconnect bandwidth and models with coarse-grained experts and lower sparsity are more likely to benefit from AFD. These findings position AFD as a promising approach for specific hardware-model combinations rather than a universal solution. 
+
+# 1 Introduction 
+
+The emergence of models with hundreds of billions or even trillions of parameters, such as DeepSeek-V3 (671B parameters) [6] and Kimi-K2 (1T parameters) [15], has placed stringent demands on the inference infrastructure of Large Language Models (LLMs). The massive parameter counts and memory requirements (e.g., KV Cache) necessitate parallel inference instances consisting of dozens of GPUs. This vast system scale translates to substantial GPU compute costs, making the optimization of Hardware FLOPS Utilization (HFU) a critical task for improving cost-efficiency. Inference performance optimization is often constrained by Service-Level Objectives (SLO), which become a primary factor limiting model inference concurrency. In the inference phase, the generation of the first token (i.e., the Prefill stage) and the subsequent tokens (i.e., the Decode stage) exhibit significant differences in FLOPS and memory access requirements. This insight has made Prefill-Decode disaggregation (PD disaggregation) [24, 12] a standard practice in large-scale deployment, substantially enhancing system throughput. Such a deployment strategy shifts the performance bottleneck of the attention stage in models adopting the MLA architecture, such as DeepSeek-V3, from being memory-bound to being compute-dominated, with this effect being particularly pronounced in the prefill stage. However, due to the auto-regressive nature of the Decode stage, the extremely sparse MoE layers leave the FFN stage constrained by memory bandwidth and communication overhead. This arithmetic intensity insufficiency has prompted the further application of large-scale Expert Parallel (EP) [6, 18] to Decode instances on top of PD disaggregation. The scheme increases the average tokens per expert during the MoE stage by expanding the DP scale and aggregating batches from multiple DP domains into a single EP batch. While large-scale EP deployment addresses the computational efficiency of the MoE stage, it simultaneously introduces severe DP imbalance and EP imbalance issues. Attention-FFN Disaggregation (AFD) has emerged as an attractive alternative [25, 17]. AFD represents an architectural evolution in current deployment scenarios: through physical decoupling, it enables independent resource scaling and targeted optimization for Attention and FFN roles. However, it is frequently viewed in industry and academia as a panacea for arithmetic intensity problems, often overlooking the complex systemic costs it incurs. Existing 
+
+> ∗
+
+This work was performed while the author was with Baidu Inc. 
+
+> arXiv:2602.09721v1 [cs.DC] 10 Feb 2026
+
+Baidu Inc. | Challenges of AFD for MoE Systems 
+
+research tends to optimistically project throughput gains from AFD while lacking in-depth, scenario-based, and model-parameter-aware quantitative analysis regarding the introduced cross-role communication overhead, pipeline bubbles, and sensitivity to load imbalance. Whether this practice of trading system synergy for operator efficiency truly translates into HFU gains is becoming a neglected yet critical topic in large-scale deployment. By extending the roofline model to the communication level, this paper provides a systematic analysis of AFD’s performance characteristics across different hardware configurations. We find that on standard cluster platforms lacking high-bandwidth, fully-interconnected scale-up networks, AFD systems often degrade from compute-bound states into network bottlenecks. In such states, pursuing operator-level efficiency may not translate into overall HFU gains. We further identify the conditions under which AFD becomes advantageous. The main contributions of this paper are as follows: • We propose a budget-based HFU upper-bound analysis method for AFD scenarios. Through this method, we identify the precarious AFD equilibrium points within specific model and hardware configurations. We demonstrate that communication is often the fundamental factor preventing this equilibrium from being reached on standard clusters, while Superpod architectures can alleviate this constraint. • We analyze the sensitivity of deployment strategies to latency jitter in real-world inference workflows. 
+
+We demonstrate that, under the same levels of DP and EP imbalance, AFD—which introduces discrete scaling by distributing computation across different nodes—exhibits lower tolerance for load imbalance compared to large-scale EP. • We synthesize the conditions favorable for AFD deployment. Based on our analysis, we identify that Superpod-class hardware systems and models with coarse-grained expert configurations are more likely to benefit from AFD, providing guidance for future infrastructure and model co-design. 
+
+# 2 Preliminary 
+
+2.1 Notations 
+
+Table 1: Summary of notations and their explanations used throughout this paper. 
+
+Symbol Explanation Symbol Explanation 
+
+BA Batch size on attention side tc Communication latency 
+
+BF Batch size on FFN side tf FFN computation latency 
+
+Brank Tokens assigned to a rank on FFN side tg Total gap latency: batch preparation and dense layers 
+
+BScaleOut Scale-out token throughput in fixed time tdispatch Dispatch communication latency 
+
+BScaleUp Scale-up token throughput in fixed time tcombine Combine communication latency 
+
+Bmem GPU memory bandwidth g Number of GPUs per node 
+
+BScaleOut Scale-out network bandwidth σ Stage throughput degradation due to imbalance 
+
+BScaleUp Scale-up network bandwidth α Overall throughput degradation due to imbalance 
+
+H Model hidden size λEP Ratio of ta to tf under large-scale EP deployment 
+
+Laccept Run batch acceptance length λAFD Ratio of NA to NF under AFD 
+
+NA Number of A-role nodes I Arithmetic intensity 
+
+NF Number of F-role nodes M MoE intermediate size 
+
+Nlayers Number of layers (BO-ready) St Temporal sparsity 
+
+Nexperts Number of MoE experts OFU Operator FLOPS Utilization (during active period) 
+
+NBO BO cardinality (at least 3) HFU Hardware FLOPS Utilization 
+
+T Target run batch latency FLOPS Floating Point Operations Per Second 
+
+tB Latency budget per micro-batch per stage FLOPs Number of floating point operations 
+
+tG Latency for grouped GEMM on FFN side Mem Memory access volume required for computation 
+
+ta Attention computation latency Overall, we use the uppercase letter B to denote the concept of “batch”, the calligraphic symbol B for bandwidth, the uppercase N for integers, the lowercase t for latency, and Greek letters such as σ for ratios. Some concepts are represented in their textual form, such as OFU. The notations are summarized in Table 1. 
+
+2.2 AFD and Budget under 3BO 
+
+Figure 1a illustrates a typical AFD architecture, where the attention instances integrate the majority of the model network from original Decode instances, while routed experts across all MoE layers are extracted to form new FFN 2Baidu Inc. | Challenges of AFD for MoE Systems 
+
+> (a) AFD architecture. The attention instances (left) host the majority of the model network, while the FFN instances (right) host the routed experts for all MoE layers. The two instance types are connected via unidirectional collective communication.
+> (b) Under similar per-layer latency budgets, 2BO (top) introduces GPU bubbles, while 3BO (bottom) has the potential to maintain a bubble-free pipeline.
+
+Figure 1: Illustration of AFD architecture (left) and micro-batch overlap strategies (right). The AFD architecture physically separates attention and FFN computations, while the overlap strategy determines how micro-batches are pipelined to hide communication latency. instances with an independent scale. Since shared experts generally operate at high arithmetic intensity, the actual deployment scheme can retain them on attention instances or transfer them to FFN instances as needed. Based on this disaggregation concept, AFD differs from existing large-scale EP deployments in several key aspects. The first distinction concerns communication architectures . Traditional EP communication, such as DeepEP [23], adopts an all-to-all pattern where all ranks participate symmetrically in token sending and receiving. In AFD, this pattern transforms into a unidirectional M 2N communication, specifically a directed collective communication within bipartite graph semantics. For instance, in the dispatch phase, tokens are transmitted from attention instances to FFN instances based on gating results. Although both the source and destination sides involve multiple GPU ranks, the data flow exhibits unidirectional (attention to FFN) and asymmetric (distinct behaviors for different roles) characteristics. Another difference is the requirement of at least Three-batch overlap (3BO) in the design of forward propagation under AFD. In current best practices for large-scale EP deployment, No Batch Overlap (NBO), Single-Batch Overlap (SBO), or Two-Batch Overlap (2BO) are selected within Decode instances based on hardware capabilities and batch size. Their main differences are shown in Table 2. Table 2: Comparison of Batch Overlap (BO) Methods: Execution Flow, Scenario, and Practices. Micro-batch IDs are denoted in square brackets.                                    
+
+> Method Stage Overlap Execution Scenario Example Practice Compute Stream Comm. Stream FLOPS Shared Expert(s)
+> NBO #1 Standard MoE N/A Low w/ or w/o N/A SBO #1 Shared Expert EP Dispatch Low w/ H20 + DeepSeek-V3 [22] 2BO #1 Shared[0] + QKV[1] EP Dispatch[0] High w/ H800 + DeepSeek-V3 [18] #2 Attn[1] EP Combine[0] 3BO #1 Attn ×FFN All-to-All (EP) High w/ or w/o H800 + Step3 [17]
+
+We denote the attention computation, FFN computation, and communication latencies of a micro-batch as ta, tf , and 
+
+tc, respectively, and the overall single-stage latency budget as tB . Here, tc = tdispatch + tcombine represents the total latency for dispatch and combine communication of a micro-batch. In AFD, NBO/SBO is the least preferred option . AFD inherently possesses separation characteristics, and serial execution would lead to severe device idling, necessitating micro-batch overlap to hide communication overhead. Furthermore, 2BO inevitably incurs GPU bubbles .As shown in Figure 1b, under the same layer count and SLO constraints, the latency budgets for the attention side and FFN side are roughly equivalent layer-wise. Under such an assumption, after a micro-batch is output from attention, 3Baidu Inc. | Challenges of AFD for MoE Systems 
+
+the total elapsed time tdispatch + tf + tcombine > t a inevitably introduces synchronization bubbles in the attention timeline. Consequently, 3BO becomes the minimum requirement to maintain efficient pipeline operation. It is worth noting that 3BO in AFD, relative to 2BO, is akin to 2BO relative to NBO/SBO in large-scale EP deployment— a promising but not guaranteed bubble-free improvement. In AFD, 3BO provides a higher upper bound while drastically lowering the tolerance for tB fluctuations. At a lower tB baseline, once network jitter causes tc to exceed the budget, or load imbalance causes ta or tf to surge, bubbles will rapidly propagate bidirectionally between the two roles, causing more severe performance collapse than in traditional large-scale EP. We detail the analysis on load imbalance in §3.3. In AFD, two roles are responsible for different computational tasks, resulting in two separated operator streams. To satisfy the SLO requirement, letting T denote the run batch latency, we have: 
+
+T = SLO × Laccept = tg + Nlayers × NBO × tB (1) where SLO represents the time-per-output-token (TPOT) related to the deployment scenario, tg is the sum of latencies for the inter-batch gap and forward latencies of non-3BO layers, Nlayers is the number of hidden layers forwarded in 3BO mode, and NBO = 3 is the batch overlap cardinality. Thanks to Multi-Token Prediction (MTP) [2, 10], we can relax T to SLO × Laccept instead of SLO , where Laccept represents the average acceptance length of a single request in a batch generation. This value mainly depends on whether MTP is enabled, the number of draft tokens, and the statistical average per-token acceptance rate. If the model has no available MTP draft model, then Laccept = 1 . The above formula allows for estimating tB under scenario and model configurations, thereby assisting in the assessment of attention batch size, FFN batch size, and communication latency. Equation 1 presents the upper bound for ta, tf , and tc without violating the SLO constraint, i.e., 
+
+max( ta, t f , t c) ≤ tB (2) However, this does not imply that the AFD system is in an optimal HFU state. To ensure full utilization of the fixed tB
+
+allocated, we aim to optimize such that: 
+
+2 × ta ≥ tf + tc (3) 
+
+2 × tf ≥ ta + tc (4) 
+
+ta, t fopt. 
+
+−−→ tB (5) Here, Equations 3 and 4 represent constraints desired to eliminate GPU bubbles in attention or FFN to enhance utilization, while Equation 5 expresses the expectation that through optimization, the execution of both attention and FFN layers approaches tB (and with a high HFU). Ideally, when tB = ta = tf ≥ tc, optimal AFD operator occupancy is achieved. Regarding optimization methods, attention and FFN differ: • For attention, since HFU is nearly in a compute-bound state, ta → tB can be approximated by fine-tuning the batch size of attention ranks. • For FFN, it is necessary to jointly adjust the attention batch, including the parallelism scale and batch size of attention instances, and the scale of FFN instances to pursue tf → tB in a multi-variable manner. The differences in optimization methods and their complexity dictate that AFD optimization will primarily focus on the FFN side. We desire FFN operators to possess high HFU while maintaining low temporal sparsity (i.e., the ratio of operator-active period to the fixed allocated period). 
+
+2.3 Performance Metrics 
+
+In most scenarios, we can evaluate the system’s utilization of computing resources by directly measuring HFU. In this paper, we further introduce the concepts of Operator FLOPS Utilization (OFU) 2 and temporal sparsity (denoted as St). We define OFU as the FLOPS utilization of an operator during its active period, equal to the FLOPs achieved divided by the actual execution latency. For scenarios like AFD where each overlap stage is assigned a fixed duration tB , we use St, whose value equals the operator execution latency divided by tB , as a metric of operator occupancy during tB .
+
+> 2We use “operator” rather than “kernel” to maintain hardware-agnostic terminology throughout this paper.
+
+4Baidu Inc. | Challenges of AFD for MoE Systems 
+
+We also need to define arithmetic intensity I, the ratio of computation to the memory access required. For the MoE stage, the forward propagation of the MLP network mainly consists of two grouped GEMM and an activation (such as SwiGLU[13]) between them. Since the fused activation operator occupies negligible latency ( 10 μs magnitude) in a typical operator sequence, we represent the computation on EP ranks using grouped GEMM operators only. Assuming all grouped GEMM operations take FP8 format as inputs, for matrices A ∈ RM×K, B ∈ RK×N, and C ∈ RM×N, the computational demand for matrix multiplication C = AB is FLOPs = 2 × M × N × K, while the total memory access is Mem = N × K, neglecting the small proportion of the activation tensors (i.e., the input and output tensors). The arithmetic intensity of a single expert is thus I = 2 M = 2 B, where B is the average input tokens per expert. The arithmetic intensity of a single expert can be naturally generalized to two grouped GEMM operations. Let tG denote the total latency to execute two grouped GEMM operations. We define St, OFU, and HFU by the following formulas: 
+
+St = tG
+
+tB
+
+(6) OFU = FLOPs 
+
+tG
+
+(7) HFU = FLOPs 
+
+tB
+
+= OFU × St (8) Note the subtle difference in denominators between OFU and HFU . By increasing the average input tokens per expert for the grouped GEMM operator, i.e., B, the direct result is a higher OFU . We also need to consider temporal sparsity 
+
+St to obtain the HFU of the entire MoE stage. 
+
+2.4 Trends in Modern MoE Architectures 
+
+Models with small parameter counts mostly adopt a single-expert form. Scaling Laws [8, 3, 9, 19] indicate that well-trained larger-scale models can further improve performance. Guided by this insight, more models are increasing their parameter counts. To balance convergence speed during training, MoE architectures reduce the FLOPs requirement for training by activating only a small fraction of experts for a single token. On the other hand, as current model sizes have grown to hundreds of billions or even trillions of parameters, the expert granularity (i.e., the ratio of model hidden size H to MoE intermediate size M ) is becoming finer, and expert sparsity (i.e., the ratio of routed expert count to TopK ) is becoming larger [7]. These trends make current model deployment, compared to traditional TP deployment of small models, more inclined towards distributed and large-scale EP to meet the comprehensive demands for MoE residency and inference latency. The aforementioned two trends in model design bring the following impacts: • Reduced computational demand per token ( FLOPs/tok ) via greater expert sparsity : Under the same total parameter count, greater expert sparsity determines the activation size in the MoE layer inversely. This conclusion also applies to the inference stage. • Reduced computational demand per expert ( tok/expert ) via finer expert granularity : Finer expert granularity essentially partitions the computational workload into more discrete units. While the total activation size remains constant, the simultaneous increase in TopK and the total number of experts causes the incoming tokens to be distributed across a wider array of experts. This “fan-out” effect significantly dilutes the per-expert token counts. 
+
+# 3 System Analysis 
+
+3.1 Arithmetic Intensity in MoE Inference 
+
+In this section, we examine the impact of model configuration, scale-out network bandwidth (e.g., InfiniBand, RoCE), and scale-up network bandwidth (e.g., NVLink) for AFD bottleneck analysis. To facilitate the discussion, we first limit the scope to the following scenarios and will expand on them later: • The hardware platform is a non-Superpod platform similar to NVIDIA H800. • Attention and FFN instances are deployed at node granularity, i.e., the scale of each instance is a multiple of g,the number of GPUs per node. 5Baidu Inc. | Challenges of AFD for MoE Systems 
+
+Figure 2: Normalized arithmetic intensity as a function of FFN node count ( NF ) for DeepSeek-V3 on the H800 platform. The blue curve shows the theoretical upper bound, while the red one indicate actual values accounting for expert count discretization. The four distinct regions correspond to different bandwidth bottleneck regimes. Generally speaking, scale-up network bandwidth is several times the amortized scale-out bandwidth per GPU. For example, NVIDIA H800 offers 160 GB/s 3 unidirectional bandwidth ( 3.2× that of 50 GbE/GPU), and NVIDIA H20 offers 360 GB/s unidirectional bandwidth ( 7.2× that of 50 GbE). Such scale-up networks accelerate data exchange between GPUs within a node, increasing the upper limit of data transmission for AFD inference. In AFD, the design of the communication library generally follows two mainstream implementation approaches: • Point-to-point direct transfer : Tokens and their associated metadata are transmitted in a point-to-point manner and written directly into pre-allocated buffers on the destination side, with one buffer reserved for each source rank. Under the AFD setting, this approach cannot effectively leverage high-bandwidth scale-up interconnects. • Two-stage forwarding : Taking the dispatch phase as an example, in the first stage, tokens and metadata are transmitted over the scale-out network, with each FFN node serving as the transmission target. In the second stage, the data are further forwarded via the scale-up network to the target ranks within the destination node. The combine phase follows the reverse logical flow of dispatch .Considering the two available communication modes jointly, we measure the overall maximum input token count for a 
+
+single rank achievable via the interconnect network within tB by: 
+
+Brank = min 
+
+
+
+BScaleOut × max 
+
+
+
+1, TopK 
+
+NF
+
+
+
+, B ScaleUp 
+
+
+
+(9) where BScaleOut and BScaleUp represent the number of tokens that can be transmitted via the scale-out network and scale-up network within tB , respectively, and NF represents the number of FFN nodes used in the deployment. The term max(1 , TopK  
+
+> NF
+
+) in the formula represents the pipeline overlap capability of scale-out and scale-up traffic. Taking DeepSeek-V3 as an example, two 8-GPU H800 nodes are sufficient to support the deployment of a minimal FFN instance. The model’s TopK parameter is 8, which means that an attention output token, in a statistical average sense, may eventually reach TopK /N F = 8 /2 = 4 expert input buffers. On the H800 platform equipped with 400 GbE per GPU, the bandwidth ratio of the scale-up network to the scale-out network is 160 /50 = 3 .2. Since TopK /N F = 4 > 3.2, the system is scale-up bound in this configuration, and Brank = BScaleUp = 3 .2 × BScaleOut .Let Nexperts denote the total number of routed experts. The arithmetic intensity I can be expressed as twice the average number of tokens assigned to each expert: 
+
+I = 2Brank 
+
+⌈Nexperts /(NF × g)⌉ (10)  
+
+> 3200 GB/s peak per specification; ≤160 GB/s sustained in practice; similar assumptions apply throughout.
+
+6Baidu Inc. | Challenges of AFD for MoE Systems   
+
+> (a) On H800 (balanced token distribution). (b) On H800 (imbalanced token distribution).
+> (c) On H20 (balanced token distribution). (d) On H20 (imbalanced token distribution).
+
+Figure 3: Grouped GEMM unit tests and theoretical roofline vs. M (average tokens per expert) on H20 and H200 platforms. The left column assumes balanced token distribution across experts, while the right column reflects realistic imbalanced scenarios where some experts receive disproportionately more tokens. We used the DeepSeek-V3 model configuration and H800 platform hardware parameters to plot the trend of normalized arithmetic intensity changing with NF , as shown in Figure 2. The blue curve represents the upper bound of calculated I
+
+without considering the discretization of the local expert count. Based on the value of NF , the relationships defined in Equations 9 and 10 can be partitioned into four distinct operational regimes: • Scale-up bound region : When NF is small enough such that TopK /N F > B ScaleUp /B ScaleOut , the number of inbound tokens is mainly constrained by the scale-up network bandwidth. Increasing NF cannot increase 
+
+Brank . However, since the number of local experts decreases as NF increases, I improves with NF .• Stable intensity region : When 1 ≤ TopK /N F ≤ BScaleUp /B ScaleOut , the number of inbound tokens is constrained by the scale-out bandwidth. Since the number of local experts decreases proportionally with NF ,the expected I remains unchanged. • Scale-out bound region : When NF ≥ TopK , the communication stage of AFD cannot benefit from the scale-up network. At this point, the FFN batch size (as well as I) is completely constrained by the scale-out bandwidth. Increasing NF can continue to optimize I by reducing the number of experts that need to be deployed locally. • Maximum intensity region : Constrained by the scale-out network, when NF continues to increase until the minimum number of local experts drops to 1, increasing NF will no longer yield larger I since the same number of tokens cannot be assigned to fewer experts. It is worth noting that starting from NF ≥ TopK , Brank no longer increases, which implies that the FLOPs of the FFN stage has reached its upper limit .This method provides a theoretical perspective for measuring NF to achieve extreme GEMM OFU. In practice, due to different padding and tiling behaviors in GEMM implementations, there is a certain FLOPS loss regardless of the 7Baidu Inc. | Challenges of AFD for MoE Systems     
+
+> (a) NVIDIA H20 (b) NVIDIA H800
+> (c) NVIDIA H100 (d) NVIDIA H200
+> (e) NVIDIA B200 (f) NVIDIA B300
+> (g) NVIDIA GB200 (h) NVIDIA GB300
+
+Figure 4: Theoretical upper-bound HFU of different models [1, 15, 16, 14, 6, 17] across hardware platforms under AFD deployment. The communication-bound HFU ceiling is highlighted in bold red . For all models, we assume MTP readiness with Laccept = 1 .7, regardless of native support. All layers, dense or sparse, are assumed to have identical execution latency. We also assume a fixed deployment unit of 8 GPUs per node regardless of the physical Superpod scale. Detailed model and hardware configurations are provided in Appendix B. arithmetic intensity. As shown in Figure 3, we conducted GEMM unit tests at different input scales in scenarios of balanced experts (i.e., experts having the same number of tokens) and imbalanced experts. The results show that although the overall HFU trend tends to flatten after the arithmetic intensity exceeds the platform’s roofline ridge, a larger input scale can still improve the operator HFU. For comparison, data from [4] estimates an average of 740 tokens per expert, indicating an HFU of approximately 60% considering EP imbalance. 8Baidu Inc. | Challenges of AFD for MoE Systems 
+
+3.2 AFD Dead Zone in Pursuit of HFU 
+
+By jointly applying the roofline model and Equation 9, we plotted Figure 4 to showcase the upper-bound HFU of different models on various hardware platforms. In the environment and scenario parameter assumptions, we set 
+
+Laccept = 1 .7 and assumed a gap of tg = 15 ms. The total FLOPs of the two grouped GEMM operators is calculated by FLOPs = 6 × G × B × H × M , while the memory access is Mem = 3 × G × H × M . Here, G represents the number of groups (i.e., the number of local experts), and B = Brank /G represents the average number of tokens obtained per expert. Models with large parameter counts, such as DeepSeek-V3 and Kimi-K2, cannot be deployed on one or two 8-GPU nodes on NVIDIA Hopper series platforms, either limited by memory capacity or memory bandwidth. We identify them on the chart with text such as “HBM - DeepSeek-V3”. Overall, Figure 4 presents the following results: • At the hardware level , GPU platforms with relatively weak FLOPS (e.g., H20) or Superpod types equipped with abundant network bandwidth (e.g., GB200/GB300) can achieve higher theoretical HFU. For the former, high HFU is attainable with modest token counts due to the lower computational ceiling; for the latter, the abundant interconnect bandwidth can supply sufficient tokens to saturate the high FLOPS capacity. Conversely, on platforms with strong FLOPS but without a fully-interconnected scale-up network, models often exhibit worse theoretical HFU under AFD. • At the model level , models with smaller sparsity and coarser expert granularity often yield higher theoretical HFU upper limits under AFD. For example, ERNIE-4.5 has a sparsity of 8 and an expert granularity of 8/3.5,while for Step3, the sparsity is 16 and the expert granularity is 7/5. These characteristics jointly allow them to generate more FLOPs requirements within limited inbound tokens. • As NF increases , HFU does not continue to improve. Although larger NF raises arithmetic intensity (and thus OFU), the network bandwidth constraint causes St of FFN to keep decreasing, keeping HFU at a low level. To measure the relative benefit of AFD on standard clusters, it is also necessary to evaluate the theoretical difference compared to large-scale EP deployment. As analyzed in §3.1, even if 100% HFU cannot be achieved, large-scale EP deployment can still obtain an HFU of approximately 60%. At this point, the theoretical HFU upper limit of AFD on non-Superpod H800 platform is only 33.1%, where 100% OFU is assumed. It is thus difficult for AFD to obtain a GEMM-stage HFU advantage compared to large-scale EP deployment on such configurations. We discuss the conditions under which AFD may exhibit greater potential in §4. 
+
+3.3 Imbalance Penalty 
+
+Another aspect that has not been well-studied is the penalty caused by imbalance in AFD mode. The effectiveness of a deployment strategy can be measured by the average throughput per node, and this section uses this metric to compare AFD and large-scale EP parallelism from the perspective of DP imbalance and EP imbalance. We define balancedness as σ ≤ 1, representing the correction factor for goodput loss in the attention or FFN stage influenced by imbalance. Let the batch sizes of the attention and FFN stages in the balanced state be BA and BF , and the conversion factor (i.e., the penalty) for average throughput per node caused by imbalance be α ≤ 1. Our task is to determine the relationship between α and σ under the two deployment modes. 
+
+3.3.1 DP Imbalance 
+
+DP imbalance stems from inconsistencies in context lengths and batch sizes across DP ranks, caused by varying input sequence lengths and the progression of requests during inference, resulting in inconsistent attention execution latencies. In real systems, the ideal attention execution latency under theoretical equilibrium will inevitably be exceeded when the total context length of requests surpasses a specific threshold. To prevent the SLO from being violated due to latency jitter caused by DP imbalance, the batch size must be reduced. In large-scale EP deployment, when facing the DP imbalance problem, as shown in Figure 5a, the batch size is first reduced to σ× the original. At this point, according to our definition of the degree of imbalance, the latency of the attention part remains unchanged, while the batch of the FFN stage is reduced from BF to σB F , leading to a decrease in tf . There are two further choices: • Maintain the status quo, i.e., introduce a throughput penalty of αEP = σ, but allow requests in existing instances to obtain smaller TPOT. • Slightly increase the batch size to utilize the latency budget released due to the faster execution of the FFN stage. In this case, αEP > σ is achieved. 9Baidu Inc. | Challenges of AFD for MoE Systems      
+
+> (a) DP imbalance handling for large-scale EP. The decreased FFN latency from reduced batch size can be partially reclaimed by slightly increasing the batch.
+> (b) DP imbalance handling for AFD. The fixed tBbudget pre-vents reclaiming latency released by the faster FFN stage.
+> (c) EP imbalance handling for large-scale EP. Continuous batch size adjustment allows fine-grained latency budget utilization. (d) EP imbalance handling for AFD. Discrete NAscaling intro-duces quantization errors in resource allocation.
+
+Figure 5: Comparison of DP and EP imbalance handling strategies between large-scale EP and AFD deployments. The key distinction lies in AFD’s discrete scaling constraints versus large-scale EP’s continuous adjustment capability. In AFD, as shown in Figure 5b, the first step adopts the same strategy as in large-scale EP deployment, i.e., reducing the batch size to σ times the original. However, due to the separation characteristics of AFD and the memory bottleneck on the FFN side, it is difficult to reuse the latency budget released by a smaller batch size. Consequently, αAFD = σ,indicating that the throughput penalty in AFD is greater than that of large-scale EP. 
+
+3.3.2 EP Imbalance 
+
+EP imbalance originates from the gating module in MoE selecting different subsets of routed experts for individual tokens, a phenomenon that cannot be eliminated under dynamic input. The direct consequence is a difference in communication and computation volume across EP ranks. For convenience of discussion, we ignore the case where communication becomes a bottleneck and only consider the impact of fluctuations on computation for the two deployment strategies and throughput metrics. The relationship of the latency metrics is formulated as: • For large-scale EP parallelism, tB = ta + tf
+
+• For AFD, tB = ta = tf
+
+Large-scale EP deployment: Assume that when the average context length is fixed, ta is proportional to batch size. When the batch is reduced to σ× in the first step, under the imbalance scenario, the total latency under the batch size 
+
+σB A becomes σt a + tf < t B . We assume that the batch size can be additionally increased to b > σB , during which both ta and tf change linearly with the increase of b. Then we have: 
+
+bB ta + bσB tf = αt a + ασ tf = tB = ta + tf (11) 
+
+αEP = ta/t f + 1 
+
+ta/t f + 1 /σ = λEP + 1 
+
+λEP + 1 /σ > σ (12) The penalty of EP imbalance on large-scale EP deployment given by Equation 12 is a monotonically increasing function of the ratio λEP = ta/t f in the latency budget. In practice, e.g., on the H800 platform, the value is typically λEP ∈ [2 , 4] ,and in the profile data provided by DeepSeek [5], λEP ≈ 4. Furthermore, it should be noted that in the derivation, we assumed bσB tf as the corrected tf . Due to the characteristic of increasing computational density, the accurate tf is a monotonically increasing convex function of batch size, implying that we actually overestimated the proportion of tf .10 Baidu Inc. | Challenges of AFD for MoE Systems 
+
+Figure 6: Throughput penalty from EP imbalance for AFD (red dashed curves) compared to large-scale EP (blue solid curves). We take NF ∈ { 2, 4, 6}, σ ∈ { 0.7, 0.75 , 0.8, 0.85 }, and λ ∈ [1 , 5] . The discrete scaling constraints in AFD result in worse penalties in most configurations. Therefore, the conversion factor αEP caused by EP imbalance under large-scale EP deployment is larger than that in Equation 12. 
+
+AFD deployment: To cope with EP imbalance, we need to adjust NA and the batch size of attention ranks to match the tokens across both ends. When σ × NA is an integer, we can simply adjust NA, and attention ranks remain in the optimal full-load state as originally planned. The penalty can hence be represented by the ratio of the average throughput per node under (1) imbalanced and (2) fully balanced conditions. The actual penalty coefficient becomes the ratio of the proportions of NA to NA + NF before and after, i.e.: 
+
+αexact =
+
+> σ×NA
+> σ×NA+NF
+> NA
+> NA+NF
+
+= σ NA + NF
+
+σN A + NF
+
+= λAFD + 1 
+
+λAFD + 1 /σ > σ (13) Note that Equation 13 is almost identical to Equation 12, except that the ratio changes from λEP = ta/t f in large-scale EP deployment to λAFD = NA/N F here. However, with the same formulaic expression, in large-scale EP, continuous fine-tuning on batch size can be adopted to control execution latency. In AFD, the means of adjusting NA must also be considered. When σ × NA is not an integer, the optimal value after discrete scaling needs to be selected. The αAFD can then be derived as: 
+
+αfloor = ( λAFD + 1) ⌊σ × NA⌋⌊σ × NA⌋ + NF
+
+(14) 
+
+αceil = ( λAFD + 1) ⌈σ × NA⌉⌈σ × NA⌉ + NF
+
+× σ × NA
+
+⌈σ × NA⌉ (15) 
+
+αAFD =
+
+αexact , σ × NA ∈ Z
+
+max( αfloor , α ceil ), σ × NA /∈ Z (16) Note that in the calculation of αceil , since attention batch size is limited by the finite FFN stage capacity when adopting the ceil-rounding method, an extra correction factor of σ×NA 
+
+> ⌈σ×NA⌉
+
+is needed, as attention ranks are currently in 11 Baidu Inc. | Challenges of AFD for MoE Systems 
+
+underutilized status. We plotted the trends of αAFD in Figure 6. The figure indicates that, due to the problem of discrete scaling under AFD, it performs worse than large-scale EP in most cases. It should be noted that λ is actually an empirical measure of the ratio of computation latency between attention and FFN. Under large-scale EP deployment, it manifests as the ratio of duration occupied by both in the same operator stream. In AFD where attention and FFN are separately deployed and share the same tB , the ratio becomes the ratio of NA to NF .Figure 6 sets the λ upper limit to 5, assuming that AFD can optimize computational efficiency for the FFN stage so that the FFN execution latency proportion is reduced from 1/(1 + 4) = 0 .2 in the original large-scale EP deployment to 
+
+1/(1 + 5) = 0 .17 in AFD. But even with such minor optimization objective, only when σ exactly equals 0.8 can it barely achieve a consistent imbalance penalty with large-scale EP deployment. Therefore, the relationship between the expected profit margin and the penalty caused by discrete scaling should be carefully weighed when considering AFD. 
+
+3.4 Implementation Challenges 
+
+In addition to the performance risks theoretically analyzed earlier that AFD may cause due to bandwidth bottlenecks and discretization problems, various factors affecting the latency budget need to be considered in real systems. For example, technologies like CUDA Graph rely on PCIe communication, which may lead to prolonged graph launch latencies under a large operator count (e.g., 3BO will bring about 1.5× the operator count on the attention side). Such a budget loss makes the assumption of tg = 15 ms somewhat optimistic. A smaller resulting tB directly constrains the overall batch size and may cause the FFN side to transition from compute-bound to memory-bound .Furthermore, when discussing arithmetic intensity and HFU, we assumed that the value is linearly correlated to the token quantity per expert, and that the token throughput carried by the interconnect is also proportional to tB , making the conclusion seemingly independent of its absolute value. However, in real systems, when the absolute tB is small, minor operators and boundary overheads account for a larger fraction of the overall cost, making them no longer negligible. When AFD is deployed under a small number of NF , the operator stream details of FFN also need to be further refined. For example, due to the different scales of attention and FFN instances and the communication pattern requirements for two-stage forwarding, additional shuffling operators are needed to conduct layout conversion from per source attention rank to per expert (and vice versa), and to allow the communication stream to run in parallel on an additional operator stream. These will further amortize the computational and bandwidth resources on the FFN side and lead to corrections on the FLOPS and memory bandwidth for bottleneck analysis. Currently, some research is attempting to solve similar problems on communication [26]. 
+
+# 4 Implications for AFD-Favorable Configurations 
+
+Based on the analysis presented in the preceding sections, we now synthesize the conditions under which AFD is more likely to yield performance benefits. Table 3 summarizes these conditions at the model and hardware levels. Table 3: Summary of conditions favorable for AFD deployment based on our analysis. 
+
+Dimension Favorable Condition Rationale 
+
+Model Coarse expert granularity Larger St and HFU potential Lower expert sparsity More tokens per EP rank Hardware Superpod-class architecture Sufficient bandwidth to saturate FFN Better baseline EP balance Reduced discrete scaling penalty Heterogeneous resources Targeted resource allocation Our analysis suggests that AFD exhibits greater potential in specific combinations of model configurations and hardware architectures, particularly in Superpod-class systems and models with coarse-grained experts. 
+
+4.1 Model-Level Considerations 
+
+At the model level, the following characteristics favor AFD deployment: 12 Baidu Inc. | Challenges of AFD for MoE Systems 
+
+• Coarse-grained MoE experts : Models with larger MoE intermediate sizes generate greater computational demand per token, improving temporal sparsity St on the FFN side. As demonstrated in Appendix A, the theoretical HFU is directly proportional to the expert dimension M when interconnect bandwidth becomes the bottleneck. For instance, Step3’s expert dimension of 5120 yields substantially higher HFU potential compared to DeepSeek-V3 with M = 2048 .• Lower expert sparsity : Expert sparsity, defined as the ratio Nexperts /TopK , determines token distribution across EP ranks. Given a fixed expert size and the minimum latency for activating all local experts, the number of experts per rank is roughly determined. Consequently, the tokens that a single attention output can contribute to an EP rank is inversely proportional to expert sparsity. Models with lower sparsity exhibit workload distributions closer to dense models, improving per-expert batch sizes. For example, Step3 with a sparsity of 48 /3 = 16 achieves better token concentration than DeepSeek-V3 with a sparsity of 256 /8 = 32 .It is worth noting that these model-level characteristics run counter to the prevailing trend in MoE architecture design, which increasingly favors fine-grained experts and higher sparsity for improved training efficiency, as discussed in §2.4. This observation suggests that AFD may require co-design between model architecture and deployment infrastructure to realize its full potential. 
+
+4.2 Hardware-Level Considerations 
+
+At the hardware level, AFD benefits from systems possessing the following attributes: • Superpod-class architecture : Superpod systems such as NVIDIA GB200 and GB300 represent the most favorable hardware configuration for AFD. As shown in Figures 4g and 4h, such systems achieve substantially higher theoretical HFU under AFD. Superpod configurations offer three key advantages: (1) abundant interconnect bandwidth from high-bandwidth, fully-interconnected scale-up networks that can supply sufficient tokens to saturate FFN FLOPS; (2) improved baseline EP balance due to dense interconnect topology enabling more uniform token distribution across ranks; and (3) flexible resource partitioning that breaks the node-granularity FFN scaling constraint of standard clusters, thereby reducing the discrete scaling penalty analyzed in §3. • Heterogeneous resource availability : When attention and FFN stages exhibit significantly different resource utilization patterns, AFD’s physical separation enables targeted resource allocation. Operators can provision different hardware specifications for each role, potentially improving cost-efficiency compared to homogeneous deployments. In conclusion, our analysis indicates that AFD holds greater promise in Superpod-class hardware systems and for models with coarse-grained expert configurations and lower expert sparsity. While current mainstream MoE architectures and standard cluster deployments may not fully benefit from AFD, the approach remains a valuable architectural option for next-generation infrastructure where these hardware constraints are alleviated. 
+
+# 5 Discussion 
+
+5.1 TP Strategies 
+
+Throughout the analysis of this paper, the parallelism mode on the attention side is limited to DP only, and that on the FFN side is limited to EP only. In fact, Tensor Parallelism (TP) is an option for both sides under AFD, as we discuss in this section. 
+
+On the attention side , the scale of attention (i.e., NA) needs to be adjusted to accumulate the batch required by FFN. For scenarios serving longer contexts, a hybrid parallelism mode of DP + TP can be further employed on the attention side. However, this does not affect attention ranks’ role of “dynamic scaling, on-demand filling of FFN batch” under AFD. For example, if TP-4 needs to be additionally introduced under the original DP scale to serve a 4× context length scenario, maintaining the DP scale and expanding NA to 4× for TP-4 will keep the FFN batch size unchanged. One should then carefully account for the synchronization overhead of request information and inference result reduction across TP ranks in the context of budget derivation. 
+
+On the FFN side , the ETP strategy (i.e., applying tensor parallelism at the expert stage) is effectively equivalent to adopting a finer-grained expert partitioning, as discussed in §2.4. This leads to reduced arithmetic intensity and therefore should be evaluated in conjunction with the TopK /N F ratio. When TopK /N F ≪ BScaleUp /B ScaleOut , adopting ETP allows more effective utilization of the scale-up network bandwidth to compensate for the loss in arithmetic intensity. 13 Baidu Inc. | Challenges of AFD for MoE Systems 
+
+In this regime, a smaller EP degree improves load balance. However, it increases the number of partial results to be reduced, incurring additional overhead. 
+
+5.2 AFD vs. PD Disaggregation 
+
+Although both AFD and PD disaggregation are motivated by decoupling instances or stages with heterogeneous demands to pursue higher throughput, they differ fundamentally in nature. In PD disaggregation, isolating the Prefill and Decode phases allows for independent optimizations on computation, memory footprint, and SLO requirements of each phase, without introducing strong coupling between the two types of instances. Modern infrastructures can effectively support elastic scaling of both phases and enable client-transparent request steering by dynamically establishing connections between them. AFD, in contrast, can be viewed as a specialized pipeline-parallel (PP) deployment scheme. Its design introduces tighter stage synchronization between the two stages to promptly satisfy stringent TPOT requirements at the scale of tens of milliseconds. To the best of our knowledge, performance improvements in inference systems typically stem either from higher operator efficiency (e.g., operator fusion or increased arithmetic intensity) or from reducing GPU bubbles that are otherwise difficult to exploit in current systems (e.g., improving overlap by lowering communication overhead). However, as revealed by our analysis, these objectives are not well achieved in AFD on standard cluster configurations: • Compared to standard large-scale EP deployments, the FFN stage in AFD struggles to attain genuinely higher HFU due to limited interconnect bandwidth on non-Superpod platforms. • Rather than directly optimizing explicitly existing GPU bubbles, AFD introduces a fragile 3BO pattern with a tight latency budget, along with the potential risk that latency jitter from DP imbalance and EP imbalance rapidly propagates across the attention and FFN stages. 
+
+5.3 Expert-as-a-Service Architectures 
+
+On the FFN side, all inputs and outputs are presented in the form of tokens and metadata, and directly interfaced with the AFD communication library, making it essentially a stateless component in LLM inference. The simple input, compute, and output stream of FFN has spawned deployment modes that further decouple FFN—especially MoE layers—from attention computation in a service-oriented form, namely Experts-as-a-Service (EaaS) [11, 21]. Such an architecture, with fully decoupled A-F communication, is expected to allow one expert instance to serve a larger attention instance. The practical viability of EaaS depends on several factors that require careful consideration. Due to strict SLO limits for online services, methods similar to micro-queuing [20] that prioritize serving local experts reaching buffer thresholds may not guarantee that forward propagation of requests in the current MoE layer will be completed within the expected latency. This method essentially trades latency metrics for improved MoE stage throughput metrics. The scale requirements for EaaS deployments vary significantly with model size. For large-scale models such as DeepSeek-V3, activating all experts simultaneously would require substantial infrastructure (approximately 58 × the base node count) due to the asynchronous nature of DP in EaaS, where inbound FFN tokens may expect to activate experts on arbitrary layers. In such configurations, accumulating sufficient tokens for effective MoE forward pass necessitates a correspondingly large attention-side deployment. In contrast, EaaS architectures are considerably more viable for smaller models, which exhibit manageable memory access latencies and more modest FLOPS requirements. The reduced infrastructure requirements render the inherent trade-offs more favorable, suggesting that service-oriented expert deployment may initially gain traction in smaller-scale scenarios before extending to larger deployments as infrastructure matures. 
+
+# 6 Conclusion 
+
+In this paper, we conducted a systematic evaluation of Attention-FFN Disaggregation (AFD) for modern MoE deployment. By establishing a budget-based analytical framework, we revealed that AFD’s performance characteristics vary significantly across different hardware configurations and model architectures. On standard cluster configurations, our analysis highlights a critical “dead zone” where scale-out bandwidth bottlenecks prevent FFN instances from achieving higher HFU despite scaling. We further demonstrated that AFD’s discrete node-level scaling makes it inherently less robust to DP and EP load imbalances compared to the continuous batch adjustment capabilities of large-scale EP. 14 Baidu Inc. | Challenges of AFD for MoE Systems 
+
+However, our analysis also identifies specific conditions under which AFD exhibits greater potential. Superpod-class hardware systems can effectively alleviate these constraints through abundant interconnect bandwidth, improved EP balance from dense interconnect topology, and flexible resource partitioning that reduces discrete scaling penalties. On the model side, coarse-grained expert configurations and lower sparsity generate higher computational demand per token, improving HFU potential under AFD deployment. While the industry trend toward fine-grained experts presents challenges for AFD on current mainstream hardware, our findings position AFD as a promising approach for specific hardware-model combinations rather than a universal solution. We hope this work provides a rigorous theoretical foundation for architectural decisions in large-scale model serving. 
+
+# References 
+
+[1] Baidu-ERNIE-Team. ERNIE 4.5 Technical Report . 2025. [2] Charlie Chen, Sebastian Borgeaud, Geoffrey Irving, Jean-Baptiste Lespiau, Laurent Sifre, and John Jumper. “Accelerating large language model decoding with speculative sampling”. In: arXiv preprint arXiv:2302.01318 
+
+(2023). [3] Aidan Clark, Diego de Las Casas, Aurelia Guy, Arthur Mensch, Michela Paganini, Jordan Hoffmann, Bogdan Damoc, Blake Hechtman, Trevor Cai, Sebastian Borgeaud, et al. “Unified scaling laws for routed language models”. In: International conference on machine learning . PMLR. 2022, pp. 4057–4086. [4] DeepSeek-AI. Day 6: One more thing, deepseek-v3/r1 inference system overview . https://github.com/ deepseek- ai/open- infra- index/blob/main/202502OpenSourceWeek/day_6_one_more_thing_ deepseekV3R1_inference_system_overview.md . 2025. [5] DeepSeek-AI. Profiling Data in DeepSeek Infra . https://github.com/deepseek- ai/profile- data .2025. [6] DeepSeek-AI et al. DeepSeek-V3 Technical Report . 2025. arXiv: 2412.19437 [cs.CL] . URL : https://arxiv. org/abs/2412.19437 .[7] Wentao Guo, Mayank Mishra, Xinle Cheng, Ion Stoica, and Tri Dao. “SonicMoE: Accelerating MoE with IO and Tile-aware Optimizations”. In: arXiv preprint arXiv:2512.14080 (2025). [8] Jared Kaplan, Sam McCandlish, Tom Henighan, Tom B Brown, Benjamin Chess, Rewon Child, Scott Gray, Alec Radford, Jeffrey Wu, and Dario Amodei. “Scaling laws for neural language models”. In: arXiv preprint arXiv:2001.08361 (2020). [9] Jakub Krajewski, Jan Ludziejewski, Kamil Adamczewski, Maciej Pióro, Michał Krutul, Szymon Antoniak, Kamil Ciebiera, Krystian Król, Tomasz Odrzygó´ zd´ z, Piotr Sankowski, et al. “Scaling laws for fine-grained mixture of experts”. In: arXiv preprint arXiv:2402.07871 (2024). [10] Yaniv Leviathan, Matan Kalman, and Yossi Matias. “Fast inference from transformers via speculative decoding”. In: International Conference on Machine Learning . PMLR. 2023, pp. 19274–19286. [11] Ziming Liu, Boyu Tian, Guoteng Wang, Zhen Jiang, Peng Sun, Zhenhua Han, Tian Tang, Xiaohe Hu, Yanmin Jia, Yan Zhang, et al. “Expert-as-a-Service: Towards Efficient, Scalable, and Robust Large-scale MoE Serving”. In: 
+
+arXiv preprint arXiv:2509.17863 (2025). [12] Pratyush Patel, Esha Choukse, Chaojie Zhang, Aashaka Shah, Íñigo Goiri, Saeed Maleki, and Ricardo Bianchini. “Splitwise: Efficient generative llm inference using phase splitting”. In: 2024 ACM/IEEE 51st Annual International Symposium on Computer Architecture (ISCA) . IEEE. 2024, pp. 118–132. [13] Noam Shazeer. GLU Variants Improve Transformer . 2020. arXiv: 2002.05202 [cs.LG] . URL : https:// arxiv.org/abs/2002.05202 .[14] GLM Team et al. GLM-4.5: Agentic, Reasoning, and Coding (ARC) Foundation Models . 2025. arXiv: 2508. 06471 [cs.CL] . URL : https://arxiv.org/abs/2508.06471 .[15] Kimi Team et al. Kimi K2: Open Agentic Intelligence . 2025. arXiv: 2507 . 20534 [cs.LG] . URL : https : //arxiv.org/abs/2507.20534 .[16] Qwen Team. Qwen3 Technical Report . 2025. arXiv: 2505.09388 [cs.CL] . URL : https://arxiv.org/abs/ 2505.09388 .[17] StepFun Team. Step-3 is Large yet Affordable: Model-system Co-design for Cost-effective Decoding . 2025. arXiv: 
+
+2507.19427 [cs.LG] . URL : https://arxiv.org/abs/2507.19427 .[18] The SGLang Team. Deploying DeepSeek with PD Disaggregation and Large-Scale Expert Parallelism on 96 H100 GPUs . https://lmsys.org/blog/2025-05-05-large-scale-ep . 2025. 15 Baidu Inc. | Challenges of AFD for MoE Systems 
+
+[19] Changxin Tian, Kunlong Chen, Jia Liu, Ziqi Liu, Zhiqiang Zhang, and Jun Zhou. “Towards greater leverage: Scaling laws for efficient mixture-of-experts language models”. In: arXiv preprint arXiv:2507.17702 (2025). [20] Shaoyu Wang, Guangrong He, Geon-Woo Kim, Yanqi Zhou, and Seo Jin Park. “Toward Cost-Efficient Serving of Mixture-of-Experts with Asynchrony”. In: arXiv preprint arXiv:2505.08944 (2025). [21] Ao Xiao, Bangzheng He, Baoquan Zhang, Baoxing Huai, Bingji Wang, Bo Wang, Bo Xu, Boyi Hou, Chan Yang, Changhong Liu, et al. “xdeepserve: Model-as-a-service on huawei cloudmatrix384”. In: arXiv preprint arXiv:2508.02520 (2025). [22] Tianyu Zhang, Peng Zhang, Yusong Gao, and Yun Zhang. Together with SGLang: Best Practices for Serving DeepSeek-R1 on H20-96G . https://lmsys.org/blog/2025-09-26-sglang-ant-group . 2025. [23] Chenggang Zhao, Shangyan Zhou, Liyue Zhang, Chengqi Deng, Zhean Xu, Yuxuan Liu, Kuai Yu, Jiashi Li, and Liang Zhao. DeepEP: an efficient expert-parallel communication library . https://github.com/deepseek-ai/DeepEP . 2025. [24] Yinmin Zhong, Shengyu Liu, Junda Chen, Jianbo Hu, Yibo Zhu, Xuanzhe Liu, Xin Jin, and Hao Zhang. “{DistServe }: Disaggregating prefill and decoding for goodput-optimized large language model serving”. In: 
+
+18th USENIX Symposium on Operating Systems Design and Implementation (OSDI 24) . 2024, pp. 193–210. [25] Ruidong Zhu, Ziheng Jiang, Chao Jin, Peng Wu, Cesar A Stuardo, Dongyang Wang, Xinlei Zhang, Huaping Zhou, Haoran Wei, Yang Cheng, et al. “MegaScale-Infer: Serving Mixture-of-Experts at Scale with Disaggregated Expert Parallelism”. In: arXiv preprint arXiv:2504.02263 (2025). [26] Zhuoran Zhu et al. FUSCO: High-Performance Distributed Data Shuffling via Transformation-Communication Fusion . 2025. arXiv: 2512.22036 [cs.DC] . URL : https://arxiv.org/abs/2512.22036 .16 Baidu Inc. | Challenges of AFD for MoE Systems 
+
+# A MoE Intermediate Size vs. HFU 
+
+Readers may have observed that in Figures 4g and 4h, models Kimi-K2 and DeepSeek-V3 exhibit an identical theoretical HFU upper bound. This section provides an analytical derivation for this phenomenon. We denote the scale-up network bandwidth of the Superpod as BScaleUp and the model’s expert dimension (i.e., MoE intermediate size) as M . In a Superpod environment, the following relationship holds: 
+
+Brank = BScaleOut = BScaleUp = BScaleUp × tB
+
+(sizeof (fp8 ) + sizeof (bf16 )) × H = BScaleUp × tB
+
+3H (17) For a given number of input tokens, the computational workload of the grouped GEMM operations is: FLOPs = 6 × G × B × H × M = 6 × Brank × H × M = 2 × B ScaleUp × M × tB (18) Accordingly, the HFU within the tB window can be derived as: HFU = FLOPs FLOPS × tB
+
+= 2 × B ScaleUp × M
+
+FLOPS (19) Since these models are primarily constrained by the interconnect bottleneck in this specific case, the theoretical achievable HFU depends exclusively on the model parameter M . For NVIDIA GB200/GB300 systems, where FLOPS = 4500 TFLOPS and BScaleUp = 720 GB/s, Equation 19 yields exactly 65.5% theoretical HFU for these models. Similarly, all other enumerated models reach the maximum theoretical HFU, with the exception of GLM-4.7, which exhibits a lower value due to its smaller M = 1536 .
+
+# B Model and Hardware System Configurations 
+
+In this section, we provide the related configurations for the models and hardware systems used in this study, respectively shown in Tables 4 and 5. Table 4: Model Configurations 
+
+Configuration Parameter DeepSeek-V3 Kimi-K2 Step3 Qwen3-Coder ERNIE-4.5 GLM-4.7 
+
+Hidden Size 7168 7168 7168 6144 8192 5120 Number of Layers 61 61 61 62 54 92 Number of Dense Layers 3 1 5 0 3 3Number of MoE Layers 58 60 56 62 51 92 Number of Routed Experts 256 384 48 160 64 160 Number of Experts per Token 8 8 3 8 8 8MoE Intermediate Size 2048 2048 5120 2560 3584 1536 Table 5: Hardware System Configurations 
+
+System Parameter H20 H100 H200 H800 B200 B300 GB200 GB300 
+
+Peak FP8 Performance (TFLOPS) 296 1979 1979 1979 4500 4500 4500 4500 Memory Bandwidth (TB/s) 4 3.35 4 3.35 7.7 8 7.7 8Memory Capacity (GB) 96 80 141 80 180 270 180 270 Scale-Out Bandwidth (GB/s) 50 50 50 50 50 100 Superpod Superpod Scale-Up Bandwidth (GB/s) 360 360 360 160 720 720 720 720 17

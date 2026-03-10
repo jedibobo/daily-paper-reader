@@ -1,0 +1,1470 @@
+Title: CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation
+
+URL Source: https://arxiv.org/pdf/2602.08686v1
+
+Published Time: Tue, 10 Feb 2026 03:40:41 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation 
+
+Ning Yang 1 Chengzhi Wang 2 Yibo Liu 3 Baoliang Tian 4 Haijun Zhang 5
+
+Abstract 
+
+Large Language Models (LLMs) in long-context scenarios are severely constrained by the linear growth of Key-Value (KV) cache memory. Existing KV compression methods rely either on static thresholds and attention-only heuristics or on coarse memory budget allocation. Under tight memory budgets, these methods overlook two key factors: prompt-dependent variation in compression risk and functional heterogeneity across attention heads, which destabilize token selection and lead to tail failures. To address these challenges, we propose CompilerKV, a risk-adaptive and head-aware compression framework that compiles offline experience into reusable decision tables for prefill-only deploy-ment. CompilerKV integrates two key synergistic components: (i) a Head Heterogeneity Table, learned via offline contextual bandits, which assigns head-specific reliability weights to govern functional differences across attention heads explicitly; and (ii) a Risk-Adaptive Threshold Gating mechanism that jointly models attention entropy and local perplexity, transforming prompt-level risk into deployable retention thresholds. Experiments on LongBench show CompilerKV dominates SOTA methods under a 512-token budget, recovering 97.7% of FullKV performance while achieving up to +5.2 points gain over the strongest competitor. Code and demo are available at https://github. com/luckypiggy-orangejuice/ CompilerKV .
+
+> 1
+
+Institute of Automation, Chinese Academy of Sciences, Bei-jing, China 2University of Electronic Science and Technology of China, Chengdu, China 3The Chinese University of Hong Kong, Shenzhen, China 4ByteDance, Beijing, China 5University of Sci-ence and Technology Beijing, Beijing, China. Correspondence to: Ning Yang <ning.yang@ia.ac.cn >.
+
+Preprint. February 10, 2026. 
+
+1. Introduction 
+
+The capability of Large Language Models (LLMs) to pro-cess extensive contexts has revolutionized applications rang-ing from document summarization to multi-hop reasoning (Liu et al., 2024; Bai et al., 2024). To accelerate inference, LLMs maintain a Key-Value (KV) cache that stores inter-mediate attention states to avoid re-computation. However, this proficiency comes at a prohibitive computational cost: the memory footprint of the KV cache grows linearly with sequence length (Behrouz et al., 2024). For a 7B model processing a 128k context, the KV cache can consume over 100GB of memory, far exceeding the capacity of standard GPUs and creating a severe bottleneck for deployment (Pope et al., 2023; Xiao et al., 2024). To alleviate this memory pressure, KV cache compression has emerged as a critical research direction. Early ap-proaches adopted static sparsity patterns, such as sliding windows (Child, 2019) or fixed attention sinks (Xiao et al., 2023), assuming that recent tokens and initial tokens suffice for generation. Recognizing the limitations of static reten-tion, subsequent research evolved towards dynamic impor-tance estimation. Methods like Heavy-Hitter Oracle (H2O) (Zhang et al., 2023) retain tokens with high accumulated attention scores. More recently, budget-aware strategies such as SnapKV (Li et al., 2024) and PyramidKV (Cai et al., 2024) have introduced structural priors to allocate memory budgets across layers, attempting to balance local precision with global context. Despite these advances, current KV compression methods exhibit two fundamental limitations, especially in prefill-only settings under tight memory budgets. First, most ap-proaches employ prompt-agnostic, one-size-fits-all policies that apply a global compression rate regardless of semantic complexity (Zhou et al., 2024). Under strict budgets, this leads to tail failures, where high-entropy prompts suffer severe information loss while low-entropy prompts retain re-dundant tokens. Second, token eviction decisions are often unstable because they rely on weakly conditioned, instanta-neous attention statistics. Such signals are inherently noisy and affected by scale bias, where large magnitudes do not necessarily correspond to semantic importance. Without mechanisms to separate reliable signals from noise, small 1
+
+> arXiv:2602.08686v1 [cs.LG] 9 Feb 2026 CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation
+
+estimation errors can shift selection boundaries and irre-versibly remove critical context. Motivated by the instability of prompt-agnostic and weakly conditioned compression strategies, we frame prefill-only KV compression as an irreversible one-shot decision under tight memory budgets. Since decisions are fixed before de-coding, unstable token selection can permanently discard critical context and trigger tail failures. This perspective motivates a shift from reactive pruning to a compile-time decision paradigm, embodied by CompilerKV . Our contri-butions can be summarized as follows: • A novel prefill-only KV cache compression framework, CompilerKV, has been proposed, which compiles of-fline compression experience into reusable decision tables. By jointly modeling prompt-level risk and head heterogeneity, it transforms noisy importance signals into stable decisions, injecting stabilization priors at prefill to enable robust compression without online adaptation. • We reframe prefill-only KV compression as an irre-versible one-shot decision problem under tight memory budgets and substantiate this paradigm by deriving an attention approximation error bound (Theorem 4.1), theoretically explaining how our head-aware strategy mitigates tail failures under strict memory constraints. • Experimental results on LongBench across 16 datasets and 4 LLM backbones show that CompilerKV con-sistently outperforms state-of-the-art baselines under strict budgets. Under a strict 512-token budget, it re-covers over 97% of FullKV performance and surpasses the strongest competitor by up to 5.2 on complex sum-marization. 
+
+2. Related Work 
+
+Token Importance Estimation for Prefill-only Compres-sion. KV compression has evolved from static sparsity patterns (Child, 2019; Roy et al., 2021) to dynamic im-portance estimation. To retain critical historical states, accumulation-based methods such as H2O (Zhang et al., 2023) and StreamingLLM (Xiao et al., 2023) identify heavy-hitter tokens that consistently attract high attention scores. In the specific context of prefill-only compression, SnapKV (Li et al., 2024) adapts this by utilizing an observation win-dow at the end of the prompt to predict future relevance, performing one-shot pruning before generation begins. Re-cent efforts such as Value-Aware Token Pruning (VATP) (Guo et al., 2024) attempt to refine utility estimation by incorporating the absolute L2-norm of value vectors along-side attention probabilities. However, a direct application of these metrics often leads to tail failures, where generation collapses due to the irreversible loss of a few key tokens. This necessitates a more robust utility metric that decouples usage frequency from information density and calibrates signal scales within each sample. 
+
+Functional Heterogeneity of Attention Heads. Beyond token-level metrics, recent studies highlight functional het-erogeneity, showing that a few retrieval heads drive long-context capabilities (Fu et al., 2024; Feng et al., 2024) demonstrating that a small subset of retrieval heads dom-inates long-context capabilities. While approaches such as ZigZagKV (Zhong et al., 2025) attempt to exploit this by calculating head-specific importance scores during the prefill phase, they typically overlook the critical reliability gap between heads. This limitation is further supported by prior work (Voita et al., 2019), which shows that attention heads in LLMs exhibit strong functional heterogeneity and that many heads are redundant or noisy. These noisy atten-tion heads can interfere with the recognition of key tokens, especially under high compression ratios (Du et al., 2025). Furthermore, many existing head-aware strategies (Zhang et al., 2023; Liu et al., 2023b) rely on online feedback dur-ing decoding or necessitate complex alterations to the KV cache layout, rendering them unsuitable for efficient, zero-overhead deployment in strictly prefill-only compression scenarios. 
+
+Risk-Adaptive Budgeting and Threshold Gating. Com-plementary to importance scoring and head heterogeneity, effective KV compression also depends on how memory budgets are allocated. Methods such as PyramidKV (Cai et al., 2024) assign larger budgets to lower layers and smaller ones to higher layers, while DynamicKV (Zhou et al., 2024) introduces task-aware budget shaping. Although these strate-gies improve coarse budget utilization, they largely assume similar compressibility across prompts, which limits ro-bustness under heterogeneous inputs (Tang et al., 2025). Recent work has begun to incorporate statistical signals into caching decisions. Entropy-based approaches (Tang et al., 2024) leverage attention distributions to assess structural concentration, but often miss semantically sensitive sam-ples with deceptively concentrated patterns. Conversely, KVPruner (Lv et al., 2025) shows that perplexity, as a mea-sure of predictive uncertainty, provides a complementary semantic signal. We propose a Risk-Adaptive Threshold Gating mechanism that jointly models attention entropy and local perplexity, enabling robust threshold calibration for both structurally diffuse and semantically complex prompts. 
+
+3. Preliminaries 
+
+3.1. KV Caching in LLMs 
+
+LLMs are typically built upon the Transformer architecture, utilizing the Multi-Head Self-Attention (MHSA) mecha-2CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation 
+
+nism (Vaswani et al., 2017). Given an input sequence of length T , for each token at step t, the model projects its embedding into query q(l,h ) 
+
+> t
+
+, key k(l,h ) 
+
+> t
+
+, and value v(l,h )
+
+> t
+
+vectors for the l-th layer ( l ∈ { 1, . . . , L }) and h-th head (h ∈ { 1, . . . , H }). To accelerate autoregressive decoding, modern systems maintain a KV Cache to store historical states. For the 
+
+l-th layer at step t, this cache is denoted as (K, V ), compris-ing all preceding keys and values: K(l) = [ k(l)1 , . . . , k (l) 
+
+> t
+
+],
+
+V (l) = [ v(l)1 , . . . , v (l) 
+
+> t
+
+]. The attention mechanism relies on the attention weight A(l,h ) 
+
+> j,t
+
+, which represents the relevance of the historical token at position j to the current query at position t:
+
+A(l,h ) 
+
+> j,t
+
+=exp 
+
+
+
+(q(l,h ) 
+
+> t
+
+)⊤k(l,h ) 
+
+> j
+
+/√dhead 
+
+Pti=1 exp 
+
+
+
+(q(l,h ) 
+
+> t
+
+)⊤k(l,h ) 
+
+> i
+
+/√dhead 
+
+ , (1) where dhead is the dimension of each head and Ptj=1 A(l,h ) 
+
+> j,t
+
+=1 . As the sequence length T increases, the memory footprint of storing (K(l), V (l)) grows linearly with 
+
+T , posing a challenge for efficient long-context inference. 
+
+3.2. Offline Reinforcement Learning 
+
+We frame the compilation of compression policies as an offline reinforcement learning (RL) problem. Since prefill compression is a one-shot decision without state transitions, we model the problem as a Contextual Bandit, i.e., a single-step Markov Decision Process (MDP). Let s ∈ S denote a context observed at prefill time, a ∈ A 
+
+as discrete compression action, and r(s, a ) ∈ R as scalar reward reflecting the compression quality. Given a fixed offline dataset D = {(si, a i, r i)}Ni=1 collected under a be-havior policy, the goal is to learn a value function Qϕ(s, a )
+
+that estimates the expected reward of each action under a given context. 
+
+Unified Reward Structure. To govern head reliability and risk thresholds, we define a unified reward function that balances compression fidelity and task-specific constraints: 
+
+r(s, a ) = −(Lcomp (s, a ) − L full (s)) − λ · Ψ( s, a ), (2) where Ψ( s, a ) is the task-specific penalty (e.g., budget vio-lation), Lfull (s) is the baseline loss, and Lcomp (s, a ) is the Negative Log-Likelihood (NLL) of the compressed model over a window Ω:
+
+Lcomp (s, a ) = − 1
+
+|Ω|
+
+X
+
+> t∈Ω
+
+log P (xt | x<t , C(a)) , (3) where xt is the ground-truth token at position t and P (· | ·, C(a)) represents the predicted probability distribution conditioned on the compressed KV cache C(a).
+
+Optimization with Conservative Q-Learning. To mitigate the distribution shift caused by querying out-of-distribution actions, we employ Conservative Q-Learning (CQL). The universal training objective minimizes the standard Bellman error regularized by a conservative penalty: 
+
+min  
+
+> θ
+
+α Es∼D 
+
+"
+
+log X
+
+> a∈A
+
+exp( Qθ (s, a )) −Ea∼πβ[Qθ (s, a )] 
+
+#! 
+
++ 12 Es,a,r ∼D 
+
+(Qθ (s, a ) − r(s, a )) 2 ,
+
+(4) where πβ is the behavior policy and α controls conservatism. This approach allows robust decision table compilation for compression tasks using the same solver.. 
+
+4. CompilerKV 
+
+4.1. Problem Formulation 
+
+The prefill phase processes an input prompt of length T
+
+and generates the complete KV cache (K(l), V (l)) for each layer l. Our goal is to initialize the subsequent generation phase with a compressed, lightweight KV cache, subject to a predefined memory budget, while minimizing the degra-dation relative to the full KV cache. Formally, let Bl denote the token budget for layer l. We aim to select a selection set of token indices 
+
+S(l) ⊂ { 1, . . . , T }, s.t. |S (l)| ≤ Bl. (5) The compressed KV cache ( ˜K(l), ˜V (l)) is then constructed by gathering the vectors corresponding to ˜K(l) = K(l)[S(l)]
+
+and ˜V (l) = V (l)[S(l)].To find such S(l), we propose CompilerKV , a framework designed for the Prefill-only Compression task. The overall architecture of CompilerKV is illustrated in Figure 1. 
+
+4.2. Stabilized Token Utility Estimation 
+
+To approximate the optimal selection set S(l), we first estab-lish a base utility score u(l,h ) 
+
+> t
+
+that quantifies the contribution of each historical state. Recognizing that individual atten-tion heads can be noisy, we first aggregate signals across the entire model to form a robust baseline, and then integrate structural feature valuation. 
+
+Global Mean Attention. To mitigate the variance of single-head attention spikes, we compute the mean attention weight 
+
+¯Aj,t for the token at position j by averaging the raw atten-tion probabilities across all layers L and heads H:
+
+¯Aj,t = 1
+
+L · H
+
+> L
+
+X
+
+> l=1
+> H
+
+X
+
+> h=1
+
+A(l,h ) 
+
+> j,t
+
+. (6) Here, ¯Aj,t represents the global consensus relevance of token j to the query at step t.3CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation Stage 1  —— Stabilized Token 
+
+Utility Estimation       
+
+> Input:
+> prompt
+> tokens
+> 𝑥 1,···, 𝑥 𝑇
+> 𝑢 𝑡 =𝛼 𝑡 ∙𝜌 𝑡
+> 𝜌 𝑡 :normalized
+> value norm
+> (sample -wise)
+> 𝛼 𝑡 :window -
+> accumulated
+> attention
+> Stable ranking under tight budgets
+
+Stage 2 —— Head -Aware 
+
+Importance Injection(Static Table)         
+
+> Offline -compiled,
+> O(1) lookup
+> 𝑊 ℎ𝑒𝑎𝑑 [𝑙 ,ℎ]
+> ො𝑢 𝑡
+> (𝑙 ,ℎ)=𝑢 𝑡 ∙𝑊 ℎ𝑒𝑎𝑑 [𝑙 ,ℎ]
+> ො𝑢 𝑡
+> (𝑙 )=ถ𝑚𝑎𝑥
+> ℎ
+> ො𝑢 𝑡
+> (𝑙 ,ℎ)
+> Head heterogeneity handled
+> in prefill(not decode)
+
+Stage 3 —— Risk -Adaptive Threshold 
+
+Gating (Static LUT)                             
+
+> Risk signal module
+> attention entropy 𝐻 (𝐴 )
+> perplexity 𝑃𝑃𝐿
+> LUT
+> 𝐼 𝑐𝑎𝑛𝑑
+> (𝑙 )={𝑡 |ො𝑢 𝑡
+> (𝑙 )>𝜏 (𝑙 )}
+> Candidate selection
+> 𝐼 𝑐𝑎𝑛𝑑
+> (𝑙 )={𝑡 |ො𝑢 𝑡
+> (𝑙 )>𝜏 (𝑙 )}
+> 𝑆 𝑙 =Top −𝐵 𝑙 (𝐼 𝑐𝑎𝑛𝑑
+> (𝑙 ),ො𝑢 𝑡
+> (𝑙 ))
+> Budget correction
+> 𝐾 𝑙 ,𝑉 𝑙 →
+> Compressed KV Cache
+> 𝑀 lex (l,bh,bp)
+
+Prefill stage (one -shot,  No  Online  Learning) 
+
+Offline Compilation on Calibration Corpus 𝐷 cal 
+
+> Decode
+> Generation
+
+𝑠 = (𝑙 , 𝑏 ℎ, 𝑏 𝑝 , 𝐵 𝑙 ) 𝑎 ∈ 𝑇 = {𝜏 1, … , 𝜏 |𝑇 |}
+
+𝑟 = −(𝐿 comp − 𝐿 full ) − 𝛽 ·| |𝐼 𝑐𝑎𝑛𝑑 | 
+
+> T
+
+− 𝐵 𝑙  
+
+> T
+
+|
+
+Conservative offline Q -Learning 
+
+𝑠 = (𝑙 , ℎ, 𝐵 𝑙 ) 𝑎 ∈ 𝑊 = {𝑤 1, … , 𝑤 |𝑊 |}
+
+Offline Module A —— Offline RL : Head -Aware Importance Table 
+
+𝑟 = −(𝐿 comp − 𝐿 full )
+
+> Objective(simplified)
+> Conservative offline Q -learning(CQL -style
+
+)  
+
+> Context
+> Calibration Corpus
+> 𝐷 cal (50K long -
+> context prompts)
+> Reward
+> Objective
+> Action Context Action
+> Reward
+> Objective
+
+Offline Module B —— Offline RL : Risk -Adaptive Threshold LUT  
+
+> Calibration
+> Corpus 𝐷 cal
+
+Online Inference (Prefill -Only Execution Pipeline) 
+
+Figure 1. Overview of the CompilerKV Framework. The framework consists of three integrated stages: (1) computing a noise-resilient baseline score to filter out transient distractions; (2) modulating the ranking via a compiled Head Heterogeneity Table to strictly govern the functional differences among attention heads; and (3) querying a Risk-Gating Table to dynamically calibrate the retention threshold based on the prompt’s inherent complexity. 
+
+Window-Cumulative Attention. Instead of relying on a single step snapshot, we measure the temporal durability of a token’s influence. We define an observation window 
+
+W of size W at the end of the prefill phase, denoted as 
+
+W = {T −W +1 , . . . , T }. The accumulated attention score 
+
+α(l,h ) 
+
+> t
+
+for a historical token is computed by aggregating attention weights across this window: α(l,h ) 
+
+> t
+
+= P 
+
+> j∈W
+
+¯Aj,t .This aggregation smooths out transient noise, ensuring that retained tokens are those consistently attended to by the recent context rather than spurious outliers. 
+
+Relative Value Magnitude. Beyond attention probability, the information content carried by the token is encoded in its value vector v(l,h ) 
+
+> t
+
+. Previous methods often utilize the abso-lute L2-norm ∥v(l,h ) 
+
+> t
+
+∥2 as a proxy for importance. However, we observe that value norms fluctuate significantly across different heads and layers, leading to scale bias where layers with naturally larger norms dominate the global budget. To address this, we employ a intra-sample relative norm. We normalize ∥v(l,h ) 
+
+> t
+
+∥2 by the sequence average to obtain a scale-invariant factor ρ(l,h ) 
+
+> t
+
+:
+
+ρ(l,h ) 
+
+> t
+
+= ∥v(l,h ) 
+
+> t
+
+∥21
+
+> T
+
+PTk=1 ∥v(l,h ) 
+
+> k
+
+∥2
+
+. (7) 
+
+Unified Base Utility. The final stabilized utility score u(l,h )
+
+> t
+
+for the t-th token in the h-th head of layer l is derived as the product of its cumulative relevance and relative density: 
+
+u(l,h ) 
+
+> t
+
+= α(l,h ) 
+
+> t
+
+· ρ(l,h ) 
+
+> t
+
+. (8) This metric u(l,h ) 
+
+> t
+
+serves as the foundational signal for our framework, filtering out tokens that are either semantically irrelevant (low α) or informationally sparse (low ρ). 
+
+4.3. Head-Aware Importance Injection via Offline Table Compilation 
+
+While base utility u(l,h ) 
+
+> t
+
+captures token significance, treat-ing heads equally ignores functional heterogeneity (e.g., retrieval vs. noisy heads). To address this, we propose a “compile-then-execute” paradigm: head reliability priors are compiled offline on a calibration corpus and deployed as a frozen lookup table to rigorously govern head contributions. 
+
+Offline Learning Framework. We instantiate the general offline RL framework (Section 3.2) to compile the Head Heterogeneity Table (Whead ). The MDP tuple ⟨S , A, r ⟩ is defined as follows: • State Space ( S): To learn a position-specific prior, the state encapsulates the structural coordinates and layer budget. For the h-th head in the l-th layer, the state is 
+
+sl,h = ( l, h, B l).4CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation 
+
+• Action Space ( A): The action represents the relia-bility weight derived from a discretized scalar set W.The selected action al,h ∈ W acts as a multiplicative modulator for the utility scores. • Reward ( r): We adopt the unified reward function (Eq. 2) with λ = 0 , as head weighting aims purely for NLL recovery without directly triggering budget violations. We calculate the marginal contribution of each head by applying action al,h while holding others constant. 
+
+Table Compilation. We optimize the policy using the uni-fied CQL objective (Eq. 4) on the calibration dataset. Upon convergence, the probabilistic policy is “compiled” into a deterministic lookup table Whead by maximizing the learned Q-value: 
+
+Whead [l, h ] = argmax 
+
+> w∈W
+
+Qθ (sl,h , w ). (9) This artifact captures the global importance of each attention head. Once compiled, this table is fixed and directly applied during prefill, injecting head-specific reliability priors with-out any online learning or runtime adaptation. 
+
+Inference: Weighted Max-Pooling. During the online pre-fill phase, we implement a weighted max-pooling strategy to grant reliable heads veto power. The final layer-wise importance score ˆu(l) 
+
+> t
+
+is calculated as: 
+
+ˆu(l) 
+
+> t
+
+= max 
+
+> h∈{ 1,...,H }
+
+
+
+u(l,h ) 
+
+> t
+
+· Whead [l, h ]
+
+
+
+. (10) This mechanism ensures that if a critical retrieval head (high weight) strongly attends to a token, that token is protected from eviction regardless of the consensus from noisy heads. 
+
+4.4. Risk-Adaptive Threshold Gating 
+
+While ˆu(l) 
+
+> t
+
+incorporates head reliability, fixed Top-k strate-gies fail by assuming uniform compressibility. High-density samples require conservative retention to prevent tail fail-ures, whereas low-density ones permit aggressive pruning. To address this, we introduce Risk-Adaptive Gating, which dynamically calibrates the retention threshold based on instance-specific difficulty. 
+
+Joint Risk Modeling. We quantify compression difficulty using two metrics within the observation window Ω: At-tention Entropy Rstruct , which serves as the Structural Risk to measure the dispersion of attention patterns, and Lo-cal Perplexity Rsem , which represents the Semantic Risk 
+
+indicating predictive uncertainty. 1. Structural Risk ( Rstruct ): A high entropy implies that the model lacks a clear focus point (e.g., dense re-trieval), making pruning riskier. Unlike previous meth-ods that calculate step-wise entropy, we first compute the Global Mean Attention ¯A′ 
+
+> t
+
+by averaging attention weights across all layers L, heads H, and window po-sitions Ω:
+
+¯A′ 
+
+> t
+
+= 1
+
+|Ω|LH 
+
+X
+
+> j∈Ω
+> L
+
+X
+
+> l=1
+> H
+
+X
+
+> h=1
+
+A(l,h ) 
+
+> j,t
+
+. (11) The structural risk is then defined as the Shannon en-tropy of this aggregated distribution: 
+
+Rstruct = −
+
+> T
+
+X
+
+> t=1
+
+¯A′ 
+
+> t
+
+log ¯A′
+
+> t
+
+. (12) 2. Semantic Risk ( Rsem ): We assess predictive uncer-tainty using local perplexity. A spike in perplexity indicates complex semantic dependencies where histor-ical context is critical. We calculate the exponentiated average negative log-likelihood over the window: 
+
+Rsem = exp 
+
+− 1
+
+|Ω|
+
+X
+
+> j∈Ω
+
+log P (xj |x<j )
+
+ . (13) 
+
+Compiling the Risk Table. Instead of tuning thresholds manually, we compile a Risk Threshold Table (Tgate ) by instantiating the unified offline RL framework (Section 3.2). The specific MDP components are defined as: • State Space ( S): The state captures the layer index and the discretized risk coordinates. We map the contin-uous risks (Rstruct , Rsem ) into discrete bins (bent , b ppl ).Thus, the state is defined as sl = ( l, b ent , b ppl , B l).• Action Space ( A): The action corresponds to selecting a scalar retention threshold τ ∈ [0 .8, 1.0] . A lower τ
+
+retains more tokens (conservative), while a higher τ
+
+implies aggressive pruning. • Reward with Budget Constraint ( r): Unlike head weighting, threshold selection directly impacts mem-ory usage. We utilize the unified reward function (Eq. 2) with a non-zero penalty weight ( λ > 0). Let λ = βT ,where β is a hyperparameter. The constraint term is defined as the deviation from the target budget: 
+
+Ψ( s, a ) = ||I cand (a)| − Bl| , (14) where Icand (a) is the set of tokens retained by thresh-old a. This encourages the policy to find the strictness threshold that maximizes fidelity without violently vio-lating the layer-wise budget Bl.
+
+Final Selection: Gating with Budget Correction. The final selection set S(l) is determined by a Threshold Gat-ing and Top-Bl Correction strategy. First, we generate a candidate set based on the adaptive threshold: 
+
+I(l) 
+
+> cand
+
+= {t | ˆu(l) 
+
+> t
+
+≥ τ (l)}. (15) 5CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation 
+
+To strictly enforce the hardware storage budget Bl, we apply a correction step: 
+
+S(l) =
+
+(
+
+I(l)
+
+> cand
+
+, if |I (l)
+
+> cand
+
+| ≤ Bl,
+
+Top-Bl(I(l)
+
+> cand
+
+, ˆu(l) 
+
+> t
+
+), if |I (l)
+
+> cand
+
+| > B l, (16) where Top-Bl(I, u ) denotes the subset of Bl indices from 
+
+I corresponding to the largest values in the score u. The first condition permits elastic retention for low-risk prompts where the adaptive threshold naturally filters out enough redundancy ( |I (l)
+
+> cand
+
+| ≤ Bl). The second condition acts as a hard clamp, prioritizing the highest-utility tokens to maxi-mize information density when the risk-aware policy admits an excess of candidates. 
+
+KV Cache Construction. The prefill phase processes an input prompt of length T and generates the complete KV cache (K(l), V (l)) for each layer l. Upon determining the optimal indices S(l), the final compressed KV cache 
+
+( ˜K(l), ˜V (l)) is constructed by gathering the vectors corre-sponding to the selected indices: 
+
+˜K(l) = K(l)[S(l)], ˜V (l) = V (l)[S(l)], (17) where K(l)[S(l)] signifies the projection of the full Key cache onto the selected index set, effectively retaining only the feature vectors required for the compressed representa-tion. This selection and construction process is performed 
+
+once at the end of the prefill phase (step T ). During the subsequent autoregressive decoding, the retained cache 
+
+( ˜K(l), ˜V (l)) remains static, prohibiting any further updates or evictions. This “compile-then-execute” paradigm ensures that the overhead of our complex selection logic is amortized to zero during generation. 
+
+4.5. Theoretical Analysis 
+
+To provide insight into the stability of CompilerKV under extreme compression, we derive a stability-oriented bound on the approximation error of the attention output. 
+
+Theorem 4.1 (Stability-Oriented Attention Approximation Bound) . Consider a transformer layer l with input sequence length T and budget Bl. Let A(l,h ) and ˜A(l,h ) denote the full and compressed attention matrices, respectively. Under CompilerKV’s selection policy determined by the stabilized utility ˆu(l) 
+
+> t
+
+and the head reliability table Whead , with proba-bility at least 1−δ, the layer-wise aggregated approximation error satisfies: 
+
+1
+
+H
+
+> H
+
+X
+
+> h=1
+
+A(l,h ) − ˜A(l,h )
+
+> F
+
+≤ √T · ϵ(l) 
+
+> tail
+
++ O
+
+s (T − Bl) log(1 /δ )
+
+T · (W (l)min )2
+
+!
+
+,
+
+(18) 
+
+where ϵ(l) 
+
+> tail
+
+denotes the average attention mass of discarded tokens, and W (l)min is the minimum reliability weight assigned to any head in layer l.
+
+The bound shows that worst-case approximation error is dominated by discarded tail mass and is inversely controlled by head reliability weighting, explaining how stabilized, head-aware selection reduces sensitivity to noisy importance signals under irreversible prefill-only compression. The proof of Theorem 4.1 is shown in Appendix A. 64 96 128 256 512 
+
+> KV Cache Size
+> 26
+> 28
+> 30
+> 32
+> 34
+> 36
+> 38
+> 40
+> 42
+> Avg. Accuracy
+> StreamingLLM
+> H2O
+> SnapKV
+> PyramidKV
+> ZigzagKV
+> DynamicKV
+> CompilerKV
+
+Figure 2. Performance vs. KV Cache Size. Comparison of av-erage accuracy on LongBench across different budget constraints. Our method (ComplierKV) degrades most gracefully, maintaining usability even at extreme compression ratios where baselines fail. 
+
+5. Experiments 
+
+5.1. Experimental Setup Datasets and Metrics. We evaluate our method on Long-Bench (Bai et al., 2024), a comprehensive benchmark for long-context understanding. We cover a diverse set of 16 tasks across categories including Single-Doc QA (e.g., NarrativeQA (Ko ˇcisk `y et al., 2018), Qasper (Dasigi et al., 2021)), Multi-Doc QA (e.g., HotpotQA (Yang et al., 2018)), Summarization (e.g., GovReport (Huang et al., 2021), Multi-News (Fabbri et al., 2019)), Few-shot Learning (e.g., TREC (Li & Roth, 2002), SAMSum (Gliwa et al., 2019)), and Synthetic & Code tasks including Passage Retrieval (PRe), Passage Count (Pcount), LCC (Guo et al., 2023), and RepoBench-P (RB-P) (Liu et al., 2023a). Following stan-dard protocols, we report the specific metric for each dataset and the macro-average score. 
+
+Baselines. We benchmark against FullKV (theoretical up-per bound) and six SOTA methods representing diverse paradigms: H2O (Zhang et al., 2023) and StreamingLLM (Xiao et al., 2023) as eviction-based baselines; SnapKV (Li et al., 2024) and ZigZagKV (Zhong et al., 2025) for prefill-optimized selection; and PyramidKV (Cai et al., 2024) alongside DynamicKV (Zhou et al., 2024) for budget al-location strategies. This selection comprehensively covers 6CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation 
+
+Table 1. Main Results on LongBench (Budget = 512 Tokens). Comparisons with state-of-the-art compression methods across four LLMs. The best result among compression methods is bolded , and the second best is underlined. 
+
+Single-Doc QA Multi-Doc QA Summarization Few-Shot Learning Synthetic & Code 
+
+Model Method NarrativeQA Qasper MF-en HotpotQA 2WikiMQA MuSiQue GovReport QMSum MultiNews TREC TriviaQA SAMSum Lcc RB-P Pcount PRe  Avg. 
+
+> InternLM-2.5 7B-Chat-1M
+
+FullKV 22.47 27.58 39.98 40.96 33.52 26.61 33.01 25.18 26.28 72.5 86.76 39.84 55.86 57.90 2.92 100 43.21 StreamingKV 17.58 15.86 26.55 26.68 16.69 11.01 25.96 21.33 25.57 65.0 67.16 21.71 43.58 42.76 0.95 87.56 32.25 H2O 15.33 19.84 32.67 27.96 19.94 21.18 16.91 23.00 21.46 42.0 84.38 34.76 48.46 50.00 1.23 96.50 34.73 SnapKV 16.86 23.28 36.24 32.14 19.89 23.21 17.81 23.18 22.44 71.0 84.05 34.34 50.32 53.34 1.00 96.50 37.85 PyramidKV 17.62 21.08 37.52 32.21 21.31 22.03 19.37 24.06 22.22 73.0 83.94 34.61 50.45 49.72 1.05 95.50 37.86 ZigZagKV 17.28 22.07 36.94 32.18 20.67 22.56 18.67 23.66 22.32 72.0 83.99 34.49 50.39 51.35 1.03 95.95 37.93 DynamicKV 17.77 23.87 37.74 32.98 21.13 23.21 19.13 23.49 22.48 75.0 84.89 36.70 50.70 51.08 0.91 95.50 38.54 
+
+Ours 18.47 24.22 38.37 33.49 21.25 23.05 24.41 24.05 23.68 75.0 84.31 36.11 51.16 52.88 1.00 95.50 39.18 LLaMA-3 8B-Instruct 
+
+FullKV 25.16 31.81 39.59 43.09 36.15 21.77 28.62 23.34 26.33 75.0 90.50 42.36 59.04 53.93 5.20 69.25 41.95 StreamingKV 19.03 12.78 28.67 37.83 29.97 16.55 20.30 20.94 24.56 61.0 75.43 30.82 51.93 49.98 5.86 69.50 34.70 H2O 22.84 16.80 32.36 41.50 34.07 19.33 22.28 22.88 23.69 41.0 90.46 40.22 57.52 55.43 5.54 69.50 37.21 SnapKV 24.62 22.78 37.88 42.96 34.82 20.25 22.63 22.54 23.93 70.0 90.39 40.30 60.27 55.85 5.74 69.50 40.28 PyramidKV 24.48 23.51 36.24 42.33 31.95 20.73 23.37 23.01 24.37 72.5 90.43 40.54 59.27 54.87 5.88 69.50 40.19 ZigZagKV 24.54 23.18 36.98 42.61 33.24 20.51 23.04 22.80 24.17 71.4 90.41 40.43 59.72 55.31 5.81 69.50 40.66 DynamicKV 24.80 24.62 36.69 44.13 33.25 20.82 23.00 22.54 24.12 72.5 90.39 40.76 61.21 56.91 5.78 69.50 40.69 
+
+Ours 24.97 25.11 37.01 43.04 35.69 20.86 23.66 22.93 25.40 72.5 90.21 40.67 61.47 57.00 5.64 69.50 40.98 Qwen2 7B-Instruct 
+
+FullKV 25.14 42.35 45.04 14.80 14.13 9.23 36.35 23.79 26.51 76.5 89.16 45.23 60.30 60.78 6.50 75.50 40.71 StreamingKV 20.47 26.97 32.64 14.31 14.39 6.82 25.70 19.31 24.88 66.0 76.56 32.11 46.58 44.20 8.00 15.50 29.65 H2O 22.88 34.28 41.50 13.30 14.60 8.31 23.69 22.07 22.72 39.5 88.75 43.91 58.83 57.83 8.00 72.00 35.76 SnapKV 23.86 38.50 44.68 15.60 14.62 9.13 24.56 22.39 23.18 70.0 89.31 43.32 58.68 60.74 5.00 72.00 38.47 PyramidKV 24.47 37.60 43.51 14.48 12.83 8.99 23.59 22.30 22.41 74.0 89.21 43.40 57.67 56.14 6.50 74.00 38.19 ZigZagKV 24.19 38.01 44.04 14.98 13.64 9.05 24.03 22.34 22.76 72.5 89.26 43.36 58.12 58.21 5.80 73.00 38.80 DynamicKV 24.66 40.44 45.30 15.42 13.89 8.46 25.51 22.77 22.92 74.0 89.27 43.18 60.38 59.32 7.00 74.00 39.16 
+
+Ours 25.05 41.00 44.99 14.75 14.04 8.50 25.96 22.70 24.16 75.5 89.09 43.38 60.76 60.10 8.00 74.00 39.50 Mistral-7B Instruct-v0.2 
+
+FullKV 26.63 32.99 49.34 42.77 27.35 18.77 32.87 24.24 27.10 71.0 86.23 42.96 56.93 54.49 2.75 86.98 42.71 StreamingKV 19.05 17.21 36.82 30.64 21.84 10.56 24.47 19.84 25.48 62.0 72.82 29.49 46.15 42.55 2.71 19.25 30.06 H2O 22.23 25.75 44.09 32.76 22.88 14.96 23.53 22.96 24.53 41.5 85.53 41.54 55.11 50.81 3.39 86.20 37.36 SnapKV 24.96 27.97 49.04 39.93 25.18 17.64 24.14 23.69 24.41 67.5 86.09 41.11 56.73 53.11 2.86 86.98 40.71 PyramidKV 23.55 28.79 48.71 41.00 25.64 16.35 24.79 23.52 24.49 69.5 86.20 42.58 55.45 51.67 3.53 81.81 40.47 ZigZagKV 24.18 28.42 48.86 40.52 25.43 16.93 24.49 23.59 24.45 68.5 86.15 41.91 56.03 52.32 3.22 84.14 40.83 DynamicKV 25.63 29.11 48.41 39.80 26.62 16.72 24.73 23.42 24.83 70.5 86.74 43.01 55.40 52.45 3.20 83.57 40.88 
+
+Ours 26.06 29.51 49.29 41.46 27.06 18.15 25.16 24.19 25.13 70.5 86.18 42.91 55.13 51.37 3.29 84.02 41.21 
+
+the spectrum from accumulation-based to head-aware and risk-adaptive compression. 
+
+Implementation Details. We conduct experiments on four popular LLMs: LLaMA-3-8B-Instruct, Qwen2-7B-Instruct, Mistral-7B-Instruct-v0.2, and InternLM-2.5-7B-Chat. Un-less otherwise stated, we set the KV cache budget to 512 tokens per layer for the compressed history. For our method, we compile both the Head Reliability Table and the Risk-Adaptive Threshold Gating on a held-out calibration corpus of approximately 50K long-context prompts, following Ap-pendix B. This calibration corpus is strictly disjoint from all LongBench evaluation instances to avoid leakage. 
+
+5.2. Main Results: Performance on LongBench 
+
+Table 1 presents the comparative results across all mod-els. Our method consistently outperforms all baselines and achieves performance closest to the FullKV upper bound. 
+
+Superiority over State-of-the-Arts. Under the strict 512-token budget, our method achieves the highest average scores across all four models. On LLaMA-3-8B, we achieve an average score of 40.98, surpassing the strongest baseline (DynamicKV: 40.69) and recovering 97 .7% of the FullKV performance (41.95). On Qwen2-7B, while StreamingLLM and H2O suffer significant degradation (col-lapsing to < 36 .0 avg), our method maintains a robust score of 39.50, significantly outperforming ZigZagKV (38.33) which suffers from head-selection noise. 
+
+Comparison with Dynamic Budgeting. Our results show that simply moving budget to lower layers is insufficient for complex reasoning tasks (e.g., Qasper). By contrast, our method, which jointly models entropy and perplexity, suc-cessfully identifies and protects high-complexity segments, yielding a +1 .17 improvement on Qasper (InternLM-2.5) compared to PyramidKV. 
+
+5.3. Analysis of Compression Robustness 
+
+To understand the behavior of our method under varying con-straints, we evaluate the performance retention rate across different KV cache sizes (ranging from 64 to 1024 tokens). Figure 2 illustrates the performance trajectory across vary-ing budget constraints. While eviction-based baselines ex-hibit precipitous performance drops as the budget decreases below 256 tokens, our approach maintains a significantly flatter degradation curve. 
+
+Needle-in-a-Haystack Retrieval Heatmaps. To assess the fidelity of our compressed representations, we visualize the “Needle-in-a-Haystack” retrieval heatmaps in Figure 3. While baselines like StreamingLLM and SnapKV suf-7CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation 1000 
+
+> 2000
+> 3000
+> 4000
+> 5000
+> 6000
+> 7000
+> 8000
+> 9000
+> 10000
+> 11000
+> 12000
+> 13000
+> 14000
+> 15000
+> 16000
+> 17000
+> 18000
+> 19000
+> 20000
+> 21000
+> 22000
+> 23000
+> 24000
+> 25000
+> 26000
+> 27000
+> 28000
+> 29000
+> 30000
+> 31000
+> 32000
+> Token Limit
+> 0.0
+> 11.0
+> 22.0
+> 33.0
+> 44.0
+> 56.0
+> 67.0
+> 78.0
+> 89.0
+> 100.0
+> Depth Percent
+> True Average Score 0.92
+
+(a) FullKV (Avg. Score: 0.92) 1000  
+
+> 2000
+> 3000
+> 4000
+> 5000
+> 6000
+> 7000
+> 8000
+> 9000
+> 10000
+> 11000
+> 12000
+> 13000
+> 14000
+> 15000
+> 16000
+> 17000
+> 18000
+> 19000
+> 20000
+> 21000
+> 22000
+> 23000
+> 24000
+> 25000
+> 26000
+> 27000
+> 28000
+> 29000
+> 30000
+> 31000
+> 32000
+> Token Limit
+> 0.0
+> 11.0
+> 22.0
+> 33.0
+> 44.0
+> 56.0
+> 67.0
+> 78.0
+> 89.0
+> 100.0
+> Depth Percent
+> True Average Score 0.26
+
+(b) StreamingLLM (Avg. Score: 0.26) 1000 
+
+> 2000
+> 3000
+> 4000
+> 5000
+> 6000
+> 7000
+> 8000
+> 9000
+> 10000
+> 11000
+> 12000
+> 13000
+> 14000
+> 15000
+> 16000
+> 17000
+> 18000
+> 19000
+> 20000
+> 21000
+> 22000
+> 23000
+> 24000
+> 25000
+> 26000
+> 27000
+> 28000
+> 29000
+> 30000
+> 31000
+> 32000
+> Token Limit
+> 0.0
+> 11.0
+> 22.0
+> 33.0
+> 44.0
+> 56.0
+> 67.0
+> 78.0
+> 89.0
+> 100.0
+> Depth Percent
+> True Average Score 0.42
+
+(c) SnapKV (Avg. Score: 0.42) 1000  
+
+> 2000
+> 3000
+> 4000
+> 5000
+> 6000
+> 7000
+> 8000
+> 9000
+> 10000
+> 11000
+> 12000
+> 13000
+> 14000
+> 15000
+> 16000
+> 17000
+> 18000
+> 19000
+> 20000
+> 21000
+> 22000
+> 23000
+> 24000
+> 25000
+> 26000
+> 27000
+> 28000
+> 29000
+> 30000
+> 31000
+> 32000
+> Token Limit
+> 0.0
+> 11.0
+> 22.0
+> 33.0
+> 44.0
+> 56.0
+> 67.0
+> 78.0
+> 89.0
+> 100.0
+> Depth Percent
+> True Average Score 0.72
+
+(d) PyramidKV (Avg. Score: 0.72) 1000 
+
+> 2000
+> 3000
+> 4000
+> 5000
+> 6000
+> 7000
+> 8000
+> 9000
+> 10000
+> 11000
+> 12000
+> 13000
+> 14000
+> 15000
+> 16000
+> 17000
+> 18000
+> 19000
+> 20000
+> 21000
+> 22000
+> 23000
+> 24000
+> 25000
+> 26000
+> 27000
+> 28000
+> 29000
+> 30000
+> 31000
+> 32000
+> Token Limit
+> 0.0
+> 11.0
+> 22.0
+> 33.0
+> 44.0
+> 56.0
+> 67.0
+> 78.0
+> 89.0
+> 100.0
+> Depth Percent
+> True Average Score 0.83
+
+(e) DynamicKV (Avg. Score: 0.83) Depth  Percent      
+
+> 0.0
+> 11.0
+> 22.0
+> 33.0
+> 44.0
+> 56.0
+> 67.0
+> 78.0
+> 89.0
+> 100.0
+> True Average Score 0.86
+> Token Limit
+
+(f) CompilerKV (Avg. Score: 0.86) - Ours 
+
+Figure 3. Needle-in-a-Haystack Pressure Test on Mistral-7B. Visual comparison of retrieval accuracy (Green=100%, Red=0%) across varying context lengths (x-axis) and needle depths (y-axis). FullKV (a) sets the upper bound. While baselines like StreamingLLM 
+
+(b) and SnapKV (c) struggle with long-range dependencies, and DynamicKV (e) shows fragmentation at extreme lengths, our method 
+
+CompilerKV (f) maintains a robust retrieval pattern comparable to the oracle. 
+
+fer severe information loss (0.26–0.42) and even strong contenders like DynamicKV exhibit fragmentation in deep contexts, CompilerKV achieves a superior score of 0.86. By adaptively preserving high-risk tokens, our method re-constructs a retrieval pattern that closely mirrors the oracle FullKV (0.92), effectively bridging the gap where other compression methods fail. 
+
+Additional Experiments. Beyond predictive accuracy, we provide the detailed profiling on end-to-end latency and peak memory usage across various context lengths in Table A1 in Appendix B.2, demonstrating up to a 60% reduction in total latency for long-sequence generation. The effectiveness of these components is further substantiated by the policy visualizations in Figure A2 and A3 in Appendix B.2, which confirm that the learned tables successfully identify retrieval heads and structurally sensitive layers. 
+
+5.4. Ablation Study 
+
+We conducted ablation experiments on Head Reliability Governance and Risk-Adaptive Gating to verify the contri-butions of these two core components. As shown in Table 2, Risk-Adaptive Gating proves most critical; replacing it with static thresholds causes the largest drop ( ∼3.0 points). Stabilized Utility is also vital, as reverting to raw attention degrades performance by ∼1.9 points, confirming its role in mitigating scale bias. Finally, Head Reliability contributes a consistent gain ( ∼1.0 point) by filtering noisy heads to prioritize reliable signals. 
+
+Table 2. Component-wise Ablation Study. Impact of removing specific modules under a 512-token budget. Risk-Adaptive Thresh-olding ( τ ) is the most critical factor. 
+
+Ablation Setting Mistral LLaMA-3 Qwen2 InternLM CompilerKV (Full) 41.21 40.98 39.50 39.18 
+
+w/o Head Reliability 40.26 40.13 38.60 38.38 w/o Risk-Adaptive τ 38.16 38.13 36.30 36.23 w/o Stabilized Utility 39.36 39.28 37.55 37.43 
+
+6. Conclusion 
+
+We introduced CompilerKV, a framework that fundamen-tally rethinks KV cache compression by treating it as a risk-adaptive compilation process rather than a static prun-ing task. By injecting offline-learned head reliability priors and dynamically calibrating retention thresholds based on prompt complexity, our approach successfully overcomes the inherent instability of the one-size-fits-all compres-sion policy and scale-biased attention statistics. Empirical results across diverse architectures confirm that Compil-erKV achieves near-lossless performance even under ex-treme memory constraints, effectively decoupling inference cost from context length. This paradigm paves the way for deploying robust long-context capabilities on memory-constrained edge devices without the performance trade-offs typical of heuristic approaches. Future work will explore extending this compilation strategy to streaming genera-tion and investigating the transferability of reliability tables across different model families. 8CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation 
+
+References 
+
+Bai, Y., Lv, X., Zhang, J., Lyu, H., Tang, J., Huang, Z., Du, Z., Liu, X., Zeng, A., Hou, L., et al. Longbench: A bilingual, multitask benchmark for long context under-standing. In Proceedings of the 62nd annual meeting of the association for computational linguistics (volume 1: Long papers) , pp. 3119–3137, 2024. Behrouz, A., Zhong, P., and Mirrokni, V. Titans: Learning to memorize at test time. arXiv preprint arXiv:2501.00663 ,2024. Cai, Z., Zhang, Y., Gao, B., Liu, Y., Li, Y., Liu, T., Lu, K., Xiong, W., Dong, Y., Hu, J., et al. Pyramidkv: Dynamic kv cache compression based on pyramidal information funneling. arXiv preprint arXiv:2406.02069 , 2024. Child, R. Generating long sequences with sparse transform-ers. arXiv preprint arXiv:1904.10509 , 2019. Dasigi, P., Lo, K., Beltagy, I., Cohan, A., Smith, N. A., and Gardner, M. A dataset of information-seeking questions and answers anchored in research papers. arXiv preprint arXiv:2105.03011 , 2021. Du, W., Jiang, L., Tao, K., Liu, X., and Wang, H. Which heads matter for reasoning? rl-guided kv cache compres-sion. arXiv preprint arXiv:2510.08525 , 2025. Fabbri, A. R., Li, I., She, T., Li, S., and Radev, D. Multi-news: A large-scale multi-document summariza-tion dataset and abstractive hierarchical model. In Pro-ceedings of the 57th annual meeting of the association for computational linguistics , pp. 1074–1084, 2019. Feng, Y., Lv, J., Cao, Y., Xie, X., and Zhou, S. K. Ada-kv: Optimizing kv cache eviction by adaptive budget allocation for efficient llm inference. arXiv preprint arXiv:2407.11550 , 2024. Fu, Y., Cai, Z., Asi, A., Xiong, W., Dong, Y., and Xiao, W. Not all heads matter: A head-level kv cache compression method with integrated retrieval and reasoning. arXiv preprint arXiv:2410.19258 , 2024. Gliwa, B., Mochol, I., Biesek, M., and Wawer, A. Samsum corpus: A human-annotated dialogue dataset for abstrac-tive summarization. arXiv preprint arXiv:1911.12237 ,2019. Guo, D., Xu, C., Duan, N., Yin, J., and McAuley, J. Long-coder: A long-range pre-trained language model for code completion. In International Conference on Machine Learning , pp. 12098–12107. PMLR, 2023. Guo, Z., Kamigaito, H., and Watanabe, T. Attention score is not all you need for token importance indicator in kv cache reduction: Value also matters. arXiv preprint arXiv:2406.12335 , 2024. Huang, L., Cao, S., Parulian, N., Ji, H., and Wang, L. Effi-cient attentions for long document summarization. arXiv preprint arXiv:2104.02112 , 2021. Ko ˇcisk `y, T., Schwarz, J., Blunsom, P., Dyer, C., Hermann, K. M., Melis, G., and Grefenstette, E. The narrativeqa reading comprehension challenge. Transactions of the Association for Computational Linguistics , 6:317–328, 2018. Li, X. and Roth, D. Learning question classifiers. In COL-ING 2002: The 19th International Conference on Com-putational Linguistics , 2002. Li, Y., Huang, Y., Yang, B., Venkitesh, B., Locatelli, A., Ye, H., Cai, T., Lewis, P., and Chen, D. Snapkv: Llm knows what you are looking for before generation. Advances in Neural Information Processing Systems , 37:22947– 22970, 2024. Liu, A., Feng, B., Xue, B., Wang, B., Wu, B., Lu, C., Zhao, C., Deng, C., Zhang, C., Ruan, C., et al. Deepseek-v3 technical report. arXiv preprint arXiv:2412.19437 , 2024. Liu, T., Xu, C., and McAuley, J. Repobench: Benchmarking repository-level code auto-completion systems. arXiv preprint arXiv:2306.03091 , 2023a. Liu, Z., Wang, J., Dao, T., Zhou, T., Yuan, B., Song, Z., Shrivastava, A., Zhang, C., Tian, Y., Re, C., et al. Deja vu: Contextual sparsity for efficient llms at inference time. In International Conference on Machine Learning , pp. 22137–22176. PMLR, 2023b. Lv, B., Zhou, Q., Ding, X., Wang, Y., and Ma, Z. Kvpruner: Structural pruning for faster and memory-efficient large language models. In ICASSP 2025-2025 IEEE Inter-national Conference on Acoustics, Speech and Signal Processing (ICASSP) , pp. 1–5. IEEE, 2025. Pope, R., Douglas, S., Chowdhery, A., Devlin, J., Bradbury, J., Heek, J., Xiao, K., Agrawal, S., and Dean, J. Efficiently scaling transformer inference. Proceedings of machine learning and systems , 5:606–624, 2023. Roy, A., Saffar, M., Vaswani, A., and Grangier, D. Efficient content-based sparse attention with routing transform-ers. Transactions of the Association for Computational Linguistics , 9:53–68, 2021. Tang, C., Liu, J., Xu, H., and Huang, L. Adaptive kv-cache compression without manually setting budget. arXiv preprint arXiv:2509.03136 , 2025. Tang, J., Zhao, Y., Zhu, K., Xiao, G., Kasikci, B., and Han, S. Quest: Query-aware sparsity for efficient long-context llm inference. arXiv preprint arXiv:2406.10774 , 2024. 9CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation 
+
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, Ł., and Polosukhin, I. At-tention is all you need. Advances in neural information processing systems , 30, 2017. Voita, E., Talbot, D., Moiseev, F., Sennrich, R., and Titov, I. Analyzing multi-head self-attention: Specialized heads do the heavy lifting, the rest can be pruned. arXiv preprint arXiv:1905.09418 , 2019. Xiao, G., Tian, Y., Chen, B., Han, S., and Lewis, M. Ef-ficient streaming language models with attention sinks. 
+
+arXiv preprint arXiv:2309.17453 , 2023. Xiao, G., Tang, J., Zuo, J., Guo, J., Yang, S., Tang, H., Fu, Y., and Han, S. Duoattention: Efficient long-context llm inference with retrieval and streaming heads. arXiv preprint arXiv:2410.10819 , 2024. Yang, Z., Qi, P., Zhang, S., Bengio, Y., Cohen, W., Salakhut-dinov, R., and Manning, C. D. Hotpotqa: A dataset for diverse, explainable multi-hop question answering. In 
+
+Proceedings of the 2018 conference on empirical methods in natural language processing , pp. 2369–2380, 2018. Zhang, Z., Sheng, Y., Zhou, T., Chen, T., Zheng, L., Cai, R., Song, Z., Tian, Y., R ´e, C., Barrett, C., et al. H2o: Heavy-hitter oracle for efficient generative inference of large language models. Advances in Neural Information Processing Systems , 36:34661–34710, 2023. Zhong, M., Liu, X., Zhang, C., Lei, Y., Gao, Y., Hu, Y., Chen, K., and Zhang, M. Zigzagkv: Dynamic kv cache compression for long-context modeling based on layer uncertainty. In Proceedings of the 31st International Con-ference on Computational Linguistics , pp. 8897–8907, 2025. Zhou, X., Wang, W., Zeng, M., Guo, J., Liu, X., Shen, L., Zhang, M., and Ding, L. Dynamickv: Task-aware adaptive kv cache compression for long context llms. 
+
+arXiv preprint arXiv:2412.14838 , 2024. 10 CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation 
+
+A. Proof of Theorem 4.1 
+
+Proof. Let A(l,h ) ∈ RT ×T be the full attention matrix for head h in layer l. For a specific query at position t, the attention distribution over keys is given by the row vector A(l,h ) 
+
+> t, :
+
+. The compressed attention matrix ˜A(l,h ) is constructed by retaining only the indices in the set S(l), where |S (l)| = Bl. The resulting sparse distribution is re-normalized. A standard result in sparse attention analysis (Zhang et al., 2023) states that the L1 distance between the full and compressed distributions is bounded by twice the probability mass of the discarded tokens: 
+
+A(l,h ) 
+
+> t, :
+
+− ˜A(l,h ) 
+
+> t, :1
+
+≤ 2 X
+
+> j / ∈S (l)
+
+A(l,h ) 
+
+> t,j
+
+. (A1) This inequality implies that the approximation error is strictly determined by the total attention weight of the evicted tokens. In CompilerKV, the selection set S(l) is determined by the stabilized utility score ˆu(l) 
+
+> j
+
+, defined as Eq. (10) . The selection rule 
+
+S(l) = Top-Bl(ˆ u(l)) ensures that we retain tokens with the highest weighted utility. Ideally, maximizing utility ˆu minimizes the discarded attention mass. However, the true attention A(l,h ) 
+
+> t,j
+
+for a specific head h may deviate from the aggregated utility. We bound this deviation using the head reliability weight. The selection rule keeps tokens with high ˆu(l) 
+
+> t
+
+= max k(u(l,k ) 
+
+> t
+
+·
+
+Whead [l, k ]) . Since , dividing by W (l)min provides a conservative scaling factor. Specifically, the error contribution of pruned tokens is strictly controlled by their utility. Combining these, we obtain the bound in terms of the utility sum: 
+
+X
+
+> j / ∈S (l)
+
+A(l,h ) 
+
+> t,j
+
+= 1
+
+Whead [l, h ]
+
+X
+
+> j / ∈S (l)
+
+
+
+Whead [l, h ] · A(l,h )
+
+> t,j
+
+
+
+≤ 1
+
+W (l)min 
+
+X
+
+> j / ∈S (l)
+
+u(l,h ) 
+
+> j
+
+. (A2) Substituting this back into inequality (A1) yields the first result: 
+
+A(l,h ) 
+
+> t, :
+
+− ˜A(l,h ) 
+
+> t, :1
+
+≤ 2
+
+W (l)min 
+
+X
+
+> j / ∈S (l)
+
+u(l,h ) 
+
+> j
+
+. (A3) We now derive the bound for the Frobenius norm over the entire layer. The squared Frobenius norm of the error matrix E(h)
+
+for head h is: 
+
+∥E(h)∥2 
+
+> F
+
+=
+
+> T
+
+X
+
+> t=1
+
+∥A(l,h ) 
+
+> t, :
+
+− ˜A(l,h ) 
+
+> t, :
+
+∥22. (A4) Using the norm inequality ∥x∥2 ≤ ∥ x∥1, we have ∥At, : − ˜At, :∥22 ≤ ∥ At, : − ˜At, :∥21. However, since probabilities sum to 1, a tighter bound for the specific case of probability distributions is ∥At, : − ˜At, :∥2 ≤
+
+q
+
+2 P 
+
+> j / ∈S
+
+At,j . Thus, 
+
+∥E(h)∥F ≈
+
+vuuut
+
+> T
+
+X
+
+> t=1
+
+X
+
+> j / ∈S
+
+A(l,h )
+
+> t,j
+
+
+
+> 2
+
+(A5) We define the random variable Xt = P 
+
+> j / ∈S
+
+A(l,h ) 
+
+> t,j
+
+representing the “lost mass” at step t. The expected value of the total lost mass is E[P Xt] = T · ϵ(l)
+
+> tail
+
+. By the McDiarmid’s Inequality (or Hoeffding’s bound for bounded variables), the deviation of the sum of independent random variables (assuming approximate independence of attention distributions across diverse prompts) from its expectation is bounded. The range of the sum is constrained by the number of pruned tokens (T − Bl).The sensitivity of the selection function is scaled by the inverse of the head reliability weights (since a low weight increases the variance of the selection decision). Applying the concentration bound with probability 1 − δ:
+
+1
+
+T
+
+> T
+
+X
+
+> t=1
+
+Xt ≤ E[Xt] + O
+
+r log(1 /δ )
+
+T
+
+!
+
+(A6) 11 CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation 
+
+Scaling to the Frobenius norm (which involves √T ): 
+
+∥E(h)∥F ≤ √T · ϵ(l) 
+
+> tail
+
++ O
+
+r (T − Bl) log(1 /δ )
+
+T
+
+!
+
+(A7) Finally, incorporating the W (l)min term to account for the worst-case head reliability (since we average over H heads, the bound is dominated by the least reliable head if not weighted), we arrive at the final aggregated bound: 
+
+1
+
+H
+
+> H
+
+X
+
+> h=1
+
+A(l,h ) − ˜A(l,h )
+
+> F
+
+≤ √T · ϵ(l) 
+
+> tail
+
++ O
+
+s (T − Bl) log(1 /δ )
+
+T · (W (l)min )2
+
+!
+
+(A8) This confirms that the approximation error is bounded by the tail mass ϵtail , and the stability of this bound improves as the context length T increases (law of large numbers), but is penalized by aggressive pruning ( T − Bl) and low head reliability (Wmin ). 
+
+B. Additional Experiments 
+
+B.1. Offline Table Compilation Calibration corpus. We compile both decision tables (the head heterogeneity table Whead [l, h ] and the risk-adaptive threshold gating Tgate ) on a held-out calibration corpus Dcal , which is strictly disjoint from the LongBench evaluation set to avoid leakage. Dcal contains approximately 50 K long-context prompts sampled from diverse public sources, including long-form narratives (PG19), scientific/technical articles (arXiv, PubMed), long-document summarization and meeting transcripts (GovReport, QMSum, BookSum), as well as instruction-style dialogues and code/QA text (ShareGPT/UltraChat and The Pile subsets such as GitHub/StackExchange). All prompts are used in an unlabeled manner: we only require forward statistics from the prefill stage and a short continuation loss for reward computation. 
+
+Risk signals and stratified coverage. For each prompt x1: T , we compute the observation-window statistics on W =
+
+{T − wobs + 1 , . . . , T }, including the attention entropy H(A) and local perplexity , and discretize them into bin indices 
+
+(bh, b p) . To ensure sufficient coverage of high-risk prompts (e.g., high-entropy or high-perplexity regimes), we adopt stratified sampling over (bh, b p) when constructing Dcal , avoiding a dominance of medium-risk samples that would otherwise bias the learned tables toward overly aggressive pruning. 
+
+Why 20 × 4 bins for (H(A), PPL) . We choose NH =20 entropy bins and NP =4 perplexity bins, resulting in a 20 × 4
+
+risk grid for each layer. This design is motivated by a practical bias–variance trade-off for discrete table policies: (i) attention entropy is a structural signal with a relatively smooth and wide dynamic range over long-context prompts, hence we allocate finer granularity ( 20 bins) to capture gradual shifts in concentration vs. dispersion; (ii) perplexity acts as a semantic uncertainty signal whose main role is to modulate the overall conservativeness, and empirically exhibits heavier tails and higher estimation noise on short windows, thus we use coarser partitioning ( 4 bins) to maintain stability. With L=32 
+
+layers, the LUT contains 32 × 20 × 4=2560 entries, which is small enough for robust offline estimation and deployment, while still expressive enough to differentiate risk regimes without introducing over-fragmentation. In our calibration, this binning yields adequate per-cell support under stratified sampling and avoids sparse high-risk cells that would cause unstable threshold decisions. 
+
+Model choice and cross-architecture applicability. We compile tables on a 32-layer backbone to obtain a unified layer index space. For models with different depths, we apply a monotonic depth mapping (e.g., relative-depth interpolation) at inference time. While our main results use per-model compilation, we also explore depth mapping as a heuristic to reuse tables across similar 7B–8B backbones, with preliminary evidence suggesting potential portability. We leave a rigorous same-table transfer evaluation for future work. 
+
+Hyperparameter ranges and robustness. Both compiled tables operate as bounded multiplicative modulators on top of a normalized utility signal, which allows us to use conservative and architecture-stable ranges. For Stage 3, the LUT outputs a layer threshold τ (l) ∈ [0 .8, 1.0] . This range is chosen for two reasons. First, ˆu(l) 
+
+> t
+
+is constructed from the stabilized utility ut = αt · ρt , where ρt is sample-normalized ; empirically, this makes ˆu(l) 
+
+> t
+
+concentrate around O(1) across prompts 12 CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation 
+
+Table A1. Efficiency comparison between FullKV and our CompilerKV. CompilerKV compiles a fixed compressed KV-cache before decoding, enabling faster token generation with slightly higher prefill cost (TTFT) but significantly improved end-to-end latency and memory usage. 
+
+Context Setting Efficiency Metrics Input Output Method TTFT TPOT Latency Memory (Tok) (Tok) (s) ↓ (tok/s) ↑ (s) ↓ (MB) ↓
+
+8k 2k FullKV 0.66 27.63 74.79 20055 
+
+CompilerKV 0.72 36.20 58.90 19050 
+
+16k 4k FullKV 1.45 19.55 209.56 23859 
+
+CompilerKV 1.52 34.80 118.40 21420 
+
+32k 8k FullKV 3.52 11.65 706.56 31213 
+
+CompilerKV 3.65 28.50 285.00 26880 
+
+and layers, so thresholds outside [0 .8, 1.0] either admit almost all tokens (too conservative) or reject nearly all tokens (degenerate), collapsing the “threshold+Top-Bl” mechanism. Second, under tight budgets the final retention is always enforced by Top-Bl ; hence τ (l) mainly controls the candidate set margin rather than the final budget. Bounding τ (l) to 
+
+[0 .8, 1.0] keeps the candidate size within a stable, budget-aligned regime while still allowing risk-conditioned shifts across 
+
+(bh, b p).
+
+Figure A1. Universality across Model Architectures. The av-erage performance trend of our method on four different LLMs (LLaMA-3, Qwen2, InternLM-2.5, Mistral) under varying KV cache budgets (ranging from 64 to 1024). The consistent degradation patterns across diverse architectures demonstrate the generalization capability of our risk-adaptive mechanism. H00 H04 H08 H20 H24 H28 H12 H16 
+
+> Attention Head
+> L00 L04 L08 L12 L16 L20 L24 L28
+> Layer
+> 0.8 0.9 1.0 1.1 1.2 1.3
+> Weight / layer-mean
+
+Figure A2. Visualization of Learned Head Reliability Table. 
+
+The color intensity represents the learned scaling factor for each head across layers. The emergence of distinct suppressed zones (blue/cold colors) confirms that our method automatically identi-fies and suppresses noisy heads that would otherwise disrupt token selection. 
+
+B.2. Runtime Efficiency and Memory Analysis 
+
+To evaluate the practical deployment viability of CompilerKV , we conducted a comprehensive efficiency profile comparing it against the lossless FullKV baseline. We measured Time to First Token (TTFT), Time Per Output Token (TPOT), end-to-end Latency, and Peak Memory usage across varying context lengths (Input: 8k-32k, Output: 2k-8k). The results are detailed in Table A1. 
+
+Prefill Overhead vs. Decoding Speedup. As shown in the “TTFT” column, CompilerKV introduces a marginal overhead during the prefill phase (e.g., an increase from 0.66s to 0.72s in the 8k setting). This slight delay is the expected “compilation cost” incurred by our Risk-Adaptive Gating and Head-Aware Importance calculation. However, this one-time investment yields significant returns during the decoding phase. By strictly maintaining a compressed budget, CompilerKV dramatically improves the throughput (TPOT). For instance, in the 32k input scenario, the generation speed increases from 11.65 tok/s to 28.50 tok/s. 
+
+End-to-End Latency. Consequently, the total latency sees a substantial reduction. The slight delay in prefill is negligible compared to the time saved during generation. In the most demanding setting (32k input, 8k output), CompilerKV reduces 13 CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation    
+
+> Figure A3. Risk-Adaptive Threshold Gating Policy. The plots show the learned retention threshold ( τ) across layers for samples with varying risk levels (binned by Perplexity and Attention Entropy). For high-risk samples (High Perplexity, rightmost plots), the policy automatically lowers thresholds to preserve more information, validating our risk-adaptive mechanism.
+
+the total latency by approximately 60 % (from 706.56s to 285.00s), demonstrating that the ”compile-then-execute” paradigm is highly efficient for long-context generation tasks. 
+
+Memory Efficiency. Furthermore, CompilerKV consistently reduces peak memory consumption. By proactively filtering redundant historical states, it saves approximately 14%–16% of GPU memory compared to FullKV, alleviating hardware bottlenecks and enabling longer context processing on resource-constrained devices. 
+
+Universality across Model Architectures. Figure A1 demonstrates our method’s consistent performance trajectory across four distinct LLMs (including LLaMA-3, Qwen2, and Mistral) as the budget tightens from 1024 to 64 tokens. This architectural universality confirms that our Risk-Adaptive Gating and Head Reliability mechanisms capture fundamental attention properties rather than overfitting to specific model weights. 
+
+B.3. Visualization of Learned Policies 
+
+To understand how CompilerKV adapts to different risk levels, we visualize the learned threshold table Tgate in Figure A3. The visualization confirms that the offline RL process converges to an interpretable strategy: As shown in the difference between the “Low Perplexity” and “High Perplexity” subplots, the policy globally lowers the retention threshold (blue zones) for high-perplexity samples, allowing more tokens to be stored when the model is uncertain. Within each plot, as Attention Entropy increases ( x-axis), the threshold decreases. This indicates the model automatically acts conservatively for diffuse attention patterns (e.g., dense retrieval), preventing the pruning of scattered but critical information. We visualize our learned Head Reliability Table in Figure A2. The heatmap reveals a clear structure: specific heads (e.g., in middle layers L12-L20) are consistently assigned negative or low weights, indicating they act as “noise emitters” for the prefill task. By explicitly down-weighting these heads, our Pass-3 mechanism prevents them from polluting the budget with irrelevant tokens. 
+
+C. Algorithm 
+
+14 CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation 
+
+Model 
+
+Method 
+
+Single-Document QA Multi-Document QA Summarization Few-shot Learning Synthetic Code Avg. 
+
+NrtvQA 
+
+Qasper 
+
+MF-en 
+
+HotpotQA 
+
+2WikiMQA 
+
+Musique 
+
+GovReport 
+
+QMSum 
+
+MultiNews 
+
+TREC 
+
+TriviaQA 
+
+SAMSum 
+
+PCount 
+
+PRe 
+
+Lcc 
+
+RB-P 
+
+18409 3619 4559 9151 4887 11214 8734 10614 2113 5177 8209 6258 11141 9289 1235 4206 –
+
+> LlaMA-3-8B -Instruct
+
+FullKV 25.16 31.81 39.59 43.09 36.15 21.77 28.62 23.34 26.33 75.00 90.50 42.36 5.20 69.25 59.04 53.93 41.95 StreamingLLM 17.85 9.50 23.09 37.84 29.02 16.77 17.91 20.42 20.16 44.00 73.00 30.00 5.80 69.50 48.38 49.31 32.03 H2O 21.58 12.54 28.49 37.13 32.36 18.88 20.23 22.16 21.14 39.00 86.62 39.19 5.50 69.50 57.39 54.46 35.39 SnapKV 21.71 12.37 32.38 37.44 30.48 19.50 19.06 21.36 20.07 45.5 87.74 38.15 5.50 68.85 57.42 54.61 35.76 PyramidKV 22.26 16.65 30.73 38.97 29.28 19.19 19.92 22.06 20.87 68.00 88.95 38.23 5.92 69.50 57.20 51.54 37.45 DynamicKV 22.10 14.93 32.94 41.06 27.98 21.18 20.03 22.06 21.28 65.50 89.61 38.70 5.13 69.50 58.01 54.00 37.75 CompilerKV 22.46 15.22 33.34 41.37 28.48 21.25 20.43 22.16 21.35 66 89.68 39.00 5.50 69.25 57.91 53.94 37.97 Mistral-7B -Instruct-v0.2  FullKV 26.63 32.99 49.34 42.77 27.35 18.77 32.87 24.24 27.10 71.00 86.23 42.96 2.75 86.98 56.93 54.49 42.71 StreamingLLM 16.58 14.76 30.36 28.13 21.76 11.98 18.26 19.02 19.16 43.50 74.12 28.50 2.50 31.81 43.65 41.19 27.83 H2O 21.66 21.64 38.60 30.96 20.63 13.02 20.65 22.61 22.08 39.00 82.19 39.75 3.16 79.98 51.25 48.20 34.71 SnapKV 20.11 21.28 42.98 37.51 22.31 14.43 19.19 21.89 21.01 48.00 83.77 40.44 2.51 66.99 51.64 48.57 35.16 PyramidKV 22.11 22.52 43.04 33.57 22.98 15.69 20.56 22.52 21.36 65.50 83.84 40.03 2.89 67.26 51.51 46.42 36.36 DynamicKV 22.05 23.65 43.08 36.03 22.60 15.23 21.35 23.11 22.19 68.00 84.79 41.02 4.20 70.11 52.45 47.41 37.33 CompilerKV 22.31 24.06 43.20 36.42 22.91 16.47 21.55 23.21 22.35 68.20 85.00 41.20 4.25 70.30 52.30 47.60 37.63 Qwen2-7B -Instruct  FullKV 25.14 42.35 45.04 14.80 14.13 9.23 36.35 23.79 26.51 76.50 89.16 45.23 6.50 75.50 60.30 60.78 40.71 StreamingLLM 19.25 23.63 26.51 14.00 15.30 7.46 18.07 19.30 18.30 47.00 77.92 31.57 6.50 17.00 42.52 41.94 26.64 H2O 20.33 30.43 34.22 13.61 13.37 7.81 20.72 21.66 18.44 40.00 86.94 42.17 7.00 70.50 53.45 53.76 33.40 SnapKV 22.26 31.62 38.95 16.05 17.71 7.66 18.91 21.41 18.21 46.00 87.61 42.01 6.50 63.50 54.87 53.03 34.14 PyramidKV 20.50 31.70 39.95 18.54 18.54 8.85 19.24 20.47 18.18 60.00 87.98 39.71 7.00 49.00 48.77 47.91 33.52 DynamicKV 22.77 35.57 42.62 14.80 16.35 8.31 21.41 21.97 19.56 58.00 88.18 40.93 6.50 70.00 53.58 52.50 35.82 CompilerKV 23.12 35.93 42.81 14.85 16.45 8.40 21.62 22.47 19.74 60.00 88.38 41.05 6.50 70.50 53.44 52.79 36.13 InternLM-2.5-7B -Chat-1M  FullKV 22.42 27.61 39.98 40.92 33.48 26.68 33.01 25.18 26.28 72.50 86.76 39.76 2.91 100.00 55.86 57.95 43.21 StreamingLLM 17.91 13.02 24.31 24.27 16.01 11.29 17.29 20.62 18.06 48.5 67.53 21.93 0.82 87.39 43.45 42.79 29.70 H2O 16.16 17.71 27.94 26.83 17.83 17.81 13.99 22.59 16.9 39.50 81.87 32.15 1.32 96.50 48.30 47.27 32.79 SnapKV 19.65 17.44 35.29 27.36 18.58 19.79 12.76 22.42 16.31 48.00 80.23 31.35 0.95 95.00 49.47 48.22 33.93 PyramidKV 18.80 17.35 33.48 31.16 20.05 19.02 14.65 22.02 17.40 69.50 80.87 32.02 1.23 95.00 47.13 44.73 35.28 DynamicKV 17.93 19.89 34.15 31.50 19.03 20.60 15.14 22.41 18.15 70.00 83.09 32.44 0.86 95.50 49.33 47.16 36.07 CompilerKV 18.36 20.32 34.61 32.17 19.75 20.95 15.5 22.62 18.46 70.50 83.43 32.76 0.92 97.00 49.28 47.42 36.50 
+
+Table A2. Performance comparison on the LongBench dataset for full KV cache, previous methods (StreamingLLM, H2O, SnapKV, PyramidKV, DynamicKV), and our CompilerKV method, with KV cache sizes of 128, using models including LLaMA3-8B-Instruct, Mistral-7B-Instruct-v0.2, QWen2-7B-Instruct, and InternLM-2.5-Chat-1M. Bold indicates the best performance. 
+
+15 CompilerKV: Risk-Adaptive KV Compression via Offline Experience Compilation 
+
+Algorithm 1 COMPILER KV: Prefill-only KV Compression (operator form) 
+
+1: Input: prompt x1: T ; layers l ∈ [1 , L ]; heads h ∈ [1 , H ]; per-layer budgets {Bl}; observation window Ω = {T − wobs +1, . . . , T }; risk LUT Tgate ; head table Whead 
+
+2: Output: compressed KV cache {( ˜K(l), ˜V (l))}Ll=1 
+
+3: (A) Prefill-time risk coordinates (streaming reductions) 
+
+4: {A(l,h ), K (l,h ), V (l,h )} ← PREFILL (x1: T ) A(l,h ) ∈ RT ×T , K (l,h ), V (l,h ) ∈ RT ×d
+
+5: ¯A ← MEAN l,h 
+
+ A(l,h ) (layer/head mean )
+
+6: α ← P 
+
+> j∈Ω
+
+¯Aj, : ∈ RT (window attention mass )
+
+7: ¯A′ ← α/ ∥α∥1 (normalize to a distribution )
+
+8: Rstruct ← H( ¯A′) = − PTt=1 ¯A′ 
+
+> t
+
+log ¯A′
+
+> t
+
+9: Rsem ← exp 
+
+
+
+− 1
+
+> |Ω|
+
+P 
+
+> j∈Ω
+
+log P (xj | x<j )
+
+
+
+10: (bent , b ppl ) ← DISCRETIZE (Rstruct , Rsem )
+
+11: (B) Stage 1: Stabilized token utility (vectorized) 
+
+12: for l = 1 to L do 
+
+13: for h = 1 to H do 
+
+14: r(l,h ) ← ∥ V (l,h )∥2,row ∈ RT (row-wise ℓ2 norm )
+
+15: μ(l,h ) ← MEAN t
+
+ r(l,h )
+
+16: ρ(l,h ) ← r(l,h )/(μ(l,h ) + ϵ) ∈ RT
+
+17: u(l,h ) ← α ⊙ ρ(l,h ) ∈ RT (elementwise )
+
+18: end for 
+
+19: end for 
+
+20: (C) Stage 2: Head-aware importance injection (weighted max-pool) 
+
+21: for l = 1 to L do 
+
+22: ˆu(l) ← MAX POOL h
+
+
+
+u(l,h ) ⊙ Whead [l, h ]
+
+
+
+∈ RT (tokenwise over heads )
+
+23: end for 
+
+24: (D) Stage 3: Risk-adaptive gating + budget correction 
+
+25: for l = 1 to L do 
+
+26: τ (l) ← Tgate [l, b ent , b ppl ]
+
+27: m(l) ← Iˆu(l) ≥ τ (l) ∈ { 0, 1}T (candidate mask )
+
+28: S(l) ← SELECT 
+
+ ˆu(l), m (l), B l
+
+
+
+29: ( ˜K(l), ˜V (l)) ← GATHER tok 
+
+ K(l), V (l); S(l)
+
+30: end for 
+
+31: return {( ˜K(l), ˜V (l))}Ll=1 
+
+32: // SELECT : if ∥m(l)∥0 ≤ Bl, keep all candidates; else return Top-Bl indices under score ˆu(l).
+
+33: // GATHER tok gathers along token dimension; S(l) is shared across heads within layer l.
+
+16

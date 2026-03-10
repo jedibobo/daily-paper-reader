@@ -1,0 +1,842 @@
+Title: TriGen: NPU Architecture for End-to-End Acceleration of Large Language Models based on SW-HW Co-Design
+
+URL Source: https://arxiv.org/pdf/2602.12962v1
+
+Published Time: Mon, 16 Feb 2026 02:06:09 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# TriGen: NPU Architecture for End-to-End Acceleration of Large Language Models based on SW-HW Co-Design 
+
+Jonghun Lee ∗, Junghoon Lee †, Hyeonjin Kim ‡, Seoho Jeon ‡, Jisup Yoon †, Hyunbin Park ‡,Meejeong Park †, and Heonjae Ha †∗Gachon University, Seongnam, Korea, jonghun@gachon.ac.kr 
+
+†Samsung Electronics, Suwon, Korea, {jayhoon.lee, jisup.yoon, heonjae.ha }@samsung.com 
+
+‡Samsung Research, Seoul, Korea, {hyeonjin.kim, seoho.jeon, h bin.park, mia.park }@samsung.com 
+
+Abstract —Recent studies have extensively explored NPU architectures for accelerating AI inference in on-device environments, which are inherently resource-constrained. Meanwhile, transformer-based large language models (LLMs) have become dominant, with rapidly increasing model sizes but low degree of parameter reuse compared to conven-tional CNNs, making end-to-end execution on resource-limited devices extremely challenging. To address these chal-lenges, we propose TriGen , a novel NPU architecture tailored for resource-constrained environments through software-hardware co-design. Firstly, TriGen adopts low-precision computation using microscaling (MX) to enable additional optimization opportunities while preserving accuracy, and resolves the issues that arise by employing such precision. Secondly, to jointly optimize both nonlinear and linear oper-ations, TriGen eliminates the need for specialized hardware for essential nonlinear operations by using fast and accurate LUT, thereby maximizing performance gains and reducing hardware-cost in on-device environments, and finally, by taking practical hardware constraints into account, further employs scheduling techniques to maximize computational utilization even under limited on-chip memory capacity. We evaluate the performance of TriGen on various LLMs and show that TriGen achieves an average 2.73 × performance speedup and 52% less memory transfer over the baseline NPU design with negligible accuracy loss. 
+
+I. Introduction 
+
+In recent years, numerous research efforts have been conducted to develop accelerators for large language models (LLMs). Building upon this, numerous quantization studies have been carried out to reduce the data precision used in LLM accelerators. Although various studies have been conducted on different combinations of data precision, most of these studies have been carried out without seriously considering both computational accuracy and given resource constraints simultaneously. For instance, in most studies, while weight parameters are quantized to 4-bit or lower (e.g., weights-only quantization), activations are maintained in FP16 to preserve accuracy [11], [13], [14], [18], [23], [24], [38], [40], resulting in no reduc-tion in memory consumption for activations. Even when activations are quantized to 8-bit and weights to 4-bit or 
+
+This work was primarily conducted while all authors were affiliated with Samsung Research. 
+
+lower, reducing memory consumption, the outlier portions of activations are still typically processed in 16-bit to ensure ac-curacy [10], [15], [20], [22], [25], [29], [31], [37]. In the same vein, it is common practice in actual commercial products to still use FP16 activations. While the use of FP16 for LLM computations typically leads to longer latency and higher power consumption due to the increased computation and memory usage, this issue is significantly more pronounced in resource-limited systems (e.g., on-device environments). Therefore, reducing the precision of both activations and weights while maintaining accuracy is essential and critical. Reducing the precision of data from 16-bit to 8-bit theoret-ically halves the computational load and memory usage, and it offers the advantage of reducing the total amount of data used in the KV cache. Especially in on-device environments where SRAM is highly limited, reducing the precision of data provides the compiler with more exploration options, leading to overall performance improvements in LLM accelerators. From this perspective, the adoption of microscaling (MX) [9], [32], [33] can emerge as a highly effective and strategic choice to maintain accuracy while reducing memory con-sumption. Moreover, addressing the various challenges that arise when introducing MXs in constrained environments, such as on-device systems, is of critical importance. Secondly, in a typical transformer-based LLM models, linear operations such as matrix multiplication (matmul) account for the majority of computations, yet they are exe-cuted with high efficiency due to the utilization of extensive MAC arrays and the inherent simplicity of the operations themselves, with consuming minimal latency. Conversely, nonlinear operations such as softmax, sigmoid linear unit (SiLU) [12], and normalization [5], [42] in LLMs involve higher computational complexity and are often required to be processed by separate processors or dedicated hardware units rather than directly within the LLM accelerator. As a result, the proportion of latency consumed by these op-erations tends to be significant. If the nonlinear operations could be processed within a single unit rather than relying on separate processors, it would significantly contribute to enhancing overall performance. The seamless and appropriate utilization of lookup tables (LUTs) within LLM accelerators 1
+
+> arXiv:2602.12962v1 [cs.AR] 13 Feb 2026
+
+could emerge as an initial step [19], [39], [41]. The approach of processing nonlinear operations using LUTs can eliminate the overhead associated with data preci-sion expansion and conversion. Additionally, it can prevent the inherent data movement that is unavoidable in certain architectural designs. To achieve this, it is essential to design LUT that is not only simple but also capable of delivering high-accuracy results. Furthermore, it is crucial to approach architectural design based on a software-level understanding of the nonlinear operations employed in the model. Lastly, while existing NPUs often pursue peak TOPS, their effective performance on memory-limited devices is largely constrained by how data are moved and reused. Under tight on-chip SRAM and limited DRAM bandwidth, poor resource allocation—such as sub-optimal tile sizes or mis-chosen sta-tionary policies—can negate the advantage of high compute density, leading to pipeline stalls and excessive DRAM access. In on-device LLM inference, these effects are amplified be-cause activation tensors dominate memory volume, and even small inefficiencies in tiling or reuse propagate across mul-tiple transformer blocks. Therefore, maximizing end-to-end performance requires jointly reasoning about computation and data movement, rather than treating operator mapping and memory scheduling as separate problems. Integrating a lightweight optimizer within its compiler stack can serve as an effective strategy. Given model graph statistics and hardware constraints, the optimizer searches over tile sizes and stationary policies to find a configura-tion that minimizes estimated DRAM traffic while satisfying SRAM limits. At runtime, the deterministic scheduling forces the selected dataflow, ensuring predictable latency and high utilization even under sub-megabyte on-chip memory. In this paper, we propose TriGen ; a new neural processing unit (NPU) architecture and optimizations such as corre-sponding neural network design and compilation methods for accelerating LLMs in environments on on-device settings. TriGen is a software and hardware co-design architecture aimed at efficient resource utilization, designed to achieve optimal acceleration for LLMs, even in scenarios with limited resources. Notably, to the best of our knowledge, TriGen is the first attempt to apply MX number system in an on-device environment, and it distinguishes itself from prior research by enabling the end-to-end execution of the entire model, addressing a critical gap in the field. 
+
+Point 1: Adopting MX and addressing its challenges: To enable 8-bit operations without sacrificing accuracy, TriGen introduces the MX data type for the first time in an on-device context and proposes an architecture that seamlessly supports diverse mixed-precision configurations while ad-dressing associated challenges. 
+
+Point 2: Nonlinear operations acceleration using LUT: 
+
+By leveraging a novel, fast, and accurate LUT co-designed with software and hardware, TriGen enable the efficient processing of complex nonlinear operations such as softmax, SiLU, and normalization without additional hardware such as Decoder 1 Decoder 2 Decoder N Embedding  LM Head   
+
+> RMSNorm  Q
+> K
+> V
+> matmul
+> softmax
+> matmul  out
+> RMSNorm
+> gate
+> up
+> SiLU
+> down +×+
+> Fig. 1: Structure of LLaMA3.2 LLM model
+
+vector processing unit and without any loss of accuracy. 
+
+Point 3: Resource-aware dataflow mapping: TriGen for-mulates dataflow mapping as a resource-aware optimization problem—co-optimizing tile sizes and stationary policies un-der compute resources, on-chip memory capacity and off-chip memory bandwidth constraints—to maximize arithmetic intensity and minimize data movement during on-device execution. Collectively, the software-hardware co-design approach of TriGen, tailored for resource-constrained environments, achieves an average performance speedup of 2.73 × and 52% less memory transfer compared to the baseline NPU design. 
+
+II. Background and Related Work 
+
+Large Language Models. In this paper, we choose Llama-3.2-3B [35] as a representative transformer based-LLM, which consists of multiple stacks of decoder layers. Fig. 1 illustrates a structure of Llama-3.2 decoder layer. Input tokens (or sequence) are first converted into embeddings via embedding layer [34], [36] and the resulting embedding vectors are injected to the cascaded decoder layers. A decoder layer consists of attention block and feed forward network (FFN). Again, the attention block is composed of a series of root mean square normalization (RMSNorm), 𝑄 /𝐾 /𝑉 generation, attention score calculation, and output projection layers. 
+
+𝑄 /𝐾 /𝑉 generation layer performs matmuls between each pretrained parameter ( 𝑊 𝑄 , 𝑊 𝐾 , 𝑊 𝑉 ) and input embeddings, and generate corresponding query ( 𝑄 ), key ( 𝐾 ), and value (𝑉 ). During attention score calculation step, each 𝑄 , 𝐾 , 𝑉 
+
+matrix is equally divided into 𝑁 ℎ𝑒𝑎𝑑 , number of heads, and compute similarity score using matmul between 𝑄 and 𝐾 .A softmax operation is applied to the resulting similarity score, and another matmul is performed between softmax result and 𝑉 . Each output of multi heads are concatenated and inputted to the output projection layer, which performs projection using fully-connected (FC) layers. The projected output goes through the FFN, which consists of FC layers and SiLU. Generated output token is used as the input token of the next decoder layer and the final output of the model is used as the input token of next iteration in a autoregressive manner. 
+
+LLM Quantization on NPUs. Extensive research work have employed quantization to create lightweight DNN models with narrow bit width data formats. Especially, quantization techniques tailored for LLM have gained spotlight. Most of 2× =           
+
+> A0
+> A1
+> A2
+> B0B1
+> C00 C01
+> C10 C11
+> C20 C21
+> ABCFig. 2: A tiling example of a matmul 𝐴 ×𝐵 =𝐶
+
+those research focused on weight-only quantization, keeping the precision of activation unchanged and preserving accu-racy [11], [14], [23], [24]. However, using weight-only quanti-zation lead to mismatching of weight and activation precision in terms of computation. Frequent dequantization of weight into higher data precision (e.g., FP4 to FP16) incurs severe latency overhead. To mitigate the dequantization overhead, weight-only LLM accelerators introduced mixed-precision processing element (PE) design that can conduct multiply and accumulate (MAC) operation between FP and INT data types [13], [18]. Therefore, total cost (i.e., TOPS/ 𝑚𝑚 2, or TOPS/W) of general matrix multiplication (GEMM) operation is significantly reduced. However, unlike the weight-only quantization, the exis-tence of outliers whose values are extremely large compared to the others hinders the activation quantization. To reduce the effect of outliers, weight-activation quantization research have introduced separately handling outliers with higher data precision while keeping the other activation in low precision [10], [25], [37]. On the hardware side, outlier is computed with dedicated high precision MAC units [20], [29] or custom number representations tailored for handling outliers [15], [22], [31]. 
+
+III. Challenges and Motivations 
+
+Challenge 1: Low-Precision Activations in LLM Inference. 
+
+The use of low precision activations for LLM inference in resource-constrained environments, such as on-device NPU, provides an efficient way to improve the inference perfor-mance. First of all, we can reduce the power consumption or the inference latency with low precision activations. For example, with 8-bit activations and 4-bit parameters, a matmul operator reduces the latency for the computation by almost half compared to the same operation with 16-bit activations and 4-bit parameters. Also we can reduce the memory transfer for not only activations but also parameters. There is no doubt about that the memory traffic of the activations would be reduced by their precision reduction, however, the reduction of the transfer size for the parameters looks not trivial but occurs frequently on an on-device NPU whose on-chip memory is not sufficient to accommodate all of the related tensors. Fig. 2 illustrates an example of a matmul with tiling. Sub-matrices 𝐴 𝑖 and 𝐵 𝑗 are read from the off-chip memory to the on-chip memory and used to make the result 𝐶 𝑖,𝑗 if the size of the on-chip memory is not large enough to store 𝐴 , 𝐵 , and 𝐶 . Algorithm 1 explains the way in 
+
+Algorithm 1 Sub-matrix Multiplication 
+
+Require: Inputs matrices : 𝐴 , 𝐵 
+
+Ensure: Matrix multiplication with input matrices  
+
+> 1:
+
+for all each 𝐴 𝑖 in 𝐴 do  
+
+> 2:
+
+read 𝐴 𝑖 from off-chip memory  
+
+> 3:
+
+for all each 𝐵 𝑗 in 𝐵 do  
+
+> 4:
+
+read 𝐵 𝑗 from off-chip memory  
+
+> 5:
+
+𝐶 𝑖,𝑗 = 𝐴 𝑖 × 𝐵 𝑗  
+
+> 6:
+
+write 𝐶 𝑖,𝑗 to off-chip memory  
+
+> 7:
+
+end for  
+
+> 8:
+
+end for  
+
+> 9:
+
+return 𝐶 
+
+which most of efficient kernels iteratively run a sequence of sub-matrix multiplications. Please be noted that Algorithm 1 minimizes the data transfer for the matmul by reading matrix 
+
+𝐴 once. Eq. 1 shows the memory transfer size of the matmul when 𝐴 is the stationary matrix. 
+
+𝑡𝑟𝑎𝑛𝑠 𝑓 𝑒𝑟 =
+
+ 𝑟𝑜𝑤𝑠 (𝐴 )
+
+𝑟𝑜𝑤𝑠 (𝐴 𝑖 )
+
+
+
+× 𝑠𝑖𝑧𝑒 (𝐵 ) + 𝑠𝑖𝑧𝑒 (𝐴 ) (1) where 𝑟𝑜𝑤𝑠 (𝐴 ) is the number of the rows of 𝐴 and 𝑠𝑖𝑧𝑒 (𝐴 )
+
+is the size of 𝐴 . The lower precision 𝐴 is, the larger sub matrix can be stored in the same size of on-chip memory, i.e., we can reduce the total transfer size of 𝐵 by decreasing the times of reading 𝐵 . Fig. 10 demonstrates the comparative memory traffic of two inferences with 8-bit activation and 16-bit activation under identical optimization configuration. The inference with 16-bit activations consumes over 2 times more DRAM traffic comparing to the 8-bit inference.                
+
+> TABLE I: PPL Comparison Across Different Data Types
+> Precision (Activation/Weight) Model FP16 INT16 UINT8 UINT8 /UINT4 /UINT4 /UINT8 /UINT4 Llama3.2-3B 9.36 9.51 124912.73 125284.01 OPT-1.3B 15.23 15.31 15905.23 21753.06
+
+While it offers potential benefits in efficiency, the in-herent accuracy degradation caused by de-quantization re-mains a critical issue, often compromising overall inference performance. Table I illustrates the comparative impact of varying precision levels on inference accuracy, as measured by Perplexitys (PPLs). A significant and abrupt degradation in PPLs is observed when precision is reduced from 16-bit to 8-bit through quantization. This explains why 16-bit precisions for activation remains prevalent in industry applications [1], [2], [7], despite extensive academic research into low-precision alternatives. Moreover, the adoption of low-precision data continues to present significant challenges in accuracy-critical tasks, potentially resulting in outcomes that are considered unacceptable. In on-device NPU architectures, where SRAM capacity is inherently limited [3], [16], underutilization of computational capacity (tera operations per second (TOPS)) persists as a 30      
+
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1
+> 512
+> 1024
+> 2048
+> 4096
+> 512
+> 1024
+> 2048
+> 4096
+> 512
+> 1024
+> 2048
+> 4096
+> 512
+> 1024
+> 2048
+> 4096
+> 512
+> 1024
+> 2048
+> 4096
+> 512
+> 1024
+> 2048
+> 4096
+> Llama2-7B Llama3-8B Llama3.2-3B OPT-2.7B OPT-1.3B Avg.
+> Latency Breakdown
+> Linear Nonlinear
+
+Fig. 3: Latency breakdown of LLMs according to the input sequence length from 512 to 4096. As the input sequence becomes longer, the portion of nonlinear function increases quadratically. When the input sequence length is 4k, nonlin-ear operations account for 20.5% and of end-to-end execution time on average. 
+
+major challenge [6]. Concurrently, inefficient resource alloca-tion strategies can lead to increased DRAM access frequency, exacerbating bandwidth contention and energy inefficiency. In this context, the adoption of low-precision data, while preserving high accuracy, emerges as a critical enabler, of-fering the flexibility needed to address these computational and memory constraints. 
+
+Motivation 1. Achieving high-accuracy inference with 8-bit low-precision quantization remains unresolved yet pivotal research challenges for NPU architectures subject to stringent resource constraints. 
+
+Challenge 2: Acceleration of Nonlinear Operations. 
+
+Fig. 3 demonstrates the latency breakdown of end-to-end execution of five LLMs, Llama family [35] and OPT family [43] that are available on on-device NPU. Latency is measured varying the input sequence length from 512 to 4096. As shown in Fig. 3, the portion of nonlinear operation increases quadratically according to input sequence length because of the attention module that is one of the core architectures of LLMs. On average, the portion of nonlinear operation increases from 4.9% to 20.5% according to input sequence length. Considering that input sequence length is growing (i.e., 2K, 4K input sequence), nonlinear operations will become major bottleneck for LLM acceleration. Simply focusing on speeding up only linear layers does not provide an effective solution for acceleration of LLMs. 
+
+Motivation 2. As input sequences becomes longer, the portion of nonlinear operation grows quadratically. Simply increasing computational throughput of linear operation (i.e., GEMM) does not help for end-to-end performance speedup of LLM. 
+
+Challenge 3: Memory-Constrained Operator Mapping. 
+
+Traditional operator mapping techniques for NPU, such as tiling, stationary data placement, and operation temporal ordering, are often optimized independently. However, in TMU         
+
+> CP
+> DMAC
+> DLA Core 0
+> IBUF
+> WBUF
+> ACC
+> PPA
+> OBUF
+> MPA
+> Core 1Core 2Core 3
+> On -Chip Memory (SRAM ,1MiB )
+> System Bus
+> DRAM
+
+Fig. 4: Overview of TriGen architecture 
+
+resource-limited environments such as on-device, this frag-mented approach fails to address the interdependence of these factors. These elements exhibit a complex interplay; neglecting any one component risks resource contention, bottlenecks, and performance degradation. Fig. 12 illustrates the performance deviation resulting from improper dataflow mapping. 
+
+Motivation 3. Efficient resource allocation must address the interplay of dataflow techniques to balance computa-tional efficiency, memory bandwidth, and power consump-tion. 
+
+IV. Architecture 
+
+We propose NPU architecture named TriGen that enables: i) low-precision LLM inference with native MXINT8 for-mat support, ii) seamless acceleration of nonlinear function without special function unit (SFU) or companion vector processor such as digital signal processor (DSP), and iii) effi-cient operator mapping that minimizes memory traffic while maximizing deep learning accelerator (DLA) core utilization. 
+
+A. Architecture Overview 
+
+Fig. 4 illustrates overall architecture of TriGen. An NPU contains control processor (CP), four DLA cores, tensor manipulation unit (TMU), and 1MiB global buffer (on-chip memory, SRAM). CP is a lightweight RISC-V processor that controls and manages other components. CP performs fetch, decode, and issue of instructions and offloads them to the related function unit. A DLA core has three buffers for inputs and output operand; IBUF, WBUF, and OBUF. Dot product operations are conducted by MAC processing array (MPA). MPA has 32 arrays and each array consists of 32 multipliers and one 32:1 adder tree. Each array performs MAC operations between two input vectors with length of 32 and therefore one MPA performs 32 ×32 MAC operations at once. The output result of MPA is accumulated in accumulator (ACC). Post-processing 4array (PPA) processes activation function such as ReLU, SiLU by referring to LUT. Also, if necessary, PPA can perform quantization of output activation using rescale logic. TMU is responsible for handling tensor manipulation, including, transpose, split, and concatenate of tensors. 
+
+B. Supported Data Types in TriGen 
+
+TriGen facilitates the handling of input and output data types such as UINT4, UINT8, INT16, along with MXINT8, and their mixed precisions. By leveraging integer data types for each operand, TriGen performs MAC operation as integer addition and multiplication, which are significantly efficient in both latency and energy consumption [17], [26]. Further-more, TriGen incorporates Floating Integer 32-bit (FI32) as an intermediate data type within the architecture’s data flow. By extending integer portion of MXINT8 data, FI32 format is capable of maintaining 24 bits of precision in the fractional part with an implicit scale factor. × =           
+
+> A0
+> A1
+> A2
+> B0B1
+> C00 C01
+> C10 C11
+> C20 C21
+> ABC
+> 8S24
+> FI 32
+> EXP
+> FRAC
+> 31 24 23 0
+> input
+> >>
+> interpolation interpolation
+> Accumulation
+> & Alignment
+> EXP
+> INV
+> SQR
+> RLU
+> Preprocessing
+> IDX
+> EXP
+> output
+> LUT e
+> LUT v
+
+Fig. 5: FI32 data type of TriGen 
+
+Fig. 5 illustrate structure of FI32 data format. FI32 data format comprises two components: an 8-bit exponent ( EXP )and a 24-bit integer fraction ( FRAC ) parts. A real number can be expressed in FI32 format as follows: 
+
+𝑟𝑒𝑎𝑙 𝑛𝑢𝑚𝑏𝑒𝑟 = 𝐹𝑅𝐴𝐶 × 𝑖𝑚𝑝𝑙𝑐𝑖𝑡 𝑠𝑐𝑎𝑙𝑒 × 2𝐸𝑋 𝑃 (2) where 𝑖𝑚𝑝𝑙𝑖𝑐𝑖𝑡 𝑠𝑐𝑎𝑙𝑒 is 2 −22 . FI32 and its variants offers a simple and intuitive representation compared to floating-point formats who needs a type conversion with sign for the accumulated results of TriGen. Despite its simplicity, FI32 maintains high precision in the significant digits, making it an efficient data representation method. FI32 is primarily utilized as an intermediate data type within the data flow be-tween architectural modules. Additionally, FI32 is employed for external inputs and outputs from/to memory, such as bias (BIAS ), partial sum ( PSUM ), and channelwise rescale ( CWQ ), where maintaining higher precision is essential. 
+
+C. MAC Processing Array (MPA) 
+
+The MPA comprises a 32 × 32 MAC array architecture. Designed to support mixed-precision computation, the MPA incorporates an exponent (EXP) component in its data struc-ture, enabling simultaneous processing of both MX data and integer type data. When processing integer data, the exponent component is set to 127 due to minus bias, while for MX-type data, the exponent and integer components are processed in parallel. The EXP components are aggregated through summation operations, while the INT components undergo multiply-accumulate operations implemented via an adder tree structure. The ACC unit performs the aggregation of partial sums where it firstly identifies the optimal common exponent W[0:31] EXP 
+
+> MP
+> W[0:31] EXP W[0:31] EXP
+> MPA MPA
+
+1D  MAC 01D  MAC 
+
+ACC      
+
+> +
+> SUM
+> EXP IFM
+> EXP W
+> EXP
+> IFM [0:31] EXP
+> W[0:31] EXP
+> IFM
+> [30]
+> W
+> [30]
+> x
+> IFM
+> [31]
+> W
+> [31]
+> x
+> IFM
+> [0]
+> W
+> [ 0 ]
+> x
+> IFM
+> [1]
+> W
+> [ 1 ]
+> x
+> IFM
+> [2]
+> W
+> [ 2 ]
+> x
+> IFM
+> [3]
+> W
+> [ 3 ]
+> x
+> IFM
+> [4]
+> W
+> [ 4 ]
+> x
+> IFM
+> [5]
+> W
+> [ 5 ]
+> x
+> +
+> ++++
+> +++
+> +
+
+Fig. 6: MPA architecture of TriGen ADD 
+
+Rescale 
+
+> CWQ
+> param .
+
+Alignment 
+
+> MPA
+> FI32
+> MX
+> INT
+> BIAS
+> LUT
+
+Fig. 7: PPA architecture in TriGen 
+
+value between the partial sum from the previous stage and the newly generated values from the MAC array, aligns the INT components based on this common EXP, and then aggregates two INTs to generate the intermediate data FI32 with EXP, which serves as another partial-sum value. TriGen architecture employs 64 ACC registers for partial sum storage in one array (32 MACs). To enable parallelized and efficient execution, it processes each operation (Instruction Set Archi-tecture (ISA)) by decomposing computations into multiple 
+
+commands , each handling 64 input row vectors. The TMATMUL , which is a representative operation con-ducted in MPA, has two input matrices IN0 and IN1, and it involves multiplying IN0 and transposed IN1. Let’s consider the shapes of IN0 and IN1 as (256 × 64 ) and (128 × 64 ),respectively. The output’s shape of TMATMUL would be 
+
+(256 × 128 ). At first, a (32 × 32 ) sub matrix of IN1 are prefetched from on-chip memory and it remains stationary in MPA during computation. After the prefetching, each 
+
+(1 × 32 ) sub row vector of IN0 is read in every cycle and broadcasted to 32 arrays for performing dot product with the prefetched IN1 row vectors. The MPA leverages a (32 × 32 )
+
+MAC array to perform single-cycle dot product calculations, where one 32-element vector from IN0 and 32 same size vectors from IN1 are processed simultaneously. The operation requires 4 commands due to the 64 partial-sum registers, accommodating IN0’s 256-row dimension and each token undergoes partial-sum processing 4 times (aligning with the 128 out column dimension). 
+
+D. Post Processing Accelerator (PPA) 
+
+The PPA performs post processing using the intermediate results from the MPA as the input. On the first stage, PPA applies adding the bias and de-quantization on the input when it is necessary. For instance, if the parameter of a 5EXP 
+
+> FRAC
+> input
+> >>
+> interpolation interpolation
+> Accumulation
+> & Alignment
+> EXP
+> INV
+> SQR
+> RLU
+> Preprocessing
+> IDX
+> EXP
+> output
+> LUT e
+> LUT v
+
+Fig. 8: Overview of LUT architecture 
+
+projection is INT4, RESCALE module de-quantizes the input suitable for the quantization configurations. When necessary, the LUT module is employed for processing nonlinear oper-ations (e.g., exponential or SiLU), enabling efficient fusion with product-sum operations such as TMATMUL through this pipeline. A detailed explanation of this process is provided in Section IV-E. On the final stage, the PPA performs output-specific oper-ations tailored to each data type. For FI32 outputs, it executes simple normalization to maximize significant digits. For MX-type outputs, it identifies the maximum exponent value and performs corresponding bit-shifts on FRAC components to ensure proper alignment through its Alignment module. For INT-type outputs, the PPA applies both zero-point adjustment and rounding operations to maintain data within the required bit-width constraints. The PPA, while primarily designed for the post process-ings, can also execute non-product-sum operations, such as element-wise MUL , ADD , and RESCALE , through control signal reconfiguration. 
+
+E. Lookup Table (LUT) 
+
+Fig. 8 illustrates overall architecture of LUT. The pre-processing block computes the indices for retrieving values from the lookup tables and determines the shift amount for the table outputs. The examples below shows how pre-processing block works for inverse square root and 
+
+SiLU operators.  
+
+> •
+
+inverse square root : 𝑓 (𝑥 ) = 1√𝑥 is computed by decomposing 𝑥 as 𝑥 = 2𝑒 𝑥 ·𝑚 𝑥 , where 𝑒 𝑥 is the exponent of 𝑥 and 1 ≤ 𝑚 𝑥 < 2. The approximation is given by: 
+
+𝑓 (𝑥 ) =
+
+
+
+2−𝑒 𝑥 /2 · 1√𝑚 𝑥 if 𝑒 𝑥 is even ,
+
+2− ( 𝑒 𝑥 +1)/ 2 · 1√𝑚 𝑥 /2 if 𝑒 𝑥 is odd . (3) The lookup table for the inverse square root function contains values within the range [ 1√2 , √2). 
+
+> •
+
+SiLU : The SiLU function 𝑓 (𝑥 ) = 𝑥   
+
+> 1+𝑒 −𝑥
+
+is computed by decomposing 𝑥 as 𝑥 = 2𝑒 𝑥 ·𝑚 𝑥 , where 𝑒 𝑥 is the exponent and 1 ≤ 𝑚 𝑥 < 2. Due to the asymptotic convergence of SiLU to ReLU for large |𝑥 |, where 𝐾 is a predefined constant integer based on accuracy requirements, the approximation is given by: 
+
+𝑓 (𝑥 ) =
+
+( 𝑥   
+
+> 1+𝑒 −𝑥
+
+if 𝑒 𝑥 ≤ 𝐾, 
+
+2𝑒 𝑥 −𝐾 · 𝑓 (2𝐾 · 𝑚 𝑥 ) if 𝑒 𝑥 > 𝐾 . (4) The lookup table retains values of 𝑓 (2𝐾 · 𝑚 𝑥 ).The value table and error table store precomputed values of nonlinear functions and their associated errors, respectively, enabling efficient computation of the function values in the operational model [21]. To achieve accurate but cost efficient solution, we utilize two tables: a compact table (𝐿𝑈𝑇 𝑣 ) with 16-bit entries and an expanded table ( 𝐿𝑈𝑇 𝑒 ) with 256 entries. The value table 𝐿𝑈𝑇 𝑣 stores quantized values of the nonlinear function 𝑓 (𝑥 ) at uniformly spaced input intervals, determined by the step size. The value interpolated 
+
+𝐿𝑈𝑇 𝑣 (𝑥 ) serves as an approximation of 𝑓 (𝑥 ). The residual error 𝑔 (𝑥 ) = 𝑓 (𝑥 ) − 𝐿𝑈𝑇 𝑣 (𝑥 ) is stored in the 𝐿𝑈𝑇 𝑒 .The interpolation block performs the linear interpolation on values retrieved from the related tables. The final result of the LUT module is derived by summing the interpolated results of both 𝐿𝑈𝑇 𝑣 and 𝐿𝑈𝑇 𝑒 , and adjusting the exponent of the resultant. 
+
+TABLE II: Accuracy of nonlinear functions using LUT                 
+
+> function reciprocal ISQR exponential SiLU input min 1/1024 -8
+> input max 4096 64
+> MAPE 8.397e-07 5.467e-06 2.023.e-05 1.626e-06
+> MSE 2.434e-08 1.968e-07 -7.344e-04 ISQR: invserse square root
+
+Table II shows the accuracy of our LUT for various nonlinear functions. The input range for each function is discretized with a step size of 1 /1024 to ensure uniform sampling across the specified intervals. The input ranges are carefully selected to cover the operational domain of each function. The experiment demonstrates that our LUT achieves exceptional accuracy in approximating nonlinear functions, with a Mean Absolute Percentage Error (MAPE) consistently below 0.1% and a Mean Squared Error (MSE) remaining under 1 .0 × 10 −3. These results underscore the LUT’s robustness and precision, making it a highly reliable solution for handling nonlinear-function approximations in practical applications. 
+
+F. Support for Multi-NPUs 
+
+Despite limited resources, modern on-device systems now aim to execute multiple models simultaneously to support diverse functionalities, leading to the growing adoption of multiple on-device NPUs for parallel processing. In this context, TriGen presents an efficient and scalable mechanism to distribute and executes the computation across multiple NPUs, enabling effective performance enhancement. The core synchronization principle in TriGen’s multi-NPU architecture ensures deadlock-free execution by blocking 6NPU progression until inter-NPU dependencies are resolved. To enable synchronized execution across multiple NPUs, the following architectural components are essential: (1) strategically embedded synchronization instructions with an appropriate Sync-ID within the instruction stream to demar-cate coordination points; and (2) dedicated synchronization registers per NPU to autonomously manage and broadcast synchronization information. When a specific NPU encounters a sync instruction dur-ing the execution of an instruction, it records the Sync-ID information, which represents the current stage being executed, in the Sync register and broadcasts it to all NPUs. At this point, from the perspective of the specific NPU, upon recognizing that the Sync-ID information from other NPUs has been broadcast (updated), it compares the value in its own Sync register with the Sync-ID information of the other NPUs to determine whether to proceed with execution. This lightweight approach efficiently handles synchronization in multi-NPUs where processing is divided into multiple parts. 
+
+V. Software Optimizations 
+
+Co-design of software and hardware is essential, especially in resource constraint environment such as on-device NPU. TriGen adopt software optimization techniques that i) remove unnecessary operation with operator fusion via mathematical equivalence and its derivation, ii) maximize PE utilization while reducing DRAM access with software-defined dataflow and tiling strategy. 
+
+A. Operator Optimization 
+
+Fusing transpose operation. Transposition of a matrix is a memory-bounded operation, and therefore can be a major bottleneck in accelerating matrix multiplication. Moreover, when engaging MX data format to activations, we cannot transpose the activation tensor as is since naive transposition of a matrix does not align with the axis of shared exponents and this causes severe accuracy drop. Thereby, transposition of MX type activation requires additional computations, 1) the previous layer makes result with a higher precision acti-vation instead of MX type activation, 2) the higher precision activation is transposed without loss of accuracy, and 3) the transposed higher precision activation is converted to MX type activation. Especially in LLM, transpose operation is required in atten-tion, where attention score is obtained as 𝑠𝑜 𝑓 𝑡𝑚𝑎𝑥 (𝑄𝐾 𝑇 ) × 𝑉 .Since TriGen performs matrix multiplication in a transposed manner using TMATMUL , 𝑄 × 𝐾 𝑇 can be performed by single TMATMUL without additional transpose operation, i.e., 
+
+𝑄 × 𝐾 𝑇 = 𝑄 ×𝑇 𝐾 . On the other hand, for the multiplication of attention score 𝐴 (= 𝑠𝑜 𝑓 𝑡𝑚𝑎𝑥 (𝑄𝐾 𝑇 )) and 𝑉 , 𝑉 should be transposed, i.e., 𝐴 × 𝑉 = 𝐴 ×𝑇 𝑉 𝑇 such that output result of TMATMUL is equivalent to that without transposition. To mitigate the overhead from explicit transposition of MX format tensor, we introduce seamless fusion of 𝑉 𝑇 into later calculation by formulation of mathematical equivalences. Eq. 5 describes projection 𝑋 onto 𝑉 .
+
+𝑉 = 𝑋 × 𝑊 𝑉 (5) 
+
+𝑊 𝑉 is quantized as INT4 in usual LLM inferences on com-mercial products and, with applying the quantization, Eq. 5 can be rewritten as below: 
+
+𝑉 = 𝑋 × 𝑊 𝐼 𝑁𝑇 × 𝑆 𝑊 (6) where 𝑆 𝑊 is per channel scale factor which is a tensor not a scalar value. Applying transposition on both side, Eq. 6 becomes: 
+
+𝑉 𝑇 = (𝑋 × 𝑊 𝐼 𝑁𝑇 × 𝑆 𝑊 )𝑇 = 𝑆 𝑊 𝑇 × 𝑊 𝐼 𝑁𝑇 𝑇 × 𝑋 𝑇 (7) Please be noted the positions difference between 𝑆 𝑊 in Eq. 6 and 𝑆 𝑊 𝑇 in Eq. 7. General NPUs has rescaling block in its post processing module (PPA for TriGen), that is, ×𝑆 𝑊 is fused into the previous matmul 𝑋 × 𝑊 𝐼 𝑁𝑇 , however, 𝑆 𝑊 𝑇 ×
+
+cannot be fused and requires an additional matmul operation. We can express the result 𝑌 of attention layer as: 
+
+𝑌 = 𝐴 × 𝑉 = 𝐴 × ( 𝑉 𝑇 )𝑇 (8) where 𝐴 is result of 𝑠𝑜 𝑓 𝑡𝑚𝑎𝑥 (𝑄𝐾 𝑇 ). By putting 𝑉 𝑇 of Eq. 7 into Eq. 8, we obtain 𝑌 as:               
+
+> 𝑌 =𝐴 × ( 𝑆 𝑊 𝑇 × ( 𝑊 𝐼 𝑁𝑇 𝑇 ×𝑋 𝑇 )) 𝑇
+> =𝐴 × ( 𝑊 𝐼 𝑁𝑇 𝑇 ×𝑋 𝑇 )𝑇 ×𝑆 𝑊
+
+(9) Consequently, we can reformulate the fused transposition of 
+
+𝑉 as below: 
+
+𝑌 = (𝐴 ×𝑇 (𝑊 𝐼 𝑁𝑇 𝑇 ×𝑇 𝑋 )) · 𝑆 𝑊 (10) As described in Eq. 10, attention can be calculated as two consecutive TMATMUL operations. Transposition of projec-tion parameter matrix 𝑊 𝐼 𝑁𝑇 can be handled during compile time. Consequently, seamless fusion of transpose operation enables TriGen to avoid unnecessary transpose operation during runtime, which otherwise severely cost redundant data movement to transpose a tensor. 
+
+Coalesced masking operation. To eliminate the influence of non-relevant data, a mask operation is necessary and this is conventionally performed via an elementwise multiplica-tion (MUL) operation, however, unfortunately, this brings inefficiency since elementwise operations cannot fully utilize MPA. To mitigate this inefficiency, TriGen employs a fused LUTs within TMATMUL operations with Partial Summation (PSUM), effectively bypassing the need for a dedicated MUL 
+
+operation for masking. PSUMs serves to aggregate values into TMATMUL ’s output, enabling direct manipulation of fused LUTs inputs. This achieves targeted results (e.g., zero-masking) without requiring separate operations. In the Scaled Dot-Product Attention (SDPA) process of a softmax layer requiring exponentiation, TriGen strategically manipulates PSUM to achieve efficient computation. For non-masked values, it sets PSUM to zero, while for masked positions, it configures PSUM to the minimum FI32 value. 7This approach effectively produces a zero output from the LUTs during exponentiation, eliminating the need for addi-tional masking operations while maintaining computational accuracy. Additionally TriGen skips the sub-matrix multipli-cation when all of the output of the sub-matrix multiplication operation would be masked out. Later, we will evaluate the impact of operator fusions in Section VII-A. 
+
+QKV Projections in a Batch. TriGen employs a batched processing approach for 𝑄 /𝐾 /𝑉 projections, enabling simul-taneous computation of required projections, rather than sequential execution. The head-splitting is performed before projection, enabling tailored attention computation with only the necessary data. This head-splitting allows loading param-eters (IN1) of partial 𝑊 𝑄 , 𝑊 𝐾 and 𝑊 𝑉 , allowing them to fit entirely in SRAM. TriGen loads required 𝑊 𝑄 , 𝑊 𝐾 and 𝑊 𝑉 
+
+simultaneously in an IN1-stationary manner, then processes activation tiles sequentially with those parameters, maxi-mizing computational efficiency while minimizing memory access for both of activations and parameters, which could have occurred repeatedly. 
+
+B. Dataflow and Tiling Strategy 
+
+In on-device environments with constrained on-chip mem-ory capacity, efficiently managing and preparing the appro-priate data in a timely manner is essential for achieving high performance. To ensure deterministic yet efficient data deliv-ery, stationary and tiling strategies generally are considered. The determination of optimal stationary strategy and tile size involves maximizing MAC utilization and the count of data reuse while minimizing DRAM traffic. Furthermore, the number of MAC units, such as DLA cores in TriGen, must be considered to achieve balanced workload distribution. TriGen adopts a simple yet effective systematic approach to determine these parameters, as described in Algorithm 2. 
+
+Algorithm 2 Stationary and Tiling Selection in TriGen 
+
+Require: Inputs matrices : 𝑖𝑛 0, 𝑖𝑛 1
+
+Ensure: Matrix multiplication with input matrices  
+
+> 1:
+
+for all each 𝑠𝑡𝑎𝑡𝑖𝑜𝑛𝑎𝑟𝑦 in {𝑖𝑛 0, 𝑖𝑛 1} do  
+
+> 2:
+
+generate division candidates based on DLA cores  
+
+> 3:
+
+determine the minimum tile size per candidate  
+
+> 4:
+
+select candidates with the maximum MAC utilization and largest tile size  
+
+> 5:
+
+expands the size of tiles till fitting SRAM capacity  
+
+> 6:
+
+end for  
+
+> 7:
+
+return stationary and tile dimension with the minimum DRAM traffic. TriGen systematically explores two stationary methods (IN0: first operand and IN1: second operand) to maximize MAC utilization while minimizing DRAM traffic. TriGen be-gins by generating division candidates based on the number of DLA cores and determines the corresponding minimum tile size, ensuring sufficient computation to hide overheads of DRAM data movement. TriGen prioritizes candidates with the highest MAC utilization and largest tile dimensions in current stationary since a larger tile of the stationary input reduces reading times of the other input as shown in Eq. 1. For instance, under IN0 stationary, it first selects cases where IN0 has the largest possible tile dimension. The tile sizes are then incrementally expanded along the row dimension until all tiles (IN0, IN1, and OUT) fit within SRAM capacity. This process repeats for the IN1 stationary method. Finally, TriGen selects the optimal one between the candidate of two stationary methods based on minimal DRAM traffic, achiev-ing an efficient computation-memory trade-off for matrix multiplication. 
+
+VI. Case Study: Deploying Llama on TriGen NPU 
+
+In this section, we demonstrate a use case example of deploying LLM on proposed TriGen. We chose Llama-3.2-3B [35] as a representative transformer-based LLM for the case study. Throughout the case study, we use MXINT8 input activation whose sequence length is 2048. Thus dimension of input activation is 2048 × 3072 ( 𝑟𝑜𝑤 × 𝑐𝑜𝑙𝑢𝑚𝑛 ). 
+
+A. Normalize Layer 
+
+Llama model can be split into two major parts; attention module and feed forward network (FFN) and, at the front of them, RMSNorm [42] layers exist. ¯𝑎 𝑖 = 𝑎 𝑖 
+
+RMS (a) × 𝑔 𝑖 , where RMS (a) =
+
+vt 1
+
+𝑛 
+
+> 𝑛
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑎 𝑖 2 (11) To conduct RMSNorm on huge input activation, TriGen slices the input activation into multiple tiles. Tile size is configured to maximize PE utilization by hiding DRAM traffic behind the computation. Table III shows on-chip memory usage breakdown when the rows number of the input tile is is set to 96.                
+
+> TABLE III: RMSNorm On-chip Memory Usage
+> Name Description Size (KiB)
+> IN0 input tile of current computation 297 IN1 input tile for next computation 297 OUT out tile of current computation 297 SQSUM square sums of IN0 <1LUT lookup table data for inverse square root <1Total 893
+
+TriGen ISA includes the operations below to accelerate whole process of RMSNorm.  
+
+> •
+
+MEAN SQUARE {IN0, OUT }: MEAN SQUARE reads ev-ery row from IN0 and calculates square mean ( Í 𝑎 𝑖 2) of each row. The type of OUT is FI32 for keeping the accuracy and the shape is reduced to (2048 × 1).  
+
+> •
+
+LUT {IN0, OUT, flags }: LUT reads input as IN0 and refer to LUT according to flag combination. Flag can include INV (reciprocal), SQR (square root), EXP (exponen-tial) and RLU (for SiLU). For RMSNorm, IN0 is the OUT of MEAN SQUARE and both of INV and SQR flags are on. The result is given as OUT and it is used in RESCALE . 
+
+> •
+
+RESCALE {IN0, OUT, scale }: PPA multiplies scale to IN0 tensor, where scale is FI32 and IN0 is MXINT8 type. 8IN0 is the input of RMSNorm and the scale is the out tensor of the previous LUT instruction. 
+
+B. Attention Module 
+
+The resulting input sequences from RMSNorm is projected into each 𝑄 , 𝐾 , and 𝑉 . The projections are matrix multipli-cation between input token tensor 𝑋 (2048 × 3072) and the related parameter tensors 𝑊 𝑄 (3072 × 3072), 𝑊 𝐾 (3072 × 1024), and 𝑊 𝑇 𝑉 (1024 × 3072). As we explained in Section V-A, each head attention processes the projections with only the related parameters, thus the shape of a parameter tensor in a head attention is (3072 × 128). TriGen performs matrix multiplication using TMATMUL instruction.  
+
+> •
+
+TMATMUL {IN0, IN1, OUT, flags }: MPA receives two inputs and performs transposed matrix multiplication between IN0 and IN1. Result is stored as OUT tensor. Resulting 𝑄 , 𝐾 , and 𝑉 𝑇 tensors go through attention mech-anism. First, MPA performs 𝑄 ×𝑇 𝐾 via TMATMUL instruction, then, softmax operation is applied to the out tensor. Softmax requires the sum of exponential of input tensor (i.e., Í 𝑒 𝑥 𝑖 )and the inverse of the sum. Similar to RMSNorm, TriGen handles exponential via LUT instruction with EXP flag. Then, summation is computed in PPA via MEAN instruction.  
+
+> •
+
+MEAN {IN0, OUT, flags }: PPA computes the summa-tion of IN0 tensor elements along depth dimension and returns the resulting scalar value as out. 
+
+𝑉 𝑇 is multiplied to the softmax result via TMATMUL in-struction and 𝑠𝑜 𝑓 𝑡𝑚𝑎𝑥 (𝑄𝐾 𝑇 ) × 𝑇 𝑉 𝑇 becomes final output of attention layer. 
+
+C. Feed Forward Network 
+
+FFN consists of multiple multi-layer perceptron (MLP) layers; gate, up, and down projection, respectively. Similar to attention layer, TriGen handles such projection operation via TMATMUL instruction. For the gate projection, whose output goes into SiLU activation function, TriGen allows the 
+
+RLU flag to be set on and SilU function is fused with the projection. At the final stage of TMATMUL , PPA applies SiLU on the accumulated results from MPA when the RLU flag is on. Please be noted that an accumulated result is intermediate data and it has high precision (FI32). Thanks to the high precision data and the advanced architecture of LUT, fused SiLU doesn’t make accuracy loss. Output from up projection with fused SiLU goes through elementwise multiplication via 
+
+MUL instruction.  
+
+> •
+
+MUL {IN0, IN1, OUT, flags }: MPA receives two in-puts and performs elementwise multiplication between two tensors IN0 and IN1. Result is returned as OUT tensor. Again, the result undergoes down projection MLP via 
+
+TMATMUL , and final residual operation is conducted using 
+
+ADD instruction, which performs elementwise addition.  
+
+> •
+
+ADD {IN0, IN1, OUT, flags }: MPA receives two in-puts and performs elementwise addition between two tensors IN0 and IN1. Result is returned as out tensor.                            
+
+> TABLE IV: TriGen NPU Configuration
+> Configurations Parameters
+> Command processor single issue RISC-V @ 1 GHz # of NPUs 1/ 2 / 4 / 8 NPU clock frequency 1 GHz MPA dimension 32 ×32 # of DLAs per NPU 1 / 2 / 4
+> # of LUT entries 𝐿𝑈𝑇 𝑣 : 16, 𝐿𝑈𝑇 𝑒 : 256 DRAM bandwidth 32 GB/s Global buffer size 1 MiB Data format MXINT8 (act.), UINT4 (weight), FI32 (intermediate value)
+> TABLE V: LLMs Used in the Experiment
+> LLMs Quantization Scheme Dataset
+> Llama2-7B QuaRot [4] + GPTQ [14] Llama3-8B SpinQuant [25] + GPTQ [14] WikiText-2 [28] Llama3.2-3B SpinQuant [25] + GPTQ [14] C4 [30] OPT-1.3B QuaRot [4] + GPTQ [14] PTB [27] OPT-2.7B AWQ [23] + GPTQ [14]
+
+VII. Evaluation 
+
+Performance Modeling. We model TriGen as a cycle-level simulator implemented in C++. The latency obtained from simulator is verified against RTL result from Synopsys Design Compiler using 14nm technology node. TriGen is configured to the parameters listed in Table IV. As a baseline configuration, we use one NPU operating at 1 GHz. The number of NPUs are varied from one to eight cores, and we present the trade-offs in implementing multi core NPU. Each NPU is engaged with 32 × 32 MPA. DRAM bandwidth is set up to 32 GB/s and, in multi-NPU setup, the average bandwidth for one NPU is (32 / number of NPUs) . Global buffer size is set to 1 MiB per NPU and it can be varied. We use MXINT8 data type for activation and UINT4 for weight. 
+
+Workload and Dataset. Table V shows the list of LLMs and dataset used in the experiment. We choose LLMs that are deployable within the resource limitations of on-device NPUs; Llama-2-7B, Llama-3-8B, Llama-3.2-3B [35], OPT-1.3B, OPT-2.7B [43]. We mainly use the language model tasks with WikiText-2 [28], C4 [30], PTB [27] dataset. Activation and weight of LLMs are quantized to each data formats using various quantization schemes and we choose the one that shows the best PPL for each precision combination. For instance, Llama-2-7B was quantized with QuaRot [4] and GPTQ [14] while Llama-3-3.2B used combination of SpinQuant [25] and GPTQ. 
+
+A. End-to-End Latency Analysis 
+
+We evaluate the end-to-end latency of TriGen across five open LLMs (Table V) with sequence lengths 2048. We compare the following design points of TriGen:  
+
+> •
+
+Baseline: Baseline models TriGen illustrated in Fig. 4 which performs LLM inference using INT16/UINT4 bit quantiza-tion. Nonlinear operation is handled by special function unit, which incurs significant overhead. 9Llama2-7B Llama3-8B Llama3.2-3B OPT-1.3B OPT-2.7B Geomean      
+
+> Models
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> Normalized Latency
+> Baseline +MXINT8 +LUT +QKV.opt +Trans.opt +Mask.opt
+
+Fig. 9: Normalized latency of TriGen during LLM inference. We measure the latency of proposed optimization scheme and demonstrate as a cumulative latency. On average, TriGen with all optimization scheme delivers 2.73 × speedup over baseline.  
+
+> •
+
++MXINT8: This configuration adopts MXINT8 data format to the input activation, and therefore reduces DRAM traffic and bandwidth.  
+
+> •
+
++LUT: This configuration performs nonlinear operation using novel LUTs with negligible accuracy loss.  
+
+> •
+
++QKV.opt: This configuration leverages batched 𝑄 /𝐾 /𝑉 pro-jection, which reduces DRAM accesses for input activation.  
+
+> •
+
++Trans.opt: This configuration performs fusing transpose operation as discussed in Section V-A.  
+
+> •
+
++Mask.opt: Built upon previous schemes, this configuration of TriGen replaces multiplication during masking operation with fused elementwise addition. Fig. 9 demonstrates the effect of each TriGen optimization scheme on the overall latency of LLM inference. Overall, engaging MXINT8 format to activation offers 1.65 × speedup. This significant performance gain mainly comes from in-creased numerical throughput and reduced DRAM traffic. Especially, the amount of DRAM traffic is diminished by approximately half as shown in Fig. 10. In the baseline configuration, nonlinear operation is com-puted by SFU, which accounts for 15.2% of total execution time. Engaging LUTs for nonlinear operation (labeled as 
+
+LUT ) further improves the performance by 26.8% compared to MXINT8 scheme. Furthermore, batching QKV projection (QKV.opt ) improves the performance by 9.1%. This technique is especially effective when hidden dimension is small. For instance, OPT-1.3B has hidden dim of 2048 while that of Llama3.2-3B is 3072. Small hidden dimension leads to expose of latency to load each activation and weight tile, since the amount of computation is not sufficient to hide the memory latency. Consequently, OPT family benefits the most from the batching QKV. 
+
+Trans.opt removes transpose operation of 𝑉 and replaces it with reverse ordered matmul. On average, Trans.opt offers 1.77% improvement over previous scheme. Masking of SDPA requires elementwise multiplication. Mask.opt technique sub-stitutes the multiplication with addition as a bias after matmul. Therefore, this scheme can remove the elementwise multiplication and seamlessly performs masking operation. Collectively, the propose techniques achieves 2.73 × speedup over baseline TriGen design. 1024 2048 4096 1024 2048 4096     
+
+> Sequence Length
+> 0
+> 1
+> 2
+> 3
+> 4
+> Memory Traffic (GB)
+> Llama3.2-3B OPT-2.7B
+> MXI8 read MXI8 write INT16 read INT16 write
+
+Fig. 10: DRAM traffics with 16-bit activation. Numbers are normalized to that of 8-bit activation. 
+
+B. Impact of Data Precision 
+
+To examine how precision configurations influence model accuracy, we analyze multiple workloads using various com-binations of activation and weight data types. 
+
+TABLE VI: PPL Measured on TriGen                            
+
+> Precision (Activation/Weight) Model MXINT8 INT16 UINT8 UINT8 /UINT4 /UINT4 /UINT8 /UINT4 Llama2-7B 6.07 6.24 40705.77 37447.06 Llama3-8B 7.49 7.48 154756.14 168274.83 Llama3.2-3B 9.37 9.51 124912.73 125284.01 OPT-1.3B 15.98 15.31 15905.23 21753.06 OPT-2.7B 12.97 13.03 12.77 13.44
+
+Table VI illustrates the PPL variations across different activation–parameter precision pairs. The results reveal that model parameters can be quantized down to 4 bits with negligible accuracy loss, however, reducing activations to UINT8 causes substantial degradation in PPL, even under the best choice of quantization algorithms described in V. This indicates that activations require a precision level equivalent to roughly 16 bits of effective resolution to sustain the quality. Fig. 10 illustrates the comparison of DRAM traffics when employing either MXs or INT16. While MX is applied solely to activations, its adoption significantly impacts the number of actual parameter loading, resulting in around 50% reduc-tion in DRAM traffic compared to 16-bit implementations. Consequently, TriGen adopts the MX data representation, which provides activation precision comparable to INT16 while significantly reducing memory traffic and bandwidth 10 QKV 
+
+> up
+> gate
+> down
+> QKV
+> up
+> down
+> QKV
+> up
+> down
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+1.2 
+
+> Normalized Latency & Traffic
+
+Llama3.2-3B OPT-1.3B OPT-2.7B 
+
+IN1 
+
+IN0 
+
+IN0 IN0 
+
+IN1 
+
+IN0 
+
+IN0 
+
+IN1 
+
+IN0 IN0 
+
+Latency DRAM traffic Fig. 11: Normalized latency and DRAM traffics to selected stationary. QKV up gate down QKV up down 
+
+Layers 
+
+0.0 
+
+0.5 
+
+1.0 
+
+1.5 
+
+2.0 
+
+2.5 
+
+> Normalized Latency
+> (256, 3072)x(3072, 64)
+> (192, 3072)x(3072, 96)
+> (160, 3072)x(3072, 128)
+> (128, 3072)x(3072, 128)
+> (224, 3072)x(3072, 64)
+> (288, 3072)x(3072, 32)
+> (256, 3072)x(3072, 64)
+> (192, 3072)x(3072, 96)
+> (224, 3072)x(3072, 64)
+> (160, 3072)x(3072, 128)
+> (256, 3072)x(3072, 32)
+> (192, 3072)x(3072, 96)
+> (160, 3072)x(3072, 128)
+> (224, 3072)x(3072, 64)
+> (96, 8192)x(2752, 64)
+> (64, 8192)x(2752, 128)
+> (32, 8192)x(2752, 256)
+> (384, 2048)x(2048, 64)
+> (320, 2048)x(2048, 64)
+> (448, 2048)x(2048, 32)
+> (352, 2048)x(2048, 64)
+> (416, 2048)x(2048, 32)
+> (320, 2048)x(2048, 128)
+> (384, 2048)x(2048, 64)
+> (448, 2048)x(2048, 32)
+> (416, 2048)x(2048, 32)
+> (352, 2048)x(2048, 96)
+> (96, 8192)x(2752, 64)
+> (64, 8192)x(2752, 128)
+> (32, 8192)x(2752, 256)
+
+Llama3.2-3B OPT-1.3B 
+
+Fig. 12: Normalized latency to selected tile dimension. 
+
+consumption. This design choice achieves a balanced trade-off between computational efficiency and accuracy preservation. 
+
+C. Impact of Dataflow and Tiling 
+
+Based on Algorithm 2 (in Section V-B), TriGen determines optimal stationary configurations and tile dimensions. Fig. 11 presents the comparative performance of the strategies. For the Llama-3.2-3B model, TriGen empolys an IN1 stationary for 𝑄𝐾𝑉 projection and the latency and the memory traffic are reduced by 58% and 24% respectively comparing to the performance of IN0 strategy. Through this targeted stationary selection, TriGen achieves superior performance. Although latency remains comparable for up and gate projections under both stationary in all model, memory bandwidth consumption is reduced by 20-50%, directly contributing to enhanced overall performance particularly in terms of on power consumption. Fig. 12 compares normalized latency across candidate tiling configurations for diverse layers. Each bar represents latency normalized against the optimal tiling configuration for its respective layer. For instance, in the 𝑄 /𝐾 /𝑉 projection of the Llama3.2-3B model, configuration ( (192 , 3072 ) × ( 3072 , 96 ))shows 20.6% latency overhead compared to the optimal ((256 , 3072 ) × ( 3072 , 64 )). On average, our proposed tiling strategy (Algorithm 2) achieves 12.5% latency reduction over second-best configuration. Llama3.2-3B OPT-1.3B OPT-2.7B 
+
+Models 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0    
+
+> Normalized Latency
+> 1 NPU 2 NPUs 4 NPUs 8 NPUs
+
+(a) 1 2 4 8
+
+# of NPUs 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0   
+
+> Utilization
+> MAC util DRAM util
+
+(b) Fig. 13: Normalized latency varying the number of NPUs: (a) Latency comparison, (b) MAC and DRAM utilization. 1024 2048 4096 
+
+Sequence Length 
+
+0.0 
+
+0.5 
+
+1.0 
+
+1.5 
+
+2.0 
+
+2.5      
+
+> Normalized Latency
+> Baseline +MXINT8 +LUT +QKV.opt +Trans.opt +Mask.opt
+
+Fig. 14: Normalized latency varying the length of sequence length. All bars are normalized to the baseline of 2K-tokens. 
+
+D. Sensitivity and Scalability Analysis 
+
+Performance variation on multi-NPUs. TriGen achieves scalable multi-NPU performance by employing a low-overhead synchronization mechanism and optimized work-load balancing through its dataflow and tiling strategy. Each NPU comprises four DLA cores and 1MiB SRAM. Workload and system DRAM bandwidth are allocated evenly across all NPUs, ensuring balanced resource utilization and scalability. Fig. 13 demonstrates TriGen’s consistent scalability up to 4 NPUs under a 4K-token sequence length using the Llama-3.2-3B model. At 8 NPUs, however, scalability exhibits a moderate reduction due to memory bandwidth constraints. As the number of NPUs increases, the allocated DRAM bandwidth to an NPUs decreases since the total DRAM bandwidth of the system is fixed. Therefore, the characteristic of the problem is changed from compute-bound to memory-bound and high DRAM utilization (94%) of 8 NPUs in Fig. 13 (b) proves this. 
+
+Sensitivity to sequence length. Fig. 14 illustrates the performance gain across varying input sequence lengths. Overall, we observe the similar trend on varying the input sequence length, however, when token length increases, the performance improvement from LUT is more prominent (1K:18.1% ⇒ 4K:28.4%) since the nonlinear portion increases 11 quadratically. For the same reason, the performance gain from Mask.opt is also increased (1K:8.2% ⇒ 4K:8.9%), how-ever, FlashAttention [8] scheduling, due to the large sequence length, diminishes the effect of Mask.opt slightly. 
+
+VIII. Conclusion 
+
+This paper presents TriGen NPU architecture for end-to-end acceleration of LLM inferences based on SW-HW co-design. For efficient inferences, TriGen adopts MXINT8 number system and HW resource constraint aware schedul-ing. Also, the new LUT architecture accelerates various nonlinear activation functions with negligible accuracy loss. Various software optimizations such as QKV batching, fusing transpose operation and coalesced masking operation further improve the efficiency of TriGen inference. The extensive experimental results demonstrate that TriGen achieves 2.73 ×
+
+speedup and reduces memory transfer by 52% on average. 
+
+References 
+
+[1] “Apple intelligence foundation language models,” 2024. [Online]. Available: https://arxiv.org/abs/2407.21075 [2] “Qualcomm ai engine direct sdk,” 2025. [Online]. Avail-able: https://www.qualcomm.com/developer/software/qualcomm-ai-engine-direct-sdk [3] ARM, “Ethos-U85: Advanced NPU with Scalable Per-formance and Efficiency,” 2025, [Online]. Available: https://www.arm.com/products/silicon-ip-cpu/ethos/ethos-u85. [4] S. Ashkboos, A. Mohtashami, M. L. Croci, B. Li, P. Cameron, M. Jaggi, D. Alistarh, T. Hoefler, and J. Hensman, “QuaRot: Outlier-free 4-bit Inference in Rotated LLMs,” International Conference on Neural Information Processing Systems , Dec. 2025, pp. 100 213–100 240. [5] J. L. Ba, J. R. Kiros, and G. E. Hinton, “Layer Normalization,” arXiv preprint arXiv:1607.06450 , 2016. [6] L. Bamberg, F. Minnella, R. Bosio, F. Ottati, Y. Wang, J. Lee, L. Lavagno, and A. Fuks, “eIQ Neutron: Redefining Edge-AI Inference with Inte-grated NPU and Compiler Innovations,” arXiv preprint arXiv:2509.14388 ,2025. [7] L. Chen, D. Feng, E. Feng, Y. Wang, R. Zhao, Y. Xia, P. Xu, and H. Chen, “Characterizing mobile soc for accelerating heterogeneous llm inference,” Proceedings of the ACM SIGOPS 31st Symposium on Operating Systems Principles , 2025, p. 359–374. [8] T. Dao, D. Fu, S. Ermon, and C. R´ e, “Flashattention-2: Faster attention with better parallelism and work partitioning,” International Conference on Learning Representations (ICLR) , 2024. [9] B. Darvish Rouhani, R. Zhao, V. Elango, R. Shafipour, M. Hall, M. Mes-makhosroshahi, A. More, L. Melnick, M. Golub, G. Varatkar et al. , “With shared microexponents, a little shifting goes a long way,” Proceedings of the 50th Annual International Symposium on Computer Architecture ,2023, pp. 1–13. [10] T. Dettmers, M. Lewis, Y. Belkada, and L. Zettlemoyer, “LLM.int8(): 8-bit Matrix Multiplication For Transformers At Scale,” International Conference on Neural Information Processing Systems , Dec. 2022, pp. 30 318–30 332. [11] T. Dettmers and L. Zettlemoyer, “The Case For 4-bit Precision: K-bit Inference Scaling Laws,” International Conference on Machine Learning ,July 2023, pp. 7750–7774. [12] S. Elfwing, E. Uchibe, and K. Doya, “Sigmoid-Weighted Linear Units for Neural Network Function Approximation in Reinforcement Learning,” 
+
+Neural networks , vol. 107, pp. 3–11, Nov. 2018. [13] C. Fang, M. Shi, R. Geens, A. Symons, Z. Wang, and M. Verhelst, “Anda: Unlocking Efficient LLM Inference with a Variable-Length Grouped Activation Data Format,” IEEE International Symposium on High Performance Computer Architecture , Feb. 2025, pp. 1467–1481. [14] E. Frantar, S. Ashkboos, T. Hoefler, and D. Alistarh, “OPTQ: Accurate Post-Training Quantization For Generative Pre-Trained Transformers,” 
+
+International Conference of Learning Representations , May 2023. [15] C. Guo, J. Tang, W. Hu, J. Leng, C. Zhang, F. Yang, Y. Liu, M. Guo, and Y. Zhu, “OliVe: Accelerating Large Language Models via Hardware-friendly Outlier-Victim Pair Quantization,” International Symposium on Computer Architecture , June 2023. [16] Hailo, “Hailo-15 AI Vision Processor,” 2025, [Online]. Available: https://www.hailo.ai/products/ai-vision-processors/hailo-15-ai-vision-processor. [17] M. Horowitz, “Computing’s energy problem (and what we can do about it),” IEEE International Solid-State Circuits Conference , Mar. 2014, pp. 10– 14. [18] J. Jang, Y. Kim, J. Lee, and J.-J. Kim, “FIGNA: Integer Unit-Based Accel-erator Design for FP-INT GEMM Preserving Numerical Accuracy,” IEEE International Symposium on High-Performance Computer Architecture ,Feb. 2024, pp. 760–773. [19] J. Kim, J. Lee, J. Choi, J. Han, and S. Lee, “Range-invariant approxima-tion of non-linear operations for efficient bert fine-tuning,” ACM/IEEE Design Automation Conference , 2023, pp. 1–6. [20] J. Lee and J.-J. Kim, “Integer Unit-Based Outlier-Aware LLM Accelerator Preserving Numerical Accuracy of FP-FP GEMM,” Design, Automation and Test in Europe Conference , Mar. 2025, pp. 1–7. [21] J. Lee, C. Park, and C. Jin, “Electronic device including accelerator for processing function and method of controlling the electronic device,” US2024/0428059 A1, Dec. 2024. [22] W. Li, A. Hu, N. Xu, and G. He, “Quantization and Hardware Archi-tecture Co-Design for Matrix-Vector Multiplications of Large Language Models,” IEEE Transactions on Circuits and Systems I: Regular Papers ,vol. 71, no. 6, pp. 2858–2871, June 2024. [23] J. Lin, J. Tang, H. Tang, S. Yang, W.-M. Chen, W.-C. Wang, G. Xiao, X. Dang, C. Gan, and S. Han, “AWQ: Activation-aware Weight Quan-tization for On-Device LLM Compression and Acceleration,” Annual Conference on Machine Learning and Systems , May 2024, pp. 87–100. [24] Y. Lin, H. Tang, S. Yang, Z. Zhang, G. Xiao, C. Gan, and S. Han, “QServe: W4A8KV4 Quantization and System Co-design for Efficient LLM Serving,” Annual Conference on Machine Learning and Systems ,May 2025, pp. 1–19. [25] Z. Liu, C. Zhao, I. Fedorov, B. Soran, D. Choudhary, R. Krishnamoorthi, V. Chandra, Y. Tian, and T. Blankevoort, “SpinQuant: LLM Quantization with Learned Rotations,” International Conference of Learning Represen-tations , May 2025, pp. 1–24. [26] W. Luo, R. Fan, Z. Li, D. Du, Q. Wang, and X. Chu, “ Benchmarking and Dissecting the Nvidia Hopper GPU Architecture ,” IEEE International Parallel and Distributed Processing Symposium , May 2024, pp. 656–667. [27] M. Marcus, G. Kim, M. A. Marcinkiewicz, R. MacIntyre, A. Bies, M. Fer-guson, K. Katz, and B. Schasberger, “The Penn Treebank: Annotating Predicate Argument Structure,” Proceedings of the Workshop on Human Language Technology , Mar. 1994, p. 114–119. [28] S. Merity, C. Xiong, J. Bradbury, and R. Socher, “Pointer Sentinel Mixture Models,” International Conference on Learning Representations ,Apr. 2017, pp. 1–13. [29] E. Park, D. Kim, and S. Yoo, “Energy-Efficient Neural Network Acceler-ator Based on Outlier-Aware Low-Precision Computation,” ACM/IEEE International Symposium on Computer Architecture , June 2018, pp. 688– 698. [30] C. Raffel, N. Shazeer, A. Roberts, K. Lee, S. Narang, M. Matena, Y. Zhou, W. Li, and P. J. Liu, “Exploring The Limits of Transfer Learning with a Unified Text-to-text Transformer,” The Journal of Machine Learning Research , vol. 21, no. 1, pp. 5485–5551, Jan. 2020. [31] A. Ramachandran, S. Kundu, and T. Krishna, “MicroScopiQ: Accelerat-ing Foundational Models through Outlier-Aware Microscaling Quanti-zation,” International Symposium on Computer Architecture , June 2025, p. 1193–1209. [32] B. Rouhani, N. Garegrat, T. Savell, R. Zhao, and A. More, “Ocp microscaling formats (mx) specification,” Open Compute Project , 2023. [33] B. D. Rouhani, R. Zhao, A. More, M. Hall, A. Khodamoradi, S. Deng, D. Choudhary, M. Cornea, E. Dellinger, K. Denolf, S. Dusan, V. Elango, M. Golub, A. Heinecke, P. James-Roxby, D. Jani, G. Kolhe, M. Langham-mer, A. Li, L. Melnick, M. Mesmakhosroshahi, A. Rodriguez, M. Schulte, R. Shafipour, L. Shao, M. Siu, P. Dubey, P. Micikevicius, M. Naumov, C. Verrilli, R. Wittig, D. Burger, and E. Chung, “Microscaling Data Formats for Deep Learning,” arXiv preprint arXiv:2310.10537 , 2023. [34] J. Su, M. Ahmed, Y. Lu, S. Pan, W. Bo, and Y. Liu, “RoFormer: Enhanced Transformer with Rotary Position Embedding,” Neurocomputing , vol. 568, no. C, pp. 1–14, Feb. 2024. 
+
+12 [35] H. Touvron, T. Lavril, G. Izacard, X. Martinet, M.-A. Lachaux, T. Lacroix, B. Rozi` ere, N. Goyal, E. Hambro, F. Azhar, A. Rodriguez, A. Joulin, E. Grave, and G. Lample, “LLaMA: Open and Efficient Foundation Language Models,” arXiv preprint arXiv:2302.13971 , 2023. [36] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, Ł. Kaiser, and I. Polosukhin, “Attention is All You Need,” International Conference on Neural Information Processing Systems , Dec. 2017, pp. 1– 11. [37] G. Xiao, J. Lin, M. Seznec, H. Wu, J. Demouth, and S. Han, “SmoothQuant: Accurate and Efficient Post-Training Quantization For Large Language Models,” International Conference on Machine Learning ,Jul 2023, pp. 1–13. [38] X. Xie, L. Wang, L. Xiao, M. Han, L. Sun, S. Zheng, and X. Xu, “FineQ: Software-Hardware Co-Design for Low-Bit Fine-Grained Mixed-Precision Quantization of LLMs,” arXiv preprint arXiv:2504.19746 , 2025. [39] Y. Xie, A. N. J. Raj, M. Chen, and J. Li, “A twofold lookup table architecture for efficient approximation of activation functions,” IEEE Transactions on Very Large Scale Integration (VLSI) Systems , vol. 28, no. 12, pp. 2540–2550, 2020. [40] D. Xu, H. Zhang, L. Yang, R. Liu, G. Huang, M. Xu, and X. Liu, “Fast On-device LLM Inference with NPUs,” ACM International Conference on Architectural Support for Programming Languages and Operating Systems , Mar. 2025, p. 445–462. [41] J. Yu, J. Park, S. Park, M. Kim, S. Lee, D. H. Lee, and J. Choi, “NN-LUT: Neural Approximation of Non-Linear Operations for Efficient Transformer Inference,” ACM/IEEE Design Automation Conference , July 2022, p. 577–582. [42] B. Zhang and R. Sennrich, “Root Mean Square Layer Normalization,” 
+
+International Conference on Neural Information Processing Systems , Dec. 2019, pp. 12 381–12 392. [43] S. Zhang, S. Roller, N. Goyal, M. Artetxe, M. Chen, S. Chen, C. Dewan, M. Diab, X. Li, X. V. Lin, T. Mihaylov, M. Ott, S. Shleifer, K. Shuster, D. Simig, P. S. Koura, A. Sridhar, T. Wang, and L. Zettlemoyer, “OPT: Open Pre-trained Transformer Language Models,” arXiv preprint arXiv:2205.01068 , 2022. 
+
+13

@@ -1,0 +1,578 @@
+Title: SigmaQuant: Hardware-Aware Heterogeneous Quantization Method for Edge DNN Inference
+
+URL Source: https://arxiv.org/pdf/2602.22136v1
+
+Published Time: Thu, 26 Feb 2026 02:22:19 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+> 1
+
+# SigmaQuant: Hardware-Aware Heterogeneous Quantization Method for Edge DNN Inference 
+
+Qunyou Liu ∗, Pengbo Yu ∗, Marina Zapater †, David Atienza ∗,
+
+∗Embedded Systems Laboratory (ESL), EPFL, Switzerland, qunyou.liu@epfl.ch, pengbo.yu@epfl.ch, david.atienza@epfl.ch †University of Applied Sciences and Arts Western Switzerland (HES-SO), Switzerland, marina.zapater@heig-vd.ch 
+
+Abstract —Deep neural networks (DNNs) are essential for performing advanced tasks on edge or mobile devices, yet their deployment is often hindered by severe resource constraints, in-cluding limited memory, energy, and computational power. While uniform quantization provides a straightforward approach to compress model and reduce hardware requirement, it fails to fully leverage the varying robustness across layers, and often lead to accuracy degradation or suboptimal resource usage, particularly at low bitwidths. In contrast, heterogeneous quantization, which allocates different bitwidths to individual layers, can mitigate these drawbacks. Nonetheless, current heterogeneous quantiza-tion methods either needs huge brute-force design space search or lacks the adaptability to meet different hardware conditions, such as memory size, energy budget, and latency requirement. Filling these gaps, this work introduces SigmaQuant , an adaptive layer-wise heterogeneous quantization framework designed to efficiently balance accuracy and resource usage for varied edge environments without exhaustive search. SigmaQuant allocates layer-wise bitwidths based on weight standard deviation and KL divergence, enabling adaptive quantization under real hardware constraints. This strategy efficiently balances accuracy, memory, and latency without the use of exhaustive search. We validate its practicality through ASIC integration in a shift-add-based accelerator, analyzing power, performance, and area (PPA) trade-offs for the resulting mixed-precision models. Experimentals on CIFAR-100 and ImageNet show that SigmaQuant consistently outperforms both uniform and state-of-the-art heterogeneous quantization. At an equal size model, it achieves up to 2.0% higher accuracy; at an equal accuracy, it reduces memory by up to 40.0%. Hardware evaluation demonstrates up to 22.3% area savings and 20.6% less energy cost compared to the widely used INT8 quantization and implementation, with slight latency overhead and comparable accuracy. These results confirm the effectiveness of SigmaQuant for edge AI deployment. 
+
+Index Terms —Hardware Accelerator, Neural Network, Algo-rithm, KL divergence 
+
+I. I NTRODUCTION 
+
+Deep Neural Networks (DNNs) have become the backbone of many edge computing applications, ranging from image processing on devices [1] to speech recognition [2] and beyond. However, executing these models with strict resource budgets remains a formidable challenge. In particular, edge devices often have extremely limited memory size [3], [4], processing capabilities, and stringent energy supplies, which can make large and high-precision DNNs prohibitively expen-sive or even infeasible to deploy [5], [6]. Quantization has emerged as one of the most effective strategies to tackle this problem, as it converts 32-bit floating point (FP) weights and activations into lower-precision repre-sentations (e.g., 8-bit or even 4-bit integers). This compression reduces the storage footprint and computational overhead of the model [7], [8]. However, uniform quantization, where all layers share the same bitwidth, often fails to achieve an optimal trade-off between accuracy and efficiency. The reason is that each DNN layer exhibits distinct statistical properties and different robustness to quantization noise [9], [10]. Therefore, forcing a single global precision can over-allocate bits to some layers and under-allocate them to others. To overcome these limitations, heterogeneous quantization has recently gained popularity. This approach tailors the bitwidth per layer based on the quantization sensitivity of each layer, resulting in more compact models with minimal accuracy loss. However, existing methods typically rely on layer-wise sensitivity heuristics or resource-intensive search algorithms (e.g., reinforcement learning) [11], [12]. In addi-tion, edge devices exhibit various hardware configurations and resource constraints. For example, IoT sensors might have only a few megabytes of available main memory, whereas mobile phones can offer significantly more but require higher accuracy for applications like real-time image recognition or speech processing. Consequently, a static quantization scheme optimized for one scenario often fails to generalize to other hardware deployments. Formally, the quantization process should ideally satisfy boundary conditions on memory and accuracy constraints: Memory Usage ≤ Memory Constraint ,
+
+Accuracy ≥ Accuracy Constraint .
+
+Current heterogeneous quantization methods fail to satisfy this adaptive requirement, as they typically provide fixed solutions that cannot accommodate the diverse and dynamic demands of edge scenarios. Beyond algorithmic efficiency, heterogeneous quantization must also deliver tangible hard-ware benefits, particularly when deployed on edge AI accelera-tors. These accelerators increasingly rely on reduced-precision arithmetic to efficiently minimize area, power, and latency. The widely adopted shift-add scheme for multiply-accumulate (MAC) operations constitutes a representative example [13]– [16]. In such cases, lower bitwidths significantly accelerate MAC computation, as fewer bits directly translate into less processing cycles and lower energy consumption. However, simply applying the lowest precision everywhere is ineffective, since some layers are highly sensitive to quantization noise. Over-quantizing these layers can lead to severe accuracy loss, undermining any hardware gains [17], [18]. This motivates a hardware-aware heterogeneous quantization strategy that carefully allocates precision across the network—assigning low bitwidths where feasible and preserving higher precision 
+
+> arXiv:2602.22136v1 [cs.LG] 25 Feb 2026 2
+
+where needed. Such an approach ensures compliance with hardware constraints (e.g., memory size, energy budgets, real-time latency) and maximizes the hardware efficiency. For this purpose, we propose SigmaQuant, a hardware-aware heterogeneous quantization framework that adaptively allocates per-layer bitwidth under user-specified memory and accuracy targets, while fully leveraging hardware efficiency simultaneously. SigmaQuant has two search phases: (i) Phase-1 provides a stable, constraint-aware initialization. All layers are grouped by simple distribution statistics so that the model quickly moves into a region that satisfies at least one boundary (memory size or accuracy). (ii) Phase-2 then performs fine-grained adjustments on a few layers each time to meet both targets while avoiding unnecessary changes in most layers. The proposed two-phase scheme reduces the search overhead and effectively satisfies the requirements imposed by tight resource budgets. We employ SigmaQuant on CIFAR-100 and ImageNet datasets and on a set of DNNs (e.g., ResNet and MobileNet) and compare performance with respect to a uniform quantization scheme and several state-of-the-art het-erogeneous quantization techniques. Furthermore, we evaluate 
+
+SigmaQuant on a general shift-add-based MAC unit widely used in modern edge accelerators, demonstrating its effective-ness in reducing latency and energy. We also provide a detailed trade-off analysis that highlights the co-optimization between software quantization strategies and hardware design, show-ing how SigmaQuant impacts performance, power, and area (PPA) metrics. This underscores the importance of proposing quantization methods that simultaneously optimize algorith-mic performance while adhering to hardware constraints for efficient deployment. More specifically, the key contributions 
+
+of our work are the following:  
+
+> •
+
+We introduce a distribution-based approach to study het-erogeneous quantization, fully utilizing the weight of each layer, guided by standard deviation and KL divergence.  
+
+> •
+
+We develop a two-phase quantization method that com-bines a cluster-based assignment with iterative divergence-driven refinement, striking an effective accuracy–efficiency balance in a reasonable design space search. Our method adapts the layer bitwidth assignments according to the user-defined boundary conditions on accuracy and model size, ensuring minimal quantization loss while aggressively compressing the network.  
+
+> •
+
+We validate our method on CIFAR-100 [19] and Ima-geNet [20] with popular DNN architectures (mainly ResNet and MobileNet families). Compared to state-of-the-art het-erogeneous schemes, our approach (1) reduces memory usage by up to 17.7% while maintaining or exceeding accuracy and (2) reaches over 2% in Top-1 accuracy under similar memory budgets. Compared to uniform quantization, 
+
+SigmaQuant can reach the same accuracy with only 60% memory budget, and achieve 4% more accuracy with the same model size.  
+
+> •
+
+We evaluate SigmaQuant using a generic hardware im-plementation based on the shift-add scheme, which is widely used in edge scenarios. The results show that our method provides plenty of quantization choices between latency/energy and accuracy. It outperforms uniform quanti-zation schemes such as A8W4 in all metrics. Compared to a well-performing INT8 quantization strategy and hardware, 
+
+SigmaQuant can further reduce area by 22.3% and energy consumption by up to 20. 6% with slight latency overhead and comparable accuracy. The remainder of this paper is organized as follows. Sec-tion II describes the most relevant heterogeneous quantization research in the state of the art. Section III explains the math-ematical explanation for the algorithm and hardware back-ground of suitable accelerator used in performance validation. Section IV details our distribution-fitting approach and two-phase algorithm. Section V describes our experimental setup, followed by results and analysis in Section VI. We conclude and discuss future directions in Section VII. II. R ELATED WORK 
+
+Deep neural network quantization has seen extensive re-search to balance accuracy and efficiency for deployment on resource-constrained hardware. A common approach is uniform quantization, where all weights and activations are quantized to a fixed bitwidth using a linear mapping scale. Uniform low-precision (e.g., 8-bit integer) models can signifi-cantly reduce memory usage and speed up inference with only minor accuracy loss in many cases [11]. However, pushing uniform quantization to ultra-low bitwidths (4-bit or below) often incurs severe accuracy degradation [11]. Techniques such as quantization-aware training and careful calibration improve the situation [11], but ultimately a one-size-fits-all bitwidth may not suit all layers. Some layers are more sensitive to quantization errors than others (as described in Section III-A), so using the same precision budget for every layer can be suboptimal (as shown in Section VI-C). This rigidity motivates the use of adaptive quantization strategies. Non-uniform quantization techniques allocate quantization levels unevenly, guided by the sensitivity of layers. Rather than spacing quantization levels uniformly, these methods concen-trate precision where it matters the most (e.g., large-magnitude values). For instance, clustering or entropy-based schemes learn value clusters that maximize information content [21], effectively compressing many small-magnitude weights into fewer levels while reserving more levels for important out-liers [21]. Zhu et al. propose an entropy-aware layerwise quantization where the bitwidth of each layer is chosen based on the weight distribution entropy, allowing more complex layers to use higher precision (and vice versa) [22]. Baskin et al. [12] introduce a non-uniform k-quantile approach (UNIQ) that adapts the quantizer to the parameter distribution by injecting noise during training to emulate a quantile-based quantization. These non-uniform quantizers can better preserve accuracy under aggressive compression, especially in the low-bit regime [12], but their irregular quantization levels offer only a limited set of solutions and may not reliably meet memory constraints. Recent approaches formulate mixed-precision selection as an optimization problem under hardware constraints. Hardware-Aware Quantization frameworks like HAQ [23] 3
+
+employ reinforcement learning to search for the Pareto-optimal bit allocation across layers given a target memory or latency budget, automating mixed-precision selection. Its runtime depends on the training budget and on the details of the implementation. Likewise, differentiable Neural Architecture Search [24] techniques have been applied to quantization, learning per-layer precisions via gradient-based optimization [25], but this approach entails training a large super-network (for bitwidth choices) – incurring considerable computational overhead – and can be sensitive to initialization and hyper-parameters. Second-order sensitivity analysis is also well established in statistics and machine learning [26], [27]. An alternative line of work uses second-order sensitivity (HAWQ – Hessian-AWare Quantization). HAWQ leverages the Hessian spectrum of each layer to gauge how quantization will impact the loss [27]. Heterogeneous DNNs have demonstrated that judiciously allocating higher bitwidth to error-sensitive layers and lower precision to tolerant layers can reduce model size and inference cost with only a small accuracy drop. There are also approaches for dynamic or adaptive precision at runtime. Instead of fixing a mixed-precision configuration post-training, a single model is trained to support multiple bitwidth settings. Jin et al. [28] propose AdaBits, which enables a network to switch between bitwidths on the fly (e.g., 2-bit to 8-bit) without retraining. By joint training with adaptive bitwidths and using techniques like switchable clipping levels for activations, they obtain a model that can cater to different hardware capabilities or energy budgets. This adds a new dimension of flexibility: one deployed model can adapt to various scenarios. The trade-off is a more involved training procedure (to ensure the network performs well at all supported precisions) and a slight runtime overhead to manage precision switching. Existing network quantization methods, including uniform and mixed-precision approaches, often do not explicitly min-imize the divergence between the pre- and post-quantization distributions of weights or activations. Instead, they use in-direct criteria (e.g. minimizing quantization noise variance or heuristics like entropy/KL to set ranges), which do not guarantee that the quantized values preserve the original distribution [29]. This oversight can lead to a mismatch in distributions that degrades accuracy, as recently noted by several studies [29] [30]. Moreover, most quantization frame-works produce a fixed precision configuration for a model. Many mixed-precision techniques explore only a handful of bitwidth assignments and then adopt a static scheme, which lacks flexibility across different hardware settings [31]. This nature means the model cannot easily adapt its bitwidth per layer to meet the constraints or capabilities of new devices. In summary, earlier quantization methods did not explicitly align distributions and often yielded fixed precision setups. While heterogeneous quantization effectively tailors preci-sion to each layer’s tolerance, deployment on real hardware demands further consideration. Edge AI accelerators, whether ASIC, DSIP, DSP, FPGA, etc., operate under strict area, power, and latency constraints. Reduced-precision arithmetic directly affects all these metrics, as lowering bitwidth reduces MAC complexity, diminishes the memory footprint and data move-ment, and thereby decreases power consumption. For example, for the shift-add scheme widely used in many accelerators, each additional bit in a multiplier operand contributes an extra cycle and corresponding power cost. Thus, lowering the weight bitwidth yields an approximately proportional reduction in compute latency and energy consumption per operation. However, naively pushing all layers to the lowest precision can devastate accuracy, since sensitive layers quickly lose accuracy under over-quantization. Existing quantization techniques largely neglect this co-optimization. Many prior methods focus on accuracy and model size (often via heuristic or search-based bit allocations) without explicitly modeling hardware costs. These approaches yield fixed precision as-signments that may satisfy a bit-budget or target accuracy but run afoul of practical limits like on-chip memory capacity, power budgets, or throughput constraints. In other words, a model might be well-compressed in theory but still too slow or energy-hungry for the target hardware. This gap in prior work motivates a hardware-aware solution that jointly addresses algorithmic and hardware objectives. Beyond early mixed-precision schemes such as HAQ and HAWQ, recent work has progressed along several complementary directions that explicitly consider hardware constraints and/or more expres-sive search formulations. On the hardware–software co-design side, Edge-MPQ [32] integrates versatile mixed-precision in-ference units into a RISC-V pipeline and couples them with a hardware-aware layer-wise MPQ search, targeting latency and energy on a specific edge platform. On the training/sensitivity side, Huang et al. [33] propose HMQAT, a Hessian-based mixed-precision QAT framework that drives bit configuration via a Pareto-frontier search and further improves stability through transition-aware fine-tuning of quantization scales. From the perspective of joint compression under an accelerator objective, Balaskas et al. [34] explore a combined pruning– quantization design space with a reinforcement-learning agent guided by an accelerator-level energy model. Finally, Deng et al. [35] present CLADO, which explicitly models cross-layer dependencies of quantization errors and formulates bitwidth assignment as an integer quadratic program to obtain strong accuracy–compression trade-offs. Motivated by these advances and their practical trade-offs, our proposed approach, SigmaQuant , adopts a lightweight yet hardware-aware distribution-fitting perspective for heteroge-neous quantization. Specifically, SigmaQuant uses layer-wise standard deviation and the KL divergence between the floating-point and quantized distributions to guide bitwidth assignment in a two-phase procedure that enforces user-defined accuracy and resource constraints (model size or BOPs) without ex-haustive search, while remaining compatible with integer-only shift-add accelerators. III. B ACKGROUND 
+
+In this section, we first review the conventional (uniform) quantization scheme and then introduce our perspective of approximating each layer’s weight distribution by a discrete (quantized) distribution. This distribution-fitting viewpoint motivates why different layers may require distinct bitwidths. 4
+
+We also highlight the increasing importance of hardware-constrained design, wherein bitwidth choices must align with metrics such as model size to meet resource and latency targets on edge devices, and we provide some background on the specific hardware design that we use to showcase the results of our work. 
+
+A. Model Quantization and Distribution 1) Uniform Quantization Basics.: Let w ∈ Rn denote the set of weights in a given DNN layer. In a uniform quantization scheme with integer bitwidth b, each weight wi is replaced by a quantized value 
+
+˜wi = clip 
+
+
+
+round   wi
+
+∆
+
+, −Q, Q 
+
+
+
+× ∆,
+
+where Q = 2 (b−1) − 1 (for signed quantization) and ∆ is the quantization step size (or scale). Typically, ∆ is chosen in one of two ways:  
+
+> •
+
+Max-based scaling , where ∆ = max  
+
+> i
+
+|wi|/Q , 
+
+> •
+
+Statistical scaling , where ∆ = k σ , with σ denoting the standard deviation of w (and k a chosen constant, e.g., 2 or 
+
+3). All weights are thus mapped to one of 2b uniformly spaced lev-els in [−Q∆, Q ∆] . While straightforward, a global uniform bitwidth can be suboptimal because different layers exhibit widely varying sensitivities to quantization noise [11], [12], [27], [36]. This observation motivates heterogeneous quanti-zation , wherein each layer (or channel) is allowed its own bitwidth bℓ. Such layer-wise customization yields better ac-curacy–size trade-offs: for example, early convolutional layers often have smaller weight variance and can safely be quantized to 4 bits, whereas layers with broader weight distributions may require 8 bits to retain accuracy. The challenge, then, is to determine how to assign precision across layers in a principled yet efficient way. 
+
+2) Quantization Sensitivity and Standard Deviation: We conducted preliminary experiments to identify a simple indica-tor of layer-wise quantization sensitivity. Using ImageNet [20] as dataset and Alexnet [37] and ResNet18 [38] as example models, we applied progressively lower bitwidths per layer to reach minimum Bits Operations (BOPs) [12] under afixed overall precision budget using brute-force search. A remarkably strong correlation emerged between each layer’s acceptable bitwidth and the standard deviation σ (Sigma ) of its weights: layers with relatively low σ tolerated very low precision (4-bit or even 2-bit) with minimal accuracy impact, whereas layers with high σ either needed to remain at higher precision (e.g., 8-bit) or suffered severe accuracy drops when forced to fewer bits. Table I illustrates this trend for AlexNet running on ImageNet, where an initial heuristic assignment (uniform 8-bit for all layers) is compared against the final adjusted bitwidths. Layers with larger σ (e.g., Conv1 ) ended up requiring higher bℓ to avoid excessive quantization error, as reflected by the larger KL divergence DKL between the original and quantized weight distributions for those layers. In contrast, layers with small σ (e.g., the fully-connected layers) were quantized to 2 bits with negligible DKL penalty. ResNet18 shows the same trend.                                                
+
+> TABLE I OBSERVATIONS ON A BASELINE (BOP-BASED )HEURISTIC VS .FINAL BITWIDTH AND WEIGHT DISTRIBUTION FOR ALEX NET (I MAGE NET ). HIGHER STANDARD DEVIATION σCORRELATES WITH THE NEED FOR HIGHER BITWIDTH TO KEEP THE KL DIVERGENCE DKL LOW .
+> Layer Init Bits Final Bits σDKL
+> AlexNet – Conv1 860.115672 0.022229 AlexNet – Conv2 860.046543 0.000626 AlexNet – Conv3 840.034646 0.000477 AlexNet – Conv4 840.027320 0.000409 AlexNet – Conv5 840.026128 0.000619 AlexNet – FC1 820.009245 0.000097 AlexNet – FC2 820.011537 0.000104 AlexNet – FC3 840.018524 0.000136
+
+These empirical findings confirm that the weight standard deviation σℓ is a strong first-order indicator of layer ℓ’s quan-tization sensitivity. Intuitively, σℓ gauges the “width” of the weight distribution: a large spread means more information can be lost when mapping to a small set of levels, whereas a tightly concentrated distribution can be compressed more aggres-sively. This insight aligns with prior observations that layer-wise weight distributions influence quantization outcomes. For instance, the quantization whitepaper in [9] recommends setting the quantizer range based on multiples of the weight standard deviation, and Zhu et al. propose an entropy-based bit allocation per layer to account for distribution complexity [22]. More sophisticated frameworks have also quantified layer sensitivity via reinforcement learning or second-order analysis (Hessian) [11], reinforcing the notion that certain layers are inherently more error-prone under quantization. Our results show that a simple statistic σℓ can serve as an effective proxy for this sensitivity, providing a convenient starting point for assigning heterogeneous bitwidths. In practice, this means we can sort or cluster layers by σℓ and assign lower precisions to those with small σℓ while reserving higher bits for layers with large σℓ, before applying any fine-grained adjustments. 
+
+3) Distribution-Fitting Perspective.: While σ provides a useful heuristic, we also adopt a theoretical perspective to quantify quantization loss more rigorously. Consider the em-pirical distribution of the weights in layer ℓ, denoted pℓ(w).We can write 
+
+pℓ(w) = 1
+
+|Wℓ|
+
+X
+
+> wi∈Wℓ
+
+δ(w − wi) ,
+
+where Wℓ = {wi} is the set of weights and δ(·) is the Dirac delta (this can be thought of as the normalized weight histogram for layer ℓ). After quantizing layer ℓ to bℓ bits, the set of quantized weights { ˜wi} induces a discrete distribution 
+
+˜pℓ(w) supported only on the finite quantization levels. Rather than viewing quantization merely as per-weight rounding error, we regard it as an information-theoretic approximation of pℓ
+
+by ˜pℓ. A natural measure of the mismatch between these two distributions is the Kullback–Leibler (KL) divergence: 
+
+DKL 
+
+ pℓ ∥ ˜pℓ
+
+ = X
+
+> w
+
+pℓ(w) log pℓ(w)˜pℓ(w) . (1) When the quantization step size (represented by bl) is too small compared to the range of values in Wl, the quantized 5
+
+representation ˜pl will not capture the differences between many distinct values, leading to a loss of precision. Conversely, a sufficiently high bℓ yields ˜pℓ that closely approximates pℓ,resulting in a small KL divergence. In essence, choosing an appropriate bitwidth bℓ amounts to balancing model size (or ef-ficiency) against an acceptable level of distribution distortion. This distribution-fitting view provides a theoretical foundation for quantization: one seeks to minimize information loss by ensuring ˜pℓ is a good fit to pℓ.Importantly, this perspective helps explain the earlier em-pirical trend with σℓ. A layer with a large σℓ typically has a broad pℓ(w); quantizing it aggressively (small bℓ) forces a poor approximation ˜pℓ(w), yielding a high DKL and, ultimately, higher accuracy degradation. In contrast, a layer with small σℓ
+
+(narrow distribution) can be quantized to low precision with only a minor increase in DKL . In practice, we leverage DKL 
+
+as a quantification of quantization “distortion” to complement the σℓ heuristic. Recent studies similarly note that preserving the original distribution (or minimizing distribution shift) is critical for maintaining accuracy [39]. Thus, by using σℓ as a first-order guide and DKL (pℓ ∥ ˜pℓ) as a refinement criterion, we ground our heterogeneous quantization strategy in both empirical intuition and theoretical approximation. Subsequent sections will reference these metrics as the basis for our two-phase bitwidth assignment algorithm, without needing to repeat the justification for why they are chosen. 
+
+B. Exploiting SigmaQuant in Efficient shift-add-based Accel-erators for Edge Devices Multiplican d
+
+> X = 0.9296875
+> 0 1 1 0 1 0 0 0
+> ×
+> Multipli er
+> Y = 0.875
+> 0 1 1 1
+
+= (0.8125,  ↓0.12%)   
+
+> +X * 1
+> +
+> 0
+> X * 1
+> +>>0 X * 0
+
+=     
+
+> 0 1 1 1 0 1 1 1
+> AI Models
+> (a) Arithmetic of AI (b) Multiplication by shift-add iterations
+> +>>1 X * 1
+> >>1
+> Conv GEMM
+> Mult.
+> Add Shift
+> ∑
+> Acc.
+> (b)
+> Fig. 1. (a) The operation hierarchy of AI models from top to down, and (b) the widely used shift-add-based multiplier for edge accelerators that target at high energy efficiency.
+
+Modern edge and mobile devices are constrained by limited memory, computational power, and energy resources, which significantly hampers DNN inference on these platforms. To increase the speed-up and efficiency of inference in resource-constrained platforms, models are quantized and executed on dedicated or domain-specific hardware accelerators. The core computation behind DNNs are matrix multi-plications (GEMMs) and convolutions, both of which are fundamentally composed by MAC operations, as presented in Figure 1(a). Consequently, enhancing the efficiency of multi-plication and accumulation is crucial. In this context, shift-add-based multipliers [13]–[16] are widely employed in hardware accelerators, as they can reduce area consumption, lower power costs, and relax critical timing constraints. Figure 1(b) illustrates an example of an 8-bit × 4-bit multiplication, yielding an 8-bit result via iterative shift-add operations. The input operands are in Q1.X format, that 1-bit for integer (i.e., 0 or -1) and others for fraction, ranging in (-1,1). The process begins at the least significant bit (LSB) of the multiplier, with each bit processed sequentially through an addition followed by a right-shift, and concludes at the most significant bit (MSB). The multiplication result is truncated to 8 bits, that is the same size of the multiplicand, since truncation loss is often minimal (only -0.12% in this example). However, while the shift–and-add scheme offers significant area and energy efficiency, it is constrained by increased la-tency, as a naive implementation requires n-cycle iterations for an n-bit multiplier operand. Consequently, reducing the size of the multiplier operand can substantially improve latency performance and further enhance energy efficiency. Although techniques such as executing multiple shift operations for trailing zeros (e.g., “1000”) within a single cycle [16], [40] or employing Canonical Signed Digit (CSD, e.g., 0111 to 100-) coding [16] for the multiplier have been proposed to mitigate this issue, the overall latency remains strongly correlated with the size of the multiplier operand. For DNNs, the multiplier operand typically corresponds to the weight. Therefore, using lower-bitwidth weights can eliminate latency concerns while simultaneously yielding additional reductions in energy consumption. Therefore, in this work, we target a generic shift-add based arithmetic scheme to assess the benefits of our pro-posed quantization method relative to uniform quantization baselines, with the evaluation reflecting arithmetic efficiency rather than being bound to any particular hardware platform. More detailed discussion about model size, latency, energy consumption are provided in Section-VI. IV. M ETHODOLOGY 
+
+A. Algorithm Overview 
+
+Based on our preliminary experiments and observations, 
+
+SigmaQuant proposes a two-phase procedure to determine per-layer quantization bitwidths, focusing first on a coarse clustering assignment and then on fine-grained adjustments. The goal of this section is to explain the structure and logic of this algorithm (summarized in Algorithm 1) without delving into low-level implementation or mathematical derivations. We take advantage of two key metrics – weight standard deviation (Sigma) and Kullback–Leibler (KL) divergence – to guide decisions (see Section III-A for the mathematical foundation and preliminary experiments results of these metrics). In essence, Phase 1 provides an initial clustering-based bitwidth assignment, and Phase 2 provides an iterative, divergence-based refinement. Throughout the procedure, the algorithm tracks the accuracy and size of the model relative to these targets (with some buffer tolerance, ∆A for accuracy and ∆M6
+
+for size) and uses two key metrics to guide decisions: weight standard deviation (denoted σ, a measure of the spread of the distribution of a layer) and Kullback-Leibler (KL) diver-gence between the original and quantized weight distributions. Algorithm 1 outlines the overall procedure at a high level, summarizing the two phases described below. 1) Phase 1 - Initial Phase (Cluster-Based Bitwidth As-signment): The algorithm clusters the layers based on standard deviation σ using an adaptive k-means method (with penalty parameter λ). Each cluster is mapped to a target bitwidth (e.g., from the set {2, 4, 6, 8}). After quan-tization and calibration, the model’s accuracy and size are compared against the desired targets (with buffers ∆A
+
+and ∆M ). If neither metric is acceptable, the clustering is refined (by increasing λ) and the process repeats until at least one metric meets its boundary. 2) Phase 2 - Refinement Phase (Iterative Improvement): 
+
+The algorithm fine-tunes the bitwidths of individual lay-ers. A sensitivity score—combining σ and the KL diver-gence between the full-precision and quantized weight distributions—is computed for each layer. Layers with high sensitivity (i.e., those most critical to accuracy) are adjusted by increasing their bitwidth, while layers with low sensitivity may have their bitwidth reduced to save memory. This iterative refinement continues until both accuracy and model size meet the targets, thereby placing the model in the Target Zone. 
+
+> Fig. 2. Overview of our proposed distribution-fitting quantization method. We start from user-defined boundary conditions (target model size and accuracy) and adapt bitwidths in two phases: initial clustering by standard deviation followed by iterative KL-based refinement.
+
+Figure 2 illustrates this two-phase procedure on a plot of model accuracy (y-axis) versus model size (x-axis). In the diagram, color-coded regions indicate the algorithm’s decision zones. We preserve those visual cues here to explain how the algorithm navigates the accuracy–model size trade-off:  
+
+> •
+
+Bit Increase Zone (Phase 1 light green region): The model’s accuracy is too low, yet its current size is com-fortably below the target budget. In this scenario, accuracy is the bottleneck. The algorithm responds by increasing bitwidths for certain layers (typically those most sensitive to quantization error) to regain accuracy  
+
+> •
+
+Bit Decrease Zone (Phase 1 light red region): The model’s accuracy is acceptable (at or above the required threshold), but the model size exceeds the target memory budget. Here, efficiency is the problem. The algorithm decreases bitwidths for some less-sensitive layers to compress the model and reduce its size  
+
+> •
+
+Transition Zone (middle gray-green region): Continue the previous cluster trend until reaching the next zone.  
+
+> •
+
+Abandon Zone (gray region): Neither accuracy nor model size is anywhere near acceptable levels. In this rare case, the procedure may terminate early to avoid wasting resources on a hopeless quantization scenario (i.e., the chosen constraints might be unattainable simultaneously). Terminate process.  
+
+> •
+
+Iteration Zone (Phase 2 region): This zone represents the intermediate state where one of the two criteria (accuracy or size) has met its target, but the other one has not yet met it. The model stays in this zone during the Phase 2 refinement process. The algorithm will perform iterative bitwidth tweaks – increasing or decreasing precision for selective layers – to improve the remaining metric while maintaining the already satisfied metric, effectively nudging the model toward the Target Zone.  
+
+> •
+
+Target Zone (light orange region): Both accuracy and model size meet their target thresholds (within the allowed buffers). When the model lands in this zone, it means it satisfies the accuracy requirement and does not exceed the size budget. 
+
+B. Phase 1: Adaptive Clustering 
+
+In the first phase, we assign initial bitwidths to each layer by clustering their standard deviations into K = 4 groups, targeting for the bitwidths of 2-, 4-, 6-, 8-bit. For the initia assignment, we use the conventional k-mean. Then we check the location of the initial point in the Fig. 2, before we decide to increase the bitwidth or decrease the bitwidth. Next, unlike standard k-means, we introduce a adaptive term that discourages certain cluster from becoming too large, thus promoting a more uniform distribution of layers across the available bitwidths. Concretely, let X = {x1, x 2, . . . , x N } be the set of N layers we wish to cluster, where xi is a one-dimensional feature (e.g. standard deviation σi). We seek a partition 
+
+C = {C1, C 2, . . . , C K },
+
+of X into K clusters. We define the centroid of Cj as 
+
+μj = 1
+
+|Cj |
+
+X
+
+> x∈Cj
+
+x. 
+
+The adaptive k-means objective reads 
+
+min 
+
+> C, μ j
+> K
+
+X
+
+> j=1
+
+ X
+
+> x∈Cj
+
+∥x − μj ∥2 + λ
+
+
+
+|Cj | − NK
+
+2
+
+, (2) where λ controls how strongly we penalize deviations from the “ideal” cluster size NK . For each iteration:  
+
+> •
+
+We compute the distances from each layer xi to the centroid of each cluster, adjusted by the cluster-size penalty term λ.7
+
+Algorithm 1 Two-Phase Heterogeneous Quantization                                                                                                                                                          
+
+> Require: Float model Mwith Nlayers; valid bit-set B=
+> {2,4,6,8}; targets At, M t; tolerances ∆A, ∆M; max iters Imax
+> Ensure: Quantised model Mq
+> 1: Mq←Initialize8Bit (M)▷start with uniform 8-bit
+> 2: A←Evaluate (Mq)
+> 3: M←ModelSize (Mq)
+> — Phase 1: adaptive clustering —
+> 4: λ←0.1;i←0
+> 5: while (A < A t−∆A)∧(M > M t+ ∆ M)∧(i < I max )do
+> 6: i←i+ 1
+> 7: feat ←StdDevFeatures (Mq)
+> 8: C ← AdaptiveKMeans (feat ,4, λ )
+> 9: AssignBitwidths (C,Mq,B)
+> 10: Calibrate (Mq);QAT (Mq)
+> 11: A←Evaluate (Mq);M←ModelSize (Mq)
+> 12: if (A≥At−∆A)∨(M≤Mt+ ∆ M)then
+> 13: break ▷one metric is inside the buffer
+> 14: else
+> 15: λ←λ+ 0 .1
+> 16: end if
+> 17: end while
+> 18: if (A < A t−∆A)∧(M > M t+ ∆ M)then
+> 19: return Mq▷give up – infeasible
+> 20: end if — Phase 2: iterative refinement —
+> 21: j←0
+> 22: while j < I max do
+> 23: j←j+ 1
+> 24: ImproveBitwidths (Mq)
+> 25: Calibrate (Mq);QAT (Mq)
+> 26: A←Evaluate (Mq);M←ModelSize (Mq)
+> 27: if (A≥At)∧(M≤Mt)then
+> 28: break
+> 29: end if
+> 30: end while
+> 31: return Mq
+> •
+
+We reassign xi to the cluster that minimizes its total cost.  
+
+> •
+
+We update the centroids μj after all points are reassigned. We initialize λ to a small value (e.g., 0.1) and gradually increase it (in increments, such as 0.1) whenever the resulting bitwidth assignment fails to meet either of the global buffer conditions ( ∆A and ∆M in 1). Each time a new clustering 
+
+C is obtained, we map each cluster Cj to a target bitwidth 
+
+bj ∈ {2, 4, 6, 8}. We then calibrate and perform a short quantization-aware training (QAT) cycle. If neither accuracy nor model size usage falls within the acceptable range, we increment λ and repeat. If, after a fixed maximum number of increments, both metrics remain unacceptably far from their targets, the algorithm halts (“abandoning” the attempt and announcing the failure of quantization). We perform a quick calibration of the quantized model before QAT by using a subset of training data to adjust batchnorm statistics and quantization scales (ensuring stable QAT initialization). 
+
+C. Phase 2: Iterative KL-Based Refinement 
+
+Once Phase 1 ensures that at least one of the target con-straints (accuracy or model sizes) is satisfied, we proceed to a finer-grained iterative improvement of the per-layer bitwidths. Here, we focus on adjusting bitwidths to fix whichever metric remains suboptimal. We define a sensitivity measure for each layer ℓ that combines its standard deviation and a normal-ized Kullback–Leibler (KL) divergence between the float and quantized weight distributions. We use the KL divergence as described in Equation 1. We use a normalized version bDKL to bound it between 0 and 1, e.g. by dividing by DKL 
+
+ pℓ ∥ pint8 
+
+
+
+for an 8-bit baseline distribution pint8 . In each iteration of Phase 2 we perform the following actions: 1) Measure Sensitivity: For layer ℓ, we define a sensitivity score bDKL (pℓ∥˜pℓ),
+
+Layers with a higher bDKL are more critical to accuracy, so if accuracy is below the target, we increase their bitwidth first. Conversely, if model size usage is too high, we decrease bitwidth on layers with a lower sensitivity score. 2) Apply Changes & Calibrate: We pick a small number of layers (e.g., 2 or 3) to adjust by ±2 bits (within the allowable range {2, 4, 6, 8}). We then recalibrate and run a short QAT cycle. 3) Re-Evaluate Metrics: We check the global accuracy and model size usage. If both are within their buffers, we stop; if neither is acceptable, we keep adjusting. 4) Early Stopping / Reversion: If too many consecutive adjustments fail to move the metrics closer to their goals, we revert to the previous stable assignment and exit. We use symmetric min–max range quantization for weights, performed per output channel (as implemented in Brevi-tas [41]), which is a common hardware-friendly scheme. For activations, we adopt asymmetric quantization with statistical clipping at the 99.9th percentile to reduce outlier sensitivity and improve calibration robustness. Unless stated otherwise, we follow a memory-centric objective (Model Size counted on weights only), and thus keep activations fixed at 8 bits while allowing layer-wise weight bitwidths to vary within {2, 4, 6, 8}
+
+under SigmaQuant; when targeting compute (BOPs), both weights and activations can be adapted with the same pro-cedure. Compared to recent MPQ methods that (i) co-design precision assignment with platform-specific inference units and pipelines (e.g., Edge-MPQ [32]), (ii) rely on second-order sensitivity (Hessian) and specialized transition-aware QAT (e.g., HMQAT [33]), (iii) explore a joint pruning–quantization space via reinforcement learning with an accelerator-level energy model [34], or (iv) formulate bitwidth assignment as a global integer quadratic program with cross-layer de-pendency modeling (e.g., CLADO [35]), SigmaQuant adopts a lightweight distribution-fitting strategy. More specifically, Phase 1 clusters layers using σ for a stable near-feasible initialization, and Phase 2 uses KL divergence to make small local bitwidth updates that explicitly enforce user-defined ac-curacy and resource constraints, without platform-specific co-design, Hessian estimation, RL exploration, or IQP solvers. By iterating this local adjustment approach, Phase 2 ensures that the model converges smoothly to a configuration that respects both accuracy and model size constraints without introducing large distributional mismatches at once; in practice, this step often accounts for relatively few bitwidth changes, given that Phase 1 has already established a near-feasible starting point. 8
+
+V. E XPERIMENTAL SETUP 
+
+To validate the effectiveness of SigmaQuant we conduct ex-periments on ImageNet [42] and CIFAR-100 datasets [43] us-ing InceptionV3 [44] and five standard ResNet variants [45]— ResNet18, ResNet34, ResNet50, ResNet101, and ResNet152. We evaluate the proposed approach against state-of-the-art 
+
+heterogeneous quantization approaches as well as conven-tional uniform quantization methods. To compare the result with other state-of-art method, we run experiments using the ImageNet (See Sec. VI-B). To show the trend and relation between the model size and accuracy, we run an experiment using CIFAR-100 to save GPU resources (see Sec. VI-C). We acquire the full-precision pre-trained models from the pytorch official website [46] for ImageNet. For CIFAR-100, we train these models again ourselves on the target dataset before quantization using either:  
+
+> •
+
+Uniform Quantization: All layers share a fixed bitwidth (e.g., 2, 4 or 8 bits).  
+
+> •
+
+SigmaQuant (Ours): Layers receive bitwidths guided by their weight distribution properties (standard deviation and optional divergence checks). Before quantization, a short calibration phase (using a small subset of the training set) is performed. Then QAT is used to mitigate performance degradation. The metrics used to assess the different techniques are the following: 1) Model Size (MB): Sum of quantized weights across all layers. 2) Top-1 Accuracy (%): Evaluated on the CIFAR-100 test set. 3) Regression Analysis: For combined sets of quantized models, we fit accuracy–model-size curves and plot error bands (standard deviation) to visualize overall trends. Moreover, to validate the hardware impact from Sig-maQuant , we map the Resnet family on a general shift-add-based MAC unit and evaluate the latency and power consump-tion information through post-synthesis simulation with TSMC 28nm library. Our experiments were run on NVIDIA A100 and V100 GPUs, and the results were validated through more than 8’500 GPU hours. VI. R ESULTS 
+
+In this section, we first illustrate how the quantization process evolves over time in our two-phase algorithm, high-lighting the transition from cluster-based assignment to it-erative refinement. Then, we compare the performance of our method against state-of-the-art heterogeneous quantiza-tion schemes. Next, we analyze the trade-off between model size and accuracy in CIFAR-100, providing information on resource-accuracy balance. In the following, we discuss the hyperparameter effect. Finally, we demonstrate the potential hardware advantages. 
+
+A. Phase-Based Learning Process 
+
+To illustrate the dynamic process of our method, we track the quantization states (”start” to ”end”) of a representative model (e.g., ResNet34) as it progresses through the two-phase algorithm described in Section IV. Figure 3 plots the model accuracy (in %) against the corrected model sizes (in megabyte), depicting the iterative exploration of the bit increase , bit decrease , and target regions:  
+
+> •
+
+Start Point – Conventional Clustering: Initially, the bitwidth assignment is based on k-means clustering of layers. This coarse clustering provides an initial bitwidth assignment that quickly improves accuracy while causing the model size to approach the target buffer ( Fig. 3 left).  
+
+> •
+
+Phase I – Iterative Re-Clustering: In Phase I, the model re-clusters individual layer bitwidths using an adaptive clus-tering method (Eq. 2). This technique assigns bitwidths to a higher or lower cluster, transitioning the model from the bit-increasing zone to the bit-decreasing zone and subsequently into Phase 2 (Fig. 3 middle).  
+
+> •
+
+Convergence and Abort Conditions: Once one of the target metrics (accuracy or model size) meets the buffer threshold, Phase 2 commences. Here, we compute a sensitivity score for each layer that combines its weight standard deviation with a normalized Kullback–Leibler divergence measure. Layers exhibiting minimal divergence, indicating that further precision reduction would incur only minor accuracy loss, are selectively adjusted (Fig. 3 right). We fix the number of clusters to 4, corresponding to weight bitwidths of {2, 4, 6, 8}-bit. These choices are illustrative, and other configurations could equally be adopted. Phase 1 runs up to 2 iterations (this number can be configured to a higher value when facing larger models), each followed by 4 epochs of QAT. Phase 2 allows up to 40 refinement steps with 40 QAT epochs per step, adjusting 2 layers (we fixed this to 2 layers in our implementation for all experiments) per iteration based on sensitivity. QAT uses cross-entropy loss and SGD (for ResNet) or Adam (for others), with a reduced learning rate. We start from INT8 quantized models. The accuracy threshold is set to 1% drop, and the memory constraint targets 75% of the INT8 model size ( ≈18.75% of the FP32 baseline). In general, Figure 3 demonstrates the stability of the quantization path, showing that only a handful of iterations are typically required before a near-optimal trade-off between accuracy and model size overhead. Additionally, we compare the configuration obtained after Phase I alone with the final configuration after Phases I–II, to quantify the added benefit of Phase II. Table II summarizes results across models under a ≤2% accuracy-drop constraint and a ≤40% INT8-size budget. As noted, Phase 1—our fast, adaptive k-means clustering based solely on layer-wise standard deviation—can leave the model slightly above or below the memory target; the table therefore reports the Phase 1 (“std-only”) accuracy/size alongside the final result after Phase 2. After Phase 1 we choose a direction: either increase the bitwidth of the most sensitive layers to recover accuracy or decrease bitwidths where possible to meet the size budget. This operating region near 35–40% of the INT8 size is particularly challenging because further bitwidth reductions leave limited headroom to preserve accuracy. For ResNet-18, Phase 1 already satisfies the size budget but the accuracy drop is excessive; increasing the precision of selected layers ( ↑in 9                                         
+
+> Fig. 3. Example showing how training advances through the two-phase quantization for ResNet34. The x-axis represents corrected model sizes and the y-axis represents model accuracy. Different points indicate successive stages in the cluster phase (Phase 1) and iteration phase ((Phase 2), with the final quantized model landing in the target area. TABLE II MODEL SIZES AND ACCURACIES .Model Int8 Size (MiB) Int8 Acc. (%) Final Acc. (%) Final Size (MiB) Phase I Acc. (%) Phase I Size (MiB) Next Phase Target Meet ResNet18 11.14 80.40 78.41 3.72 75.98 3.20 ↑✓
+> ResNet34 20.77 82.90 --81.14 6.52 -✓
+> ResNet50 24.32 84.01 81.21 8.49 82.57 8.93 ↓✗
+> ResNet101 42.38 85.98 84.31 12.28 84.78 15.26 ↓✓
+> ResNet152 57.26 86.77 84.67 16.72 85.26 22.66 ↓✗
+
+Table II) restores accuracy while keeping the model within budget, so both constraints are ultimately met. For ResNet-34, both constraints are met after Phase 1, so no refinement is required. For ResNet-50, the size target is met but the accuracy constraint remains violated even after Phase 2, indicating that the two targets cannot be satisfied simultaneously under this setting. 
+
+B. Performance Comparisons with State-of-the-Art Heteroge-neous Quantization Schemes 
+
+In this subsection, we compare our proposed quantization technique ( Ours ) against state-of-the-art methods on ResNet-50 [38] and InceptionV3 [44], focusing on model size (in MB) and Top-1 accuracy (%). We implement our method to achieve optimal performance under various memory constraints by setting target bitwidths to 2, 4, 6, and 8, resulting in amixed-bitwidth configuration. Table III consolidates results from prior work [11], [12], [35], [36], [47]–[49] alongside our heterogeneous bitwidth assignments for weights (W) and activations (A) (column Bits(W,A) in the table). We emphasize weight precision while treating activations as 8-bit, since our primary objective is memory reduction. For each model, we list the baseline full-precision size and accuracy, then compare uniform or mixed-precision baselines to illustrate how different bit configurations trade off memory and accu-racy. The methods labeled Ours highlight two representative configurations that demonstrate a favorable balance between model compactness and classification performance.                                                                  
+
+> TABLE III COMPARISON OF QUANTIZATION METHODS ON INCEPTION V3 AND
+> RES NET -50.
+> Method Bits(W,A) Model Size(MB) Top-1 Acc.(%) ResNet-50
+> Baseline [11] 32,32 97.8 77.72 Apprentice [36] 2+, 8+ 14.11 72.8 UNIQ [12] 4,8 12.8 74.37 UNIQ [12] 4+, 8+ 12.8 75.1 Apprentice [36] 4+, 8+ 20 74.7 Apprentice [36] 2+,32 14.1 74.7 UNIQ [12] 4,32 12.8 75.09 HAWQ-V3 [11] 8,8 24.5 77.58 HAWQ-V3 [11] 4/8,4/8 18.7 76.73 HAWQ-V3 [11] 4,4 13.1 74.24 CLADO [35] mix, 8 17.89 75.42 CLADO [35] mix, 8 13.42 73.10 Ours mix,8 12.02 76.86 Ours mix,8 10.78 75.63
+> InceptionV3
+> Baseline [11] 32,32 90.9 78.88 Integer Only [8] 8, 8 22.7 74.20 Integer Only [8] 7, 7 20.1 73.70 RVQuant [12] 8,8 22.7 74.22 HAWQ-V3 [11] 4/8,4/8 19.6 74.65 Ours mix,8 19.63 74.73
+
+Focusing primarily on memory efficiency, these results show that our heterogeneous quantization yields models that are up to 7–10 × smaller than the full-precision baseline, while retaining most of the original accuracy. For example, for ResNet-50, Ours (mix,8) (12.02 MB) exceeds 76% accuracy, aligning with methods that use similar or slightly larger model sizes, while 13.1MB for HAWQ-V3 with 74.24% accuracy, 13.42MB for CLADO with 73.10% accuracy. Similarly, for In-ceptionV3, our method reach similar Model Size (19.6MB for HAWQ-V3, 19.63MB for Ours) and Top-1 accuracy (74.65% 10 
+
+for HAWQ-V3, 74.73% for Ours) as the HAWQ-V3. Notably, we achieve these gains using a straightforward procedure that incorporates standard deviation and divergence metrics to adapt the bitwidth per layer. Compare to the HAWQ-V3, our method support more bitwidths choices, and it can shrink the model size adaptively according to the memory constrain (as shown in Fig.4(b)). These comparisons confirm that our method effectively balances memory footprint with competitive accuracy, making it a suitable choice for scenarios where model size is the foremost constraint. In our design, SigmaQuant’s search cost is dominated by short QAT loops rather than by an expensive discrete search. Phase 1 computes per-layer statistics (one scalar σ per layer) and runs adaptive 
+
+k-means on these L layers with K = 4 clusters, which is limited in practice (M iterations for example). Computing KL divergences uses layer histograms and scales with the number of parameters P once per refinement round. Phase 2 makes small local moves—changing m layers per round ( m = 2 in our setup)—and applies brief QAT to re-stabilize accuracy. Overall, the wall-clock is therefore well approximated by the number of QAT epochs: 
+
+Cost ≈  M E P1 + N E P2 
+
+ × Tepoch ,
+
+where M is the number of phase 1 rounds, EP1 are Phase 1 epochs, N is the number of refinement rounds, EP2 are epochs per round, and Tepoch is the time for one QAT epoch. In our experiments we cap Phase 1 at normally 1 to 3 iterations and Phase 2 runs normally within 5 (smaller models) to 40 (large models) refinement rounds, with early stopping once both accuracy and size targets are met. As a result, end-to-end times are model-dependent: for the runs in this paper we measured ≈2 to 30 hours for ResNet-18/34/50/101/152, respectively, using A100/V100 GPUs (see Sect. VI-C). We do not claim to be faster than calibration-only PTQ meth-ods that avoid any fine-tuning; instead, SigmaQuant trades a moderate offline search for two properties that those methods typically lack: (i) hard-constraint adaptivity (meeting user-specified accuracy/size targets across devices) and (ii) con-sistently better accuracy–size and hardware PPA trade-offs (Tables II III, Figs. 4). Methods such as HAWQ-V3 estimate per-layer sensitivity via second-order information and solve a global assignment with ILP; their runtime is dominated by many backward passes for Hessian/spectrum estimation plus calibration, after which assignment is relatively cheap. UNIQ and Apprentice require training (noise injection or distillation) across multiple epochs; they do not perform a per-layer mixed-precision search but still incur substantial wall-clock due to full-model optimization. SigmaQuant lies in between: it avoids Hessian estimation and global RL/ILP search, yet it still adapts layer preci-sions to explicit hardware/accuracy constraints via a small number of targeted QAT loops. In short, SigmaQuant is not a “zero-search” PTQ method; it is an adaptive mixed-precision method with linear-in-layers bookkeeping and abounded number of short QAT epochs, which empirically yields favorable accuracy–size–hardware trade-offs under tight device constraints. 
+
+C. Model Size and Accuracy Analysis 
+
+Another key advantage of our method is its adaptive nature. By dynamically adjusting the boundary conditions for both the model size buffer and the accuracy target, our approach performs layer-wise quantization in a highly flexible man-ner, a capability that previous methods lack. Figure 4 (a) compares model size and Top-1 accuracy on CIFAR-100 for five different ResNet architectures (ResNet-18, ResNet-34, ResNet-50, ResNet-101, and ResNet-152) under two quan-tization schemes: conventional uniform quantization and our 
+
+SigmaQuant approach. Across all model variants, SigmaQuant 
+
+(plotted as darker markers) achieves higher accuracy for a given model size than their uniformly quantized counterparts (lighter markers). In practical terms, for an equal memory footprint, a model quantized with SigmaQuant yields 4% more accuracy. For the same accuracy, the model size can shrink by around 40%. Notably, the uniform quantization approach is unable to reach the optimal balance between model size and accuracy, highlighting its inherent limitations. This trend holds consistent as networks become deeper: model quantized with our method surpasses the accuracy of a similarly-sized uniformly quantized one. For example, the ResNet50 sigma can achieve similar accuracy (81.0% for uniform quantiza-tion, 81.7% for sigma quantization) with better model size (18.24MB for uniform quantization, 13.98MB for sigma quan-tization). In effect, SigmaQuant retains and, in some cases even improves, the predictive performance while aggressively reducing the size of the model. To further illustrate the overall trend, Fig. 4 (b) consolidates the results by plotting top-1 accuracy against model size for all quantized ResNet models tested, with linear regression fits for each quantization scheme (sigma-based vs. uniform) and shaded ±1 σ error bands. The key observation is that the fitted curve for SigmaQuant lies consistently above that of uniform quantization across the entire range. The separation between these trendlines is substantial, and the error bands show minimal overlap, indicating that the accuracy gap is statistically robust across multiple runs. In other words, Sig-maQuant achieves a given accuracy level with fewer parame-ters (3.2MB Model Size Saving in Fig. 4 (b)), or conversely, for the same number of parameters (same memory budget), it delivers higher accuracy than uniform precision (4% Accuracy Gain in Fig. 4 (b)). This translates to a more favorable accuracy–efficiency trade-off. Notably, the advantage becomes even more pronounced for larger models: SigmaQuant ’s accu-racy approaches that of higher-precision (e.g., 32-bit) networks at a fraction of the memory usage as model size grows. Such behavior is highly desirable for resource-constrained deploy-ments, as it means that one can enjoy near-baseline accuracy without the cost of a large model. Overall, the regression fits and non-overlapping error bands indicate that SigmaQuant consistently provides a better accuracy–model-size trade-off than uniform quantization across different ResNet depths. Our experiments also demonstrate that SigmaQuant remains practical for offline training across the ResNet family. For example, under an extreme constraint, limiting the model size to achieve at least 25% memory savings while tolerating at 11      
+
+> Fig. 4. (a) Comparison of Top-1 accuracy versus model size for various ResNet architectures on CIFAR-100, where darker markers denote the sigma -based method and lighter markers denote uniform quantization. (b) Regression fits with ±1 σerror bands reveal that the sigma approach consistently achieves higher accuracy at equivalent model sizes.
+
+most 1% accuracy drop relative to the full precision model, the total quantization search and training times were approxi-mately 4, 2, 1.5, 5.5, and 26 hours for ResNet-18, ResNet-34, ResNet-50, ResNet-101, and ResNet-152, respectively. These runtimes remain within a reasonable range for offline deployment. Even in cases where the training process fails due to overly tight memory constraints, we observe from the generated models that SigmaQuant still produces meaningful accuracy–efficiency trade-offs, as shown in the corresponding evaluation figures. 
+
+D. Hyperparameter and the Activation 
+
+We study the impact of the accuracy/size buffers (∆ A, ∆M )
+
+and the refinement schedule (max rounds Nmax , step size 
+
+m layers/round, and QAT epochs/round EP2 ) on convergence and wall-clock. Recall that Phase 1 ends once either of the metrics enters its buffer (Alg. 1, lines 12–16), whereas Phase 2 continues until both strict targets are met (lines 27–31). Thus, larger buffers generally reduce Phase 1 iterations but may require more Phase 2 refinements; smaller buffers have the opposite effect. We keep K=4 clusters and the default 2-layer step in Phase 2 unless otherwise stated. Table IV summarizes typical behavior on ResNet-34/CIFAR-100 under our default targets (at most 1% accuracy drop), varying only (∆ M ) and refinement settings. The trends hold qualitatively for other models. Overall, smaller buffers ( Conservative ) reduce the chance of overshooting a target but increase observed rounds 
+
+N and wall-clock; larger buffers ( Aggressive ) do the opposite, at a slight risk of needing extra micro-adjustments later in Phase 2. In all cases, the final solution respects the strict targets due to the Phase 2 stopping rule. Moreover, except the weights for the memory saving, we adapt the activation to reduce the amount of BOPs. To evaluate activation reduction fairly, we switch the target from memory to compute: 
+
+BOPs ≜ P 
+
+> ℓ
+
+Bw(ℓ) Ba(ℓ) MACs( ℓ),                              
+
+> TABLE IV SENSITIVITY OF SIGMA QUANT ON RES NET -34 (CIFAR-100) UNDER THE DEFAULT TARGETS .Numbers shown are placeholders.
+> Setting ∆A∆MObs. MObs. NTime (h) Meet? Conservative 1% 85% 30∼4.5 ✓
+> Balanced (default) 1% 75% 33∼12.6 ✓
+> Aggressive 1% 50% 45∼19.0 ✗
+
+where the Bw(ℓ) and Ba(ℓ) are the bitwidth of weight and activation; MACs is the multiply–accumulate operation of this layer. It upper-bounds bit-level work and correlates with energy/latency (on our shift-and-add MACs, cycles scale primarily with Bw) while exposing the benefit of lower-ing Ba. We then run SigmaQuant with a compute bud-get (BOPs) and an accuracy target, letting both weights and activations adapt. Table V reports indicative results on AlexNet/ResNet-18/ResNet-32/ResNet-50 on CIFAR-100 with a 1% accuracy-drop target and a 25–35% BOPs-reduction budget. As expected, activation down-quantization reduces BOPs but leaves Model Size (MB) unchanged; SigmaQuant co-adapts layerwise weights to maintain accuracy. When the optimization target is memory (weight size), changing acti-vation bitwidth has no effect on Model Size (MB) because activations are not counted in that metric. Under a compute target (BOPs), SigmaQuant naturally co-optimizes toward lower activation precision while preserving accuracy, yielding 35–50% BOPs reductions in our indicative runs with ≤2.5% accuracy loss.                               
+
+> TABLE V ACTIVATION REDUCTION UNDER A BOP TARGET .Model ∆A∆BOP
+> ResNet-18 78.91% (−32 .9% )ResNet-34 81.31% (−49 .4% )ResNet-50 82.38% (−32 .0% )12 76.0
+> 78.0
+> 80.0
+> 82.0
+> 84.0
+> 86.0
+> 88.0
+> 0.70 0.80 0.90 1.00 1.10
+> Accuracy (%)
+> Normalized Energy
+> 76.0
+> 78.0
+> 80.0
+> 82.0
+> 84.0
+> 86.0
+> 88.0
+> 0.70 0.80 0.90 1.00 1.10
+> Accuracy (%)
+> Normalized Energy
+> 70.0
+> 72.0
+> 74.0
+> 76.0
+> 78.0
+> 80.0
+> 82.0
+> 0.70 0.80 0.90 1.00 1.10
+> Accuracy (%)
+> Normalized Energy
+> 72.0
+> 74.0
+> 76.0
+> 78.0
+> 80.0
+> 82.0
+> 84.0
+> 0.70 0.80 0.90 1.00 1.10
+> Accuracy (%)
+> Normalized Energy
+> 77.0
+> 78.0
+> 79.0
+> 80.0
+> 81.0
+> 82.0
+> 83.0
+> 84.0
+> 85.0
+> 0.70 0.80 0.90 1.00 1.10
+> Accuracy (%)
+> Normalized Energy
+
+Resnet18  Resnet34  Resnet50  Resnet101  Resnet152 
+
+Shift-add MAC (8-bit >>+ Multiplication, 32-bit + for accumulation) 
+
+INT8 MAC (8-bit × 8-bit, 32-bit +)  From left to right: A8W2, A8W4, A8W6, A8W8.  Our mixed-precision solutions                     
+
+> 76.0
+> 78.0
+> 80.0
+> 82.0
+> 84.0
+> 86.0
+> 88.0
+> 0.50 1.50 2.50 3.50 4.50
+> Accuracy (%)
+> Normalized Cycles
+> 76.0
+> 78.0
+> 80.0
+> 82.0
+> 84.0
+> 86.0
+> 88.0
+> 0.50 1.50 2.50 3.50 4.50
+> Accuracy (%)
+> Normalized Cycles
+> 70.0
+> 72.0
+> 74.0
+> 76.0
+> 78.0
+> 80.0
+> 82.0
+> 0.50 1.50 2.50 3.50 4.50
+> Accuracy (%)
+> Normalized Cycles
+> 72.0
+> 74.0
+> 76.0
+> 78.0
+> 80.0
+> 82.0
+> 84.0
+> 0.50 1.50 2.50 3.50 4.50
+> Accuracy (%)
+> Normalized Cycles
+> 77.0
+> 78.0
+> 79.0
+> 80.0
+> 81.0
+> 82.0
+> 83.0
+> 84.0
+> 85.0
+> 0.50 1.50 2.50 3.50 4.50
+> Accuracy (%)
+> Normalized Cycles
+> Energy Latency
+
+Fig. 5. Normalized energy consumption (top) and cycle count (hence latency, bottom) 
+
+versus accuracy for all ResNet models with uniform quantization(A8W2, A8W4, A8W6, A8W8) and sigma quantization schemes. An INT8 MAC, which has 1-cycle 8-bit × 8-bit multiplier and 32-bit adder, is used as a baseline for performance comparison. FP32, FP16, and BF16 alternatives are not presented here since they incurs huge overhead , that up to 5.5 ×,4.0 ×, and 3.6 × more energy cost. All the data are normalized with INT8 computation. The closer a dot element is to the top-left corner, the better its performance and accuracy. 
+
+TABLE VI MAC I MPLEMENTATIONS             
+
+> FP32 FP16 BF16 INT8 Shift-add
+> Multiplication 32-bit 1 subword FP32 ×
+> 32-bit 2 subwords FP16 ×
+> 32-bit 2 subwords BF16 ×
+> 32-bit 4 subwords INT8 ×
+> 32-bit 4 subwords 8-bit ≫+Accumulation 1 subword FP32 +
+> 2 subwords FP32 +
+> 2 subwords FP32 +
+> 4 subwords INT32 +
+> 4 subwords INT32 +
+> Area / μm23218.3 3837.9 3501.9 2103.4 1635.4
+
+Overall, these results show that our distribution-guided Sig-maQuant method provides an effective balance between model compression and predictive performance. By judiciously allo-cating bitwidths based on per-layer weight statistics and distri-butional divergence, SigmaQuant consistently produces more compact models without sacrificing accuracy under the same model-size constraints. This represents a compelling improve-ment over uniform quantization, making our approach well-suited for real-world DNN deployment in memory-limited embedded environments. 
+
+E. Hardware Performance Analysis 
+
+A key advantage of heterogeneous quantization is that it leverages the varying robustness of different layers to maintain accuracy while allowing the corresponding hardware to oper-ate with less area occupation, fewer cycle count, and lower energy consumption, increasing all benefits. In this work, we target a widely used shift-add MAC implementation to evaluate the performance under different quantization schemes. This MAC unit has an 8-bit shift-add-based multiplier that supports 8-bit × n-bit → 8-bit multipli-cation through iterative right-shift and addition, followed by a 32-bit adder for accumulation. The shift-add design performs a single addition and multiple right-shift operations within each cycle, which enables to process trailing zeros of the multiplier operand, reducing the average latency to roughly n/2 cycles for an n-bit operand. The shift-add MAC hardware is implemented in TSMC 28nm technology (0.9V, 600MHz) and features a 32-bit datapath. It should be emphasized that the arithmetic performance comparison reflect a general case applicable to all technology nodes and hardware platforms, while the presented implementation is intended primarily for illustrative purposes. We also implemented FP32, FP16, BF16, and INT8 alternatives under the same conditions, detailed in Table VI. It can be found that shit-add MAC implemen-tation reduces 22.3% area over the INT8 one, and more than 49.2% over others. We characterize the performance using post-synthesis simulation, mapping all convolutional and fully-connected layers of ResNet models onto the hardware. The energy consumption and cycle count for inference are evaluated, as shown in Figure 5. In Figure 5, we show the normalized energy consumption (top, a) and cycle count (hence latency, (bottom, b)) of different quantization schemes across benchmarks. Both our SigmaQuant scheme and the uniform quantization approach are mapped on the shift-add design, whereas the typical INT8 quantization is performed with the INT8 hardware that already has high efficiency. The results of FP32, FP16, BF16 are not included, since they incur up to 5.5 ×, 4.0 ×, and 3.6 × more energy cost over the INT8 one, respectively. The uniform quantization approach has 13 
+
+four combinations of 8-bit activations and 2/4/6/8-bit weights, namely as A8W8, A8W6, A8W4 and A8W2. All the values are normalized by the INT8 MAC implementation. The accuracy drop is defined as the difference between FP32 reference and the quantized ones. As expected, in uniform quantization, when weights reduce from 8-bit to 4-bit, and especially to 2-bit, the accuracy dramatically drops. Taking Resnet34 as an example, even if uniform quantization A8W2 saves 25.0% energy consumption wrt. the INT8 case, it degrades accuracy by 8.54%. However, 
+
+SigmaQuant performs a larger search in the design space and is able to address this issue, achieving 23.3% energy savings over the INT8 alternative with only a 2.97% accuracy loss. As for the A8W4 case, uniform quantization can save 13.8% energy consumption with 1.39% accuracy loss while our method reduces 16.0% energy cost with only 1.25% accuracy degradation. Furthermore, the results of SigmaQuant 
+
+are consistent across all the benchmarks, always yielding data points located closer to the upper left corner in the figure wrt. the uniform approach, hence less latency and energy consumption with lower accuracy loss. The only exception is ResNet18, where SigmaQuant shows a very similar trend to uniform quantization, since such model is too small and therefore the space search is limited. Still, SigmaQuant can get 15.7 % less energy consumption wrt. the INT8 case with 3.76% accuracy drop while that of uniform quantized one is 13.8% and 3.45%. For larger models such as Resnet101 and Resenet152, that provides enough searching space, our 
+
+SigmaQuant method can reduce up to 20.6% and 20.3% energy cost wrt. the INT8 alternative, which is already a well-known solution, with comparable accuracy. Note that the model size of our method is always smaller than that of INT8 quantization for all the comparisons. Similar trend can be observed in the latency performance. Due to the serial shift-add-based multiplication, even multiple shifts per cycle is used, it still incurs latency overhead. For example, the A8W8 uniform quantization of ResNet34, runs 4.2 × slower than the INT8 case. Thanks to the fully exploitation and optimization by SigmaQuant , however, it dramatically cuts this overhead. For Resnet34, it lowers energy by 23.3% while increasing latency by only 17.5% relative to the INT8 alternative. This analysis only considers the general shift-add arithmetic, yet the advantages would become far more pronounced with specific techniques such as CSD encoding [16] applied to the multiplier operand. In addition, uniform quantization offers a very limited range of choices, making it difficult to balance accuracy with latency and energy efficiency. In contrast, the SigmaQuant 
+
+dot distribution shown in Figure 5 illustrates a broader set of quantized models. For example, the options between A8W2 to A8W4 or A8W4 to A8W6 for ResNet18, ResNet34, and ResNet50. This greater flexibility allows for more effective tailoring to diverse hardware requirements, including model size, runtime latency, and energy budget. Overall, these results demonstrate that distribution-guided, layer-wise bit allocation can significantly enhance hardware efficiency compared to uniform quantization. In fact, our approach shows greater improvements than the A8W4 vari-ant, approaching the efficiency of A8W2 quantization while incurring minimal accuracy loss, and can further improve hardware efficiency than typical INT8 solution. As model size decreases, fine-grained quantization leverages the shift-add architecture to achieve lower latency and reduced power consumption, offering a compelling solution for resource-constrained deployments. VII. C ONCLUSION 
+
+In this work, we have presented SigmaQuant , an adaptive, layerwise heterogeneous quantization framework that lever-ages a distribution-fitting approach to assign bitwidths based on both weight standard deviation and KL divergence. Our two-phase method, featuring an initial cluster-based bitwidth assignment followed by an iterative, divergence-driven refine-ment, effectively balances accuracy and model size with a reasonable searching effort, ensuring that quantized models maintain high performance while achieving significant com-pression. A key strength of SigmaQuant is its inherent adapt-ability. Across different platforms with varying constraints and requirements, our framework consistently adapts bit al-location to satisfy specific resource budgets. For example, by integrating with hardware-centric metrics such as model size and target accuracy, SigmaQuant directly translates per-layer quantization decisions into efficient bitwidth assignments that align with the overall requirements of the system. In general, our experimental results on CIFAR-100 and ImageNet across multiple DNN architectures demonstrate that SigmaQuant 
+
+not only outperforms state-of-the-art heterogeneous quanti-zation and uniform quantization, but also provides a robust and hardware-aware solution for efficient DNN inference in resource-limited environments. Furthermore, experiments on general hardware arithmetic scheme validate our results from both power and latency perspectives, further emphasizing the advantages of our approach. This adaptive, dynamic method paves the way for the practical deployment of deep neural networks in a wide range of embedded systems. VIII. A CKNOWLEDGMENTS 
+
+This work was supported in part by the Swiss State Secre-tariat for Education, Research, and Innovation (SERI) through the SwissChips research project, and also by Intel as part of the Intel Center for Heterogeneous Integrated Platforms (HIP). REFERENCES [1] A. Krizhevsky, I. Sutskever, and G. E. Hinton, “Imagenet classification with deep convolutional neural networks,” Commun. ACM , vol. 60, no. 6, p. 84–90, May 2017. [Online]. Available: https://doi.org/10.1145/ 3065386 [2] D. Amodei et al. , “Deep speech 2: end-to-end speech recognition in english and mandarin,” in Proceedings of the 33rd International Conference on International Conference on Machine Learning - Volume 48 , ser. ICML’16. JMLR.org, 2016, p. 173–182. [3] Q. Liu, M. Zapater, and D. Atienza, “MatrixFlow: System–accelerator co-design for high-performance transformer applications,” arXiv preprint arXiv:2503.05290, 2025. [Online]. Available: https://arxiv.org/ abs/2503.05290 [4] ——, “Gem5-AcceSys: Enabling system-level exploration of standard interconnects for novel accelerators,” arXiv preprint arXiv:2502.12273, 2025. [Online]. Available: https://arxiv.org/abs/2502.12273 [5] V. Sze, Y.-H. Chen, T.-J. Yang, and J. S. Emer, “Efficient processing of deep neural networks: A tutorial and survey,” Proceedings of the IEEE ,vol. 105, no. 12, pp. 2295–2329, 2017. 14 
+
+[6] L. Deng, “Model compression and acceleration for deep neural net-works: The principles, progress, and challenges,” IEEE Signal Process-ing Magazine , vol. 37, no. 6, pp. 101–110, 2020. [7] S. Han, H. Mao, and W. J. Dally, “Deep compression: Compressing deep neural networks with pruning, trained quantization and huffman coding,” in International Conference on Learning Representations (ICLR) , 2016. [8] B. Jacob, S. Kligys, B. Chen, M. Zhu, M. Tang, A. Howard, H. Adam, and D. Kalenichenko, “Quantization and training of neural networks for efficient integer-arithmetic-only inference,” Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 2704–2713, 2018. [9] R. Krishnamoorthi, “Quantizing deep convolutional networks for effi-cient inference: A whitepaper,” 2018. [10] R. Banner, I. Hubara, E. Hoffer, and D. Soudry, “Scalable methods for 8-bit training of neural networks,” Advances in Neural Information Processing Systems (NeurIPS) , vol. 31, pp. 5145–5153, 2018. [11] Z. Yao, Z. Dong, Z. Zheng, A. Gholami, J. Yu, E. Tan, L. Wang, Q. Huang, Y. Wang, M. W. Mahoney, and K. Keutzer, “Hawq-v3: Dyadic neural network quantization,” in Proceedings of the 38th International Conference on Machine Learning . PMLR, 2021, pp. 11 875–11 886. [12] C. Baskin, E. Schwartz, E. Zheltonozhskii, N. Liss, R. Giryes, A. M. Bronstein, and A. Mendelson, “Uniq: Uniform noise injection for non-uniform quantization of neural networks,” ACM Transactions on Computer Systems , vol. 37, no. 1–4, pp. 1–15, 2021. [13] P. Judd, J. Albericio, T. Hetherington, T. M. Aamodt, and A. Moshovos, “Stripes: Bit-serial deep neural network computing,” in 2016 49th Annual IEEE/ACM International Symposium on Microarchitecture (MI-CRO) . IEEE, 2016, pp. 1–12. [14] L.-C. Hsu, C.-T. Chiu, K.-T. Lin, H.-H. Chou, and Y.-Y. Pu, “Essa: An energy-aware bit-serial streaming deep convolutional neural network accelerator,” Journal of Systems Architecture , vol. 111, p. 101831, 2020. [15] M. Rios, F. Ponzina, A. Levisse, G. Ansaloni, and D. Atienza, “Bit-line computing for cnn accelerators co-design in edge ai inference,” IEEE Transactions on Emerging Topics in Computing , vol. 11, no. 2, pp. 358– 372, 2023. [16] P. Yu, F. Ponzina, A. Levisse, M. Gupta, D. Biswas, G. Ansaloni, D. Atienza, and F. Catthoor, “An energy efficient soft simd microar-chitecture and its application on quantized cnns,” IEEE Transactions on Very Large Scale Integration (VLSI) Systems , 2024. [17] Z. Dong, Z. Yao, A. Gholami, M. W. Mahoney, and K. Keutzer, “HAWQ: Hessian aware quantization of neural networks with mixed precision,” in Proc. IEEE/CVF Int’l Conf. Computer Vision (ICCV) , 2019. [18] A. Yazdanbakhsh, A. T. Elthakeb, P. Pilligundla, F. S. Mireshghallah, and H. Esmaeilzadeh, “ReLeQ: A reinforcement learning approach for deep quantization of neural networks,” arXiv:1811.01704 , 2019. [19] A. Krizhevsky and G. Hinton, “Learning multiple layers of features from tiny images,” 2009, technical Report. [20] O. Russakovsky, J. Deng, H. Su, J. Krause, S. Satheesh, S. Ma, Z. Huang, A. Karpathy, A. Khosla, M. Bernstein et al. , “Imagenet large scale visual recognition challenge,” International Journal of Computer Vision , vol. 115, no. 3, pp. 211–252, 2015. [21] E. Park, J. Ahn, and S. Yoo, “Weighted-entropy-based quantization for deep neural networks,” in 2017 IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , 2017, pp. 7197–7205. [22] X. Zhu, Q. Li, and D. Wang, “Entropy-based layerwise quantization for efficient deep neural networks,” in Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition . IEEE, 2018, pp. 1234– 1243. [23] K. Wang, Z. Liu, Y. Lin, J. Lin, and S. Han, “Haq: Hardware-aware automated quantization with mixed precision,” in 2019 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2019, pp. 8604–8612. [24] T. Elsken, J. H. Metzen, and F. Hutter, “Neural architecture search: a survey,” J. Mach. Learn. Res. , vol. 20, no. 1, p. 1997–2017, Jan. 2019. [25] B. Wu, X. Dai, P. Zhang, Y. Wang, F. Sun, Y. Wu, Y. Tian, P. Vajda, Y. Jia, and K. Keutzer, “Fbnet: Hardware-aware efficient convnet design via differentiable neural architecture search,” 2019 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pp. 10 726–10 734, 2018. [Online]. Available: https://api.semanticscholar. org/CorpusID:54461508 [26] H. Cai, M. F. Kaloorazi, and J. Chen, “Online generalized eigenvectors extraction via a fixed-point approach,” IEEE Transactions on Signal Processing , vol. 69, pp. 2435–2451, 2021. [27] Z. Dong, Z. Yao, D. Arfeen, A. Gholami, M. W. Mahoney, and K. Keutzer, “Hawq-v2: Hessian aware trace-weighted quantization of neural networks,” in Advances in Neural Information Processing Systems , H. Larochelle, M. Ranzato, R. Hadsell, M. Balcan, and H. Lin, Eds., vol. 33. Curran Associates, Inc., 2020, pp. 18 518– 18 529. [Online]. Available: https://proceedings.neurips.cc/paper files/ paper/2020/file/d77c703536718b95308130ff2e5cf9ee-Paper.pdf [28] L. Wang and B. Chen, “Adabits: Adaptive bitwidth quantization for deep neural networks,” in Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition . IEEE, 2020, pp. 5560–5568. [29] A. Finkelstein, U. Almog, and M. Grobman, “Fighting quantization bias with bias,” ArXiv , vol. abs/1906.03193, 2019. [Online]. Available: https://api.semanticscholar.org/CorpusID:174801144 [30] C. Hong and K. M. Lee, “Overcoming distribution mismatch in quantizing image super-resolution networks,” 2024. [Online]. Available: https://openreview.net/forum?id=GOt2kP383R [31] A. Bulat and G. Tzimiropoulos, “ Bit-Mixer: Mixed-precision networks with runtime bit-width selection ,” in 2021 IEEE/CVF International Conference on Computer Vision (ICCV) . Los Alamitos, CA, USA: IEEE Computer Society, Oct. 2021, pp. 5168–5177. [Online]. Available: https://doi.ieeecomputersociety.org/10.1109/ICCV48922.2021.00514 [32] X. Zhao, R. Xu, Y. Gao, V. Verma, M. R. Stan, and X. Guo, “Edge-MPQ: Layer-wise mixed-precision quantization with tightly integrated versatile inference units for edge computing,” IEEE Transactions on Computers , vol. 73, no. 11, pp. 2504–2519, 2024. [33] Z. Huang, X. Han, Z. Yu, Y. Zhao, M. Hou, and S. Hu, “Hessian-based mixed-precision quantization with transition aware training for neural networks,” Neural Networks , vol. 182, p. 106910, 2025. [34] K. Balaskas, A. Karatzas, C. Sad, K. Siozios, I. Anagnostopoulos, G. Zervakis, and J. Henkel, “Hardware-aware DNN compression via diverse pruning and mixed-precision quantization,” IEEE Transactions on Emerging Topics in Computing , vol. 12, no. 4, pp. 1079–1092, 2024. [35] Z. Deng, S. Sharify, X. Wang, and M. Orshansky, “Mixed-precision quantization for deep vision models with integer quadratic program-ming,” in Proceedings of the 62nd ACM/IEEE Design Automation Conference (DAC) , 2025, pp. 1–7. [36] A. Mishra and D. Marr, “Apprentice: Using knowledge distillation techniques to improve low-precision network accuracy,” in International Conference on Learning Representations (ICLR) , 2018. [37] A. Krizhevsky, I. Sutskever, and G. E. Hinton, “Imagenet classification with deep convolutional neural networks,” in Advances in Neural Infor-mation Processing Systems , 2012, pp. 1097–1105. [38] K. He, X. Zhang, S. Ren, and J. Sun, “Deep residual learning for image recognition,” in Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition , 2016, pp. 770–778. [39] M. Federici, R. Tomioka, and P. Forr´ e, “An information-theoretic ap-proach to distribution shifts,” in Proceedings of the 35th International Conference on Neural Information Processing Systems , ser. NIPS ’21. Red Hook, NY, USA: Curran Associates Inc., 2021. [40] M. Rios, W. Simon, A. Levisse, M. Zapater, and D. Atienza, “An associativity-agnostic in-cache computing architecture optimized for multiplication,” in 2019 IFIP/IEEE 27th International Conference on Very Large Scale Integration (VLSI-SoC) . IEEE, 2019, pp. 34–39. [41] G. Franco, A. Pappalardo, and N. J. Fraser, “Xilinx/brevitas,” 2025. [Online]. Available: https://doi.org/10.5281/zenodo.3333552 [42] J. Deng, W. Dong, R. Socher, L.-J. Li, K. Li, and L. Fei-Fei, “Imagenet: A large-scale hierarchical image database,” in 2009 IEEE Conference on Computer Vision and Pattern Recognition , 2009, pp. 248–255. [43] A. Krizhevsky and G. Hinton, “Cifar-100 dataset,” https://www.cs. toronto.edu/ ∼kriz/cifar.html, 2009. [44] C. Szegedy, V. Vanhoucke, S. Ioffe, J. Shlens, and Z. Wojna, “ Rethinking the Inception Architecture for Computer Vision ,” in 2016 IEEE Conference on Computer Vision and Pattern Recognition (CVPR) . Los Alamitos, CA, USA: IEEE Computer Society, Jun. 2016, pp. 2818–2826. [Online]. Available: https: //doi.ieeecomputersociety.org/10.1109/CVPR.2016.308 [45] K. He, X. Zhang, S. Ren, and J. Sun, “Deep residual learning for image recognition,” in 2016 IEEE Conference on Computer Vision and Pattern Recognition (CVPR) , 2016, pp. 770–778. [46] PyTorch, “Models — torchvision documentation,” https://pytorch.org/ vision/stable/models.html, accessed: YYYY-MM-DD. [47] A. Zhou, A. Yao, Y. Guo, L. Xu, and Y. Chen, “Incremental network quantization: Towards lossless cnns with low-precision weights,” in 
+
+International Conference on Learning Representations (ICLR) , 2017. [48] Y. Xu, Y. Wang, A. Zhou, W. Lin, and H. Xiong, “Deep neural network compression with single and multiple level quantization,” 2018. [49] A. Polino, R. Pascanu, and D. Alistarh, “Model compression via distillation and quantization,” in International Conference on Learning Representations (ICLR) , 2018.

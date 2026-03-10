@@ -1,0 +1,629 @@
+Title: Scope: A Scalable Merged Pipeline Framework for Multi-Chip-Module NN Accelerators
+
+URL Source: https://arxiv.org/pdf/2602.14393v1
+
+Published Time: Tue, 17 Feb 2026 02:29:03 GMT
+
+Number of Pages: 7
+
+Markdown Content:
+# Scope: A Scalable Merged Pipeline Framework for Multi-Chip-Module NN Accelerators 
+
+Zongle Huang 1,3, Hongyang Jia 1, Kaiwei Zou 2†, Yongpan Liu 1,3†
+
+> 1
+
+Tsinghua University, 2Capital Normal University, 3Beijing National Research Center for Information Science and Technology huangzl23@mails.tsinghua.edu.cn, zoukaiwei@cnu.edu.cn, {hjia, ypliu }@tsinghua.edu.cn 
+
+Abstract —Neural network (NN) accelerators with multi-chip-module (MCM) architectures enable integration of massive com-putation capability; however, they face challenges of computing resource underutilization and off-chip communication overheads. Traditional parallelization schemes for NN inference on MCM architectures, such as intra-layer parallelism and inter-layer pipelining, show incompetency in breaking through both chal-lenges, limiting the scalability of MCM architectures. We observed that existing works typically deploy layers sepa-rately rather than considering them jointly. This underexploited dimension leads to compromises between system computation and communication, thus hindering optimal utilization, espe-cially as hardware/software scale. To address this limitation, we propose Scope, a merged pipeline framework incorporating this overlooked multi-layer dimension, thereby achieving improved throughput and scalability by relaxing tradeoffs between com-putation, communication and memory costs. This new dimension, however, adds to the complexity of design space exploration (DSE). To tackle this, we develop a series of search algorithms that achieves exponential-to-linear complexity reduction, while identifying solutions that rank in the top 0.05% of performance. Experiments show that Scope achieves up to 1.73× throughput improvement while maintaining similar energy consumption for ResNet-152 inference compared to state-of-the-art approaches. 
+
+Index Terms —NN inference, MCM, chiplet, scheduling, DSE 
+
+I. I NTRODUCTION 
+
+Neural networks (NNs) have achieved great success in var-ious real-world cognitive applications and grown deeper [1]– [4]. To keep up with ever-growing NN computation and model size, multi-chip-module (MCM) architectures have emerged as a promising approach for scaled-out computation power [5]– [9]. It assembles smaller silicon dice known as chiplets onto a package substrate connected with a network-on-package (NoP). Compared to large monolithic chips [10]–[12], MCMs can integrate more transistors by breaking the reticle size limit, while reducing design and fabrication costs by lifting yield. Currently, hundreds to thousands of chiplets can already be integrated together [9], [13]. Therefore, they are expected to show remarkable advantages in hardware scalability and cost-effectiveness, especially for large-scale NN-based applications. However, when the number of chiplet increases, direct deployment of NN layers on MCMs faces (1) NoP communi-cation overheads and, (2) resource underutilization , potentially negating the benefits of increased computational capacity. (1) NoP links, designed for longer transmission with wider pitch, exhibit lower bandwidth and energy efficiency than on-chip 
+
+† Corresponding Author. 
+
+links in system-on-chips (SoCs), bringing more severe com-munication overheads. Research [6] demonstrates that with 32 chiplets, NoP communication latency exceeds computational latency, degrading system performance. (2) Partitioning NN layers with fixed parallelizable dimensions across numerous chiplets results in insufficient workload per chiplet, with typ-ical resource utilization rates below 40% for 64 chiplets [14]. These limitations create a substantial gap between MCMs’ theoretical peak performance and their actual performance, especially when the system scales. Some works [15], [16] have introduced pipelining into MCM scheduling to alleviate these two problems. Each layer is mapped to distinct chiplet regions rather than the whole package, thus reducing communication volume and mitigating the underutilization caused by over-partitioning. However, the discrete nature of chiplet assignment poses challenges for pipeline stage matching in deep NNs. For example, given a network with normalized computational loads of (1,3,8,4), 16 chiplets can be allocated proportionally. Yet with 16 layers, each layer can only be assigned to one chiplet, causing layers with more computation to become pipeline bottlenecks. 
+
+Therefore, pipelining for NNs incorporating layers with varied computation is only efficient when NNs are shallow .
+
+To tackle this, several works [17]–[19] further propose 
+
+segmented pipelining , which divides a deep NN into several shallower segments . Segments are mapped sequentially to the MCM, while within each segment, layers operate in a pipelined manner across the full package, as shown in Fig. 1(a). By treating each segment as a shallower NN, this approach mitigates the limitations of full pipelining. However, selecting the optimal number of segments presents a trade-L1  L2  L3  L4 L5 L6      
+
+> Region1
+> Region2
+> Region3
+> Segment 1Segment 2
+> T1 T3 T9 Time
+> Region
+> warmup
+> cooldown
+> warmup
+> bubbles
+> cooldown
+> bubbles
+> （a）
+> Number of Segments
+> Latency
+> Communication
+> Computation
+> （b）
+
+Fig. 1. (a) The execution of segmented pipeline. (b) The tradeoff of segmented pipeline. More segments indicate fewer layers are deployed in each sequential deployment, increasing communication overhead, while fewer segments create deeper pipelines, leading to more bubbles and harder stage matching.                
+
+> arXiv:2602.14393v1 [cs.AR] 16 Feb 2026 L1 L2 L3
+> L4 L5 L7
+> L8 L9
+> L10 L6
+> Segment(1)
+> Segment(2) Segment(3)
+> (a) Segmented Pipeline
+> Region(1,1)
+> Region(1,3)
+> Region(1,2)
+> L2
+> L3
+> L1
+> (b) Merged Pipeline (Ours)
+> L1 L2 L3
+> L4 L5 L7
+> L8 L9
+> L10 L6
+> Segment(1) Segment(2)
+> Cluster(1,1)
+> Cluster
+> (1,3)
+> (1,2)
+> Region(1,2)
+> Cluster(1,2)
+> Region(1,3)
+> Cluster(1,3)
+> L3
+> Region(1,1)
+> Cluster(1,1)
+> L4 L5
+> L1 L2
+
+Fig. 2. Comparison between segmented pipeline and Scope. We open up the new cluster dimension, thus enabling multi-to-multi layer-to-chiplet mapping. 
+
+off. Too many segments indicate that each layer is distributed on many chiplets, incurring the issues of NoP overheads and underutilization; too few segments result in each segment containing many layers, leading to a deep pipeline with substantial bubble overhead during the warm-up or cool-down phase, and challenges in achieving stage matching. Fig. 1(b) illustrates this dilemma: more segment counts increase com-munication overheads, while fewer segment counts result in 
+
+worse throughput due to pipeline mismatch and bubbles. 
+
+A. Motivation and challenges 
+
+We found that existing approaches all deploy each layer 
+
+separately . Since each layer has distinct shapes and com-putational requirements, it is natural that perfectly matching hardware resources to different layers is challenging. This observation motivates our work: by jointly considering layers and merging them properly (we call a set of merged layers as a cluster ), we can create a shallower NN comprising clusters with balanced loads. Rather than distinct layers, we then deploy balanced clusters on MCM as shown in Fig. 2, which therefore eases hardware allocation and is expected to achieve better utilization. Based on this insight, we develop Scope, a merged pipeline framework that incorporates the cluster dimension into design space exploration (DSE). However, the merge pipeline also introduces new chal-lenges. After merging, each segment usually contains more layers, thus requiring saving larger amounts of parameters on the MCM to avoid costly off-chip DRAM access overhead. To address this, we implement distributed storage and on-chip sharing mechanisms to optimize MCM storage efficiency. The merged pipeline also expands the design search space. While the segmented pipeline maps individual layers to multi-ple chiplets, the merged pipeline maps multiple layers within a cluster to multiple chiplets. The merged pipeline generalizes the segmented pipeline, with the latter being a special case of the former where all clusters only have one layer. To avoid the prohibitive cost of brute force search, we leverage dynamic programming (DP) based on NN layers’ parallelism feature to reduce the algorithmic complexity from exponential to linear. Experimental results demonstrate that this expanded search dimension yields significant performance improvements. Chiplet  Chiplet  Chiplet  Chiplet                   
+
+> Chiplet Chiplet Chiplet Chiplet
+> Chiplet Chiplet Chiplet Chiplet
+> Chiplet Chiplet Chiplet Chiplet
+> (b) Global
+> buffer
+> PE PE PE PE
+> PE PE PE PE
+> …
+> …
+> …
+> …
+> Weight buffer
+> Input buffer
+> PPU
+> Output buffer
+> ××××…
+> Adder Tree
+> Lane 1
+> Lane N
+> NoP
+> Off -chip
+> memory
+> Substrate
+> (a)
+
+Fig. 3. (a) The overview of the MCM structure. (b) The micro-architecture of a chiplet, comtaining hierarchical memory and computing units. 
+
+B. Main contributions 
+
+This paper makes the following contributions:  
+
+> •
+
+We develop Scope, a novel merged pipeline framework for MCM-based NN inference that enhances hardware uti-lization and reduces NoP overheads, while also mitigating segment count tradeoffs in segmented pipelines.  
+
+> •
+
+We elaborate flexible layer partitioning and distributed weight storage to further balance computation, inter-chiplet communication and DRAM access during NN execution.  
+
+> •
+
+We develop a dynamic programming-based search algorithm for DSE that comprehensively considers parallelizable di-mensions of NN layers and hardware resource utilization.  
+
+> •
+
+Experiments show that our search algorithm identifies so-lutions achieving top 0.05% performance across the whole search space within an acceptable time. The found schedules exhibit balanced computational loads across clusters and reduce segment counts. Scope achieves 1.73× performance improvement compared to SOTA works. II. B ACKGROUND 
+
+A. Scalable MCM and Chiplet Architectures 
+
+MCM achieves scaled-out computational power by inte-grating multiple chiplets on a silicon interposer [20] or an organic substrate [21]. Compared to monolithic multi-tile chips, MCMs offer cost advantages due to higher yield rates of smaller chiplets. MCMs can also integrate more transistors by circumventing the reticle size constraints that limit the area of monolithic silicon chips. However, these benefits come with compromised interconnect performance. Cross-chiplet transmissions require serial/parallel conversion and multi-layer protocol encoding/decoding for reliable transmission, resulting in increased latency, reduced bandwidth, and higher energy-per-bit compared to on-chip interconnects. Fig. 3(a) shows a typical MCM structure. The system adopts the 2D-mesh topology as widely used in previous MCMs [6], [9], [19]. Each chiplet adopts a microarchitecture as shown in Fig. 3(b), which includes a global buffer (GB) for activations, a processing element (PE) array for main computation and parameter buffering, and efficient network-on-chip aggregating results from PEs. PEs are further composed of Lanes per-forming multiply accumulation (MAC), adopting the weight stationary dataflow as previous works do [21]. �                  
+
+> �
+> Chiplet 4
+> P
+> �
+> ���
+> �����
+> �����
+> ������������ ���������
+> ���������
+> ���������
+> ���������
+> �
+> All  chiplets  Chiplet 1
+> Chiplet 2
+> Chiplet 3
+> Chiplet 4
+> (b) Weight -shared partitioning (WSP)
+> K
+> R
+> S
+> ������������
+> ���������
+> ���������
+> ���������
+> �
+> ��������
+> ���������
+> ���������
+> ���������
+> ���������
+> �
+> �
+> ��
+> �
+> �
+> �
+> All chiplets
+> Chiplet 1
+> Chiplet 2
+> Chiplet 3
+> Chiplet 4
+> Chiplet 1
+> Chiplet 3
+> Chiplet 2
+> (a) Input -shared partitioning (ISP)
+> Q
+> C
+> H
+> W
+> Chiplet 1
+> Chiplet 2
+> Chiplet 3
+> Chiplet 4
+> Halo
+
+Fig. 4. Typical intra-layer partitioning schemes on four chiplets. TABLE I DESIGN PARAMETERS AND NOTATIONS 
+
+Notation Explanation 
+
+Segment(i) The ith Segment in the whole NN, i = 1 , ..., N Segment .
+
+Cluster(i,j) The jth Cluster in the ith Segment, j = 1 , ..., N i
+
+> Cluster
+
+.
+
+Region(i,j) The Region executing Cluster(i,j) . In a Segment, Re-gion counts equal Cluster counts. 
+
+Layer(i,j,k) The kth Layer in (the ith Segment, the jth Cluster), 
+
+k = 1 , ..., N i,j 
+
+> Layer
+
+.
+
+P (i, j, k ) The partitioning scheme for the Layer(i,j,k) . P (i, j, k )
+
+represents ISP or WSP. 
+
+B. Intra-layer Partitioning across Chiplets 
+
+There are three regular workload partitioning approaches to parallel an NN layer: (1) Input-shared partitioning (ISP) as shown in Fig. 4(a), where the inputs are replicated, and the weights are divided proportionally onto the assigned chiplets. ISP introduces NoP communications for activation broadcast-ing from the previous layer. (2) Weight-shared partitioning (WSP) as shown in Fig. 4(b), where inputs are distributed with each chiplet copying the whole weights. It alleviates the inter-layer communication from the whole activation to only halo 
+
+(the overlapping input regions required due to large kernel sizes), but suffers large runtime weight memory footprint. (3) Output-shared partitioning (OSP) , where both the inputs and weight kernels are partitioned along the input-channel dimension. The OSP partitioning usually incurs higher NoP communications due to the transmission of wide partial sums [11]. Therefore, this work only examines ISP and WSP as previous works usually do [7], [10], [17], [22]. III. T HE SCOPE SCHEME 
+
+A. Execution and Modeling 
+
+Fig. 2(b) illustrates the mapping relationships in the merged pipeline, where segments and clusters are software abstrac-tions, while regions are hardware concepts. The system latency 
+
+TSystem is the sum of sequentially-performed segment latency 
+
+TSegment as Equ. 1 shows. Tab. I defines the notation used. 
+
+TSystem =
+
+> NSegment
+
+X
+
+> i=1
+
+TSegment(i) (1) Fig. 5 illustrates the execution within a single segment, where the processing of different clusters composes distinct pipeline stages. Since TSegment(i) is bottlenecked by the longest Region(1,1) Region(1,2) Region(1,3)     
+
+> Time
+> Layer(1,1,1) Layer(1,1,2)
+> Layer(1,2,1)
+> Layer(1,3,1) Layer(1,3,2)
+> Cluster(1,1)
+> Cluster(1,2)
+> Throughput match
+> Communication phase
+> Comput ation phase
+> Prepar ation phase Sample1
+> Sample2 Sample1
+> Sample1
+> Sample2
+> Space
+> Computing -bound
+> Communication -bound
+
+Fig. 5. Scope’s decomposed execution and timeline within a segment, which is composed of pipelined clusters. Each cluster can be further broken down into layer-wise execution. We overlap computing phase and communication phase to reduce processing time. 
+
+stage, given fixed hardware resources, the system achieves optimal throughput when cluster execution times are approxi-mately the same. Given a total of m samples, we can express each Segment’s processing time TSegment(i) as: 
+
+TSegment(i) = ( m + N i 
+
+> Cluster
+
+− 1) × max  
+
+> j=1 ,...,N i
+> Cluster
+
+(TCluster(i,j) ) (2) The cluster latency is determined by the execution of its constituent layers, as shown in Equ. 3. The execution of each NN layer comprises the following three phases. 
+
+TCluster(i,j) = 
+
+> Ni,j
+> Layer
+
+X
+
+> k=0
+
+TLayer(i,j,k) (3) 
+
+(1) Preparation Phase. In this phase, off-chip memory or other chiplets (detailed in Sec. III-B) prepare weight and activation for this layer. Given the MCM platform, its time 
+
+T pre Layer(i,j,k) is related to the weight volume and how weights are divided among chiplets in the corresponding region, as expressed in Equ. 4. The function F⊮ represents DRAM and NoP behaviors given these tasks, which are regressed from simulators like Ramulator2 [23] and BookSim2 [24]. 
+
+T pre Layer(i,j,k) = F⊮
+
+  Layer(i,j,k) , P(i,j,k) , Region(i,j)  (4) 
+
+(2) Computation Phase. In this phase, computation is distributedly performed on chiplets following partition meth-ods illustrated in Fig. 4. For both methods, the theoretical operations per chiplet are reduced to 1/|| Region(i,j) || of the un-partitioned load, where || · || gets the chiplet counts. However, ISP reduces the parallelable weight dimension, potentially impacting resource utilization. Equ. 5 describes above relation-ships, with F⊭ derived from DNN simulator Timeloop [25]. 
+
+T comp Layer(i,j,k) = F⊭
+
+  Layer(i,j,k) , P(i,j,k) , || Region(i,j) ||  (5) 
+
+(3) Communication Phase. In this phase, computation results are collected and distributed to the corresponding regions of next layer, which could be the same region as this layer (Case1, indicating this layer and the next layer belong to the same cluster, like Layer(1,1,1) and Layer(1,1,2) in Fig. 5), or a different region (Case2, indicating they belong to different clusters, like Layer(1,1,2) and Layer(1,2,1) in Fig. 5). The TABLE II COMMUNICATION VOLUME BETWEEN CHIPLETS FOR VARIED SETTINGS .                  
+
+> This layer Next layer Communication volume Case1
+> WSP WSP Halo
+> WSP ISP (∥Region(i,j) ∥ − 1) Output
+> ISP WSP (∥Region(i,j) ∥ − 1) Output +Halo
+> ISP ISP (∥Region(i,j) ∥ − 1) Output
+> Case2 WSP / ISP WSP Output
+> WSP / ISP ISP ∥Region(i,j+1) ∥Output
+
+communication volume is affected by the partitioning schemes of both the current and subsequent layers, as listed in Tab.II, where Halo represents the volume of overlapped inputs in WSP as shown in Fig. 4, and Output denotes output activation volume of this layer. We use Equ. 6 to summarize this phase. 
+
+T comm Layer(i,j,k) = F⊯
+
+
+
+Layer(i,j,k) , P(i,j,k) , Region(i,j) ,
+
+(
+
+Layer(i,j,k+1) , P(i,j,k+1) , Region(i,j) , Case 1
+
+Layer(i,j+1,1) , P(i,j+1,1) , Region(i,j+1) , Case 2
+
+
+
+(6) 
+
+To minimize the impact of NoP communication on system performance, we overlap it with computation . Rather than waiting for the completion of computing the whole activation, NoP transmission begins as soon as partial results are available from the chiplet, thus creating a two-stage pipeline between computation and NoP communication. Consequently, the layer execution time is bounded by the maximum of either computa-tion or NoP transmission time. Equ.7 models this relationship. 
+
+TLayer(i,j,k) = T pre Layer(i,j,k) + max (T comm Layer(i,j,k) , T comp Layer(i,j,k) ) (7) 
+
+B. Distributed Weight Buffering 
+
+A key challenge in Scope is that it still prefers to buffer weights on-chip; otherwise, DRAM access significantly de-grades performance and energy efficiency. This issue usually escalates with WSP storing replicated weights. Scope mitigates this by exploiting distributed weight storage across chiplets. Even for WSP layers, each chiplet stores only a weight tiling instead of the whole weight matrix when it’s not their turn to compute. Until the preparation phases of these layers, chiplets exchange their weight tiles to ensure that all chiplets hold a complete data copy. This approach reduces on-chip buffer requirements for clusters containing multiple WSP layers. IV. D ESIGN SPACE EXPLORATION 
+
+A. Search Space 
+
+Based on the analysis of Sec. III, implementing Scope scheme requires determining variables in Table I. Since how to divide segments has been thoroughly discussed in segmented pipeline scheme, for clarity, the following analysis focuses on how to merge layers into a cluster. Specifically, given a single segment containing L layers and an MCM array with 
+
+C chiplets, we want to find the best Cluster , Region , and each layer’s Partition as listed in Table I. If there are NCluster clusters in a segment, the allocation of clusters and their corresponding regions can be viewed as inserting NCluster − 1 division across L layers and C chiplets. This generates Q possible configurations as shown in Equ. 8: 
+
+Q(NCluster ; L, C ) = L − 1
+
+NCluster − 1
+
+!
+
+C − 1
+
+NCluster − 1
+
+!
+
+(8) 
+
+Since NCluster can range from 1 to L, the total number of possible cluster-region combinations is PLi=1 Q(i; L, C ).Considering that each layer can implement either ISP or WSP, then the complete search space introduced by Scope is: 
+
+Qtotal = 2 LLX
+
+> i=1
+
+Q(i; L, C ) (9) 
+
+When deploying Resnet-152 on 256 chiplets, which is the largest setting in our experiments, Qtotal ≈ 8.27 × 10 164 .Therefore, we need an efficient searching algorithm to find a near-optimal solution for Scope. 
+
+B. Searching algorithm 
+
+To address the exponential growth in design space driven by clusters, regions, and partitioning, we propose different search methods for each dimension. The overall algorithm is shown in Alg. 1, with explanations for each provided below. 
+
+For cluster allocation , we leverage the inherent parallelism of NN layers to reduce the search space. Since layers within a cluster are processed by the same region, they should exhibit similar parallelizable dimensions to optimize region utilization. Given NCluster , our goal is to determine the optimal set of Cluster . We employ dynamic programming to efficiently achieve this. The algorithm initializes with NCluster = L,where each layer forms its own cluster. We then iteratively merge adjacent clusters with the highest parallelism similarity, documenting each merger in a cluster merge table (CMT). Each iteration decrements NCluster by 1, and after L iterations, the CMT contains cluster division schemes for all possible values of NCluster . This approach efficiently narrows down the search space by incorporating mapping constraints. Given cluster allocation, we propose a heuristic method to determine optimal regions . Aiming to achieve balanced pipeline stages, the initial step allocates chiplets across regions proportionally to the computational load of their corresponding clusters. Since this initial allocation does not account for communication overhead and utilization issues, it often yields suboptimal results. To improve it, our algorithm iteratively re-distributes chiplets from regions with shorter processing times to those with longer processing times until the overall latency cannot be further reduced. After determining the number of chiplets per region, we arrange them on the MCM in a ZigZag pattern—an approach adopted and validated by previous works for its effectiveness [17]. Experiments show that the optimal region allocation can be found in just a few iterations. 
+
+For each layer’s partition , we leveraged the observation that NN typically exhibits larger activation sizes in shallow layers and larger weight sizes in deep layers. Therefore, to reduce the NoP communication overheads, we apply WSP to earlier layers and ISP to later layers. By reformulating the problem from determining per-layer partitioning to identifying a single Algorithm 1 The proposed searching algorithm 
+
+Input: A Segment containing L layers, chiplet count C;
+
+Output: Cluster , Region , Partition ; minLatency ;
+
+CMT = GenCMT( Segment )
+
+minLatency = Infinity 
+
+for idx from 0 to L do // WSP for first idx layers, ISP for remaining layers. 
+
+tmpPartition[:idx] = WSP, tmpPartition[idx:] = ISP 
+
+for NCluster from 1 to L do 
+
+tmpCluster = CMT( NCluster )tmpRegion = ProportionallyAllocate( tmpCluster )
+
+tmpLatency, tmpClusterLatencyList = \
+
+Forward( tmpPartition, tmpCluster, tmpRegion )// Heuristically search the best Region .
+
+while tmpLatency < minLatency do 
+
+minLatency = tmpLatency Cluster = tmpCluster , Region = tmpRegion Partition = tmpPartition maxClusterIdx = max( tmpClusterLatencyList )
+
+minClusterIdx = min( tmpClusterLatencyList )
+
+tmpRegion[maxClusterIdx] += 1 
+
+tmpRegion[minClusterIdx] -= 1 
+
+tmpLatency = \
+
+Forward( tmpPartition , tmpCluster , tmpRegion )end while end for end for 
+
+return minLatency, Cluster, Region, Partition 
+
+GenCMT( Segment ): // Build cluster merge table (CMT) CMT = {} , CMT[L] = Segment 
+
+for NCluster from L to 2 do 
+
+curCluster = CMT[ NCluster ]parallel = ComputeParallelism( curCluster )
+
+parallelOffset = abs( parallel[: NCluster -1] / parallel[1:] - 1 )
+
+minOffsetIdx = min( parallelOffset )
+
+Cluster = merge( curCluster , minOffsetIdx )CMT [NCluster -1] = Cluster 
+
+end for 
+
+return CMT Architecture Spec.   
+
+> Chiplet count
+> Buffer size
+> PE count
+> NoP bandwidt h
+
+…                  
+
+> L1 L2 L3
+> L4 L5 L7
+> L8 L9
+> L10 L6
+> DNN Model Design space searchin g
+> L1 L2 L3
+> L4 L5 L7
+> L8 L9
+> L10 L6
+> Segmen t
+> Cluster
+> Region
+> Partition DP / heuristic alg.
+> ZigZag allocatio n
+> Comm. & Comp.
+> Hardware evaluation
+> Chiplet
+> (Timeloop )
+> NoP
+> (BookSim2 )
+> Memory
+> (Ramulator2)
+> ++Energy
+> Time
+> Util.
+> Fig. 6. The overview of Scope Framework.
+
+WSP-to-ISP transition point, we reduced the computational complexity from exponential to linear. V. E VALUATION 
+
+A. Experiment settings 
+
+The experiments are conducted on a simulated MCM ar-chitecture as described in Section II-A, with detailed con-figurations presented in Table III. Energy measurements for  
+
+> TABLE III EVALUATION SETUP
+
+Component Parameters Chiplet 4×4 PEs, 8 Lanes per PE, 8 MACs per Lane. 64KB weight buffer per PE, 64 KB global buffer, 0.2pJ for each 8-bit MAC NoP 2D mesh topology, 100GB/s/chiplet band-width, 1.3pJ/bit Main memory 100GB/s total bandwidth, 128-bit LPDDR5 
+
+digital modules and SRAM are obtained through Synopsys Design Compiler and SRAM Compiler synthesis at 28nm 800MHz. Hardware evaluation for chiplet, NoP, and DRAM leverages results of open-source simulators Timeloop [25], BookSim2 [24], and Ramulator2 [23], respectively. Fig. 6 shows the Scope framework, with design variables listed in Table I obtained through DSE. We evaluate AlexNet, VGG16, DarkNet19, and ResNet18/34/50/101/152, using 8-bit weights/activations and 24-bit accumulation. Our baselines include state-of-the-art works on deploying DNNs on chiplets, whose scheduling can be categorized into three types as introduced in Sec. I: fully sequential ( [6], [7], [21]), fully pipeline ( [15], [16]), and segmented pipeline execution ( [17]–[19]). For a fair comparison, Scope uses an identical segment allocation method as the segmented pipeline to isolate performance gains solely to our novel contributions. 
+
+B. Experiment Results 
+
+(1) Validation of Searching Methodology. Since the pro-posed search algorithm reduces the number of samples re-quiring simulation across the whole design space, we first validate that high-performance solutions remain attainable within the pruned search space in this subsection. Using AlexNet deployment on a 16-chiplet MCM, we compare valid solutions from exhaustive search with our algorithm’s output. As illustrated in Fig. 8, our approach identifies the solution with a top 0.05% performance. The algorithm is also efficient, with searching time of the largest experiment (ResNet152 on 256-chiplet MCM) being approximately one hour on an Intel Core i-13700H processor. The original design space contains 
+
+O(10 164 ) samples, which is impossible to fully search. 
+
+(2) Performance Comparison. Fig. 7 demonstrates the nor-malized throughput of different NN tasks at varying MCM scales. Scope consistently achieves optimal performance across all configurations, with maximum gains in the deepest 
+
+NN utilizing most chiplets, demonstrating up to 1.73x perfor-mance improvement compared to SOTA solutions. Analysis of baselines are as follows. (a) Sequential execu-tion exhibits better performance with fewer chiplets, where communication overhead and resource underutilization are minimized. However, as the hardware scales, its perfor-mance significantly degrades and becomes the least efficient                                    
+
+> The smallest-scale setting is selected, as experiments with larger scales make exhaustive search computationally prohibitive. AlexNet VGG16 DarkNet19 ResNet18 ResNet34 ResNet50 ResNet101 ResNet152 AlexNet VGG16 DarkNet19 ResNet18 ResNet34 ResNet50 ResNet101 ResNet152
+> NAN
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Normalized Throughput
+> AlexNet VGG16 DarkNet19 ResNet18 ResNet34 ResNet50 ResNet101 ResNet152
+> NAN
+> NAN
+> NAN
+> NAN
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 16chiplets
+> 144 chiplets
+> AlexNet VGG16 DarkNet19 ResNet18 ResNet34 ResNet50 ResNet101 ResNet152
+> NAN
+> NAN
+> NAN
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 64 chiplets
+> 256 chiplets
+> Fully sequential
+> Execution
+> Fully pipeline
+> Segmented
+> pipeline
+> Scope (merged
+> pipeline , ours )
+> Legend
+> NAN
+
+Fig. 7. Normalized throughput of different methods when deploying various networks on MCMs of different scales. Scope achieves the most significant performance improvement in the largest-scale experiment (ResNet152 on 256-chiplet MCM). 0.2  0.4  0.6  0.8  1.0 0 
+
+> 0
+> 2
+> 4
+> 6
+> 8
+> Processing time (1e6 cycles)
+> Probability (1e -6)  The proposed algorithm
+> finds the scheduling with
+> the shortest 0.05%
+> processing time.
+
+Fig. 8. Processing time distribution of all valid scheduling. The x-axis represents the processing time range, while the y-axis shows the proportion of schedules with processing time falling into the corresponding interval. 
+
+scheduling. (b) Pipeline execution achieves optimal results with increased chip count and shallower networks, facilitating effective pipeline stage matching. However, its performance degrades significantly as network depth increases, even failing to be valid due to weight buffer overflow. (c) Segmented pipeline execution demonstrates improvements over the pre-vious two alternatives at scale, establishing it as the existing SOTA approach, outperformed only by Scope. 
+
+(c) Scalability Evaluation. Fig. 9 shows the scalability of various methods with increasing chiplet counts under a fixed workload. The fully-pipelined approach is excluded due to a lack of valid solutions at lower chiplet counts. Scope demon-strates the best scalability. The throughput of the segmented pipeline increases more slowly than Scope, while that of the fully-sequential method may even decrease with more chiplets, as NoP communication becomes the bottleneck. 
+
+(d) A Case Study of Segmented Pipeline and Scope. 
+
+We conduct a detailed case study comparing segmented pipeline and Scope by analyzing the largest-scale experiment demonstrating the most obvious performance improvement. When processing ResNet152, the segmented pipeline partitions the neural network into three segments, while Scope divides it into only two segments. Figure 10(a) illustrates the computational load across individual layers and clusters. Scope merges layers properly, resulting in balanced workload distribution across clusters, thus facilitating efficient pipeline stage matching. Both methods have roughly equivalent energy consumption and breakdown, as shown in Figure 10(b). The discrepancy in their latency and energy comparison results from the difference in utilization. 16  36 64  144  25 6
+
+> Sequential execution
+> Segmented pipeline
+> Scope
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> 12
+
+Number of chiplets  
+
+> Normalized Throughput
+> 2.3 61.71
+> 2.25
+> 7.79
+> 4.58
+> 6.37
+> 10.38
+> 3.06
+> 1.93
+> 1.00
+
+Fig. 9. The normalized throughput for different methods as the number of chiplets increases. For each method, the throughput is normalized to the case with 16 chiplets. Scope exhibits the best scalability. Computation   
+
+> DRAM access
+> NoP comm.
+> SRAM access
+> 0
+> 1
+> Normalized energy
+> breakdown
+> Scope Segmented
+> pipeline
+> (b)
+> 0
+> 1
+> 10
+> Cluster
+> 10
+> 0
+> 1
+> Layer
+> Segmented
+> pipeline
+> Var = 2.429
+> Scope
+> Var = 0.816
+> (a)
+
+Fig. 10. The case study of deploying ResNet152 on a 256-chiplet MCM. a) The normalized computation for clusters in Scope and layers in Segmented pipeline. Scope has a more balanced distribution with smaller variance, thus facilitating easier stage matching. (b) The energy breakdown for both methods, normalized to the total Scope energy consumption. 
+
+VI. A CKNOWLEDGMENT 
+
+This work was supported by the National Natural Science Foundation of China (Grant Nos. 92267203 and 62504161) and Deng Feng Fund. VII. C ONCLUSION 
+
+This paper presents Scope, a coarse-grained pipeline frame-work introducing a cluster dimension for NN inference or-chestration. By merging layers, Scope balances workloads and mitigates pipeline bubbles. Its flexible partitioning and distributed storage optimize computation, communication, and memory access. We devise an efficient linear-complexity algo-rithm using dynamic programming and heuristics to navigate the design space. Evaluations show Scope achieves up to 1.72× speedup over SOTA and scales better on large MCMs. REFERENCES [1] A. Krizhevsky, I. Sutskever, and G. E. Hinton, “Imagenet classification with deep convolutional neural networks,” Communications of the ACM ,vol. 60, no. 6, pp. 84–90, 2017. [2] K. Simonyan and A. Zisserman, “Very deep convolutional networks for large-scale image recognition,” arXiv preprint arXiv:1409.1556 , 2014. [3] K. He, X. Zhang, S. Ren, and J. Sun, “Deep residual learning for image recognition,” in Proceedings of the IEEE conference on computer vision and pattern recognition , 2016, pp. 770–778. [4] J. Redmon and A. Farhadi, “Yolo9000: Better, faster, stronger,” 2016. [Online]. Available: https://arxiv.org/abs/1612.08242 [5] U. K. Dasari et al. , “Apparatus and mechanism for processing neural network tasks using a single chip package with multiple identical dies,” in US Patent 10,936,942 , 2021. [6] Y. S. Shao et al. , “Simba: Scaling deep-learning inference with multi-chip-module-based architecture,” in MICRO , 2019, pp. 14–27. [7] Z. Tan et al. , “Nn-baton: Dnn workload orchestration and chiplet granularity exploration for multichip accelerators,” in ISCA , 2021, pp. 1013–1026. [8] H. Zhu et al. , “COMB-MCM: computing-on-memory-boundary NN processor with bipolar bitwise sparsity optimization for scalable multi-chiplet-module edge machine learning,” in ISSCC , 2022, pp. 1–3. [9] E. Talpes et al. , “Dojo: The microarchitecture of tesla’s exa-scale computer,” in HCS , 2022, pp. 1–28. [10] Y. Chen et al. , “Dadiannao: A machine-learning supercomputer,” in 
+
+MICRO , 2014, pp. 609–622. [11] M. Gao et al. , “Tetris: Scalable and efficient neural network acceleration with 3d memory,” in ASPLOS , 2017, pp. 751–764. [12] S. Venkataramani et al. , “Scaledeep: A scalable compute architecture for learning and evaluating deep networks,” in ISCA , 2017, pp. 13–26. [13] S. Pal, J. Liu, I. Alam, N. Cebry, H. Suhail, S. Bu, S. S. Iyer, S. Pamarti, R. Kumar, and P. Gupta, “Designing a 2048-chiplet, 14336-core waferscale processor,” in 2021 58th ACM/IEEE Design Automation Conference (DAC) . IEEE, 2021, pp. 1183–1188. [14] S. Zheng, X. Zhang, L. Liu, S. Wei, and S. Yin, “Atomic dataflow based graph-level workload orchestration for scalable dnn accelerators,” in 2022 IEEE International Symposium on High-Performance Computer Architecture (HPCA) . IEEE, 2022, pp. 475–489. [15] X. Zhang et al. , “Dnnbuilder: an automated tool for building high-performance dnn hardware accelerators for fpgas,” in ICCAD , 2018, p. 56. [16] X. Wei et al. , “Tgpa: tile-grained pipeline architecture for low latency cnn inference,” in ICCAD , 2018, p. 58. [17] M. Gao, et al. , “Tangram: Optimized coarse-grained dataflow for scal-able nn accelerators,” in ASPLOS , 2019, pp. 807–820. [18] X. Cai et al. , “Deepburning-seg: Generating dnn accelerators of segment-grained pipeline architecture,” in MICRO , 2022, pp. 1396–1413. [19] J. Cai, Z. Wu, S. Peng, Y. Wei, Z. Tan, G. Shi, M. Gao, and K. Ma, “Gemini: Mapping and architecture co-exploration for large-scale dnn chiplet accelerators,” in 2024 IEEE International Symposium on High-Performance Computer Architecture (HPCA) . IEEE, 2024, pp. 156– 171. [20] M.-S. Lin et al. , “A 7nm 4ghz arm®-core-based cowos® chiplet design for high performance computing,” in 2019 Symposium on VLSI Circuits ,2019. [21] B. Zimmer et al. , “A 0.32–128 tops, scalable multi-chip-module-based deep neural network inference accelerator with ground-referenced sig-naling in 16 nm,” in IEEE Journal of Solid-State Circuits , vol. 55, no. 4, 2020, pp. 920–932. [22] K. Zou et al. , “Learn-to-scale: Parallelizing deep learning inference on chip multiprocessor architecture,” in DATE , 2019, pp. 1172–1177. [23] H. Luo, Y. C. Tu˘ grul, F. N. Bostancı, A. Olgun, A. G. Ya˘ glıkc ¸ı, , and O. Mutlu, “Ramulator 2.0: A Modern, Modular, and Extensible DRAM Simulator,” 2023. [24] N. Jiang et al. , “A detailed and flexible cycle-accurate network-on-chip simulator,” in ISPASS , 2013, pp. 86–96. [25] A. Parashar et al. , “Timeloop: A systematic approach to dnn accelerator evaluation,” in ISPASS , 2019, pp. 304–315.
