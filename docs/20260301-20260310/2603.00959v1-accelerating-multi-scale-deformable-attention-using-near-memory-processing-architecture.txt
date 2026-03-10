@@ -1,0 +1,627 @@
+Title: Accelerating Multi-Scale Deformable Attention Using Near-Memory-Processing Architecture
+
+URL Source: https://arxiv.org/pdf/2603.00959v1
+
+Published Time: Tue, 03 Mar 2026 02:14:01 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# Accelerating Multi-Scale Deformable Attention Using Near-Memory-Processing Architecture 
+
+# Huize Li 
+
+University of Central Florida Orlando, Florida, USA huize.li@ucf.edu 
+
+# Qinggang Wang 
+
+Huazhong University of Sci. & Tech. Wuhan, China qgwang@hust.edu.cn 
+
+# Bin Gao 
+
+National University of Singapore Singapore, Singapore bingao@comp.nus.edu.sg 
+
+# Dan Chen 
+
+National University of Singapore Singapore, Singapore danchen@nus.edu.sg 
+
+# Yu Huang 
+
+Huazhong University of Sci. & Tech. Wuhan, China yuh@hust.edu.cn 
+
+# Xin Xin ∗
+
+University of Central Florida Orlando, Florida, USA xin.xin@ucf.edu 
+
+## Abstract 
+
+Multi-Scale Deformable Attention (MSDAttn) has become a fun-damental component in various vision tasks due to its effective multi-scale grid sampling (MSGS). However, its reliance on ran-dom sampling results in highly irregular memory access patterns, making it a memory-intensive operation inefficient for GPUs. Near-memory processing (NMP) offers a promising solution for accel-erating memory-bound kernels, yet existing NMP-based attention accelerators remain suboptimal for MSDAttn due to incompatible load balancing and data reuse strategies. Specifically, current NMP solutions uniformly distribute processing elements (PEs) across all banks, leading to significant PE underutilization and excessive cross-bank data transfers. Moreover, most rely on locality-based reuse, which fails under MSDAttn’s unpredictable sampling patterns. To address these challenges, this paper presents DANMP , a hard-ware–software co-designed NMP-based MSDAttn accelerator. On the hardware side, DANMP adopts non-uniform NMP integration to handle unbalanced workloads, allocating PEs only in select banks for hot entries, while cold data are processed at the bank-group level—reducing PE idleness and cross-bank transfers. On the soft-ware side, it introduces a clustering-and-packing (CAP) method that leverages clustering to improve temporal locality in query pro-cessing, enhancing data reuse. Finally, we implement host–NMP co-optimization techniques, including an optimized programming model, customized instructions, and a tailored dataflow. Experi-ments on object detection inference show that DANMP achieves 97.43 × speedup and 208.47 × energy efficiency improvement over NVIDIA A6000 GPU. 
+
+## CCS Concepts 
+
+• Computer systems organization → Neural networks . 
+
+> ∗Corresponding author is Xin Xin. Permission to make digital or hard copies of all or part of this work for personal or classroom use is granted without fee provided that copies are not made or distributed for profit or commercial advantage and that copies bear this notice and the full citation on the first page. Copyrights for components of this work owned by others than the author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or republish, to post on servers or to redistribute to lists, requires prior specific permission and/or a fee. Request permissions from permissions@acm.org.
+> ICS’26,
+> ©2026 Copyright held by the owner/author(s). Publication rights licensed to ACM. ACM ISBN 978-x-xxxx-xxxx-x/YYYY/MM https://doi.org/XXXXXXX.XXXXXXX
+
+## Keywords 
+
+Hardware Accelerators, Machine Learning, Memory Systems, In-memory Computing 
+
+ACM Reference Format: 
+
+Huize Li, Qinggang Wang, Bin Gao, Dan Chen, Yu Huang, and Xin Xin. 2026. Accelerating Multi-Scale Deformable Attention Using Near-Memory-Processing Architecture. In Proceedings of July 06–09, 2026 (ICS’26). ACM, New York, NY, USA, 14 pages. https://doi.org/XXXXXXX.XXXXXXX 
+
+## 1 Introduction 
+
+The Detection Transformer (DETR) [ 5 , 8, 24 , 30 ] has recently achieved remarkable success in object detection by combining convolutional neural networks (CNNs) with a Transformer-based encoder-decoder architecture [ 72 ]. Despite its improvement in accuracy, DETR suf-fers from slow convergence, requiring significantly more training epochs than conventional object detection methods [ 10 , 21 , 77 ]. To address this limitation, multi-scale deformable attention (MS-DAttn/MSDeformAttn) has been introduced, effectively reducing training/inference costs and computational complexity. Inspired by deformable convolution [ 17 ], MSDAttn selectively attends to a sparse set of reference points across multi-scale feature maps, avoid-ing the exhaustive computation inherent in traditional attention mechanisms [ 72 ]. By leveraging efficient multi-scale grid-sampling 
+
+(MSGS), MSDAttn achieves state-of-the-art training/inference effi-ciency. However, the irregular distribution of reference point sam-pling introduces random memory access overhead, significantly constraining system performance [80]. Recently, there has been growing interest in hardware-software co-designed solutions to mitigate random memory access overhead. These solutions encompass various platforms, including GPUs [ 6 ,67 , 70 , 93 ], Field Programmable Gate Arrays (FPGAs) [ 4 , 23 , 88 , 89 ], and Application Specific Integrated Circuits (ASICs) [ 60 , 64 , 66 , 80 ]. While these co-designed approaches outperform software-only so-lutions with hardware-friendly scheduling and computation tech-niques, they remain compute-centric and are still constrained by off-chip memory bandwidth when accelerating memory-intensive MSDAttn workloads. As a result, they suffer from high-latency off-chip accesses due to the large volume of randomly sampled feature maps [ 80 ]. Given the increasing demand for low latency object detection, improving the efficiency of MSDAttn could have a substantial impact on both performance and scalability.       
+
+> arXiv:2603.00959v1 [cs.AR] 1 Mar 2026 ICS’26, Belfast, Northern Ireland, UK, Huize Li, Qinggang Wang, Bin Gao, Dan Chen, Yu Huang, and Xin Xin Analytical Flops (log)
+> Analytical Memory Bytes (log)
+> 10 610 910 12
+> 10 6
+> 10 7
+> 10 8
+> 10 9
+> MSDAttn
+> RNN
+> FC
+> 10 010 110 2
+> 10 1
+> 10 3
+> 10 5MSDAttn
+> E2EM
+> DANMP E2EM
+> Performance (GFlops/s)
+> Operational Intensity (Flops/Byte)
+> 10 10
+> Convolutional
+> 128×
+> 67×
+> (a) (b)
+> 143×
+> DANMP MSDAttn
+> FC Ops
+> Self-Attn
+> DANMP Peak BW
+> GPU Peak BW
+
+Figure 1: (a) Computational and memory footprint of common deep learning operators across different batch sizes (darker shades indicate larger batches), (b) Band-width roofline model showing performance gains, including operator-level speedups for FC and MSDAttn, as well as end-to-end model (E2EM) acceleration enabled by DANMP 
+
+A quantitative comparison of the computational and memory access requirements for various neural network operations is pre-sented in Figure 1(a) (The experimental configuration is same to Section 3). Unlike recurrent neural networks (RNNs), convolutions, 
+
+full-connection (FC), and self-attention (Self-Attn) operations, MS-DAttn exhibits exceptionally low operational intensity—less than 10% of the compute–bandwidth intersection in the Roofline model— indicating that its performance is primarily constrained by memory bandwidth rather than arithmetic throughput. This memory-bound behavior arises mainly from multi-scale grid sampling ( 2 in Fig-ure 2) and feature aggregation ( 3 in Figure 2). Compared to standard self-attention, MSDAttn faces three major challenges. Irregular Sampling: Sparse and non-uniform sampling across large feature maps leads to unpredictable memory accesses, making prefetching and dataflow optimizations ineffective. Lim-ited Data Reuse: Hundreds of detection queries target different spatial regions, offering little locality across queries. Irregular Spar-sity and Load Imbalance: MSDAttn prunes data-dependent feature points, creating highly unstructured sparsity and severe load imbal-ance. Unlike previous sparsity accelerators (e.g., SCNN [ 61 ], CAN-DLES [ 29 ], AWB-GCN [ 27 ], EnGN [ 55 ]) that exploit predictable zero patterns, MSDAttn’s query-specific sparsity varies across scales and tokens, breaking regular dataflows and tile reuse. Consequently, its operational intensity remains extremely low, leaving the computa-tion memory-bound. This paper presents DANMP , the first near-memory processing architecture designed to accelerate MSDAttn in DETR. DANMP 
+
+is a hardware-software co-designed Dual In-line Memory Mod-ule (DIMM)-based system, built on standard DRAM technology. In contrast to stack-based solutions, which demands specialized 2.5D/3D integration processes such as HBM [ 1, 12 , 20 , 54 , 92 ]and ReRAM [ 47 – 49 , 51 , 52 , 57 ], the adoption of a DIMM-based NMP [ 11 , 31 , 39 , 46 ] enables the use of commodity DDR5 devices and provides large memory capacity (over 64GB) at low cost. By eliminating the off-chip memory bottleneck and exposing higher internal bandwidth, DANMP significantly enhances both perfor-mance and energy efficiency. Specifically, it raises the bandwidth roofline of GPU platform by 128 × in bandwidth-constrained re-gions (Figure 1(b)), unlocking optimization opportunities that are infeasible with conventional architectures. We conducted a detailed characterization of the open-source Deformable DETR (DE-DETR) model [ 93 ] as a case study (Figure 1 and Figure 3). This analysis quantifies the potential benefits of near-memory processing in accelerating Deformable DETR, specifically highlighting how DANMP can optimize performance. In this paper, memory-intensive MSDAttn operations are executed within mem-ory, while compute-intensive FC operations are processed by the host. Additionally, we also performed an NMP-based DETR case study (Figure 4) to identify performance bottlenecks in executing DETR on existing NMP accelerators. Our findings reveal two key challenges that severely limit performance. PE Idleness Caused by Load Imbalance: Current NMP solutions often adopt uniform PE integration, leading to idle PEs when mapping irregular MSDAttn workloads. Reassigning tasks to idle PEs introduces significant cross-bank transfers, further increasing memory access overhead. 
+
+Bandwidth Wastage Due to Random Memory Access: Due to the poor data locality in MSDAttn, existing NMP accelerators fail to exploit data reuse efficiently. This leads to underutilization of the ample intra-bank bandwidth and intensifies the pressure on the limited cross-bank bandwidth. To address these challenges, DANMP introduces both hardware and software innovations. On the hardware side, DANMP inves-tigates the hierarchical structure of DRAM memory systems and exploits the multi-tiered parallelism across ranks, bank-groups, and banks. Unlike existing NMP architectures, we adopt a non-traditional, uneven integration strategy by implementing PEs only in selected banks. Mapping irregular MSDAttn workloads to the unevenly integrated architecture significantly reduces PE idleness without introducing cross-bank transfers. On the software side, we introduce a clustering-and-packing (CAP) method, which sig-nificantly enhances data reuse by grouping queries with the same sub-targets. This optimization mitigates random memory access in-efficiencies and improves temporal locality. Compared to the GPU platform, DANMP achieves 143 × reduction in MSDAttn latency and 67 × improvement in end-to-end DE-DETR inference perfor-mance, as shown in Figure 1(b). This work makes the following key research contributions: 
+
+• We demonstrate that MSDAttn is constrained by memory bandwidth with our GPU case study. Our NMP-based case study reveals that load imbalance and low data reuse rates are the primary factors behind this constraint. 
+
+• We introduce DANMP , a lightweight DDR5-compatible near-memory processing accelerator designed for MSDAttn exe-cution, achieving 97.43 × performance improvement, 208.47 ×
+
+energy efficiency improvement against NVIDIA A6000 GPU. 
+
+• We also explore uneven PE integration, clustering-and-packing algorithm, and host-NMP co-optimizations to enhance the performance of DANMP .
+
+## 2 Background 2.1 Multi-Scale Deformable Attention 
+
+Multi-Scale Deformable Attention (MSDAttn) is a key operation in modern object detectors such as Deformable DETR, where each Accelerating Multi-Scale Deformable Attention Using Near-Memory-Processing Architecture ICS’26, Belfast, Northern Ireland, UK, 
+
+Figure 2: Overview of the MSDAttn 
+
+query dynamically samples a small set of spatial locations across multi-scale feature maps to capture long-range dependencies. This data-dependent sampling provides high modeling flexibility but also introduces severe irregularity in memory access, as illustrated in Figure 2. MSDAttn identifies relations between each query and a small set of sampling points in multi-scale fmaps 𝑋 ∈ R𝑛 ×𝑑 .Let 𝑛 and 𝑑 denote the length of flattened feature maps from 𝑙 
+
+levels ( 𝑁 = Í𝑙 𝑖 =1 𝐻 𝑖 × 𝑊 𝑖 ) and hidden dimension of pixel vectors respectively. Where 𝐻 𝑖 and 𝑊 𝑖 denote the height (number of vertical pixels) and width (number of horizontal pixels) of layer 𝑙 . The computation of MSDAttn is calculated by concatenate all ℎ attention heads as equation (1), 
+
+𝑀𝑆𝐷𝐴𝑡𝑡𝑛 (𝑸 , 𝑷 , 𝑿 ) = 𝐶𝑜𝑛𝑐𝑎𝑡 (𝑯 1, ..., 𝑯 ℎ ), (1) the calculation of the output matrix in the 𝑗 𝑡ℎ attention head is shown in equation (2), 
+
+𝑯 𝑗 = 𝑆𝑜 𝑓 𝑡𝑚𝑎𝑥 (𝑸 · 𝑾 𝐴 𝑗 ) ·𝑽 𝑗 (𝑿 , 𝑷 ⊕ Δ𝑷 𝑗 ), (2) where 𝑸 ∈ R𝑛 ×𝑑 and 𝑽 = 𝑿 · 𝑾 𝑉 ∈ R𝑛 ×𝑑 denote the query matrix and the multi-scale fmaps, respectively. 𝑷 refers to the coordinates of the reference point in each level of fmaps. ⊕ denotes coordinate indexing rather than arithmetic addition, i.e., 𝑷 ⊕ Δ𝑷 𝑗 represents sampling locations offset from reference points 𝑷 by learned dis-placements Δ𝑷 𝑗 . 𝑽 𝑗 (𝑿 , 𝑷 ⊕ Δ𝑷 𝑗 ) gathers feature values from 𝑿 
+
+via bilinear interpolation at these locations. Δ𝑷 = 𝑸 · 𝑾 𝑆 denotes the offsets of sampling points. 𝑾 𝐴 ∈ R𝑑 ×ℎ×𝑙 ×𝑝 , while 𝑾 𝑉 ∈ R𝑑 ×𝑑 
+
+and 𝑾 𝑆 ∈ R𝑑 ×2𝑛 ·𝑙 ·𝑝 are learnable weights, where 𝑝 denotes the fixed number of sampling points in each level of fmaps. Although the above equations are expressed in matrix form for compactness, they do not represent dense matrix multiplications. Instead, MS-DAttn follows a gather–interpolate–accumulate pattern visualized in Figure 2, which exposes its highly irregular memory behavior. Figure 2 illustrates the visualization process of single-level de-formable attention, which is an example of all levels in MSDAttn. The inputs to Deformable DETR include the query feature 𝑄 , refer-ence point 𝑃 (𝑥, 𝑦 ), feature map 𝑋 , and all learnable weight matrices. 20  40  60            
+
+> 30
+> 60
+> 90
+> SpAttn 12 batches
+> Self-Attn 12 batches
+> Self-Attn 20 batches
+> Bandwidth (GB/s)
+> Number of Streaming Multiprocessor
+> (a)
+> SpAttn 20 batches
+> Peak DDR BW
+> 080
+> DIMM Bound BW
+> xxx.4 GB/s (100%)
+> 256 512 1K
+> 25
+> 50
+> 75
+> Latency (%)
+> Sequence Length (batch=8)
+> (b)
+> 04K
+> FC
+> SpAttn
+> 10 30 50 70
+> 120
+> 150
+> xxx.8 GB/s (81.7%)
+> SpAttn 4 batches
+> xx93.1 GB/s (69.3%)
+> xx.7 GB/s (66.1%)
+> Self-Attn 4 batches
+> 100
+> Data Transfer
+> KV Filtering
+> 2K 8K 4816
+> 20
+> 40
+> 60
+> Cache Hit Rate (%)
+> Batch Sizes (SM=78)
+> (a)
+> 032
+> SpAttn
+> Self-Attn
+> 80
+
+Figure 3: (a) Memory bandwidth saturation analysis as the number of streaming multiprocessors (SM) increases, (b) Tem-poral data locality evaluation by varying batch size while keeping cache capacity fixed 
+
+The linear transformations on query 𝑄 and feature map 𝑋 are per-formed in 1 , involves three fully connected layers (weighted matrix multiplication). Simultaneously, a softmax operation normalizes all points across different levels, which are projected from a row vector of the input query, generating attention probability vectors. In 2 , the multi-scale grid sampling (MSGS) procedure applies a bi-linear interpolation (BI) kernel to process fractional sampling points, retrieving corresponding values from the multi-scale feature maps. In 3 , each pixel vector obtained from sampling is multiplied by an element of the attention probability vector, and all weighted vectors are summed to produce the output of a single attention head. Finally, the outputs from all attention heads are concatenated to generate the final output matrix. The bottom of Figure 2 illustrates the MSGS computation. Three sampling points, 𝑃 + Δ𝑃 1, 𝑃 + Δ𝑃 2, and 𝑃 + Δ𝑃 3, are selected on the feature map 𝑉 . Since these points typically lie between discrete pixels, bilinear interpolation is used to estimate their feature values. For a sampling point at (𝑥, 𝑦 ) with interpolated value 𝑓 𝑥 𝑦 , its four neighboring pixels are: top-left (TL) at (𝑥 0, 𝑦 0) with value 𝑓 0, top-right (TR) at (𝑥 0, 𝑦 1) with 𝑓 1, bottom-left (BL) at (𝑥 1, 𝑦 0) with 𝑓 2,and bottom-right (BR) at (𝑥 1, 𝑦 1) with 𝑓 3. The interpolated value is computed as: 𝑓 𝑥 𝑦 ≈ [ 𝑓 0 (𝑥 1 − 𝑥 )( 𝑦 1 −𝑦 ) + 𝑓 1 (𝑥 1 − 𝑥 )( 𝑦 −𝑦 1) + 𝑓 2 (𝑥 −
+
+𝑥 1)( 𝑦 1 − 𝑦 ) + 𝑓 3 (𝑥 − 𝑥 1)( 𝑦 − 𝑦 1)]/[( 𝑥 1 − 𝑥 0)( 𝑦 1 − 𝑦 0)] . This process involves substantial random memory access due to the irregular distribution of sampling points 𝑃 and Δ𝑃 .
+
+## 3 Motivation Analysis 
+
+The irregular sampling and low locality of MSDAttn make it fun-damentally different from standard self-attention. To quantify its inefficiency on existing platforms, we conduct two case studies. 
+
+## 3.1 Case Study#1—Deformable DETR With GPU 
+
+Configurations. To evaluate the benefits of near-memory pro-cessing for DETR, we analyze the open-source Deformable DETR 
+
+(DE-DETR) model [ 93 ] on an NVIDIA RTX A6000 GPU. Our evalu-ation focuses on object detection inference using the COCO 2017 dataset [ 56 ]. To assess the impact of data parallelism, we vary the inference batch size from 1 to 32 with darker colors representing larger batch sizes, where 32 is the standard batch size in [ 93 ]. Mem-ory bandwidth utilization is measured using the CUDA Profiling Tools Interface (CUPTI), while Nsight Compute (NCU) is employed to analyze L1 and L2 cache hit rates. ICS’26, Belfast, Northern Ireland, UK, Huize Li, Qinggang Wang, Bin Gao, Dan Chen, Yu Huang, and Xin Xin 256  512  1K      
+
+> 25
+> 50
+> 75
+> Latency (%)
+> Sequence Length (batch=8)
+> (a)
+> 04K
+> FC
+> SpAttn
+> 100
+> Data Transfer
+> KV Filtering
+> 2K 8K OPT-6.7B
+> 20
+> 40
+> 60
+> PE idle Rate (%)
+> Models
+> (b)
+> TransPIM
+> HAIMA
+> 80 SADIMM
+> GeNMP
+> OPT-13B Llama-2-7B
+
+Figure 4: (a) PE idle rate comparison among SOTA NMP at-tention accelerators, (b) Data reuse rate comparison among SOTA NMP attention accelerators Bandwidth Roofline Analysis. We employ the bandwidth roofline model provided by Nsight Compute (NCU) to illustrate the theoretical performance limits of the GPU platform. Figure 1(b) presents the internal bandwidth data points for the MSDAttn and FC operators. Our analysis reveals distinct computational character-istics for different components of the model, i.e., MSDAttn exhibits low computational intensity but high memory demands, FC is more compute-intensive. The operational intensity of MSDAttn remains low and constant across batch sizes, as it performs a fixed number of grid-sampling operations and corresponding vector-matrix mul-tiplications. In contrast, FC’s operational intensity increases with batch size due to enhanced data reuse, as all queries in the batch share the same learnable weight matrices. Our findings indicate that the end-to-end model (E2EM) remains in the memory-bound region, as its operational intensity is primarily determined by the high proportion of MSDAttn [ 80 ]. As batch size increases, both MSDAttn and the full model approach the system’s theoretical performance limits since bandwidth limitation. 
+
+Compared to Self-Attn. In Figure 3(a), the bandwidth utiliza-tion of both MSDAttn and Self-Attn increases as the batch size grows. This suggests that a larger batch size enhances bandwidth efficiency and ensures fuller utilization of bandwidth. Figure 3(b) presents the cache hit rate of an NVIDIA A6000 GPU when pro-cessing MSDAttn and Self-Attn. Compared to Self-Attn, MSDAttn exhibits a significantly lower cache hit rate, which further declines as batch size increases. The strong data locality of Self-Attn arises from the principle that a token is more likely to have strong cor-relations with its neighboring tokens [ 6 ]. Consequently, in global Self-Attn computation, neighboring token data can be extensively reused. In contrast, MSDAttn relies on highly irregular grid sam-pling, leading to poor data locality. Furthermore, different batches often involve distinct detection targets, rendering conventional locality-based data reuse strategies ineffective. As illustrated in Figure 3, MSDAttn substantially degrades deformable DETR’s per-formance, due to excessive memory bandwidth consumption driven by random memory accesses with poor data locality. 
+
+## 3.2 Case Study#2—MSDAttn With Modern NMPs 
+
+Configurations. To identify the bottleneck of existing NMP accel-erators for MSDAttn, we conduct a case study evaluating modern DETR models on state-of-the-art (SOTA) NMP-based attention ac-celerators. Specifically, we examine three NMP-based accelerators: TransPIM [ 92 ], HAIMA [ 20 ], and SADIMM [ 46 ]. Since these ac-celerators are designed for Self-Attn, we introduce an additional 
+
+Figure 5: Many PE idle in TransPIM for sampled computing 
+
+module for these platforms to enable MSGS execution during simu-lation. Our study includes three DETR models, i.e., DE-DETR [ 93 ], DN-DETR [ 45 ], and DINO [ 86 ]. All models are running with ob-ject detection inference on the COCO 2017 dataset [ 56 ]. The data reuse rate is computed as follows: when a query’s associated data is accessed for the first time, it is cached by the input buffer follow-ing a FIFO replacement policy. If a data block is not reused within the next four queries, it is evicted. The data reuse rate is given by  
+
+> 𝑁 𝑀𝑅 −𝑁 𝑅𝐸 𝑁 𝑀𝑅
+
+, where NMR is the total number of memory requests, and NRE is the number of input buffer replacements. The PE idle rate is calculated as follows: given 𝑁 processing elements (PEs) and a total execution time 𝑇 for the NMP accelerator. The execution time and stall time for PE 𝑖 are denoted as 𝑡 𝑖 and 𝑠 𝑖 (𝑇 = 𝑠 𝑖 + 𝑡 𝑖 ), respectively. The average stall ratio across all PEs is given by   
+
+> Í𝑁 𝑖 =1𝑠 𝑖
+> 𝑁𝑇
+
+.
+
+Bottleneck#1: load imbalance leads to PE idleness. Fig-ure 4(a) illustrates the PE idle rate for state-of-the-art NMP-based attention accelerators when executing DETR models, revealing that more than 50% of PEs remain idle. This inefficiency is particularly evident in TransPIM [ 92 ], as shown in Figure 5, when applied to MSDAttn. TransPIM adopts a token-based dataflow, where tokens are partitioned and distributed across different memory banks. This approach is highly effective for self-attention, as it ensures high PE parallelism. However, when performing matrix computations with sampling, a significant number of PEs remain inactive. For instance, consider computing attention scores 𝑆 = 𝑄 × 𝐾 T using sampled elements 𝑆 11 , 𝑆 23 , and 𝑆 32 from matrix 𝑆 . Although the storage of tokens across banks appears evenly distributed, the sampling opera-tion bypasses most computations. As a result, in each iteration, only the PEs that contain the sampled data remain active, while others remain idle. This severe computational imbalance leads to substan-tial resource underutilization, limiting the efficiency of NMP-based accelerators when applied to MSDAttn. 
+
+Bottleneck#2: poor data reuse leads to bandwidth waste. 
+
+Figure 4(b) depicts the data reuse rate of SOTA NMP-based atten-tion accelerators on DETR models, showing a reuse rate of less than 20%. To understand the root cause of this inefficiency, we analyze TransPIM’s design. TransPIM employs a token-based dataflow to improve data reuse. In the left part of Figure 5, the attention score matrix 𝑆 is computed as 𝑆 = 𝑄 × 𝐾 T. Once 𝑄 1 is multiplied by 
+
+𝐾 1, it can be immediately reused to compute 𝑄 1 × 𝐾 2, maximizing data locality. However, this reuse strategy fails when accelerating MSDAttn. The primary issue lies in MSGS, which exhibits poor data locality both within a single query and across multiple queries. 
+
+Within a single query: MSGS samples reference points from mul-tiple orientations to capture diverse features, inherently limiting Accelerating Multi-Scale Deformable Attention Using Near-Memory-Processing Architecture ICS’26, Belfast, Northern Ireland, UK, 
+
+Figure 6: (a) Architecture overview of DANMP , (b) Rank-NMP, (c) Bank-group-NMP, (d) Bank-NMP, (e) Details of index computing unit (ICU) and bilinear interpolation computing unit (BICU), (f) NMP instruction format 
+
+opportunities for data reuse. Across different queries: Queries are processed in a random order, with varying detection targets, leading to minimal overlap between adjacent queries. As a direct conse-quence, a significant portion of memory bandwidth is wasted on repeatedly accessing irregularly sampled data, severely degrading system performance. Therefore, adapting NMP-based self-attention accelerators like TransPIM to MSDAttn is highly inefficient, as the lack of exploitable data locality negates the benefits of dataflow optimization techniques. 
+
+## 3.3 Key Ideas of DANMP 
+
+Our first case study reveals that GPU-based MSDAttn suffers from severe memory bandwidth limitations, operating near the roofline. Consequently, leveraging NMP architectures to alleviate these bot-tlenecks is essential. Our second case study shows that existing NMP-based accelerators are ill-suited for MSDAttn. While current implementations typically offload both FC and self-attention layers, we find that the FC layer is compute-intensive with significant weight reuse. Thus, designing a dedicated NMP accelerator for MSDAttn is urgently needed. 
+
+## 4 DANMP Architecture Design 4.1 Overall Architecture 
+
+The overall architecture of DANMP is illustrated in Figure 6(a). It integrates three types of NMP units: near-rank PEs, near bank-group PEs, and near-bank PEs. The buffer chip contains two near-rank PEs responsible for managing I/O data transfers between two ranks. At the bank-group level, each group within a rank is paired with a dedicated PE, enabling near bank-group processing that enhances bandwidth utilization. Unlike prior NMP accelerators such as SADIMM [ 46 ] and TransPIM [ 92 ], DANMP selectively des-ignates only a subset of banks (50% based on the measured idle rate in Figure 4(a)) as bank-level NMP units instead of distributing computation across all banks. Each near-bank PE operates in local access mode, meaning it only accesses its corresponding bank (e.g., PE 𝑖 exclusively accesses bank 𝑖 ). Furthermore, DANMP avoids cross-bank data transfers, a major source of bandwidth inefficiency. Such transfers not only require extra hardware, as in TransPIM [ 92 ], but also incur latency several times higher than local access. As shown in Figure 2, MSDAttn consists of two key operations: multi-scale grid sampling and aggregation of extracted features. These rely on three computational primitives—addition, multiplica-tion, and reduction. Integrating DANMP therefore requires includ-ing these primitives in hardware. A crucial design consideration is the optimal placement of logic units to handle MSDAttn’s varied demands efficiently. MSGS Execution: Since MSGS frequently ac-cesses feature maps and sampling points stored in memory banks, executing it with Bank-NMP minimizes latency and maximizes parallelism by keeping data local. Aggregation Execution: Aggre-gation involves extensive reduction operations on interpolated and weighted results. As reduction naturally aligns with DIMM hierarchy, Rank-NMP and BG-NMP efficiently perform this task, leveraging DDR5 structure to optimize data flow and parallelism. 
+
+## 4.2 Integration Details 
+
+Rank-NMP Module. The Rank-NMP module, shown in Figure 6(b), integrates near-rank PEs to manage final data aggregation effi-ciently. In addition to performing standard DDR PHY functions, Rank-NMP serves as a transport layer for NMP control instructions, ensuring low-latency instruction propagation and execution syn-chronization. The instruction queue size is limited to 5 because it shares the limited on-die area with NMP logic units. A larger queue can slightly improve packing efficiency but also increases area cost and reduces available compute resources. Through RTL validation, we found that a queue size of 5 achieves the best trade-off between packing benefit and hardware efficiency. Instructions are multi-plexed to specific ranks using the NMP-Select ( NMP _Se ) instruction. Rank-NMP aggregates results across all bank-groups. After each bank-group processes its local results (e.g., interpolated features ICS’26, Belfast, Northern Ireland, UK, Huize Li, Qinggang Wang, Bin Gao, Dan Chen, Yu Huang, and Xin Xin 
+
+or query partial sums), Rank-NMP performs final data aggrega-tion and reduction. This process accumulates contributions from different feature map levels, forming the final attention-weighted feature vector. For multi-head attention, Rank-NMP also concate-nates outputs from different attention heads. Since most arithmetic operations occur at the bank level, Rank-NMP only performs light-weight accumulation, ensuring minimal processing overhead. By finalizing aggregation at the rank level, DANMP reduces the data volume sent to the host, improving bandwidth efficiency. 
+
+Bank-NMP Module. The Bank-NMP module, illustrated in Fig-ure 6(d), handles MSGS near the bank’s sense amplifiers, reducing latency and bandwidth usage. It includes two primary components (Figure 6(e)). The Index Computation Unit (ICU) calculates sam-pled coordinates from scaled reference points, performs boundary checks, and generates memory indices. Microarchitecturally, it com-prises a coordinate sampler (Adder1), a comparator-based boundary checker, and an index generator (Multiplier and Adder2). The Bi-linear Interpolation Computational Unit (BICU) extracts fractional components, computes weights, and performs weighted summa-tion over four neighboring pixels. It consists of a bitwise fraction extractor (Comparator and Subtractor), a multiplier, and a binary adder tree. Positioned near DDR5 sense amplifiers, Bank-NMP PEs perform low-latency memory accesses. Each PE directly computes interpolated features, eliminating raw pixel transfers over the bus. These PEs utilize SIMD-based MAC units for parallel processing. As the MAC follows conventional architectures like Eyeriss [ 14 ], we omit its internal structure for brevity. Feature maps are partitioned so each bank holds a spatial tile, enabling bank-level parallelism (details in Section 5.1). 
+
+BG-NMP Module. The BG-NMP module (Figure 6(c)) acts as a bridge between Rank-NMP and Bank-NMP, aggregating inter-mediate results while managing bilinear interpolation for non-PE banks. Given the hierarchical nature of DRAM, batch-wise reduc-tion operations are efficiently executed at the bank-group level before forwarding the aggregated data to Rank-NMP for final pro-cessing. BG-NMP also coordinates indexing computations, ensuring that near-bank PEs handle hot data within the nearest bank, while bank-group PEs process cold data from all its non-PE banks. Com-pared to even integration, this approach reduces costly hot data transmission from with-PE bank to non-PE bank, preventing unnec-essary movement (cross-bank transfer) of raw pixel data. To support these functions, each bank-group integrates accumulator, ICU, and BICU units, where the ICU and BICU contain dedicated adder and multiplier arrays capable of performing vector-level MAC opera-tions. Additionally, BG-NMP balances workloads by distributing simple, localized computations to individual banks while managing cross-bank coordination at the bank-group level. This structure maximizes parallel processing while keeping computations close to the data, ensuring optimal memory efficiency and performance. 
+
+Technical Feasibility of Non-Uniform PEs. While traditional DRAM (e.g., DDR4/5) employs symmetric bank configurations for manufacturing and interface compatibility, recent research demon-strates the feasibility of heterogeneous designs across banks and subarrays. FIGARO [ 74 ] enables subarray-level partitioning into fast and slow regions using a shared global row buffer. CROW [ 33 ]introduces "regular" and "copy" rows within subarrays, activated independently via additional decoder logic to accelerate hot rows. LISA [ 9 ] adds lightweight inter-subarray links and identifies fast segments for in-DRAM caching, enabling intra-bank latency het-erogeneity. These efforts show that DRAM can be configured at fine granularity, such as banks and subarrays, supporting the non-uniform PE integration strategy proposed in this work. 
+
+## 4.3 NMP Instruction Format 
+
+Overview. Similar to RecNMP [ 38 ] and ReCROSS [ 58 ], the DANMP 
+
+accelerator uses a 83-bit compressed instruction format that tightly encodes memory and compute operations. This format was de-signed to fit within standard memory interface constraints. We refine and elaborate each field of the instruction to better support advanced operations, e.g., indexing, bilinear interpolation, aggrega-tion, weighted sums. 
+
+Instruction Format Breakdown. The fields and their typi-cal bit widths are shown in Figure 6(f). Mode Selection: The 1-bit 
+
+Mode _Se indicates the memory working on DRAM mode or NMP mode. In DRAM mode , data remain striped across chips and ac-cessed via host controller. In NMP mode , each bank issues local requests through its embedded PE and executes independently. Feature tiles are remapped into per-bank scratchpads under a sep-arate logical address space, invisible to the host, preserving full DRAM compatibility. NMP Selection: The 2-bit NMP _Se determines whether an instruction is executed by the near-rank PEs, near bank-group PEs, or near-bank PEs. This classification is generated by the host-side memory controller based on operation types. Oper-ation Type: The 4-bit Op _Code covers sum/mean ( NMP _Sum /Mean ), weighted sum ( NMP _WSum ), bilinear interpolation ( NMP _Interp ), etc. 
+
+DDR Command Flags: The 3-bit DDR _cmd compresses the DRAM commands (Activate, Read, Precharge) needed for the memory ac-cess. The memory controller (host) or the near-rank controller sets these flags based on whether the target row is already open, how many column bursts are needed, etc. 
+
+Memory Address: The 32-bit Daddr supplies the memory loca-tion for the operation. In a DRAM setting it can be broken into rank, bank-group, bank, row, and column bits. Vector Size/Length: 
+
+The 3-bit vsize influences how many DRAM column bursts the rank controller issues. Weight Field: The 32-bit W_value supplies the scalar weight to multiply the fetched vector by for weighted sum opcodes. Partial Sum Tag: The 4-bit PsumTag identify which accumulation stream this instruction belongs to. This is crucial for aggregation/reduction operations. Only data with the same 
+
+PsumTag will be accumulated, ensuring the correctness of the re-duction operation. 
+
+## 5 DANMP System Design 5.1 Data Sharding and Mapping 
+
+To leverage DDR5’s high bank-level parallelism, feature maps and attention weights are evenly distributed across DDR5’s 32 banks, organized into 8 bank-groups. This partitioning ensures maximum concurrent access by minimizing contention. For instance, a query’s sampling points are placed in separate banks to prevent overload-ing and enable parallel fetching. The four neighboring pixels of a sampling point are stored in the same bank to reduce cross-bank overhead. However, while this tile-based mapping prevents bank conflicts, it introduces load imbalance. Despite equal storage, pixel Accelerating Multi-Scale Deformable Attention Using Near-Memory-Processing Architecture ICS’26, Belfast, Northern Ireland, UK, 
+
+access probability varies significantly; for example, in portraits, the facial region sees higher sampling, causing uneven workloads. To address this, we implement a coordinate clustering approach before mapping feature maps to banks. Specifically, query-related coordinates are first computed and clustered to identify frequently sampled regions. DANMP classifies feature entries by access fre-quency: the top 50% most frequently accessed entries are mapped to PE-equipped banks for local computation, while the remaining 50% are evenly assigned to the banks without PEs. This frequency-based mapping ensures balanced utilization without overloading PE banks. Since these infrequently accessed data are typically stored across different banks, we use near bank-group PEs to process them, thereby reducing cross-bank data transfers. This optimized map-ping strategy incurs minimal overhead, as the coordinate clustering approach operates solely on coordinate data and does not require feature map access or interpolation operations. 
+
+## 5.2 Clustering-and-Packing Algorithm 
+
+Current Challenges in Data Reuse. In a single DETR query, pix-els from various orientations are sampled to capture richer features. However, this process inherently results in low data reuse due to the lack of spatial locality. When executing a batch of queries on a single feature map, data reuse opportunities remain limited for two primary reasons. First, different queries typically correspond to dis-tinct detection targets, which are randomly distributed across the feature map. Second, the arrival order of queries is entirely random, leading to poor temporal locality and further hindering efficient data reuse. Addressing these challenges is critical to minimizing redundant memory accesses and improving system performance. 
+
+Opportunity Analysis. Although queries generally focus on different detection targets, many targets can be decomposed into smaller sub-targets, often leading to overlaps across queries. For in-stance, in portrait detection, detecting both the upper body and face involves extracting common facial features. If queries with shared sub-targets can be identified, spatial locality can be leveraged to enhance data reuse. However, random query order greatly under-mines this benefit. For example, after detecting a face, if subsequent queries focus on unrelated objects, the cached facial features may be evicted from the buffer. Consequently, when the system later detects the upper body, it cannot reuse previously computed facial features. To maximize data reuse, queries with shared sub-targets should be grouped to improve temporal locality. This strategic grouping keeps frequently accessed data available for reuse, reduc-ing memory access and improving performance. 
+
+Algorithm Details. Algorithm 1 outlines the CAP method for improving data reuse in bilinear interpolation. Random Query Selec-tion (Lines 1-2): 20% of queries from the same FMap are randomly selected to compute sampled point offsets Δ ˆ𝑝 . Clustering (Line 3): 
+
+K-means clustering is applied to the sampled points ( ˆ𝑝 + Δ ˆ𝑝 ), yield-ing 𝑘 cluster centroids. A 9 × 9 pixel region is used as the clustering distance metric, identifying frequently accessed (hot) regions. Since only coordinates are involved, this step can be performed prior to FMap storage. The feature values around each cluster center are stored in PE-equipped banks (hot entries), while the rest are placed in non-PE banks (cold entries). Query Packing (Lines 4-8): For the re-maining 80% of queries, offsets are computed as Δ𝑝 = 𝑞 ×𝑊 𝑆 . Each 
+
+Algorithm 1 Clustering-and-Packing 
+
+Require: Q, V, 𝑊 𝑆 are query, FMap and weight matrices, 𝑃 (𝑥, 𝑦 )
+
+is the coordinate set of all reference points 
+
+Ensure: Bilinear Interpolation ( BI ) of sample points 𝑝 + Δ𝑝  
+
+> 1:
+
+ˆ𝑄 ← Random selecting 20% queries from 𝑄  
+
+> 2:
+
+Δ ˆ𝑝 = ˆ𝑄 × 𝑊 𝑆  
+
+> 3:
+
+𝑘 × Cluster Centroids 𝐶 ← K-means ( ˆ𝑝 + Δ ˆ𝑝 ) 
+
+> 4:
+
+Mapping feature values of 9 × 9 pixels near 𝐶 to banks with PE  
+
+> 5:
+
+while 𝑞 ∈ ( 𝑄 − ˆ𝑄 ) (𝑖 = 0) do  
+
+> 6:
+
+Δ𝑝 = 𝑞 × 𝑊 𝑆  
+
+> 7:
+
+𝑗 𝑡ℎ Cluster Centroid 𝐶 𝑗 ← Search (𝐶 , 𝑝 + Δ𝑝 ) 
+
+> 8:
+
+Pack 𝑗 = Packing (𝑝 + Δ𝑝 ), 𝑖 + +  
+
+> 9:
+
+end while  
+
+> 10:
+
+Output ← BI (V, from Pack 0 to Pack 𝑘 )sampled point ( 𝑝 + Δ𝑝 ) is mapped to its nearest cluster centroid. Queries targeting the same 9 × 9 region are grouped into packs, enabling shared sub-targets and improved data reuse. Optimized Bilinear Interpolation (Line 9): Query packs undergo bilinear inter-polation collectively, maximizing reuse and improving efficiency. 
+
+## 5.3 Programming Model and Execution Flow 
+
+Overview. At the core of DANMP’s programming model, the CPU serves as the system’s central controller, managing global infor-mation and orchestrating execution, while NMP units focus solely on executing assigned computations and returning results. Several global factors are critical to ensuring efficiency, including: (1) the dis-tribution of near-bank PEs, (2) the spatial distribution of sampling points, and (3) cluster center information from the CAP algorithm. To illustrate, consider a feature map: the CPU first calculates sam-pling point locations for 20% of queries and applies CAP clustering to identify frequently accessed (hotspot) regions. Using this infor-mation, the CPU issues instructions to store hotspot-associated feature map segments in banks with PEs, while non-hotspot re-gions are allocated to banks without PEs. For the remaining 80% of queries, once the CPU determines sampling point coordinates, it performs query packing to enhance temporal locality, improving data reuse. Finally, based on the spatial distribution of sampling points, the CPU generates instructions for different NMP levels to optimize execution. 
+
+Details of DANMP’s Execution Flow. Figure 7 presents an example code of host-DANMP collaborative processing for DETR inference. The blue region highlights the MSDAttn portion that needs to be offloaded to DANMP for execution. We use Figure 6 to elaborate on the detailed process of executing MSDAttn with 
+
+DANMP . The control logic is designed to keep all levels of the hier-archy busy. While one set of sample points is being processed at the banks, the near-rank unit can prepare the next set of instruc-tions, overlapping computation and communication. The execution sequence for one detection query is as follows. (1) The near-rank NMP receives the NMP instructions of one query, which contains all the informations shown in Figure 6(f). (2) The near-rank instruction decoder will broadcast the instruction info down to the bank-groups according to the NMP _Se field. (3) If NMP _Se = 𝑏𝑎𝑛𝑘 and the instruction is successfully broadcast to ICS’26, Belfast, Northern Ireland, UK, Huize Li, Qinggang Wang, Bin Gao, Dan Chen, Yu Huang, and Xin Xin NMP Packet            
+
+> [Packet header]
+> Store counter NMP_Inst
+> …
+> NMP_Inst Load Host::queries, ref_points
+> [Packet tail]
+> NMP Packet
+> \\ Global Definition IMAGE_SIZE = batch * channels * height * width FEATURE_SIZE = num_levels * batch * feature_dim * height * width QUERY_SIZE = batch * num_queries * feature_dim REF_POINT_SIZE = batch * num_queries * num_levels * 2 \\ Initialize Ref Points and Clustering for 20% Queries Host::queries, ref_points = initialize_queries () Host::offsets = Mat_Mul(queries, weights) Host::centers = clustering (ref_points + offsets) \\ Memory Allocation Host::MemAlloc(image, IMAGE_SIZE) Host::MemAlloc(ms_features, FEATURE_SIZE, centers) Host::MemAlloc(queries & probability, QUERY_SIZE) Host::MemAlloc(ref_points, REF_POINT_SIZE) \\ Position Encoding and Calculate Probability Host::features = backbone (image) Host::ms_features = position_encoding (features) Host::probability = softmax (Mat_Mul(queries, attn_weights)) \\ NMP Kernels for MSDAttn NMP::MSDAttn(ms_features, probability, ref_points, offsets){ memory = transformer_encoder (ms_features)
+> for decoder in decoder_layers: sampled_features = bilinear_interpolation (memory, ref_points, offsets) output = weighted_sum (sampled_features, probability) }Host::pred_bboxes, pred_classes = predict (output) Host::detections = filter_detections (pred_bboxes, pred_classes)
+
+(a) 
+
+> [Packet header]
+> Store counter NMP_Inst
+> …
+> NMP_Inst Load Host::queries, ref_points
+> [Packet tail]
+
+(b) 
+
+SM_0 
+
+> L2
+
+NMP-DIMM   
+
+> Cores Regs L1
+
+SM_1  SM_n 
+
+...  
+
+> Interconnect Fabric
+> Memory Controller NMP-extension
+> Regular DRAM access
+> Offloading NMP packets
+
+NMP-DIMM NMP-DIMM NMP-DIMM  ...  NMP-DIMM NMP-DIMM NMP-DIMM NMP-DIMM 
+
+(c) 
+
+> Chip-Select, NMP-Inst
+
+(d)  
+
+> SM_0 NMP Packet
+
+...  SM_n NMP Packet  
+
+> NMP Packet Queue
+> Packet_0 Packet_N
+
+... 
+
+> Packet Scheduler
+> NMP-Inst Queue
+> Paddr Mapping
+> Counter Calc
+> NMP-Inst Scheduler FR-FCFS
+> Setup NMP-Inst Tag ACT, RD, PRE
+
+Figure 7: DANMP MSDAttn example code 
+
+all banks, the banks equipped with PEs will proceed with memory access based on the address specified by Daddr . If NMP _Se = 𝑏𝑎𝑛𝑘 −
+
+𝑔𝑟𝑜𝑢𝑝 , The near-bank-group instruction decoder will collect data from its banks with Daddr . Then the PEs within the bank-groups will generate the bilinear interpolation results locally. (4) Near-bank PEs will collect data from the input buffer in Figure 6(d). Meanwhile, the near-bank instruction decoder will parse the Op _Code field to determine the specific operation to be executed. (5) After the local execution of parallel near-bank PEs, those partial results are sent over a fast intra-bank-group bus to the near-bank-group PE, which adds them together. (6) Each bank-group PE then sends its result (e.g., one interpolated feature vector per sample or a partial sum for the query) up to the near-rank unit. (7) The near-rank unit accumulates all these vectors into the final output for the query’s attention computation, and writes it to a designated location or return it to the host. 
+
+## 6 Evaluation 6.1 Experimental Setup 
+
+Simulation Framework. Table 1 summarizes the core simulation settings used for evaluating the performance of DANMP . We con-duct a cycle-accurate, full-system simulation of a 32-core architec-ture with a DDR5-based memory hierarchy. Processor cores and the cache subsystem are modeled using the gem5 simulator [ 7], which captures instruction-level behavior, cache interactions, and memory access patterns. To model the memory subsystem, including DDR5 channels and near-memory logic, we extend Ramulator [ 40 ] with a custom NMP simulation backend. This extension incorporates cycle-level models for address translation, NMP-specific instruction generation, and detailed execution timing of DANMP ’s processing elements (PEs). Hardware synthesis of the PEs targets a 40nm CMOS 
+
+Table 1: System Parameters and Configurations Host-side CPU Configurations 
+
+Processor 32 Cores, 2.5GHz L1 Caches 32KB per core L2 Caches 1MB per core Shared LLC 60MB for 32 cores 
+
+DRAM Configurations 
+
+64GB DDR5-4800, 2400MHz, 38.4GB/s per channel, 4 channels × 1 DIMM × 2 Ranks × 8 bank-groups × 4 banks, scheduler with a FR-FCFS, 32-entry RD/WR request queue, open-page management, Intel Skylake address mapping [63] 
+
+DRAM Timing Parameters (cycles) 
+
+tRCD = 40, tCL = 40, tRP = 40, tRC = 116, tBL = 8, tFAW=32, tRAS = 76, tCCD_S = 8, tCCD_L = 12 
+
+Latency and Energy Parameters 
+
+DDR ACT = 2nJ, DDR RD/WR = 4.2pJ/b, Off-chip I/O = 4pJ/b, NMP_buffer RD/WR = 1 cycle, 50pJ/access, Comparator = 1 cycle, 0.27pJ/Op FP32 adder = 3 cycles, 0.9pJ/Op, FP32 multiplier = 4 cycles, 2.4pJ/Op process at 300MHz, matching the internal frequency of DDR5-4800. For area and power estimation of the NMP logic, we utilize Syn-opsys Design Compiler. Memory access energy and I/O power are derived using CACTI-3DD [13] and CACTI-IO [34], respectively. 
+
+Evaluation Methodology. We benchmark DANMP against six leading hardware platforms designed for attention mechanisms. These include: (1) A 32-core Intel Xeon Gold 6458Q CPU running at 3.1GHz with a 350W TDP; (2) NVIDIA RTX A6000 GPU equipped with 46GB memory and a 300W TDP, using CUDA v11.6. The GPU baseline employs fused CUDA kernels optimized with shared-memory buffering, warp-level parallelism, and memory coalescing. In addition, we validated our measurements using TensorRT with operator fusion enabled, observing only a marginal ( <5%) latency reduction compared to our optimized CUDA version, confirming that the baseline is close to the practical upper bound. (3) DEFA [ 80 ], an ASIC-based deformable attention accelerator leveraging pruning-assisted grid sampling and multi-scale parallel processing to reduce computation overhead; (4) TransPIM [ 92 ], an HBM-based acceler-ator optimized for self-attention with a token-wise dataflow; (5) HAIMA [ 20 ], which combines near-SRAM and near-DRAM to ac-celerate self-attention using hybrid memory processing; and (6) SADIMM [ 46 ], a DIMM-integrated sparse attention accelerator with dimension-based partitioning to maintain balanced workloads post-pruning. Since these NMP-based platforms are tailored for tra-ditional self-attention kernels, we extended them with the necessary hardware modules (ICU and BICU units; see Figure 6(e)) to support multi-scale grid sampling (MSGS) in MSDAttn. All platforms ex-ecute inference in FP32 precision. To ensure fair comparison and remove area bias, we report performance using throughput per unit area (GFLOPS/mm 2) and energy efficiency using throughput per watt (GFLOPS/W). 
+
+Workload Configuration. We evaluate object detection per-formance across four standard datasets: PASCAL VOC [ 22 ], MS COCO [ 56 ], KITTI [ 26 ], and DOTA [ 76 ]. Three representative transformer-based detectors are used: DE-DETR [ 93 ], DN-DETR [ 45 ], and DINO [ 86 ]. In our setup, DE-DETR uses 100 detection queries per image, DN-DETR uses 300, and DINO uses 900. All models Accelerating Multi-Scale Deformable Attention Using Near-Memory-Processing Architecture ICS’26, Belfast, Northern Ireland, UK, 1                   
+
+> 5
+> 25
+> 125
+> 625
+> VOC COCO KITTI DOTA VOC COCO KITTI DOTA VOC COCO KITTI DOTA AVG
+> Speedups  GPU DEFA TransPIM HAIMA SADIMM DANMP
+> DE-DETR DN-DETR DINO
+
+Figure 8: Speedup of DANMP compared with GPU, DEFA, TransPIM, HAIMA, and SADIMM (normalized to CPU) 
+
+are fine-tuned on GPUs using their standard training pipelines to obtain optimized weights, which are then preloaded into DANMP for inference acceleration. No model parameters were modified for DANMP, and its inference accuracy is consistent with GPU and CPU baselines (within ±0.1 mAP on all datasets). 
+
+## 6.2 Overall Performance 
+
+Figure 8 presents the performance of DANMP against CPU, GPU, DEFA, TransPIM, HAIMA, and SADIMM. 
+
+Comparison with CPU and GPU. CPUs and GPUs are the mainstream platforms for accelerating Deformable DETR inference. Across all evaluated datasets and models, DANMP delivers an av-erage speedup of 557.31 × over the CPU baseline and 97.43 × over the GPU. This remarkable performance gain stems from three key factors: (1) DANMP is specifically optimized—both in hardware and software—for MSDAttn, making it far more suitable for DETR workloads than general-purpose architectures. (2) Its near-memory architecture minimizes costly host-to-memory data transfers, which typically become a bottleneck in memory-intensive tasks. (3) By integrating processing units directly at the bank level, DANMP un-leashes the full potential of DRAM bandwidth, which is essential for the heavy memory access patterns of MSDAttn. 
+
+Comparison with DEFA. DEFA is the SOTA ASIC-based ac-celerator for MSDAttn. Compared to DEFA, DANMP achieves an average speedup of 13.74 ×, primarily due to two architectural ad-vantages. First, DANMP leverages near-memory parallelism by integrating processing elements directly adjacent to DRAM banks. This design eliminates frequent off-chip memory transfers and en-ables high-throughput, low-latency data access. Second, DANMP adopts a Clustering-and-Packing (CAP) algorithm that identifies and groups redundant queries across consecutive frames, signifi-cantly reducing memory access overhead in streaming workloads. 
+
+Comparison with TransPIM and HAIMA. TransPIM and HAIMA are state-of-the-art accelerators optimized for standard self-attention. Nevertheless, DANMP surpasses them by 5.17 × and 4.26 × on average, respectively. The reasons for this advantage in-clude: (1) TransPIM and HAIMA target dense matrix multiplications typical of self-attention, whereas MSDAttn involves irregular and sparse operations that GEMM units handle poorly. DANMP ad-dresses this with specialized PEs that execute MSGS directly in memory. (2) Their dataflows and schedulers are designed for regu-lar patterns, making them less effective for MSDAttn’s complexity. In contrast, DANMP introduces a custom NMP dataflow tailored to MSDAttn’s irregular behavior, improving runtime efficiency. (3) Unlike MSDAttn, self-attention workloads are regular, so prior ac-celerators overlook dynamic load balancing. In MSGS, severe load imbalance can leave some banks with minimal data for their PEs, causing idle cycles after local computations. DANMP addresses this with non-uniform hardware integration, aligning resources with 1                   
+
+> 5
+> 25
+> 125
+> 625
+> VOC COCO KITTI DOTA VOC COCO KITTI DOTA VOC COCO KITTI DOTA AVG
+> Energy Eff.  GPU DEFA TransPIM HAIMA SADIMM DANMP
+> DE-DETR DN-DETR DINO
+
+Figure 9: Energy efficiency of DANMP compared with GPU, DEFA, TransPIM, HAIMA, and SADIMM 
+
+workload irregularity to reduce PE idling. Moreover, relocating cold data within a bank-group requires only a read from the source bank, significantly lowering overhead compared to cross-bank transfers. While DANMP employs fewer PEs than TransPIM, its throughput is higher because both architectures perform the same computa-tion, making latency the key factor. The latency is dominated by the most loaded bank–PE pair. DANMP’s query grouping greatly improves data reuse among nearby queries, reducing redundant data movement and PE idle time. As a result, DANMP achieves lower execution latency for the same workload, delivering higher effective throughput despite using fewer PEs. 
+
+Comparison with SADIMM. Compared to SADIMM, a lead-ing sparse-attention accelerator, DANMP achieves a 3.43 × average speedup. The improvements arise from several innovations: (1) While both adopt efficient memory-side execution, DANMP offers a dataflow better suited for MSDAttn. (2) SADIMM introduces a dimension-wise data partitioning strategy to balance load across PEs. However, this method proves insufficient for MSDAttn’s more irregular computation, often resulting in idle compute resources. 
+
+DANMP addresses this through its irregular hardware mapping, aligning hot (cold) entries to bank-level (bank-group level) PEs to en-sure balanced execution. (3) SADIMM enhances reuse through diag-onal locality in sparse attention [ 52 ]. Unfortunately, MSDAttn lacks such regularity. DANMP compensates by applying the Clustering-and-Packing (CAP) algorithm, which groups queries with shared sub-targets to boost both spatial and temporal data reuse. 
+
+Energy Efficiency Comparison. Figure 9 shows energy ef-ficiency results. Compared to CPU, GPU, and DEFA platforms, 
+
+DANMP achieves 1437.82 ×, 227.21 ×, and 11.63 × improvements, respectively. For completeness, DRAM refresh, DIMM I/O termina-tion, and NMP instruction decoding overheads are also included in the revised estimation. Their combined contribution accounts for less than 8% of total system energy, leading to an adjusted overall efficiency of 208.47 × over GPU baseline. Compared to the GPU, DANMP achieves a higher improvement in energy efficiency than in performance. This disparity stems from DANMP’s ability to avoid costly off-chip memory accesses, the dominant source of en-ergy consumption. In contrast, GPUs suffer from substantial energy overhead due to frequent data movement and always-on compute resources. Relative to other NMP accelerators, DANMP achieves 4.41 ×, 2.85 ×, and 2.37 × better energy efficiency than TransPIM, HAIMA, and SADIMM, respectively. These gains can be attributed to: (1) DANMP ’s non-uniform integration strategy ensures that near-bank PEs are only deployed where needed, reducing energy waste from idle units. In contrast, platforms with uniform integra-tion must reallocate tasks through costly cross-bank communica-tion. (2) The clustering-and-packing algorithm also significantly increases data reuse, reducing redundant memory accesses and thereby lowering energy per operation. ICS’26, Belfast, Northern Ireland, UK, Huize Li, Qinggang Wang, Bin Gao, Dan Chen, Yu Huang, and Xin Xin 0.1                   
+
+> 1
+> 10
+> 100
+> 1000
+> VOC COCO KITTI DOTA VOC COCO KITTI DOTA VOC COCO KITTI DOTA AVG
+> Speedups  CPU CPU+CAP DANMP-uniform DANMP-noCAP DANMP
+> DE-DETR DN-DETR DINO
+
+Figure 10: Performance comparison of extra configurations 
+
+## 6.3 Hardware and Software Efficiency 
+
+To better understand the individual contributions of DANMP ’s hardware and software components, we conducted experiments across three supplementary platforms: (1) CPU+CAP, where the CAP algorithm is applied during DETR query inference on the CPU to improve data locality; (2) DANMP-uniform, where identical bank-level PEs are integrated into all banks in DANMP; and (3) DANMP-noCAP, which runs DANMP without CAP to isolate its software impact. The results are shown in Figure 10. 
+
+Software Effectiveness. Compared to the CPU baseline, inte-grating CAP yields a 1.45 × speedup, demonstrating its effectiveness. Although it introduces clustering and packing overhead, CAP sig-nificantly improves data reuse and reduces redundant memory accesses. This gain arises from two key benefits. First, CAP or-ganizes queries sharing common sub-targets, avoiding repeated computations on overlapping regions. Second, by grouping spatially correlated queries, CAP improves temporal locality, minimizing redundant memory accesses and mitigating random access over-head. These findings support the insight that combining multiple ML strategies is often essential for improving system efficiency in practice. 
+
+Hardware Effectiveness. Compared to DANMP-uniform, DANMP achieves a 2.21 × performance boost. Although CAP improves data reuse in DANMP-uniform, its uniform hardware configuration can-not adapt to the irregular access patterns of MSDAttn, causing significant PE underutilization. To avoid idling, data must be trans-ferred from other banks via the MC, which is far less efficient than local bank-group reads. Moreover, DANMP-uniform provides no more compute resources than DANMP , as DANMP reallocates some PEs to the bank-group level for better load balancing. Even without CAP optimization, DANMP-noCAP still surpasses the CPU baseline by a large margin, achieving a 283.63 × speedup. This improvement mainly results from the NMP-based architecture, which minimizes off-chip transfers, and the near-bank computing scheme that sig-nificantly increases available bandwidth. Although omitting CAP introduces some bandwidth inefficiencies, DANMP still maintains a substantial advantage, underscoring the potential of NMP-based architectures for specialized DETR acceleration. 
+
+## 6.4 Scalability 
+
+Impact of DIMM and Rank Configuration. Figure 11(a) shows 
+
+DANMP performance scaling on MSDAttn workloads under vary-ing DIMM and memory channel counts. Results reveal that simply increasing DIMMs on a single memory channel yields limited im-provement. Although more DIMMs provide higher internal band-width, control signals remain constrained by the single channel, making it the bottleneck. In contrast, adding DIMMs across mul-tiple channels significantly boosts throughput by removing this 0    
+
+> 1
+> 2
+> 3
+> 4
+> 5
+> Speedups
+> Single-channel Multi-channel
+> (a) 0
+> 3
+> 6
+> 9
+> 12
+> Speedups
+> 1 Ranks 2 Ranks 4 Ranks (b)
+
+Figure 11: (a) Scalability of DANMP on DE-DETR as the num-ber of DIMMs increases, and (b) Performance of DANMP with different number of ranks 0                  
+
+> 2
+> 4
+> VOC COCO KITTI DOTA VOC COCO KITTI DOTA VOC COCO KITTI DOTA AVG
+> Speedups  DANMP 2× Queries 3× Queries2 4× Queries 5× Queries
+> DE-DETR DN-DETR DINO
+
+Figure 12: The speedups with various number of queries 
+
+constraint and enabling parallel C/A paths. Figure 11(b) further examines performance changes with rank count per DIMM. While adding ranks enhances bandwidth at the rank level, gains are sub-linear due to shared bus connections. Nonetheless, performance improves steadily—for example, a 4-rank configuration achieves a 1.63 × speedup over 2 ranks, demonstrating that DANMP effectively exploits bandwidth hierarchy across ranks. 
+
+Impact of Query Volume. We simulate expanded workloads by proportionally increasing the number of queries and feature map dimensions. For instance, the "2 × Queries" setup doubles the query and feature map sizes compared to the baseline. As shown in Figure 12, DANMP ’s performance gain over the CPU baseline continues to grow with the number of queries. This trend high-lights DANMP ’s strong scalability in large-scale inference tasks. First, the use of near-memory computing minimizes the off-chip random memory access overhead. This advantage becomes more pronounced as the number of queries increases. Second, the CAP algorithm enhances temporal and spatial data reuse by clustering queries that target overlapping regions. As the number of queries increases, the probability of shared sub-targets rises, leading to even higher reuse efficiency. 
+
+Impact of CAP Sampling Rate. Figure 13(b) presents the exper-imental results of the impact of CAP clustering ratio on normalized inference latency. The x-axis represents cumulative query progress (50, 100, 150, 200, 250, and 300 queries), and the y-axis shows the corresponding latency. The clustering-and-packing overhead is al-ready included. Since it is performed only once for 300 queries, and the latency of a single query is higher than the packing overhead.. Compared to the no-CAP baseline, CAP with various sampling ratios consistently achieves lower latency, demonstrating its effec-tiveness. The lowest latency is observed when 20% of the queries are selected for coordinate clustering, as the remaining 80% benefit from improved data reuse enabled by CAP. A smaller ratio, such as 10%, is not chosen because it yields limited benefits on feature maps with only 100 queries. We set 20% as the default configuration be-cause it achieves the best trade-off between clustering effectiveness and minimal inference latency. Accelerating Multi-Scale Deformable Attention Using Near-Memory-Processing Architecture ICS’26, Belfast, Northern Ireland, UK, 0              
+
+> 2
+> 4
+> 6
+> 8
+> 10
+> GPU DANMP
+> Normalized Latency  FC MSDAtttn Data Transfer CAP
+> Zoom in
+> (a) 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> 050 100 150 200 250 300
+> Normalized Latency  No-CAP 20% 30% 40% (b)
+
+Figure 13: (a) Latency breakdown of a DE-DETR transformer block (COCO, 100 queries per FMap, batch size 8), and (b) Im-pact of CAP clustering ratio on normalized inference latency (CPU, 300 queries per FMap, batch size 8) Table 2: Power and area breakdown of DANMP 
+
+Name Component PE type Area (mm 2) Power (mW) 
+
+SADIMM Rank PEs adder&soft. 0.73 82 BG PEs adder 0.39 37 Banks PEs multiplier 2.29 216 DANMP Rank PEs MAC Unit 0.42 51 BG PEs ICU&BICU 0.57 71 Bank PEs ICU&BICU 1.03 137 
+
+## 6.5 Latency/Energy/Area Breakdown 
+
+Latency Breakdown. Figure 13(a) shows the latency breakdown of a transformer block in DE-DETR on the COCO dataset, with 100 queries per feature map and a batch size of 8. On GPU, MSDAttn accounts for 36.4% of total latency, while data movement dominates with 59.2%, reflecting the low cache hit rate in Figure 3(b). The FC layer contributes less than 5%, as its regular access pattern overlaps effectively with data transfers, consistent with prior studies [ 28 , 37 ,43 ]. In DANMP , CAP, FC, data movement, and MSDAttn contribute 1.3%, 8.6%, 27.4%, and 62.7% of latency, respectively, indicating minimal CAP overhead. Although the FC layer runs on the CPU, its latency remains low due to overlap with data transfers. Unlike the GPU, where FC execution is delayed by the long MSDAttn stage due to data dependencies, DANMP’s faster NMP-based MSDAttn shortens this dependency chain, resulting in significantly less FC stall time and reducing the overall latency. Despite being an NMP accelerator, DANMP incurs 27% data movement overhead, primarily from transferring weight matrices to the CPU. 
+
+Energy/Area Breakdown. We present the area and power con-sumption of SADIMM and DANMP in Table 2. In 40nm technology, 
+
+DANMP shows a minimal rank PE area per buffer chip of 0.42 𝑚𝑚 2,a notable reduction from SADIMM’s 0.73 𝑚𝑚 2, mainly because the rank PE in DANMP only handles aggregation and omits soft-max. DANMP exhibits a bank-group PE area per DRAM chip of 0.57 𝑚𝑚 2, slightly larger than SADIMM’s 0.39 𝑚𝑚 2, since BG-level PEs in DANMP share part of the workload originally handled by bank-level PEs. DANMP also shows a minimal bank PE area per DRAM chip of 1.03 𝑚𝑚 2, a significant reduction from SADIMM’s 2.29 𝑚𝑚 2. Furthermore, DANMP consumes 259 𝑚𝑊 , 31.6% lower than SADIMM’s 335 𝑚𝑊 .
+
+## 6.6 Discussion 
+
+Support Other Applications. We discuss how DANMP benefits other memory-bound workloads. A prime example is graph process-ing, known for its irregularity: high-degree nodes require heavy computation, while low-degree ones are lightweight. Uniform as-signment causes runtime inefficiencies. DANMP ’s heterogeneous integration addresses this by allocating heavy, high-degree nodes to bank-level PEs and lighter ones to bank-group PEs, enhancing efficiency. Similarly, in databases, frequently accessed fields (e.g., primary keys) can be routed to bank-level PEs, leaving less ac-tive fields to bank-group units. While not aiming for a universal accelerator, our insights—such as clustering-based reuse and non-uniform PE integration—can guide future NMP architectures for graph analytics, sparse vision, and other irregular applications. 
+
+## 7 Related Works 
+
+Traditional Attention Accelerators. Early efforts to accelerate Transformer-based models largely leveraged GPUs due to their high parallel computing capabilities [ 3, 6, 18 , 19 , 45 , 59 , 71 , 72 , 86 , 93 ]. GPU-focused approaches [ 6 , 15 , 18 , 73 , 75 , 85 , 85 ] aim to reduce memory consumption and computational complexity in attention modules. To further alleviate compute and memory overheads, co-designed accelerators have been developed using FPGAs [ 4 , 44 , 83 ,89 ] and ASICs [ 32 , 60 , 65 , 66 , 80 , 84 ]. These platforms provide better support for custom scheduling and attention-specific logic. How-ever, their performance remains limited by frequent random mem-ory accesses and the increasing cost of off-chip memory transfers, with bandwidth quickly becoming the system bottleneck [42, 78]. 
+
+Near-Memory Attention Acceleration. Near-memory pro-cessing (NMP) architectures offer a promising alternative by en-abling in-memory data processing and reducing off-chip traffic. These architectures have shown notable improvements in band-width utilization and throughput across memory-intensive work-loads such as non-Transformer deep learning [ 2, 25 , 35 , 57 , 58 , 62 ,79 ], graph processing [ 16 , 69 , 87 ], and attention models [ 20 , 36 , 41 ,46 , 50 , 52 , 53 , 68 , 81 , 82 , 90 – 92 ]. While NMP designs excel at min-imizing memory access latency, many still suffer from inefficient PE utilization due to workload imbalance and limited data reuse opportunities. These shortcomings result in increased scheduling overhead and suboptimal resource use. To address these issues, our work proposes a heterogeneous NMP design with non-uniform integration of compute units and introduces a collaborative opti-mization framework between the host and memory modules. 
+
+## 8 Conclusion 
+
+This paper targets the memory-bound MSDAttn mechanism. As existing NMP accelerators struggle with utilization and efficiency, we propose DANMP , a hardware–software co-designed solution. 
+
+DANMP employs selective PE integration, placing compute units only in designated banks to match MSDAttn’s irregularity and reduce cross-bank communication. In software, the CAP method ensures efficient execution via a tailored dataflow. Experiments demonstrate that DANMP significantly outperforms state-of-the-art NMP accelerators in both performance and energy efficiency. ICS’26, Belfast, Northern Ireland, UK, Huize Li, Qinggang Wang, Bin Gao, Dan Chen, Yu Huang, and Xin Xin 
+
+## References 
+
+[1] Junwhan Ahn, Sungjoo Yoo, Onur Mutlu, and Kiyoung Choi. 2015. PIM-enabled instructions: a low-overhead, locality-aware processing-in-memory architecture. In Proceedings of the 42nd Annual International Symposium on Computer Architec-ture (Portland, Oregon) (ISCA ’15) . Association for Computing Machinery, New York, NY, USA, 336–348. doi:10.1145/2749469.2750385 [2] Shaahin Angizi, Zhezhi He, Adnan Siraj Rakin, and Deliang Fan. 2018. CMP-PIM: an energy-efficient comparator-based processing-in-memory neural network accelerator. In Proceedings of the 55th Annual Design Automation Conference .doi:10.1145/3195970.3196009 [3] Anurag Arnab, Mostafa Dehghani, Georg Heigold, Chen Sun, Mario Lučić, and Cordelia Schmid. 2021. ViViT: A Video Vision Transformer. In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV) . 6836–6846. [4] Zhenyu Bai, Pranav Dangi, Huize Li, and Tulika Mitra. 2024. SWAT: Scalable and Efficient Window Attention-based Transformers Acceleration on FPGAs. In 
+
+Proceedings of the 61st ACM/IEEE Design Automation Conference (San Francisco, CA, USA) (DAC ’24) . Association for Computing Machinery, New York, NY, USA, Article 93, 6 pages. doi:10.1145/3649329.3658488 [5] Josh Beal, Eric Kim, Eric Tzeng, Dong Huk Park, Andrew Zhai, and Dmitry Kislyuk. 2020. Toward transformer-based object detection. arXiv preprint arXiv:2012.09958 (2020). [6] Iz Beltagy, Matthew E. Peters, and Arman Cohan. 2020. Longformer: The Long-Document Transformer. CoRR abs/2004.05150 (2020). arXiv:2004.05150 https: //arxiv.org/abs/2004.05150 [7] Nathan Binkert, Bradford Beckmann, Gabriel Black, Steven K. Reinhardt, Ali Saidi, Arkaprava Basu, Joel Hestness, Derek R. Hower, Tushar Krishna, Somayeh Sardashti, Rathijit Sen, Korey Sewell, Muhammad Shoaib, Nilay Vaish, Mark D. Hill, and David A. Wood. 2011. The gem5 simulator. SIGARCH Comput. Archit. News 39, 2 (Aug. 2011), 1–7. doi:10.1145/2024716.2024718 [8] Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier, Alexan-der Kirillov, and Sergey Zagoruyko. 2020. End-to-end object detection with transformers. In European conference on computer vision . Springer, 213–229. [9] Kevin K Chang, Prashant J Nair, Donghyuk Lee, Saugata Ghose, Moinuddin K Qureshi, and Onur Mutlu. 2016. Low-cost inter-linked subarrays (LISA): En-abling fast inter-subarray data movement in DRAM. In 2016 IEEE International Symposium on High Performance Computer Architecture (HPCA) . IEEE, 568–580. [10] Chenyi Chen, Ming-Yu Liu, Oncel Tuzel, and Jianxiong Xiao. 2016. R-CNN for small object detection. In Asian conference on computer vision . Springer, 214–230. [11] Dan Chen, Haiheng He, Hai Jin, Long Zheng, Yu Huang, Xinyang Shen, and Xiaofei Liao. 2023. MetaNMP: Leveraging Cartesian-Like Product to Acceler-ate HGNNs with Near-Memory Processing. In Proceedings of the 50th Annual International Symposium on Computer Architecture (Orlando, FL, USA) (ISCA ’23) .Association for Computing Machinery, New York, NY, USA, Article 56, 13 pages. doi:10.1145/3579371.3589091 [12] Dan Chen, Huize Li, Huiying Lan, Zhaoying Li, Pengcheng Yao, and Tulika Mitra. 2026. HighP: In-Memory Acceleration of SpGEMM With High Bank-Level Parallelism. IEEE Trans. Comput. 75, 1 (2026), 139–151. doi:10.1109/TC.2025. 3624920 [13] Ke Chen, Sheng Li, Naveen Muralimanohar, Jung Ho Ahn, Jay B. Brockman, and Norman P. Jouppi. 2012. CACTI-3DD: Architecture-level modeling for 3D die-stacked DRAM main memory. In 2012 Design, Automation & Test in Europe Conference & Exhibition (DATE) . 33–38. doi:10.1109/DATE.2012.6176428 [14] Yu-Hsin Chen, Joel Emer, and Vivienne Sze. 2016. Eyeriss: A spatial architecture for energy-efficient dataflow for convolutional neural networks. ACM SIGARCH computer architecture news 44, 3 (2016), 367–379. [15] Krzysztof Choromanski, Valerii Likhosherstov, David Dohan, Xingyou Song, Andreea Gane, Tamás Sarlós, Peter Hawkins, Jared Davis, Afroz Mohiuddin, Lukasz Kaiser, David Belanger, Lucy J. Colwell, and Adrian Weller. 2020. Rethink-ing Attention with Performers. CoRR abs/2009.14794 (2020). arXiv:2009.14794 https://arxiv.org/abs/2009.14794 [16] Guohao Dai, Zhenhua Zhu, Tianyu Fu, Chiyue Wei, Bangyan Wang, Xiangyu Li, Yuan Xie, Huazhong Yang, and Yu Wang. 2022. DIMMining: Pruning-Efficient and Parallel Graph Mining on near-Memory-Computing. In Proceedings of the 49th Annual International Symposium on Computer Architecture . 130–145. [17] Jifeng Dai, Haozhi Qi, Yuwen Xiong, Yi Li, Guodong Zhang, Han Hu, and Yichen Wei. 2017. Deformable Convolutional Networks. In Proceedings of the IEEE International Conference on Computer Vision (ICCV) .[18] Tri Dao, Dan Fu, Stefano Ermon, Atri Rudra, and Christopher Ré. 2022. FlashAtten-tion: Fast and Memory-Efficient Exact Attention with IO-Awareness. In Advances in Neural Information Processing Systems , Vol. 35. 16344–16359. [19] Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. 2018. BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding. 
+
+CoRR abs/1810.04805 (2018). arXiv:1810.04805 [20] Yan Ding, Chubo Liu, Mingxing Duan, Wanli Chang, Keqin Li, and Kenli Li. 2023. HAIMA: A Hybrid SRAM and DRAM Accelerator-in-Memory Architecture for Transformer. In 2023 60th ACM/IEEE Design Automation Conference (DAC) . 1–6. [21] Juan Du. 2018. Understanding of object detection based on CNN family and YOLO. In Journal of Physics: Conference Series , Vol. 1004. IOP Publishing, 012029. [22] Mark Everingham, Luc Van Gool, Christopher KI Williams, John Winn, and Andrew Zisserman. 2010. The pascal visual object classes (voc) challenge. Inter-national journal of computer vision 88 (2010), 303–338. [23] Hongxiang Fan, Thomas Chau, Stylianos I. Venieris, Royson Lee, Alexandros Kouris, Wayne Luk, Nicholas D. Lane, and Mohamed S. Abdelfattah. 2022. Adapt-able Butterfly Accelerator for Attention-based NNs via Hardware and Algorithm Co-design. In 2022 55th IEEE/ACM International Symposium on Microarchitecture (MICRO) . 599–615. doi:10.1109/MICRO56248.2022.00050 [24] Yuxin Fang, Bencheng Liao, Xinggang Wang, Jiemin Fang, Jiyang Qi, Rui Wu, Jianwei Niu, and Wenyu Liu. 2021. You Only Look at One Sequence: Rethinking Transformer in Vision through Object Detectio. CoRR abs/2106.00666 (2021). arXiv:2106.00666 https://arxiv.org/abs/2106.00666 [25] Mingyu Gao, Jing Pu, Xuan Yang, Mark Horowitz, and Christos Kozyrakis. 2017. TETRIS: Scalable and Efficient Neural Network Acceleration with 3D Memory. In Proceedings of the Twenty-Second International Conference on Architectural Support for Programming Languages and Operating Systems .[26] Andreas Geiger, Philip Lenz, Christoph Stiller, and Raquel Urtasun. 2013. Vision meets robotics: The kitti dataset. The international journal of robotics research 32, 11 (2013), 1231–1237. [27] Tong Geng, Ang Li, Runbin Shi, Chunshu Wu, Tianqi Wang, Yanfei Li, Pouya Haghi, Antonino Tumeo, Shuai Che, Steve Reinhardt, et al . 2020. AWB-GCN: A graph convolutional network accelerator with runtime workload rebalancing. In 2020 53rd Annual IEEE/ACM International Symposium on Microarchitecture (MICRO) . IEEE, 922–936. [28] Michael Gilbert, Yannan Nellie Wu, Joel S Emer, and Vivienne Sze. 2024. LoopTree: Exploring the Fused-layer Dataflow Accelerator Design Space. IEEE Transactions on Circuits and Systems for Artificial Intelligence (2024). [29] Sumanth Gudaparthi, Sarabjeet Singh, Surya Narayanan, Rajeev Balasubramo-nian, and Visvesh Sathe. 2022. CANDLES: Channel-aware novel dataflow-microarchitecture co-design for low energy sparse neural network acceleration. In 2022 IEEE International Symposium on high-performance computer architecture (HPCA) . IEEE, 876–891. [30] Akshita Gupta, Sanath Narayan, KJ Joseph, Salman Khan, Fahad Shahbaz Khan, and Mubarak Shah. 2022. Ow-detr: Open-world detection transformer. In Pro-ceedings of the IEEE/CVF conference on computer vision and pattern recognition .9235–9244. [31] Hyungkyu Ham, Jeongmin Hong, Geonwoo Park, Yunseon Shin, Okkyun Woo, Wonhyuk Yang, Jinhoon Bae, Eunhyeok Park, Hyojin Sung, Euicheol Lim, and Gwangsun Kim. 2024. Low-Overhead General-Purpose Near-Data Processing in CXL Memory Expanders. In 2024 57th IEEE/ACM International Symposium on Microarchitecture (MICRO) . 594–611. doi:10.1109/MICRO61859.2024.00051 [32] Tae Jun Ham, Sung Jun Jung, Seonghak Kim, Young H. Oh, Yeonhong Park, Yoonho Song, Jung-Hun Park, Sanghee Lee, Kyoung Park, Jae W. Lee, and Deog-Kyoon Jeong. 2020. A 3: Accelerating Attention Mechanisms in Neural Networks with Approximation. In Proceedings of 2020 IEEE International Symposium on High Performance Computer Architecture (HPCA) . 328–341. [33] Hasan Hassan, Minesh Patel, Jeremie S Kim, A Giray Yaglikci, Nandita Vijayku-mar, Nika Mansouri Ghiasi, Saugata Ghose, and Onur Mutlu. 2019. Crow: A low-cost substrate for improving dram performance, energy efficiency, and relia-bility. In Proceedings of the 46th International Symposium on Computer Architecture .129–142. [34] Norman P. Jouppi, Andrew B. Kahng, Naveen Muralimanohar, and Vaishnav Srinivas. 2012. CACTI-IO: CACTI with off-chip power-area-timing models. In 
+
+Proceedings of the International Conference on Computer-Aided Design (San Jose, California) (ICCAD ’12) . Association for Computing Machinery, New York, NY, USA, 294–301. doi:10.1145/2429384.2429446 [35] Hongju Kal, Seokmin Lee, Gun Ko, and Won Woo Ro. 2021. SPACE: Locality-Aware Processing in Heterogeneous Memory for Personalized Recommendations. In 2021 ACM/IEEE 48th Annual International Symposium on Computer Architecture (ISCA) . 679–691. doi:10.1109/ISCA52012.2021.00059 [36] Myeonggu Kang, Hyein Shin, and Lee-Sup Kim. 2021. A Framework for Acceler-ating Transformer-based Language Model on ReRAM-based Architecture. IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems (2021), 1–1. doi:10.1109/TCAD.2021.3121264 [37] Sheng-Chun Kao, Suvinay Subramanian, Gaurav Agrawal, Amir Yazdanbakhsh, and Tushar Krishna. 2023. Flat: An optimized dataflow for mitigating attention bottlenecks. In Proceedings of the 28th ACM International Conference on Archi-tectural Support for Programming Languages and Operating Systems, Volume 2 .295–310. [38] Liu Ke, Udit Gupta, Benjamin Youngjae Cho, David Brooks, Vikas Chandra, Utku Diril, Amin Firoozshahian, Kim Hazelwood, Bill Jia, Hsien-Hsin S. Lee, Meng Li, Bert Maher, Dheevatsa Mudigere, Maxim Naumov, Martin Schatz, Mikhail Smelyanskiy, Xiaodong Wang, Brandon Reagen, Carole-Jean Wu, Mark Hemp-stead, and Xuan Zhang. 2020. RecNMP: Accelerating Personalized Recommenda-tion with Near-Memory Processing. In 2020 ACM/IEEE 47th Annual International Accelerating Multi-Scale Deformable Attention Using Near-Memory-Processing Architecture ICS’26, Belfast, Northern Ireland, UK, 
+
+Symposium on Computer Architecture (ISCA) . 790–803. [39] Jin Hyun Kim, Shin-Haeng Kang, Sukhan Lee, Hyeonsu Kim, Yuhwan Ro, Se-ungwon Lee, David Wang, Jihyun Choi, Jinin So, YeonGon Cho, JoonHo Song, Jeonghyeon Cho, Kyomin Sohn, and Nam Sung Kim. 2022. Aquabolt-XL HBM2-PIM, LPDDR5-PIM With In-Memory Processing, and AXDIMM With Accelera-tion Buffer. IEEE Micro 42, 3 (2022), 20–30. doi:10.1109/MM.2022.3164651 [40] Yoongu Kim, Weikun Yang, and Onur Mutlu. 2016. Ramulator: A Fast and Extensible DRAM Simulator. IEEE Computer Architecture Letters 15, 1 (2016), 45–49. [41] Ann Franchesca Laguna, Arman Kazemi, Michael Niemier, and X. Sharon Hu. 2021. In-Memory Computing based Accelerator for Transformer Networks for Long Sequences. In 2021 Design, Automation & Test in Europe Conference & Exhibition (DATE) . 1839–1844. doi:10.23919/DATE51398.2021.9474146 [42] Dongjae Lee, Bongjoon Hyun, Taehun Kim, and Minsoo Rhu. 2024. PIM-MMU: A Memory Management Unit for Accelerating Data Transfers in Commercial PIM Systems. In 2024 57th IEEE/ACM International Symposium on Microarchitecture (MICRO) . 627–642. doi:10.1109/MICRO61859.2024.00053 [43] Wonbeom Lee, Jungi Lee, Junghwan Seo, and Jaewoong Sim. 2024. {InfiniGen }:Efficient generative inference of large language models with dynamic {KV }
+
+cache management. In 18th USENIX Symposium on Operating Systems Design and Implementation (OSDI 24) . 155–172. [44] Bingbing Li, Santosh Pandey, Haowen Fang, Yanjun Lyv, Ji Li, Jieyang Chen, Mimi Xie, Lipeng Wan, Hang Liu, and Caiwen Ding. 2020. FTRANS: Energy-Efficient Acceleration of Transformers Using FPGA. In Proceedings of the ACM/IEEE Inter-national Symposium on Low Power Electronics and Design (Boston, Massachusetts) 
+
+(ISLPED ’20) . Association for Computing Machinery, New York, NY, USA, 175–180. doi:10.1145/3370748.3406567 [45] Feng Li, Hao Zhang, Shilong Liu, Jian Guo, Lionel M. Ni, and Lei Zhang. 2022. DN-DETR: Accelerate DETR Training by Introducing Query DeNoising. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) .13619–13627. [46] Huize Li, Dan Chen, and Tulika Mitra. 2025. SADIMM: Accelerating Sparse Attention Using DIMM-Based Near-Memory Processing. IEEE Trans. Comput. 74, 2 (2025), 542–554. doi:10.1109/TC.2024.3500362 [47] Huize Li, Dan Chen, and Tulika Mitra. 2025. SPLIM: Bridging the Gap Between Unstructured SpGEMM and Structured In-Situ Computing. IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems 44, 6 (2025), 2412–2423. doi:10.1109/TCAD.2024.3522882 [48] Huize Li, Hai Jin, Long Zheng, Yu Huang, Xiaofei Liao, Zhuohui Duan, Dan Chen, and Chuangyi Gui. 2022. ReSMA: accelerating approximate string matching using ReRAM-based content addressable memory. In Proceedings of the 59th ACM/IEEE Design Automation Conference (San Francisco, California) (DAC ’22) . Association for Computing Machinery, New York, NY, USA, 991–996. doi:10.1145/3489517. 3530559 [49] Huize Li, Hai Jin, Long Zheng, and Xiaofei Liao. 2020. ReSQM: Accelerating Database Operations Using ReRAM-Based Content Addressable Memory. IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems 39, 11 (2020), 4030–4041. doi:10.1109/TCAD.2020.3012860 [50] Huize Li, Hai Jin, Long Zheng, Xiaofei Liao, Yu Huang, Cong Liu, Jiahong Xu, Zhuohui Duan, Dan Chen, and Chuangyi Gui. 2023. CPSAA: Accelerating Sparse Attention Using Crossbar-Based Processing-In-Memory Architecture. IEEE Trans-actions on Computer-Aided Design of Integrated Circuits and Systems (2023), 1–1. [51] Huize Li, Hai Jin, Long Zheng, Xiaofei Liao, Yu Huang, Cong Liu, Jiahong Xu, Zhuohui Duan, Dan Chen, and Chuangyi Gui. 2024. CPSAA: Accelerating Sparse Attention Using Crossbar-Based Processing-In-Memory Architecture. IEEE Trans-actions on Computer-Aided Design of Integrated Circuits and Systems 43, 6 (2024), 1741–1754. doi:10.1109/TCAD.2023.3344524 [52] Huize Li, Zhaoying Li, Zhenyu Bai, and Tulika Mitra. 2024. ASADI: Acceler-ating Sparse Attention Using Diagonal-based In-Situ Computing. In 2024 IEEE International Symposium on High-Performance Computer Architecture (HPCA) .774–787. [53] Wantong Li, Madison Manley, James Read, Ankit Kaul, Muhannad S. Bakir, and Shimeng Yu. 2023. H3DAtten: Heterogeneous 3-D Integrated Hybrid Analog and Digital Compute-in-Memory Accelerator for Vision Transformer Self-Attention. 
+
+IEEE Transactions on Very Large Scale Integration (VLSI) Systems 31, 10 (2023), 1592–1602. doi:10.1109/TVLSI.2023.3299509 [54] Yiwei Li, Boyu Tian, Yi Ren, and Mingyu Gao. 2024. Stream-Based Data Placement for Near-Data Processing with Extended Memory. In 2024 57th IEEE/ACM International Symposium on Microarchitecture (MICRO) . 1648–1662. doi:10.1109/MICRO61859.2024.00120 [55] Shengwen Liang, Ying Wang, Cheng Liu, Lei He, Huawei Li, Dawen Xu, and Xiaowei Li. 2020. EnGN: A high-throughput and energy-efficient accelerator for large graph neural networks. IEEE Trans. Comput. 70, 9 (2020), 1511–1525. [56] Tsung-Yi Lin, Michael Maire, Serge Belongie, James Hays, Pietro Perona, Deva Ramanan, Piotr Dollár, and C. Lawrence Zitnick. 2014. Microsoft COCO: Common Objects in Context. In Computer Vision – ECCV 2014 . Springer International Publishing, Cham, 740–755. [57] Cong Liu, Haikun Liu, Hai Jin, Xiaofei Liao, Yu Zhang, Zhuohui Duan, Jiahong Xu, and Huize Li. 2022. ReGNN: a ReRAM-based heterogeneous architecture for general graph neural networks. In Proceedings of the 59th ACM/IEEE Design Automation Conference . 469–474. [58] Haifeng Liu, Long Zheng, Yu Huang, Chaoqiang Liu, Xiangyu Ye, Jingrui Yuan, Xiaofei Liao, Hai Jin, and Jingling Xue. 2023. Accelerating Personalized Recom-mendation with Cross-Level Near-Memory Processing. In Proceedings of the 50th Annual International Symposium on Computer Architecture (Orlando, FL, USA) 
+
+(ISCA ’23) . Association for Computing Machinery, New York, NY, USA, Article 66, 13 pages. doi:10.1145/3579371.3589101 [59] Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Mandar Joshi, Danqi Chen, Omer Levy, Mike Lewis, Luke Zettlemoyer, and Veselin Stoyanov. 2019. RoBERTa: A Robustly Optimized BERT Pretraining Approach. CoRR abs/1907.11692 (2019). arXiv:1907.11692 http://arxiv.org/abs/1907.11692 [60] Liqiang Lu, Yicheng Jin, Hangrui Bi, Zizhang Luo, Peng Li, Tao Wang, and Yun Liang. 2021. Sanger: A Co-Design Framework for Enabling Sparse Attention Using Reconfigurable Architecture. In Proceedings of 54th Annual IEEE/ACM International Symposium on Microarchitecture (Virtual Event, Greece). Association for Computing Machinery, New York, NY, USA, 977–991. doi:10.1145/3466752. 3480125 [61] Angshuman Parashar, Minsoo Rhu, Anurag Mukkara, Antonio Puglielli, Rang-harajan Venkatesan, Brucek Khailany, Joel Emer, Stephen W Keckler, and William J Dally. 2017. SCNN: An accelerator for compressed-sparse convo-lutional neural networks. ACM SIGARCH computer architecture news 45, 2 (2017), 27–40. [62] Jaehyun Park, Byeongho Kim, Sungmin Yun, Eojin Lee, Minsoo Rhu, and Jung Ho Ahn. 2021. TRiM: Enhancing Processor-Memory Interfaces with Scalable Ten-sor Reduction in Memory. In MICRO-54: 54th Annual IEEE/ACM International Symposium on Microarchitecture . 268–281. [63] Peter Pessl, Daniel Gruss, Clémentine Maurice, Michael Schwarz, and Stefan Mangard. 2016. {DRAMA }: Exploiting {DRAM } addressing for {Cross-CPU }
+
+attacks. In 25th USENIX security symposium (USENIX security 16) . 565–581. [64] Yubin Qin, Yang Wang, Dazheng Deng, Zhiren Zhao, Xiaolong Yang, Leibo Liu, Shaojun Wei, Yang Hu, and Shouyi Yin. 2023. FACT: FFN-Attention Co-optimized Transformer Architecture with Eager Correlation Prediction (ISCA ’23) .Association for Computing Machinery, New York, NY, USA, Article 22, 14 pages. doi:10.1145/3579371.3589057 [65] Yubin Qin, Yang Wang, Dazheng Deng, Zhiren Zhao, Xiaolong Yang, Leibo Liu, Shaojun Wei, Yang Hu, and Shouyi Yin. 2023. FACT: FFN-Attention Co-Optimized Transformer Architecture with Eager Correlation Prediction. In Proceedings of the 50th Annual International Symposium on Computer Architecture (Orlando, FL, USA) (ISCA ’23) . Association for Computing Machinery, New York, NY, USA, Article 22, 14 pages. doi:10.1145/3579371.3589057 [66] Zheng Qu, Liu Liu, Fengbin Tu, Zhaodong Chen, Yufei Ding, and Yuan Xie. 2022. DOTA: Detect and Omit Weak Attentions for Scalable Transformer Acceleration. In Proceedings of the 27th ACM International Conference on Architectural Support for Programming Languages and Operating Systems (Lausanne, Switzerland). Association for Computing Machinery, 14–26. doi:10.1145/3503222.3507738 [67] Pranav Rajpurkar, Robin Jia, and Percy Liang. 2018. Know what you don’t know: Unanswerable questions for SQuAD. arXiv preprint arXiv:1806.03822 (2018). [68] Shrihari Sridharan, Jacob R. Stevens, Kaushik Roy, and Anand Raghunathan. 2023. X-Former: In-Memory Acceleration of Transformers. IEEE Transactions on Very Large Scale Integration (VLSI) Systems 31, 8 (2023), 1223–1233. doi:10.1109/TVLSI. 2023.3282046 [69] Nishil Talati, Haojie Ye, Yichen Yang, Leul Belayneh, Kuan-Yu Chen, David Blaauw, Trevor Mudge, and Ronald Dreslinski. 2022. NDMiner: Accelerating Graph Pattern Mining Using near Data Processing. In Proceedings of the 49th Annual International Symposium on Computer Architecture . 146–159. [70] Yi Tay, Dara Bahri, Liu Yang, Donald Metzler, and Da-Cheng Juan. 2020. Sparse sinkhorn attention. In International Conference on Machine Learning (ICML) .PMLR, 9438–9447. [71] Betty van Aken, Benjamin Winter, Alexander Löser, and Felix A. Gers. 2019. How Does BERT Answer Questions? A Layer-Wise Analysis of Transformer Representations. In Proceedings of the 28th ACM International Conference on Information and Knowledge Management (Beijing, China) (CIKM ’19) . Association for Computing Machinery, New York, NY, USA, 1823–1832. doi:10.1145/3357384. 3358028 [72] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in Neural Information Processing Systems . 5998–6008. [73] Sinong Wang, Belinda Z. Li, Madian Khabsa, Han Fang, and Hao Ma. 2020. Linformer: Self-Attention with Linear Complexity. CoRR abs/2006.04768 (2020). arXiv:2006.04768 https://arxiv.org/abs/2006.04768 [74] Yaohua Wang, Lois Orosa, Xiangjun Peng, Yang Guo, Saugata Ghose, Minesh Patel, Jeremie S Kim, Juan Gómez Luna, Mohammad Sadrosadati, Nika Mansouri Ghiasi, et al . 2020. FIGARO: Improving system performance via fine-grained in-DRAM data relocation and caching. In 2020 53rd Annual IEEE/ACM International Symposium on Microarchitecture (MICRO) . IEEE, 313–328. ICS’26, Belfast, Northern Ireland, UK, Huize Li, Qinggang Wang, Bin Gao, Dan Chen, Yu Huang, and Xin Xin 
+
+[75] Bichen Wu, Chenfeng Xu, Xiaoliang Dai, Alvin Wan, Peizhao Zhang, Zhicheng Yan, Masayoshi Tomizuka, Joseph Gonzalez, Kurt Keutzer, and Peter Vajda. 2020. Visual Transformers: Token-based Image Representation and Processing for Com-puter Vision. arXiv preprint arXiv:2006.03677 (2020). arXiv:2006.03677 [cs.CV] [76] Gui-Song Xia, Xiang Bai, Jian Ding, Zhen Zhu, Serge Belongie, Jiebo Luo, Mihai Datcu, Marcello Pelillo, and Liangpei Zhang. 2018. DOTA: A large-scale dataset for object detection in aerial images. In Proceedings of the IEEE conference on computer vision and pattern recognition . 3974–3983. [77] Xingxing Xie, Gong Cheng, Jiabao Wang, Xiwen Yao, and Junwei Han. 2021. Oriented R-CNN for object detection. In Proceedings of the IEEE/CVF international conference on computer vision . 3520–3529. [78] Xinfeng Xie, Zheng Liang, Peng Gu, Abanti Basak, Lei Deng, Ling Liang, Xing Hu, and Yuan Xie. 2021. SpaceA: Sparse Matrix Vector Multiplication on Processing-in-Memory Accelerator. In 2021 IEEE International Symposium on High-Performance Computer Architecture (HPCA) . 570–583. [79] Jiahong Xu, Haikun Liu, Zhuohui Duan, Xiaofei Liao, Hai Jin, Xiaokang Yang, Huize Li, Cong Liu, Fubing Mao, and Yu Zhang. 2024. ReHarvest: An ADC Resource-Harvesting Crossbar Architecture for ReRAM-Based DNN Accelerators. 
+
+ACM Trans. Archit. Code Optim. 21, 3, Article 63 (Sept. 2024), 26 pages. [80] Yansong Xu, Dongxu Lyu, Zhenyu Li, Yuzhou Chen, Zilong Wang, Gang Wang, Zhican Wang, Haomin Li, and Guanghui He. 2024. DEFA: Efficient Deformable At-tention Acceleration via Pruning-Assisted Grid-Sampling and Multi-Scale Parallel Processing. In Proceedings of the 61st ACM/IEEE Design Automation Conference 
+
+(San Francisco, CA, USA) (DAC ’24) . Association for Computing Machinery, New York, NY, USA, Article 24, 6 pages. doi:10.1145/3649329.3657328 [81] Xiaoxuan Yang, Bonan Yan, Hai Li, and Yiran Chen. 2020. ReTransformer: ReRAM-based processing-in-memory architecture for transformer acceleration. In Pro-ceedings of the 39th International Conference on Computer-Aided Design (ICCAD) .1–9. [82] Amir Yazdanbakhsh, Ashkan Moradifirouzabadi, Zheng Li, and Mingu Kang. 2022. Sparse Attention Acceleration with Synergistic In-Memory Pruning and On-Chip Recomputation. In Proceedings of 2022 55th IEEE/ACM International Symposium on Microarchitecture (MICRO) . 744–762. doi:10.1109/MICRO56248.2022.00059 [83] Wenhua Ye, Xu Zhou, Joey Zhou, Cen Chen, and Kenli Li. 2023. Accelerating Attention Mechanism on FPGAs Based on Efficient Reconfigurable Systolic Array. 
+
+ACM Trans. Embed. Comput. Syst. 22, 6, Article 93 (nov 2023), 22 pages. doi:10. 1145/3549937 [84] Haoran You, Zhanyi Sun, Huihong Shi, Zhongzhi Yu, Yang Zhao, Yongan Zhang, Chaojian Li, Baopu Li, and Yingyan Lin. 2023. ViTCoD: Vision Transformer Acceleration via Dedicated Algorithm and Accelerator Co-Design. In 2023 IEEE International Symposium on High-Performance Computer Architecture (HPCA) .273–286. doi:10.1109/HPCA56546.2023.10071027 [85] Manzil Zaheer, Guru Guruganesh, Kumar Avinava Dubey, Joshua Ainslie, Chris Alberti, Santiago Ontanon, Philip Pham, Anirudh Ravula, Qifan Wang, Li Yang, and Amr Ahmed. 2020. Big Bird: Transformers for Longer Sequences. In Advances in Neural Information Processing Systems (NeurIPS) , Vol. 33. 17283–17297. [86] Hao Zhang, Feng Li, Shilong Liu, Lei Zhang, Hang Su, Jun Zhu, Lionel Ni, and Heung-Yeung Shum. 2023. DINO: DETR with Improved DeNoising Anchor Boxes for End-to-End Object Detection. In The Eleventh International Conference on Learning Representations . https://openreview.net/forum?id=3mRwyG5one [87] Mingxing Zhang, Youwei Zhuo, Chao Wang, Mingyu Gao, Yongwei Wu, Kang Chen, Christos Kozyrakis, and Xuehai Qian. 2018. GraphP: Reducing Communi-cation for PIM-Based Graph Processing with Efficient Data Partition. In 2018 IEEE International Symposium on High Performance Computer Architecture (HPCA) .[88] Xinyi Zhang, Yawen Wu, Peipei Zhou, Xulong Tang, and Jingtong Hu. 2021. Algorithm-Hardware Co-Design of Attention Mechanism on FPGA Devices. 
+
+ACM Trans. Embed. Comput. Syst. 20, 5s (2021), 1–24. [89] Xinyi Zhang, Yawen Wu, Peipei Zhou, Xulong Tang, and Jingtong Hu. 2021. Algorithm-Hardware Co-Design of Attention Mechanism on FPGA Devices. 
+
+ACM Trans. Embed. Comput. Syst. 20, 5s (2021), 1–24. [90] Qilin Zheng, Shiyu Li, Yitu Wang, Ziru Li, Yiran Chen, and Hai Helen Li. 2023. Accelerating Sparse Attention with a Reconfigurable Non-volatile Processing-In-Memory Architecture. In 2023 60th ACM/IEEE Design Automation Conference (DAC) . 1–6. doi:10.1109/DAC56929.2023.10247908 [91] Minxuan Zhou, Yunhui Guo, Weihong Xu, Bin Li, Kevin W. Eliceiri, and Tajana Rosing. 2021. MAT: Processing In-Memory Acceleration for Long-Sequence Attention. In 2021 58th ACM/IEEE Design Automation Conference (DAC) . 25–30. doi:10.1109/DAC18074.2021.9586212 [92] Minxuan Zhou, Weihong Xu, Jaeyoung Kang, and Tajana Rosing. 2022. TransPIM: A Memory-based Acceleration via Software-Hardware Co-Design for Trans-former. In Proceedings of 2022 IEEE International Symposium on High-Performance Computer Architecture (HPCA) . 1071–1085. [93] Xizhou Zhu, Weijie Su, Lewei Lu, Bin Li, Xiaogang Wang, and Jifeng Dai. 2021. Deformable DETR: Deformable Transformers for End-to-End Object Detection. In International Conference on Learning Representations . https://openreview.net/ forum?id=gZ9hCDWe6ke

@@ -1,0 +1,963 @@
+Title: InstMeter: An Instruction-Level Method to Predict Energy and Latency of DL Model Inference on MCUs
+
+URL Source: https://arxiv.org/pdf/2603.04134v1
+
+Published Time: Thu, 05 Mar 2026 02:18:49 GMT
+
+Number of Pages: 17
+
+Markdown Content:
+# InstMeter: An Instruction-Level Method to Predict Energy and Latency of DL Model Inference on MCUs 
+
+# Hao Liu 
+
+h.liu-8@tudelft.nl Delft University of Technology Delft, The Netherlands 
+
+# Qing Wang 
+
+qing.wang@tudelft.nl Delft University of Technology Delft, The Netherlands 
+
+# Marco Zuniga 
+
+m.a.zunigazamalloa@tudelft.nl Delft University of Technology Delft, The Netherlands 
+
+## Abstract 
+
+Deep learning (DL) models can now run on microcontrollers (MCUs). Through neural architecture search (NAS), we can search DL models that meet the constraints of MCUs. Among various constraints, energy and latency costs of the model in-ference are critical metrics. To predict them, existing research relies on coarse proxies such as multiply-accumulations (MACs) and model’s input parameters, often resulting in inaccurate predictions or requiring extensive data collection. In this paper, we propose InstMeter , a predictor leveraging MCUs’ 
+
+clock cycles to accurately estimate the energy and latency of DL models. Clock cycles are fundamental metrics reflecting MCU operations, directly determining energy and latency costs. Furthermore, a unique property of our predictor is its strong linearity, allowing it to be simple and accurate. We thoroughly evaluate InstMeter under different scenarios, MCUs, and software settings. Compared with state-of-the-art studies, InstMeter can reduce the energy and latency predic-tion errors by 3× and 6.5×, respectively, while requiring 100 ×
+
+and 10 × less training data. In the NAS scenario, InstMeter can fully exploit the energy budget, identifying optimal DL models with higher inference accuracy. We also evaluate InstMeter’s generalization performance through various ex-periments on three ARM MCUs (Cortex-M4, M7, M33) and one RISC-V-based MCU (ESP32-C3), different compilation options (-Os, -O2), GCC versions (v7.3, v10.3), application scenarios (keyword spotting, image recognition), dynamic voltage and frequency scaling, temperatures (21 °C, 43 °C), and software settings (TFLMv2.4, TFLMvCI). We will open our source codes and the MCU-specific benchmark datasets. 
+
+## 1 Introduction 
+
+Deep learning (DL) models are increasingly being deployed on microcontrollers (MCUs) 1, enabling the development of compact yet intelligent devices. This advancement enables novel systems, such as smartwatches that recognize voice commands and earbuds that autonomously reduce noise [ 5,     
+
+> 1MCUs play a pivotal role in empowering a vast array of applications, with global shipments reaching billions annually. MCUs account for roughly 4 out of every 5 processors shipped in the electronics industry today [15]. SOTA :Non -linear estimation (1000~5000 data)
+> DL model
+> parameters
+> Energy &
+> Latency
+> CMP i_ ker_x, R3
+> BLT loc _471FA
+> CMP R3 ,R2
+> Mapping
+> (<30 mins)
+> Linear estimation
+> (< 10 data)
+> InstMeter : an instruction -level predictor
+
+Figure 1: The overview of our method. 
+
+44 ]. However, designing low-end DL models is not easy. Com-pared to powerful processors (CPUs, GPUs), MCUs have lim-ited resources but still need to balance accuracy, latency, and energy. For example, some embedded applications must pro-vide real-time responses, requiring low latency [ 17 , 31 ]; while others operate on platforms with small batteries or even with-out batteries, requiring low power consumption [ 6, 22 , 27 , 45 ]. To facilitate the design of compact DL models that balance accuracy and efficiency, the community has widely adopted neural architecture search (NAS) methods [ 7 , 20 , 25 , 26 , 36 ]. NAS methods can evaluate thousands of models to find the most accurate architecture within the required memory, la-tency, and energy constraints. To achieve this, NAS requires the latency and energy cost of each one of those thousands of models. Since directly measuring latency and energy for every model is time and computationally expensive [ 36 ], state-of-the-art (SOTA) NAS algorithms rely on predictors .
+
+The main limitation of the SOTA is that their energy and latency predictors require thousands of training sam-ples. NAS relies on model parameters for estimations [ 7, 9 , 14 ,20 , 25 , 43 ]. The shortcoming is that those parameters have a 
+
+non-linear relation with the final values linked to latency and energy [43]. Due to that non-linear relationship, SOTA pre-dictors require thousands of samples to capture the intricate relation between model parameters and performance. The non-linearity faced by SOTA predictors is due to the optimizations performed on the original model (source code) to obtain the final instructions (disassembled code, hereafter abbreviated as disasm ) [ 43 ]. Ultimately, what determines the latency and energy costs of a model are MCU’s clock cycles ,derived from the executed instructions, each having a fixed cycle cost. Unfortunately, model parameters only account for architectural variations, e.g., layer types and configu-rations, without considering lower-level execution details. These factors, such as code implementation details and com-piler optimizations, can greatly impact execution efficiency 
+
+> arXiv:2603.04134v1 [cs.LG] 4 Mar 2026
+
+and resource consumption. Thus, they can introduce latency and energy estimation deviations that require significant training data to obtain an accurate predictor. 
+
+To address SOTA limitations , we propose InstMeter ,an instruction-level framework that enables rapid , accurate 
+
+construction of linear latency/energy predictors (Figure 1). 
+
+Contrary to SOTA requiring thousands of training samples, InstMeter achieves accurate predictions with less than ten train-ing samples, a 100 × improvement. 
+
+Challenge. The design of our predictor requires address-ing a critical research challenge in the SOTA: Overcoming the non-linear relation between model parameters and the model’s energy consumption and latency performance. 
+
+A fundamental shortcoming in SOTA is the lack of a clear understanding of the relationship between model parame-ters and model performance. Current studies see the relation-ship as a black-box that needs to be measured or estimated, and there are three main approaches to do that. First , direct measurements [ 36 ]. This approach is time-consuming and complex, as it requires connecting equipment to perform real measurements. Second , operation predictors [ 20 , 25 ]. This method maps model parameters to features that have been proven to be inaccurate, such as multiply-accumulate op-erations (MACs). Third , machine learning models [ 14 , 43 ]. This recent group of studies estimates latency using ma-chine learning models. It is more accurate than operation predictors, but requires thousands of training samples. These three approaches do not try to understand the non-linearity of the ‘black-box’ performance but rather propose methods to estimate it. Thus, a critical research question is to analyze if that non-linear property is inherent to perfor-mance estimation or if it can be avoided. To address this challenge in our InstMeter , we map model parameters to MCUs’ clock cycles. By doing this, our InstMeter requires only one input : the total number of clock cycles ex-ecuted by the model, and those clock cycles have a natural 
+
+linear relationship with performance metrics such as energy and latency. Thanks to the linearity of our model, we do not need a large amount of training data . We only need two sim-ple phases. First , we build a library mapping model operators to their execution cycles. Second , we gather only a handful of training data to build a predictor for our linear model. 
+
+Contributions. Our main contributions are as follows. 
+
+Contribution 1: Transforming the energy and latency esti-mation of DL models from a non-linear paradigm to a linear one. We show that DL models can be accurately converted to clock cycles, which have a linear relationship with latency and energy cost. When DL models run on MCUs, each model layer is implemented as a set of functions. The compiled in-structions of these functions remain nearly identical across different models. The primary variation comes from the val-ues of the loop variables. In other words, when the model parameters change, they affect the number of times that for 
+
+or while loops are executed. If we can determine these loop values, we can infer the number of clock cycles associated with each function to build a linear predictor. 
+
+Contribution 2: Proposing a novel source-disasm code map-ping to build accurate and simple predictors. Building a linear predictor is not simple because neither the source code nor the disasm code has all the required information. The source code (C++) contains the values of the loop variables but no instruction-level details, while the disasm code has the opposite trade-off: it has instruction-level information but the variable values cannot be easily inferred. We map the 
+
+loops between these two representations to obtain both instruction-level details and loop execution behavior. Our mapping, however, does not use DL models (due to their high overhead); we propose a customized algorithm to achieve fine-grained mappings between source and disasm code with low time costs. The key benefit of our approach is that we do not need to measure thousands of models to build a training set; we only need a handful of training data. 
+
+Contribution 3: Creating a dataset to benchmark the per-formance of DL models running on MCUs. While the SOTA has some well-known datasets to benchmark the latency of advanced processors (GPU, TPU, CPU) [ 13 ], there are no equivalent datasets for MCUs. Our first attempt considered using datasets designed for mobile devices (CPUs), such as NAS-Bench201 [ 13 ]. However, out of 1000 models randomly chosen from that dataset, only 13 fit the memory constraints of MCUs after compiling them with the TensorFlow Lite for Microcontrollers (TFLM). To evaluate the effectiveness of InstMeter , we build a dataset covering three ARM MCUs (Cortex-M4, M7, M33) and one RISC-V MCU (ESP32-C3), two compiler optimizations (-Os, -O2), GCC versions (v7.3, v10.3), application scenarios (keyword spotting (KWS), im-age recognition), different dynamic voltage and frequency scaling (DVFS) settings, temperatures (21 °C, 43 °C) and two TFLM versions (v2.4, vCI). In general, our dataset contains 2125 models with ground-truth measurements for energy and latency considering two applications: KWS and CIFAR10-based image recognition [ 40 ]. We will open our datasets and source codes. 
+
+Contribution 4: Performing a thorough evaluation to quan-tify the advantages of a linear predictor. Our instruction-level predictor requires as few as five training samples to provide competitive performance. Our evaluation shows that, for 90% of the models, InstMeter achieves a relative error below 
+
+∼30% with just 5 samples. On the other hand, nn-Meter [ 43 ]achieves a 90th percentile error of ∼100% with 500 training samples, that is 100 × more training data while providing an error that is 3 × worse. MAC-based predictors [ 20 , 25 ] have a 90th percentile error of ∼200% across various training sam-ple sizes (5, 50), that is up to 10 × more training data with an       
+
+> 2BatchNorm
+> Input dims
+> CNN
+> Conv2D
+> BatchNorm
+> …
+> Conv2D
+> Filter size
+> Stride size
+> Conv2D
+> Filter dims
+> Stride dims
+> arm _convolve_s8
+> arm _convolve_1x1_s8
+> arm _convolve_1xn_s8
+> Model Layer TFLM operators TFLM functions
+> Input dims
+> Add BroadcastAdd4DSlow
+> BroadcastMul4DSlow
+> Input dims
+> Mul
+
+Figure 2: From DL models to TFLM functions. 
+
+error that is 6.5 × worse. We also test InstMeter considering NAS methods. Our predictor identifies optimal models that remain closer to the provided constraints, maintaining an error rate within 10%, while other predictors exhibit errors up to 100%. To support further adoption, we provide an in-struction dictionary for ARM MCUs Cortex-M4, M7, M33, and RISC-V MCU ESP32-C3, allowing researchers to predict instruction types and counts for any DL models. 
+
+## 2 Background and Motivation 
+
+Our InstMeter centers around mapping the source code to the disasm code, but first, we need to understand (𝑖 ) how DL frameworks work on MCUs, (𝑖𝑖 ) how those frameworks per-form code optimizations, and (𝑖𝑖𝑖 ) how SOTA tackles the non-linear relationship introduced by those MCU frameworks. 
+
+## 2.1 TFLM Framework 
+
+The TensorFlow Lite for MCUs (TFLM) is a widely employed open-source framework that allows DL models to run effi-ciently on resource-constrained MCUs [ 12 ]. Other popular frameworks like Edge Impulse [ 2 ] and STM32 AI [ 3 ], are built upon it. TFLM consists of core operators that execute different parts of a DL model. A single model layer can map to one or more operators. For example, as shown in Figure 2, the Conv2D layer corresponds only to the Conv2D operator, while the BatchNormalization layer requires using the Add 
+
+and Mul operators. This modular design enables TFLM to efficiently support a variety of DL models on MCUs. Besides, multiple operators can be fused during the model conver-sion process (e.g., fused activations), resulting in optimized 
+
+TFLite models. TFLM then deploys these optimized model on MCUs, inherently performing these fusion optimizations. 
+
+## 2.2 TFLM Optimizations 
+
+TFLM uses multiple techniques to optimize its performance for different MCU platforms and compilers. 
+
+1) Kernel functions. TFLM operators are run on kernel func-tions, but an operator can have multiple kernel implementa-tions; e.g., operator Conv2D selects among three functions de-pending on its kernel dimension: arm_convolve_1x1_s8_fast 
+
+for 1 × 1 kernels, arm_convolve_1_x_n_s8 for 1 × 𝑛 kernels, and arm_convolve_s8 for other kernel sizes, as illustrated in Figure 2. They improve efficiency in specific cases. E.g., Dead code elimination    
+
+> NOP
+> NOP
+> NOP
+> NOP
+> MOVS R7, #0
+> MOV R6, R7
+> Instruction scheduling
+> Instructions Operand width
+> SMLABB 16 -bit
+> SMLAL 32 -bit
+> MLAD 64 -bit
+
+Figure 3: Some optimizations in the TFLM compiler. 
+
+arm_convolve_1x1_s8_fast converts computationally ex-pensive 1x1 convolutions into more efficient matrix multi-plications, reducing memory usage and execution time. 
+
+2) Dead code elimination. Compilers also apply optimiza-tions to enhance TFLM performance on MCUs. A common technique is dead code elimination, which removes unused or unreachable code to reduce program size. Additionally, 
+
+NOP instructions are inserted to ensure instruction alignment and optimize pipeline execution, as shown in Figure 3 (left). 
+
+3) Instruction scheduling. Another common compiling op-timization is instruction scheduling. The compiler selects different multiply-accumulate (MAC) instructions based on the operand width—SMLABB for 16-bit, SMLAL for 32-bit, and MLAD for 64-bit operations, as shown in Figure 3 (right). All these optimizations enhance performance. However, using one-to-many mappings (kernel functions), adding or re-moving code (dead code elimination), and selecting different instructions (instruction scheduling) introduces significant non-linear relationships. The last two optimizations are only visible in the compiled disasm instructions. 
+
+## 2.3 Limitations of Existing Research 
+
+Existing prediction methods rely on model-level features, which capture only structural information (e.g., model graphs) or high-level operator transformations such as fusion. They ignore instruction-level features, which account for varia-tions in code implementations and compiler optimizations, leading to SOTA requiring excessive training costs. 
+
+• MAC-based methods: They calculate the number of MAC operations performed by DL models and use regression to correlate the number of MACs with latency [ 20 , 25 ]. They require 1000 training samples and have lower accuracy than other methods because they do not capture non-linear effects. 
+
+• Graph convolutional network (GCN) methods: They use DL model’s computational graph to estimate performance metrics [ 14 ]. Compared to MAC-based methods, GCNs are effective at capturing nonlinear distortions from code opti-mizations, but they require around 2000 samples for training. 
+
+• Fusion methods: They use random forests with multiple layer parameters as features. A notable study [ 43 ] uses opera-tors as the smallest execution units to fuse different operators (e.g., merging Conv-BN into a single Conv layer). It considers non-linear effects but typically needs 3000 samples. 
+
+• Lookup table (LUT) methods: They store the energy and latency of fundamental layers [ 9]. Predictions are made by 
+
+> 3
+
+decomposing a model into these layers and summing their stored values. However, building a LUT needs 5000 training points, making it the most time-consuming of all alternatives. 
+
+Summary. Current predictors cannot account for source code variations and compiler optimizations. Moreover, among the key SOTA described above, only three tackle MCUs [ 7, 20 ,25 ], the others [ 9 , 14 , 43 ] target powerful processors (CPUs/G-PUs/VPUs). To address these limitations, we need models that can capture accurately disasm instructions and cycle counts since they provide the most direct representation of hardware execution. Based on this insight, we propose us-ing the clock cycles of MCUs as proxies for estimation. By directly correlating these low-level features with energy and latency, we aim to develop a predictor that is highly accurate and requires little training data (since it is linear). 
+
+## 3 InstMeter Design 
+
+In this section, we present InstMeter , an accurate instruction-level linear predictor for the energy consumption ( 𝐸 ) and latency ( 𝐿 ) of DL models running on MCUs. By using a single 
+
+instruction-level feature (the number of execution cycles), we improve the estimation accuracy and reduce the amount of training data. The model follows a simple linear equation: 
+
+𝐸 (or 𝐿 ) = 𝑎 · Cycles + 𝑏, (1) where 𝑎 denotes the joules per cycle (for 𝐸 ) or seconds per cycle (for 𝐿 ) and 𝑏 is a fixed per-inference overhead in joules (for 𝐸 ) or seconds (for 𝐿 ). The construction of this predictor has two phases: instruction profiling (for the variable 𝐶𝑦𝑐𝑙𝑒𝑠 )and data collection (to determine 𝑎 and 𝑏 ). Instruction pro-filing , traditionally a costly step, is significantly optimized in our approach with a novel technique to map source code to disasm code. After that, data collection involves gather-ing a small number of training samples to determine the parameters 𝑎 and 𝑏 , keeping the overall process lightweight. 
+
+## 3.1 Instruction Profiling 
+
+Our goal is to map the DL model code to the disasm code to obtain the executed instructions and their correspond-ing number of execution cycles. This goal could be attained with traditional instruction profiling methods, but those ap-proaches have important disadvantages: dynamic profiling 
+
+requires hardware performance counters or code modifica-tions to track instruction execution [ 10 , 16 , 23 , 29 , 37 , 39 ], while static profiling uses machine learning models that re-quire hundreds of thousands of training data [8, 30, 46]. We propose a new profiling method that does not require hardware performance counters, code modifications, or a large amount of training data. Our method has the following foundation: Since all DL models in TFLM are run with a list of specific operators, if we can map the source code of these operators to their corresponding disasm code, we can map the Model layer: Conv2D    
+
+> Input shape (batch, height, width, channel) Filter size (filter_height, filter_width)
+> TFLM function: arm_convolve_s8
+> for (i_batch = 0; i_batch < input_batches; …)
+> for (i_ker_x = 0; i_ker_x < kernel_x ; ...)
+> TFLM disasm code
+> R2, [SP,#0x108+input_batches]
+> LDR R3, [SP,#0x108+i_batch] LDR
+> LDR CMP
+> R3, [SP,#0x108+var_C8]
+> i_ker_x, R3
+
+Figure 4: Illustration of the observations. 
+
+source code of any DL model to its corresponding disasm code. 
+
+Next, we present the insight that allows us to perform low-overhead mapping. Then, we describe our mapping solution. 
+
+3.1.1 Theoretical foundation. Calculating the number of cy-cles run by a DL model requires two pieces of information 
+
+(𝑖 ) the instruction sets and (𝑖𝑖 ) the number of times these in-struction sets are run inside loops. While these two pieces of information are not readily available from either the source code or the disasm code, they can be obtained by combining them, as substantiated by our next two observations. 
+
+Observation 1: Within TFLM functions, tuning DL model parameters primarily modifies loop variables (i.e. the number of times a loop is executed), while keeping the code structure unchanged. On MCUs, DL models are executed as a sequence of TFLM functions. When model parameters are adjusted, the disasm instructions associated with these functions remain unchanged; what changes are the variable values, partic-ularly the loop variables. For example, in Figure 4, chang-ing the the parameters such as batch size and filter width 
+
+in a Conv2D layer only modifies the corresponding loop variables ( input_batches and kernel_x ) in the C++ code (arm_convolve_s8 function). 2 Thus, since the instruction sequence of a function is the same across different models, for any given model, we could obtain the disasm instructions associated with the functions required to run the model. 
+
+Observation 2: Loop variable values are difficult to extract from compiled binaries but can be inferred from pre-compiled source code. Obtaining the disasm instructions of each kernel function is necessary but not sufficient. We also need the loop variable values to quantify how many times the disasm code is run. Unfortunately, compiled instructions obscure variable names by replacing them with dummy names or memory addresses, making it difficult to extract loop vari-able values. For example, Figure 4 shows that the compiler renames the loop variable kernel_x (clearly visible in source code) to a generic identifier ( var_C8 ), making it harder to trace. However, if we are able to map the kernel functions in source code to disasm code, we can easily obtain the loop variable values from the source code or model code. 
+
+> 2To further support this observation, we quantify it by comparing kernel functions from two NAS-generated models using Cosine, Jaccard, and LCS similarity metrics. All metrics reached perfect similarity (1.0), confirming that disasm instructions differ only slightly in loop variable values.
+> 4TFLM Disasm function:
+> void BroadcastAdd4DSlow
+> adds r6, #1
+> str r3, [sp, #20]
+> b.n 2c8da
+> movs r6, #0
+> ldr r3, [sp, #28]
+> cmp r6, r3
+> bge.n 2c976
+> ldr.w sl, [sp, #20]
+> adds r7, #1
+> add sl, r3
+> b.n 2c8e6
+> ldr r3, [sp, #20]
+> ldr r2, [sp, #36]
+> add r3, r2 movs r7, #0
+> ldr r3, [sp, #24]
+> cmp r7, r3
+> bge.n 2c96a
+> str.w sl, [sp, #16]
+> TFLM Source function:
+> void BroadcastAdd4DSlow
+> for(int b = 0; b < output.Dims(0); ++b) {
+> for (int y = 0; y < output.Dims(1); ++y) {
+> }
+> }
+
+Figure 5: The semantic features of TFLM source and binary functions. 
+
+3.1.2 Our profiling method: A single compilation to profile all kernels. The above two observations form the basis of our profiling approach. Based on them, we propose a loop-level 
+
+mapping method that has two key processes: 
+
+1) Mapping source-disasm code: First, we extract loop exe-cution counts from the C++ source code. Then, we establish a loop-level mapping to transfer the execution count to the compiled disasm. Now, we have the execution count from the source code and instructions & cycles from disasm code. 
+
+2) Estimating the number of cycles: We estimate the total execution cycles of the DL model by, first, multiplying each instruction type by the number of times it is executed and by the number of cycles it requires. Then, we sum up the cycles obtained for each instruction type. 
+
+## 3.2 Loop-Level Source-disasm Code Mapping 
+
+Most source-disasm code mapping techniques focus on coarse-grained blocks like function-level mapping and library-level mapping, which do not fit the fine-granularity of loops [ 18 ,21 , 28 , 41 , 42 ]. Coarse-grained blocks have thousands of lines of code, which contain hundreds of features that allow se-mantic mapping (such as variable names). On the other hand, loops often have few lines of code with scarce semantic fea-tures. For example, Figure 5 shows two loops in source and disasm code. In source code, the loops only have one line of code and each of these lines has only two semantic features: (b, output.Dims ) and ( y, output.Dims ). In disasm, those four variable names are represented with dummy names like 
+
+r2 , r3 , r6 , and r7 . This is just a simple example; DL models can have more than one hundred loops (i.e., more than 200 dummy variables), making it hard to perform fine-grained mapping based solely on (obscure) semantic features. To address this problem, we introduce structural features and a new semantic feature. In brief, our approach consists of two main phases. First , we obtain the control flow graphs of the source and disasm codes to map their loops based on their graph structures. Second , since the graph structures can lead to many-to-many mapping, we exploit semantic features to obtain one-to-one loop mapping. Next, we present the details. Disasm code              
+
+> for (i_out_y < output_dims){ for (i_out_x < output_dims){
+> if ( output_dims %2==0 )
+> arm_nn_mat_mult (…)
+> CMP R3, R2
+> BEQ loc_2EB30
+> CMP R3, R2
+> BNE loc_2EB90
+> CMP R3, R2
+> Bloc_2EB84
+> Source code (C++) Control flow graph
+> Begin
+> End
+> Loop 1
+> Loop 2
+> Loop 3
+> Loop 1 ∩Loop 2
+> Structural feature
+> Loop 2 ⊂Loop 3
+> Loop 1 ∩Loop 3
+
+Figure 6: The process of extracting structural features. 
+
+## 3.3 Structural and Semantic Features 
+
+3.3.1 Structural features. Loops inside code can have differ-ent types of relations. The subset ( ⊂) relation describes a loop that is strictly contained within another, and the intersection (∩) relation means two loops that overlap partially. Graph structure is a well-known tool to capture the intersection and subset relationships among loops. To obtain structural features, we first generate the control flow graphs (CFGs) of each source code and then extract the loops within each CFG. 
+
+Generating control flow graphs (CFGs). CFGs contain the code structure and they can be obtained with existing soft-ware tools for both the source and disasm code [ 1 , 35 ]. Some sample CFGs are shown in Figure 6. 
+
+Extracting loops. Once the graphs are generated, all the loops in the source and disasm graphs can be extracted with various tools, e.g. Networkx [19 ]. Figure 6 shows three iden-tified loops using colors to connect them between the CFG and code sources (C++ and disasm). For example, Loop 1 
+
+corresponds to the first loop in the source code and disasm instructions (yellow color). 
+
+Obtaining loop relationships. With the CFGs, we can extract the relationship among loops. By traversing every pair of loops, we can define their relations. If all elements in one loop belong to another loop, we define the subset relation. If partial elements in one loop belong to another loop, we define the intersect relation. For example, in Figure 6, Loop 2 
+
+is a subset of Loop 3 while Loop 1 intersects with Loop 2 .
+
+3.3.2 Semantic features. Semantic features primarily include string literals within loops. 
+
+Traditional semantic features. String literals such as func-tion names, variable names and integers are widely used in prior studies [ 28 , 42 ], but their representations are not consistent. For example, as illustrated in Figure 7, while the variable name i_ker_x appears in both source code ( Loop 1 )and disasm code ( Loop A ), the function name memset only appears in source code ( Loop 2 ), not in disasm code. Hence, these traditional features alone cannot be used to map loops. 
+
+Comparison features. Unlike previous work, we incorpo-rate comparison operators as semantic features due to their ubiquitous presence: every loop has a comparison operator. For example, in Figure 7, while the names of string variables                                     
+
+> 5Func name Var name Int Ops
+> Loop 1 i_ker_x 1<
+> Loop 2 memset k_y, k_x 1>
+> Loop A i_ker_x BLT
+> Loop B BGT
+> Loop 1
+> Source code (C++)
+> for ( i_ker_x < filter_dims){
+> if (k_y > 0)
+> memset (…); Loop 2
+> Disasm code
+> Loop A CMP i_ker_x, R3
+> BLT loc_471FA
+> Loop B CMP R3, R2
+> BGT loc_4721C
+> Variable name
+> Loop 1 Loop 2
+> Loop A 10
+> Loop B 00
+> Operators
+> Loop 1 Loop 2
+> Loop A 10
+> Loop B 01
+> TFLM function loops Semantic features Cost matrix
+
+Figure 7: The illustration of semantic features. Table 1: The comparison of operator features.                      
+
+> Operators (.cpp) <≥>≥==
+> Operators (.asm) BLT, BGE BLE, BGT BGT, BLE BGE, BLT BEQ
+> Operators (.cpp) !=≫≪&|
+> Operators (.asm) BNE ASR, ASRS LSL, LSLS AND ORR
+
+do not remain constant in source and disasm code, stop con-ditions always appear in both. For instance, the conditions 
+
+i_ker_x < filter_dims in Loop 1 and k_y > 0 in Loop 2 
+
+are represented with the operators < and > in source code, and BLT,BGT (Branch Less/Great Than) in disasm code. We extract different types of comparison operators and summarize them in Table 1. It is important to note that for each comparison in source code (e.g., <), disasm instructions use two different representations, e.g., an identical instruc-tion BLT (branch less than) and a counter instruction BGE 
+
+(branch greater equal). 
+
+Generating semantic features. The semantic features are also obtained from the CFGs. This process is the same as that of generating structural features. After extracting the loops, we traverse the source and disasm code to record the semantic features of each loop, as shown in Figure 7. 
+
+## 3.4 Structural and Semantic Mapping 
+
+Our algorithm maps the loops between source and disasm code using the structural and semantic features described in the prior subsection. We propose a progressive mapping algorithm. We first map structural features based on graph matching algorithms, and then apply commonly used seman-tic mapping algorithms for the semantic features [42]. 
+
+3.4.1 Structural mapping. Structural mapping identifies loop correspondences between source and disasm CFGs using graph matching. We use the matching algorithm VF2 [ 11 ]because it is designed for large graphs and uses an efficient search strategy, based on depth-first search [ 38 ]. In our case, the graph nodes represent the loops and the edges represent the structural features, as shown in Figure 8. With these graphs, the graph-matching algorithm traverses nodes and edges to identify the most similar pairs. For instance, as shown in Figure 8, Loop 1 and Loop A form a unique match due to their shared characteristic of having exactly two inter-actions, with Loops 2 and 3 and Loops B and C , respectively. Structural features  Structural graphs                   
+
+> Loop 1 ∩Loop 2
+> Source code (C++)
+> Loop 1 ∩Loop 3
+> Source code (C++)
+> ∩Loop 1
+> Loop 2
+> ∩
+> Loop 3
+> Mapping results 1
+> Loop 1 Loop 2 Loop 3
+> Loop A ∩Loop B
+> Disasm code
+> Loop A ∩Loop C
+> Disasm code
+> ∩Loop A
+> Loop B
+> ∩
+> Loop C
+> Loop A Loop B Loop C
+> Mapping results 2
+> Loop 1 Loop 2 Loop 3
+> Loop A Loop B Loop C
+> Structural mappings
+
+Figure 8: The process of structural mappings. 
+
+However, the mapping is not always unique. For instance, 
+
+Loops 2 and 3 and Loops B and C exhibit identical struc-tural features, preventing a clear mapping based solely on structural properties. Consequently, the algorithm yields two possible matchings: (Loops 1 ↦→A, 2 ↦→B, 3 ↦→C) and (Loops 1↦→A, 2 ↦→C, 3 ↦→B). To overcome this shortcoming, the next phase of our algorithm uses semantic matching. 
+
+3.4.2 Semantic mapping. When structural features lead to in-conclusive mappings, we use semantic features to identify the best candidate. Semantic mapping has three steps: build-ing similarity matrix for semantic features, assigning differ-ent weights to features, and computing candidate scores. 
+
+Constructing the similarity matrix. Similarity matrices mea-sure the correlation of features between source and disasm loops, and we adopt the approach from [ 42 ] to build our ma-trices. Some of the undefined relations arising from structural mapping can be resolved with traditional semantic features (e.g., variable names) but others need comparator features. E.g., Figure 7 shows that the similarity score between Loop 1 
+
+(source) and Loop A (disasm) is high since the variable name 
+
+i_ker_x is in both loops. However, this traditional feature does not work for the if statement, since the function name 
+
+memset appears in Loop 2 but not in Loop B . In this case, the comparator operator allows us to perform the mapping. 
+
+Assigning weights to features. We have four semantic fea-tures: function name , variable name , integer , and comparison operator . Each feature requires a matrix and provides a vary-ing degree of similarity between source and disasm loops. Thus, two important questions arise: What features are the most important? How much weight should we assign to each feature? When the relevance of features cannot be quantified clearly, the best way to assign weights is random scalariza-tion [ 32 ], which explores diverse weighting combinations to ensure unbiased optimization. The random scalarization and the computation of similarity scores are described next. 
+
+Computing similarity scores. Formally, considering 𝑛 loops in the source code and 𝑚 loops in the disasm code that have a many-to-many mapping due to the limitations of struc-tural features, let us define four similarity matrices M𝑓 ,
+
+> 6
+
+Algorithm 1 Structural and semantic matching algorithms  
+
+> 1:
+
+function Structural_Matching (𝑠𝑡𝑟𝑢𝑐𝑡𝑢𝑟𝑎𝑙 _𝑓 𝑒𝑎𝑡𝑢𝑟𝑒𝑠 ) 
+
+> 2:
+
+Construct graphs 𝐺 𝑠 = (𝑉 𝑠 , 𝐸 𝑠 ) and 𝐺 𝑏 = (𝑉 𝑏 , 𝐸 𝑏 ) 
+
+> 3:
+
+Add edges based on 𝑠𝑡𝑟𝑢𝑐𝑡𝑢𝑟𝑎𝑙 _𝑓 𝑒𝑎𝑡𝑢𝑟𝑒𝑠  
+
+> 4:
+
+Initialize mapping: 𝑖𝑛𝑖𝑡𝑖𝑎𝑙 _𝑚𝑎𝑝 ← { 0 : 0 } 
+
+> 5:
+
+𝑚𝑎𝑡𝑐ℎ𝑒𝑠 ← VF2_Search (𝐺 𝑠 , 𝐺 𝑏 , 𝑖𝑛𝑖𝑡𝑖𝑎𝑙 _𝑚𝑎𝑝 ) 
+
+> 6:
+
+return 𝑚𝑎𝑡𝑐ℎ𝑒𝑠  
+
+> 7:
+
+function Semantic_Matching (𝑚𝑎𝑡𝑐ℎ𝑒𝑠 , 𝑠𝑒𝑚𝑎𝑛𝑡𝑖𝑐 _𝑓 𝑒𝑎𝑡𝑢𝑟𝑒𝑠 ) 
+
+> 8:
+
+Initialize 𝑠𝑖𝑚 _𝑚𝑎𝑡𝑟𝑖𝑐𝑒𝑠 ← []  
+
+> 9:
+
+for each 𝑓 𝑒𝑎𝑡𝑢𝑟𝑒 in 𝑠𝑒𝑚𝑎𝑛𝑡𝑖𝑐 _𝑓 𝑒𝑎𝑡𝑢𝑟𝑒𝑠 do  
+
+> 10:
+
+𝑠𝑖𝑚 _𝑚𝑎𝑡𝑟𝑖𝑥 ← Similarity (𝑓 𝑒𝑎𝑡𝑢𝑟𝑒 ) 
+
+> 11:
+
+Append 𝑠𝑖𝑚 _𝑚𝑎𝑡𝑟𝑖𝑥 to 𝑠𝑖𝑚 _𝑚𝑎𝑡𝑟𝑖𝑐𝑒𝑠  
+
+> 12:
+
+𝑏𝑒𝑠𝑡 _𝑠𝑐𝑜𝑟𝑒 ← −∞ , 𝑏𝑒𝑠𝑡 _𝑚𝑎𝑡𝑐ℎ ← 𝑁𝑜𝑛𝑒  
+
+> 13:
+
+while multiple top matches exist do  
+
+> 14:
+
+Generate 𝑤𝑒𝑖𝑔ℎ𝑡𝑠 ← Random_Scalarization  
+
+> 15:
+
+Compute weighted scores for each match:  
+
+> 16:
+
+for each 𝑚𝑎𝑡𝑐ℎ in 𝑚𝑎𝑡𝑐ℎ𝑒𝑠 do  
+
+> 17:
+
+𝑠𝑐𝑜𝑟𝑒 ← Weighted_Sum (𝑤𝑒𝑖𝑔ℎ𝑡𝑠 , 𝑠𝑖𝑚 _𝑚𝑎𝑡𝑟𝑖𝑐𝑒𝑠 ) 
+
+> 18:
+
+Select highest-scoring match:  
+
+> 19:
+
+𝑏𝑒𝑠𝑡 _𝑠𝑐𝑜𝑟𝑒 ← Max (𝑠𝑐𝑜𝑟𝑒𝑠 ) 
+
+> 20:
+
+𝑏𝑒𝑠𝑡 _𝑚𝑎𝑡𝑐ℎ ← Select_Uniqe (𝑠𝑐𝑜𝑟𝑒𝑠 , 𝑏𝑒𝑠𝑡 _𝑠𝑐𝑜𝑟𝑒 )
+
+return 𝑏𝑒𝑠𝑡 _𝑚𝑎𝑡𝑐ℎ 
+
+one matrix for each feature 𝑓 , where 𝑠 𝑓 (𝑖, 𝑗 ) is a matrix el-ement capturing the similarity between loop 𝑖 and loop 𝑗 
+
+for feature 𝑓 . Considering that we are using random scalar-ization, let us define four weights 𝑤 𝑖 , where Í 𝑤 𝑖 = 1, and run 100 random weight vectors to avoid biases. Consider-ing the above notation, the total similarity 𝑆 (𝑖, 𝑗 ) between loops 𝑖 and 𝑗 is given by summing the similarities of all features: 𝑆 (𝑖, 𝑗 ) = Í100  
+
+> 𝑟 =1
+
+Í4  
+
+> 𝑓 =1
+
+𝑠 𝑓 (𝑖, 𝑗 )𝑤 𝑟 𝑓 . The best mapping candidate is the one that maximizes the similarity, that is: 
+
+𝑆 ∗ = max (𝑖,𝑗 ) ∈ ( 𝑛,𝑚 ) 𝑆 (𝑖, 𝑗 ).
+
+Algorithm overview. The complete procedure is outlined in Algorithm 1, which progressively integrates structural and semantic mapping. For structural matching, we first construct a relation graph (lines 2-3) and apply the VF2 algo-rithm for graph matching (lines 4-5). For semantic matching, we generate a similarity matrix for each feature type (lines 8-11) and assign different weights to these matrices (lines 14-15). Finally, we compute the scores for all candidates and select the best match (lines 16-20). 
+
+## 3.5 Estimate Total Cycles and Generate Instruction Library 
+
+The disasm-source mapping described above needs to be performed only once if the following two conditions are met: (1) the MCU architecture remains unchanged (e.g., Cortex-M4), and (2) neither the source code nor the corresponding disassembled instructions undergo significant changes, such as the introduction of new operator files (validated in Section 5.4). After that, we build an instruction library that can be used to estimate the total execution cycles of any DL model. First, we will explain how we get the number of cycles per kernel function, and then, describe the instruction library. 
+
+Estimating the number of cycles. For each kernel function 
+
+𝑘 , total execution cycles are computed by multiplying the occurrence ( 𝑜 𝑖 , via our looping algorithm) of each instruction type 𝑖 by its cycle-per-instruction (CPI, denoted as 𝑐 𝑖 ): Cycles 𝑘 =
+
+> 𝑁 𝑘
+
+∑︁ 
+
+> 𝑖 =1
+
+
+
+𝑜 𝑘 𝑖 · 𝑐 𝑘 𝑖 
+
+
+
+, (2) where 𝑁 𝑘 is the number of instruction types in function 𝑘 .The accurate CPI values can be derived from an MCU’s offi-cial documentation, or from empirical measurements. 3
+
+Generating Instruction Library. Once we obtain the number of cycles per function, we calculate the cycles in each opera-tor using the operator-to-function mappings (cf. Section 2.2). Then, we build a library to estimate the total number of cy-cles of any DL models. When a new DL model is provided, we do not need to compile it. We first convert it into a TFLite model, inherently including operator fusions (cf. Section 2.1). Then we use the instruction library to parse the model into the operators and obtain their cycles. The sum of these cycles is the total cycles executed by the DL model. This process enables fast and precise estimation of execution cycles. To estimate the energy consumption and latency, we only require a few training samples. For these samples (DL mod-els), we measure the energy and latency; and derive their number of cycles using our instruction library. The ground truth and cycles allow us to obtain the parameters 𝑎 and 𝑏 
+
+for energy and latency in Equation 1. To optimize cycle profiling, we pre-generate instruction li-braries for common MCUs (Cortex-M4, M7, M33 and ESP32C3). When constructing energy and latency predictors for those MCUs, we can directly use the pre-generated libraries. The library remains valid unless the kernel source code signifi-cantly changes (e.g., new operators added) or a new MCU ar-chitecture is introduced. In such cases, users need to provide updated source code, its disassembled instructions, loop exe-cution counts extracted from the source, and MCU-specific CPI values (obtained either from documentation or empirical measurement). The whole process roughly takes 30 minutes.                        
+
+> 3For Cortex-M4, CPI values are directly obtained from the official ARM documentation [ 4]. Due to incomplete official CPI documentation for Cortex-M7 and Cortex-M33, we adopt CPI values from Cortex-M4 as proxies because these MCUs share common instruction types for TFLM inference. Although we did not explicitly validate CPI accuracy, our evaluation (cf. Figure 15a) indirectly supports this approximation. For the significantly different MCU ESP32-C3, which has a RISC-V-based architecture , we empirically measure CPI values by embedding assembly instructions within C code, executing each instruction type on the MCU 100K times, and averaging the results.
+> 7Uploading Inference Compiling Uploading Inference
+> 0s20 s40 s60 s80 s100 s120 s
+> 0
+> 10
+> Current (mA)
+> Laptop Power meter
+> Microcontroller
+> Setup for automated data collection Captured energy trace from automated data collection
+> Voltage+ Voltage-Signal
+> MCUs: M4, M7*, M33, C3
+
+Figure 9: Our tool for automatic energy and latency measurements; captured energy traces are illustrated. MCUs: M4 (Seeed nRF52840), M7 (Teensy 4.1 and STM32F767), M33 (Arduino Portenta C33) and C3 (Seeed ESP32C3). 
+
+## 4 Implementation & Benchmark Datasets 4.1 Implementation 
+
+To profile the instructions/cycles for InstMeter , we need to analyze the source and disasm code of TFLM. We build a single DL model using 10 commonly used operators in MCUs: Conv2D, DepthConv2D, FullyConnected, MaxPool2D, AvgPool2D, ReLU, Add, Mul, Softmax, and Reshape . These op-erators cover most cases in MCU NAS [ 7 , 20 , 25 , 26 ]. From the source code (C++), we identify that these operators are implemented with 26 kernel functions in TFLM 4. For the source code, we identify these kernel functions through their function names. For the compiled disasm code, we extract the 26 kernel functions using IDA Pro [ 35 ], a decompilation tool that allows locating functions accurately. After the ker-nel functions are identified in the source and disasm code, we obtain the control flow graphs (CFG) using IDA Pro and cxx2flow [ 1]. Once the CFGs are obtained, we use our frame-work, in Section 3, to achieve robust source-disasm mapping. 
+
+Automated data collection. To evaluate the performance of InstMeter , we also design and implement an automatic data collection tool. While similar automation tools have been mentioned in [ 36 ], they do not describe implementa-tion details. The setup of our tool is shown in Figure 9. It fully automates model compilation, uploading, execution, and measurement through customized Python scripts. To accurately identify inference intervals from energy traces, we insert short delays before and after each inference, clearly distinguishing inference intervals from idle periods based on power-level differences. Each inference is consecutively executed 10 times to ensure stable, precise energy measure-ments, and the average consumption is reported using an OTII ACE PRO power meter with nanowatt-level resolution. 
+
+## 4.2 Creating Benchmark Datasets for MCU-Specific Predictor Evaluation 
+
+The popular NAS-Bench201 dataset [ 13 ] aims at mobile-level devices (CPUs) and is not well suited for MCUs due to two            
+
+> 4The 26 kernel functions include arm_elementwise_mul_s8 ,arm_element wise_add_s8 ,arm_depthwise_conv_s8 ,arm_softmax_s8 ,arm_convolve _s8 ,arm_max_pool_s8 ,arm_depthwise_conv_8s_opt ,arm_depthwise_c onv_3x3 ,reshapeOutput ,ReluQuantized ,FlatSize , among others.
+
+key limitations. First, its models exceed typical MCU mem-ory constraints—we found that only 13 out of 1000 randomly sampled models fit within 256 KB, a common limit of MCU. Second, the dataset’s model granularity does not align with mainstream MCU design. While NAS-Bench201 adopts a coarse-grained approach with layer-stacked cells, MCUs typ-ically use individual layers rather than predefined cells. To bridge this gap, we create two custom datasets measur-ing latency and energy. The first dataset focuses on testing a diverse set of models, while the second dataset focuses on testing different hardware platforms, software versions, compiler versions, temperatures, applications, DVFS config-urations, and compiler optimizations. 
+
+Performance evaluation dataset. This dataset consists of two sub-datasets: a mixed-layer dataset (ML-Data) and a single-layer dataset (SL-Data). ML-Data contains models con-structed by randomly mixing layers, allowing us to evaluate the predictor’s accuracy under diverse and heterogeneous ar-chitectures. The models are generated using an MCU-based NAS algorithm [ 25 ], which explores a fine-grained search space optimized for MCU constraints. To ensure consistency, we use Cortex-M4 as the target MCU, compiled with -O0 op-timization level, and execute the models within TFLMv2.4. A total of 445 valid models are collected. SL-Data , inspired by [ 43 ], consists of models only with one type of layer, such as Conv2D or MaxPooling2D, to evaluate the predic-tor’s accuracy on a layer basis. We collect models for eight layer types, including Conv2D, Conv1x1, DepthwiseConv2D, Dense, MaxPooling2D, and AvgPooling2D. For each layer type, we collect ten samples, leading to a total of 60 models, using the same setup as ML-Data (MCU, optimization level and TFLM version). 
+
+Compatibility evaluation dataset. This dataset eval-uates predictor adaptability across diverse hardware, soft-ware, and compiler settings, comprising seven distinct sub-datasets: MCU-Data , Compiler-Data , GCC-Data , Temp-Data , App-Data , DVFS-Data , and TFLM-Data . MCU-Data 
+
+> 8
+
+evaluates performance across four MCU architectures (Cortex-M4, M7, M33, ESP32C3) with fixed compiler optimization (-O0) and TFLMv2.4, collecting 100 samples per MCU (400 sam-ples in total). Compiler-Data analyzes sensitivity to com-piler optimizations (-Os, -O2) using Cortex-M7 and TFLM v2.4, collecting 100 samples each (200 samples in total). DVFS-Data assesses robustness under two frequency-voltage pairs (120MHz/1.1V, 216MHz/1.3V) on STM32767ZI MCU, with 100 samples per setting (200 samples in total). GCC-Data 
+
+considers two compiler versions (GCC v7.3, v10.3) at opti-mization -O0 on Cortex-M4, collecting 100 samples each (200 samples in total). Temp-Data evaluates predictor stability at two MCU temperatures (21 °C, 43 °C) using Cortex-M4, fixed compiler (-O0) and TFLMv2.4, collecting 100 samples per temperature (200 samples in total). App-Data tests general-ization across keyword spotting and image classification (CI-FAR10), each scenario collecting 100 samples (200 samples in total), using Cortex-M4, compiler -O0, and TFLMv2.4. Finally, 
+
+TFLM-Data examines software version impact (TFLMv2.4, TFLMvCI) on Cortex-M4 with -Os optimization, collecting 100 samples per version (200 samples in total). 
+
+Summary of the data collection. Across all the datasets, we collect a total of 2125 data points. Except for the SL-Data ,models are generated using an MCU-based NAS algorithm [ 25 ], which explores a fine-grained search space optimized for MCU constraints. The time required to compile and col-lect each sample ranged from 1 minute (on Cortex-M7, M33, ESP32C3) to 5 minutes (on Cortex-M4), leading to a total data collection time exceeding 5000 minutes. We collect these comprehensive datasets not only for our evaluation but also hope that they are valuable for our community to evaluate DL models’ performance on MCUs. 
+
+## 5 Performance Evaluation 
+
+Baselines. We compare our InstMeter with two widely used state-of-the-art (SOTA) methods. (1)MACs-based predictors 
+
+[ 20 , 25 ], which estimate performance based on the number of MAC operations in a model and apply regression methods for prediction. (2)nn-Meter [ 43 ], which defines fused kernels (layers) and utilizes a random forest approach combined with adaptive sampling methods to make predictions. 
+
+Evaluation metrics. We use the relative error rate as the main evaluation metric, defined as |𝑦 pred −𝑦 true | 
+
+> 𝑦 true
+
+× 100% , where 
+
+𝑦 pred is the predicted value and 𝑦 true is the ground truth. Un-like other metrics such as 𝑅 2 or mean squared error (MSE), which can be disproportionately affected by outliers or large values, the relative error rate measures the proportional dif-ference between predicted and true values, ensuring a fair and interpretable evaluation across all data points.             
+
+> 5Note that this figure does not directly represent the energy cost of each layer in DL models; the actual cost must also take into account the number of layers in the model and the input parameters. 0121e6 0.0 510 Conv
+> 0.0 0.5 1.0 1e5 0.7 0.9 1Dense
+> 0.0 0.5 1.0 1e4 0.6 0.8 1DepthConv
+> 0.0 2.5 5.0 1e3 0.7 0.8 Pooling The number of MACs Energy (mJ)
+
+(a) MACs-based predictor: Energy vs number of MACs 0.0 0.6 1.2 1e7 0.0 510 Conv          
+
+> 0.0 3.0 1e5 0.7 0.9 1Dense
+> 1.5 0121e5 0.6 0.8 1DepthConv
+> 0.4 0.8 1.2 1e5 0.7 0.8 Pooling The number of cycles Energy (mJ)
+
+(b) Our cycle-based InstMeter: Energy vs number of cycles 
+
+Figure 10: Linearity between our proxy and measured 
+
+energy on pure-layer models. 5(Results on other layers, such as Residue, are similar and omitted due to space limitations.) 0 1 21e6 0.0 12 Conv         
+
+> 0.0 0.5 1.0 1e5 0.1 0.2 Dense
+> 0.0 0.5 1.0 1e4 0.1 0.2 DepthConv
+> 0.0 2.5 5.0 1e3 0.1 0.1 Pooling The number of MACs Latency (ms)
+
+(a) MACs-based predictor: Latency vs number of MACs 0.0 0.5 1.0 1e7 0.0 12 Conv         
+
+> 0.0 3.0 1e5 0.1 0.2 Dense
+> 1.5 0121e5 0.1 0.2 DepthConv
+> 0.4 0.7 1.0 1e5 0.1 0.1 Pooling The number of cycles Latency (ms)
+
+(b) Our cycle-based InstMeter: Latency vs number of cycles 
+
+Figure 11: Linearity between our proxy and measured 
+
+latency on pure-layer models. Training methods. Unless otherwise stated, we only use 5 training samples for our InstMeter. Given the data scarcity, we employ a sub-sampling strategy: we iterate through inter-nal training/validation splits (e.g., train on 2, validate on 3) to select the regression line that minimizes internal error. This optimal model is then evaluated on the global test set. We repeat this process 10 times with independent random seeds to ensure statistical robustness. Due to space limitation, from Section 5.2 we only present the results on energy prediction; the results on latency prediction are similar and provided in Appendix. 
+
+## 5.1 Evaluation of Proxies 
+
+We first evaluate different predictors’ proxies using the single-layer dataset (SL-Data), consisting of models built from pure                
+
+> 9050 100 150 200
+> Relative Error Rate (%)
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF
+> InstMeter MACs Average (a) Ours vs. MACs (5 samples) 050 100 150 200
+> Relative Error Rate (%)
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF
+> InstMeter MACs Average (b) Ours vs. MACs (20 samples) 050 100 150 200
+> Relative Error Rate (%)
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF
+> InstMeter MACs Average (c) Ours vs. MACs (50 samples) 050 100 150 200
+> Relative Error Rate (%)
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF
+> InstMeter nnMeter(300) nnMeter(500) (d) Ours vs. nn-Meter
+
+Figure 12: Energy prediction comparisons of our InstMeter vs. MAC-based estimators and nn-Meter, with varying training data sizes on the ML-Data. 
+
+layers. This comparison focuses on MAC-based methods to show that, for some layers, model-level parameters have a non-linear relation with latency and energy, but our cycle-based proxies can model them linearly .Figure 10 and Figure 11 shows the relationship between the measured energy/latency and various layer types. We can observe that MAC-based proxies exhibit a linear rela-tionship for dense layers but fail to generalize across other types of layers. This occurs because MACs are not inher-ently tied to specific code implementations and compiler optimizations. When compiling the DL models for MCUs, TFLM and compiler optimizations introduce discrete behav-iors—such as switching kernel functions based on distinct pa-rameters—that break the linearity between MACs and energy consumption. On the other hand, InstMeter ’s cycle-based proxies maintain strong linearity across all layer types. Over-all, the results show the linearity (superiority) of InstMeter ’s instruction-level modeling for accurate energy consumption across all the DL model layers. 
+
+## 5.2 Comparison with SOTA 
+
+We now evaluate InstMeter ’s performance compared to the SOTA, using the mixed-layer dataset (ML-Data). 
+
+InstMeter vs. MACs-based estimators. Figures 12a-12c illustrate the relative error rates of both predictors as a func-tion of the training data size on energy and latency predic-tions, respectively. The experiments are carried out on the mixed-layer dataset (ML-Data). Out of the 445 samples in the dataset, we use 𝑠 samples for training and the remaining samples for testing ( 445 −𝑠 ). We set 𝑠 to 5, 20 and 50; for each 
+
+𝑠 , we run 10 random instances. The results in Figures 12a-12c show that InstMeter achieves consistently lower error rates across all the cases with different training data sizes. The performance of the worst-case instance in InstMeter is also significantly better than the performance of the best-case in-stance of MACs-based methods. Specifically, if we look at the 0–90th percentiles of the averaged results (solid lines), the relative prediction error rates in InstMeter remain below 30% across all training data sizes, whereas those of MACs-based predictors exceed 200%, showing an improvement of over 6.5 × achieved by our InstMeter. 
+
+InstMeter vs. nn-Meter. With MACs-based approaches, using the same number of training samples provides a fair comparison because both proxies, MACs and cycles, use linear regression. On the other hand, nn-Meter [ 43 ] uses random forests for estimation, and thus, relying only on a few samples would lead to terrible performance. The original nn-Meter requires thousands of training samples. While nn-Meter can learn the non-linearities with such an amount of training samples, it requires a huge amount of effort to collect such training samples for each MCU type, which is not practical due to the slow data collection on MCUs and the diversity of MCU platforms. To create a competitive implementation of nn-Meter while showcasing the reduced training data required by InstMeter , we train nn-Meter with 300 and 500 samples and InstMeter with only 5 samples. For nn-Meter, we cannot use the ML-Data for training since it has a specific and predefined method for collecting training data. To train nn-Meter, we use their public code as is, with the only difference being that we check that the training models fit the memory requirement of MCUs. Thus, our overall training and testing phases are as follows: (𝑖 ) for our InstMeter we use 5 training samples chosen at random from the ML-Dataset, and we repeat this process 10 times; 
+
+(𝑖𝑖 ) for nn-Meter, we build a new set of 500 training samples following their guidelines; and (𝑖𝑖𝑖 ) to test both approaches, we use the remaining 440 samples from the ML-Dataset (after using 5 samples at random for training InstMeter). The result for energy estimation, presented in Figure 12d, shows a significant gain of InstMeter over nn-Meter. For all data, InstMeter consistently exhibits stable and predictable error rates, ranging from 0% to around 40%. In contrast, nn-Meter demonstrates much higher variability, with error rates ranging over 200%. As the amount of training data increases from 300 to 500 samples, the error rates under nn-Meter de-crease and become more compact. However, the advantages of InstMeter remain strong, particularly at the upper per-centiles. At the 90th percentile, the error rates of nn-Meter      
+
+> 10 020 40
+> Energy (mJ)
+> 0.80 0.82 0.84 0.86 0.88 0.90
+> Inference Accuracy  InstMeter MACs nn-Meter Budget 050 100 150
+> Relative Error Rate (%)
+> 0.80 0.82 0.84 0.86 0.88 0.90
+> Inference Accuracy
+> InstMeter MACs nn-Meter
+
+Figure 13: NAS results with 10mJ energy budget. 
+
+reach as high as 100%, whereas InstMeter maintains its error rates within 30%. These results clearly show the superior stability and accuracy of InstMeter. Overall, our results show two important points. First, thanks to the linearity of our approach, few samples are needed. For InstMeter , there is not much improvement between using 5 and 50 samples. Second, we attain a better performance with fewer samples. MACs-based methods use 10 × more training data but provide 6.5 × worse error, while nn-Meter requires 100 × more training data but provides 3 × worse error. 
+
+## 5.3 Evaluation in NAS Scenarios 
+
+Until now, we have evaluated the performance of InstMeter on individual models, but the key advantage of fast and accu-rate predictors is on the model design. Neural Architecture Search (NAS) is a family of algorithms that automatically search for optimal neural network architectures. For MCUs, predictors are central because they evaluate tens of thou-sands of models to maximize accuracy while satisfying con-straints, such as memory, energy, or latency budgets. In this subsection, we assess the performance of InstMeter and SOTA predictors in a NAS scenario focusing on the con-straints of MCU memory and energy consumption. Accurate estimation of energy is important: because if energy con-sumption is underestimated, the device will have a shorter life than expected; and if the energy consumption is overes-timated, the device may sacrifice accuracy. We use a widely adopted NAS method based on evolutionary algorithms [ 20 ,25 ]. The NAS setup is identical across all predictors, differing only in the predictor component. The memory constraint corresponds to the MCU’s memory size 256 KB, and the en-ergy constraint is set to two empirical values of 10 mJ and 30 mJ. To compare the performance of the predictors, we report the top 20 models discovered by NAS using each pre-dictor. We run these top models on MCUs and measure the ground-truth using our automated pipeline. We configure the training sample sizes as follows: InstMeter (5, ML-Data), MACs-based (50, ML-Data), nn-Meter (500, using their cus-tom sampling method). The results are presented in Figures 13-14. We can observe that the models searched with the help of InstMeter remain closest to the energy constraint, and have higher inference accuracy. Both MACs-based and nn-meter predictors cannot fully exploit the energy constraint, leading to models that are 0 20 40   
+
+> Energy (mJ)
+> 0.80 0.82 0.84 0.86 0.88 0.90
+> Inference Accuracy  InstMeter MACs nn-Meter Budget 0100 200
+> Relative Error Rate (%)
+> 0.80 0.82 0.84 0.86 0.88 0.90
+> Inference Accuracy
+> InstMeter MACs nn-Meter
+
+Figure 14: NAS results with 30mJ energy budget. 0 50 100 150 200 
+
+Relative Error Rate (%) 
+
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF  M4 M7 M33 RISC-V Average
+
+(a) Different MCUs 0 50 100 150 200 
+
+Relative Error Rate (%)  
+
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF
+> TFLMv24 TFLMvCI Average
+
+(b) Different TFLM versions 
+
+Figure 15: Generalization on the energy prediction across different MCUs and TFLM versions. 
+
+less accurate regarding inference. Our predictor identifies op-timal models that remain closer to the provided constraints, maintaining an error rate within 10%, while most of the other predictions exhibit errors up to 100%. These results un-derscore the advantages of InstMeter in achieving accurate predictions on models’ energy consumptions even with a small training dataset. By minimizing the likelihood of pre-dicted values exceeding or falling far below the constraint, InstMeter can empower NAS to efficiently search within a valid search space, ultimately improving the efficiency and effectiveness of the NAS search process. 
+
+## 5.4 Generalization & Robustness Evaluation 
+
+We evaluate the generalization and robustness capabilities of InstMeter across diverse experimental settings using the compatibility dataset. We conduct generalization experiments 
+
+(MCU architectures, TFLM versions) by individually rebuild-ing the instruction libraries due to the significant instruction differences. For the robustness evaluation (compiler options, GCC versions, application scenarios, DVFS, and tempera-ture), we reuse previously built libraries across different MCUs, explicitly evaluating InstMeter ’s robustness without incurring frequent library regeneration. In each evaluation, we randomly select 5 samples for training, using the remain-ing samples for testing, and repeat the process 10 times. 
+
+Generalization on other ARM MCUs and the RISC-V-based MCU. In prior experiments, the Cortex-M4 platform is used as the default for evaluation. Here, we further ap-ply InstMeter to another three MCUs: Cortex-M7, M33 and RISC-V-based ESP32-C3. To extend our framework, we fol-low the procedure described in Section 3. Specifically, we compile model functions to generate disasm code tailored for new MCUs, and replace the Cortex-M4 files (source and    
+
+> 11 050 100 150 200
+> Relative Error Rate (%)
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF
+> -Os -O2 Average
+
+(a) Compiler settings 0 50 100 150 200  
+
+> Relative Error Rate (%)
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF
+> KWS CIFAR10 Average
+
+(b) Applications 0 50 100 150 200  
+
+> Relative Error Rate (%)
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF
+> 120 Mhz @ 1.1V 216 Mhz @ 1.3V Average
+
+(c) DVFS settings 0 50 100 150 200  
+
+> Relative Error Rate (%)
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF  20°C → 20°C 20°C → 40°C 40°C → 40°C 40°C → 20°C Average
+
+(d) Temperatures 0 50 100 150 200  
+
+> Relative Error Rate (%)
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF
+> GCC7.3 GCC10.3 Average
+
+(e) GCC versions 
+
+Figure 16: Robustness of energy prediction across different TFLM versions, applications, DVFS settings, tempera-tures, and GCC compiler versions. 
+
+disasm files) with new MCUs’ counterparts. We then rerun our framework to establish mappings and perform the corre-sponding operator-to-instructions profiling. The generated dictionaries are used for modeling on the corresponding plat-forms. The results are summarized in Figure 15a. Overall, our InstMeter demonstrates stable performance across the M4, M7, M33 and RISC-V-based ESP32-C3 platforms. The average relative error almost remains below 50 % across all the platforms. For 95% of the models, Cortex-M7’s, M4’s, and ESP32-C3’s error rates are consistently below 30 %, while for Cortex-M33, our InstMeter remains stable below 40 %. These results confirm the robust cross-platform compatibility of InstMeter and its ability to maintain high prediction accu-racy across diverse MCU platforms. The slightly higher error rate in the M33 platform is mainly due to the lack of detailed cycle counts per instruction in its manual, so we need to use the corresponding details in M4 to build the predictor. The instruction library overhead is quantified as follows: storage sizes (31-32 KB for the three Cortex-M MCUs, and 58 KB for the RISC-V MCU), and query latencies (84 ms/query for the Cortex-M MCUs, and 154 ms/query for the RISC-V MCU), averaged over 100 NAS-generated models. 
+
+Generalization across different TFLM versions. Dif-ferent versions of the TFLM library implement the model operators with varying code optimizations, potentially af-fecting the prediction accuracy of energy consumption. To evaluate the compatibility and robustness of our predictor across various TFLM versions, we conduct experiments us-ing two widely adopted versions: TFLMv2.4 and TFLMvCI. We generate version-specific instruction libraries by directly utilizing the source files from each TFLM version, precisely modeling their implementation differences. The evaluation results are shown in Figure 15b. We can observe strong com-patibility of InstMeter across both TFLM versions. For 90% of the models, the relative error rates for the predicted energy cost remain below 40 %, which validates InstMeter ’s consis-tent performance. TFLMvCI has slightly higher relative error rates compared to TFLMv2.4. Nevertheless, the overall re-sults demonstrate InstMeter ’s robustness in accommodating variations across software versions. 
+
+Robustness with different compiler settings. The im-pact of compiler options on the prediction of energy con-sumption is often overlooked in prior studies. However, com-piler options can significantly influence the execution order and frequency of program instructions, thereby affecting the overall energy cost. To investigate these effects, we evaluate two representative compiler options: -Os (optimized for min-imal code size) and -O2 (optimized for maximum execution speed). We leverage the profiling libraries compiled at -O0 to directly predict performance at -O2 and -Os . The results are shown in Figure 16a. We can observe the consistent perfor-mance of InstMeter across both compiler settings. For 90% of the models, the relative error rates for both -Os and -O2 re-main within 30 %. The -O2 option yields slightly less accurate results, because we use libraries profiled at -O0 , while the option -O2 introduces structural changes to the code, such as loop unrolling and other optimizations for improving the execution speed, which slightly degrade prediction accu-racy. In summary, the results in Figure 16a demonstrate that our InstMeter maintains strong adaptability and robustness across different compilation environments. 
+
+Robustness across different applications. Besides the default KWS application, we also evaluate InstMeter for an-other representative application: image recognition (using the CIFAR-10 dataset). KWS and image recognition represent distinct tasks with different data types, model architectures, and operator patterns. The DL models for KWS are light-weight and process short audio clips, whereas the DL models for the image recognition application are deeper and take images as input. The results are shown in Figure 16b. We can observe that InstMeter maintains strong prediction accu-racy across both tasks, with over 90% of the models having a relative error of less than 20%. This confirms InstMeter ’s robustness across different DL tasks. 
+
+Robustness under DVFS configurations. We further evaluate InstMeter under two DVFS configurations on the STM32F767ZI MCU to examine its robustness under realistic power-performance trade-offs. Specifically, we measure the ground-truth energy and latency using the OTII ACE PRO power meter at a high-performance setting (216MHz@1.3V) 
+
+> 12
+
+and a low-power setting (120MHz@1.1V). Note that, follow-ing common practice [ 24 , 33 ], the DVFS setting is configured at the beginning of inference execution and remains fixed throughout inference, as intra-inference voltage/frequency switching often introduces significant overhead. Figure 16c shows, across these two DVFS operating points, InstMeter achieves a relative prediction error of less than 25% for over 90% of the models, confirming its reliable prediction accuracy and adaptability to different DVFS settings. 
+
+Robustness under different temperature conditions. 
+
+We also evaluate the robustness of InstMeter ’s predictions un-der different temperatures. We use an FLIR E4 infrared cam-era to monitor the MCU chip’s surface temperature. Specifi-cally, we measure the ground-truth energy cost at two dis-tinct temperature conditions: an indoor scenario with the chip’s surface temperature staying about 21 ±2◦C, and an out-door scenario with the chip’s surface temperature reaching 
+
+43 ±2◦C. The performance evaluation results of InstMeter are shown in Figure 16d. We can observe that InstMeter , trained using 5 samples at 21 °C, can accurately predict the energy cost at both 21 °C and 43 °C, with nearly identical accuracy. Likewise, InstMeter trained at 43 °C maintains similar pre-diction accuracy across both temperature conditions. This cross-temperature evaluation demonstrates that InstMeter ’s prediction error remains consistently below around 22% for over 90% of the tested models, confirming its stability and reliability across typical operating temperature ranges. 
+
+Robustness across different GCC versions. Finally, we evaluate InstMeter across two widely-used GCC compiler versions (v7.3, v10.3) to assess its robustness against compiler-induced variations. Different compiler versions can impact instruction scheduling, optimization behaviors, and resulting execution patterns, thereby affecting the energy cost. The evaluation results are shown in Figure 16e. We can see that InstMeter achieves consistently accurate predictions across both GCC versions, with over 90% of the models exhibiting a relative error below 20%. This shows InstMeter ’s strong resilience to variations caused by different compiler versions. 
+
+## 6 Discussion & Related Work 
+
+Generalization to MCUs with hardware accelerators. 
+
+Our current implementation of InstMeter relies on the Ten-sorFlow Lite for Microcontrollers (TFLM) framework, which does not directly support hardware accelerators (e.g., Ar-duino Nicola Voice, MAX78000) due to their different soft-ware stacks. These accelerators use their own closed-source tools instead of TFLM, making the generalization of InstMeter on them challenging. We leave extending TFLM to directly support such accelerators as a future research direction. 
+
+Impact of thermal physics. Extreme temperature affects physical properties like leakage current and MOSFET thresh-olds. These thermal variances are treated as environmental factors beyond the scope of our static analysis. Consequently, the dynamic performance impact triggered by thermal throt-tling is not currently modeled in our system. We leave ex-tending our framework to account for these temperature-dependent fluctuations as a future work. 
+
+Limitation of the loop-mapping algorithm. Our pre-dictor has higher errors at the aggressive compiler optimiza-tion levels such as -O2 . This is because aggressive optimiza-tions greatly alter loop structures through transformations like loop fusion or fission, making structural mapping more challenging. We leave this improvement as future work. 
+
+Requiring access to source and disasm codes. InstMeter requires access to both source and disasm code, which may pose technical challenges for adapting to new MCU architec-tures or compiler versions when help is needed. To mitigate this, we document our step-by-step methods, openly pro-vide the specific TFLM version used, and release our prebuilt instruction library. These resources aim to significantly sim-plify the customized adaptations for future researchers. 
+
+Energy and latency prediction in NAS. Studies [ 34 , 36 ]are based on direct device measurements, which are accurate but incur significant overhead. To improve efficiency, some solutions have adopted lookup tables [ 9 ] or MACs-based models [ 7 , 20 , 25 ] to balance prediction speed and accuracy. Recent advances have leveraged non-linear models, such as BRP-NAS [ 14 ], which employs graph convolutional networks for structural learning, and nn-Meter [ 43 ], which uses layer fusion rules and random forests for greater accuracy. How-ever, they need extensive training data (1000’s of samples). Our InstMeter leverages hardware-specific instructions, the lowest-level features of MCUs, to accurately estimate the energy and latency of deep learning models. Due to its strong linearity property, InstMeter is simpler and more accurate. 
+
+## 7 Conclusion 
+
+We designed InstMeter , an instruction-level framework that can rapidly construct linear predictors to accurately estimate the energy and latency costs of deep learning model infer-ence on MCUs. InstMeter achieves superior performance compared to the state-of-the-art methods. Extensive experi-ments demonstrated the generalization and robustness per-formance of the proposed InstMeter across various MCUs (ARM Cortex-M4, M7, M33, RISC-V-based ESP32C3), GCC (v7.3, v10.3), applications (keyword spotting, image recogni-tion), DVFS, temperatures (21 °C, 43 °C), compiler optimiza-tions (-Os, -O2), and TFLM versions (v2.4, vCI). 
+
+Acknowledgment: This work is partly supported by the NWO LuxSenz project funded through the TOP Grant (Mod-ule 1) under project number 612.001.854, and the EU’s Hori-zon Europe HarmonicAI project under the HORIZON-MSCA-2022-SE-01 scheme with grant agreement number 101131117. 
+
+> 13
+
+## References 
+
+[1] 2022. cxx2flow. https://github.com/Enter-tainer/cxx2flow. [2] 2025. Edge Impulse. https://edgeimpulse.com/. [3] 2025. STM32 AI. https://stm32ai.st.com/. [4] Arm Ltd. 2025. Cortex-M Technical Reference Manual. https: //developer.arm.com/documentation/#numberOfResults=48&&cf-navigationhierarchiesproducts=%20IP%20Products,Processors, Cortex-M [5] AudioXpress News. 2025. GreenWaves Ramps Up Production of GAP9 Hearables Platform. https://audioxpress.com/news/greenwaves-ramps-up-production-of-gap9-hearables-platform [6] Abu Bakar, Rishabh Goel, Jasper de Winkel, Jason Huang, Saad Ahmed, Bashima Islam, Przemysław Pawełczak, Kasım Sinan Yıldırım, and Josiah Hester. 2023. Protean: An Energy-Efficient and Heterogeneous Platform for Adaptive and Hardware-Accelerated Battery-Free Com-puting. In Proceedings of the ACM Conference on Embedded Networked Sensor Systems (SenSys) .[7] Colby Banbury, Chuteng Zhou, Igor Fedorov, Ramon Matas, Urmish Thakker, Dibakar Gope, Vijay Janapa Reddi, Matthew Mattina, and Paul Whatmough. 2021. Micronets: Neural network architectures for deploying tinyML applications on commodity microcontrollers. In 
+
+Proceedings of Machine Learning and Systems (MLSys) .[8] Martin Breitbach, Janick Edinger, Siim Kaupmees, Heiko Trötsch, Christian Krupitzer, and Christian Becker. 2021. Voltaire: Precise energy-aware code offloading decisions with machine learning. In Pro-ceedings of the IEEE International Conference on Pervasive Computing and Communications (PerCom) .[9] Han Cai, Ligeng Zhu, and Song Han. 2018. Proxylessnas: Direct neu-ral architecture search on target task and hardware. arXiv preprint arXiv:1812.00332 (2018). [10] Inho Cho, Seo Jin Park, Ahmed Saeed, Mohammad Alizadeh, and Adam Belay. 2024. LDB: An Efficient Latency Profiling Tool for Multithreaded Applications. In Proceedings of the USENIX Symposium on Networked Systems Design and Implementation (NSDI) .[11] Luigi Pietro Cordella, Pasquale Foggia, Carlo Sansone, Mario Vento, et al . 2001. An improved algorithm for matching large graphs. Citeseer. [12] Robert David, Jared Duke, Advait Jain, Vijay Janapa Reddi, Nat Jeffries, Jian Li, Nick Kreeger, Ian Nappier, Meghna Natraj, Tiezhen Wang, et al .2021. Tensorflow lite micro: Embedded machine learning for tinyML systems. In Proceedings of Machine Learning and Systems (MLSys) .[13] Xuanyi Dong and Yi Yang. 2020. Nas-bench-201: Extending the scope of reproducible neural architecture search. arXiv preprint arXiv:2001.00326 (2020). [14] Lukasz Dudziak, Thomas Chau, Mohamed Abdelfattah, Royson Lee, Hyeji Kim, and Nicholas Lane. 2020. Brp-nas: Prediction-based nas using gcns. Advances in Neural Information Processing Systems (2020). [15] Electronics Sourcing. 2025. MCU vendors broaden offerings as Edge AI push intensifies. https://electronics-sourcing.com/2025/05/16/mcu-vendors-broaden-offerings-as-edge-ai-push-intensifies/ [16] Eva García-Martín, Crefeda Faviola Rodrigues, Graham Riley, and Håkan Grahn. 2019. Estimation of energy consumption in machine learning. J. Parallel and Distrib. Comput. (2019). [17] Marco Giordano, Philipp Mayer, and Michele Magno. 2020. A Battery-Free Long-Range Wireless Smart Camera for Face Detection. In Pro-ceedings of the ACM Workshop on Energy Harvesting & Energy-Neutral Sensing Systems (ENSsys) .[18] Yi Gui, Yao Wan, Hongyu Zhang, Huifang Huang, Yulei Sui, Guandong Xu, Zhiyuan Shao, and Hai Jin. 2022. Cross-language binary-source code matching with intermediate representations. In Proceedings of the IEEE International Conference on Software Analysis, Evolution and Reengineering (SANER) .[19] Aric A. Hagberg, Daniel A. Schult, and Pieter J. Swart. 2008. Explor-ing Network Structure, Dynamics, and Function using NetworkX. In 
+
+Proceedings of the Python in Science Conference .[20] Seunghyeok Jeon, Yonghun Choi, Yeonwoo Cho, and Hojung Cha. 2023. HarvNet: Resource-Optimized Operation of Multi-Exit Deep Neural Networks on Energy Harvesting Devices. In Proceedings of the ACM Conference on Mobile Systems, Applications and Services (MobiSys) .[21] Ling Jiang, Junwen An, Huihui Huang, Qiyi Tang, Sen Nie, Shi Wu, and Yuqun Zhang. 2024. BinaryAI: Binary Software Composition Analysis via Intelligent Binary Source Code Matching. In Proceedings of the IEEE/ACM International Conference on Software Engineering (ICSE) .[22] Petar Jokic, Stephane Emery, and Luca Benini. [n. d.]. Battery-Less Face Recognition at the Extreme Edge. In Proceedings of the IEEE Inter-national New Circuits and Systems Conference (NEWCAS) .[23] Michael A Laurenzano, Ananta Tiwari, Adam Jundt, Joshua Peraza, William A Ward, Roy Campbell, and Laura Carrington. 2014. Charac-terizing the performance-energy tradeoff of small ARM cores in HPC computation. In Proceedings of the Euro-Par International Conference on Parallel Processing .[24] Xiangjie Li, Yingtao Shen, An Zou, and Yehan Ma. 2023. EENet: Energy efficient neural networks with run-time power management. In 2023 60th ACM/IEEE Design Automation Conference (DAC) .[25] Edgar Liberis, Łukasz Dudziak, and Nicholas D. Lane. 2021. 𝜇 NAS: Constrained Neural Architecture Search for Microcontrollers. In Pro-ceedings of the Workshop on Machine Learning and Systems (EuroML-Sys) .[26] Ji Lin, Wei-Ming Chen, Yujun Lin, John Cohn, Chuang Gan, and Song Han. 2020. MCUNet: Tiny Deep Learning on IoT Devices. In Proceedings of the Advances in Neural Information Processing Systems (NeurIPS) .[27] Hao Liu, Qing Wang, and Marco Zuniga. 2025. SolarML: Optimizing Sensing and Inference for Solar-Powered TinyML Platforms. In 2025 Design, Automation & Test in Europe Conference (DATE) . IEEE. [28] Dhaval Miyani, Zhen Huang, and David Lie. 2017. Binpro: A tool for binary source code provenance. arXiv preprint arXiv:1711.00830 
+
+(2017). [29] Saeejith Nair, Saad Abbasi, Alexander Wong, and Mohammad Javad Shafiee. 2022. Maple-edge: A runtime latency predictor for edge de-vices. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition (CVPR) .[30] Kris Nikov, Kyriakos Georgiou, Zbigniew Chamski, Kerstin Eder, and Jose Nunez-Yanez. 2022. Accurate Energy Modelling on the Cortex-M0 Processor for Profiling and Static Analysis. In Proceedings of the IEEE International Conference on Electronics, Circuits and Systems (ICECS) .[31] Daniele Palossi, Antonio Loquercio, Francesco Conti, Eric Flamand, Davide Scaramuzza, and Luca Benini. 2018. Ultra low power deep-learning-powered autonomous nano drones. In Proceedings of IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS) .[32] Biswajit Paria, Kirthevasan Kandasamy, and Barnabás Póczos. 2020. A flexible framework for multi-objective bayesian optimization using random scalarizations. In Proceedings of the Uncertainty in Artificial Intelligence Conference (UAI), PMLR .[33] Nhat Pham, Hong Jia, Minh Tran, Tuan Dinh, Nam Bui, Young Kwon, Dong Ma, Phuc Nguyen, Cecilia Mascolo, and Tam Vu. 2022. PROS: An Efficient Pattern-Driven Compressive Sensing Framework for Low-Power Biopotential-Based Wearables with on-Chip Intelligence. In 
+
+Proceedings of the International Conference on Mobile Computing and Networking (MobiCom) .[34] Ye Qiao, Haocheng Xu, Yifan Zhang, and Sitao Huang. 2024. MONAS: Efficient Zero-Shot Neural Architecture Search for MCUs. arXiv preprint arXiv:2408.15034 (2024). [35] Hex-Rays SA. 2020. IDA Pro: The Interactive Disassembler. https: //hex-rays.com/ida-pro/. Version 7.6. 
+
+> 14
+
+[36] Swapnil Sayan Saha, Sandeep Singh Sandha, Siyou Pei, Vivek Jain, Ziqi Wang, Yuchen Li, Ankur Sarker, and Mani Srivastava. 2022. Auritus: An open-source optimization toolkit for training and development of human movement models and filters using earables. Proceedings of the ACM on Interactive, Mobile, Wearable and Ubiquitous Technologies 
+
+(2022). [37] Mariagiovanna Sami, Donatella Sciuto, Cristina Silvano, and Vitto-rio Zaccaria. 2002. An instruction-level energy model for embedded VLIW architectures. IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems (2002). [38] Robert Tarjan. 1972. Depth-first search and linear graph algorithms. 
+
+SIAM journal on computing (1972). [39] Vivek Tiwari, Sharad Malik, Andrew Wolfe, and Mike Tien-Chien Lee. 1996. Instruction level power analysis and optimization of software. 
+
+Technologies for wireless computing (1996). [40] Pete Warden and Daniel Situnayake. 2019. TinyML: Machine learning with TensorFlow Lite on Arduino and ultra-low-power microcontrollers .O’Reilly Media. [41] Zeping Yu, Wenxin Zheng, Jiaqi Wang, Qiyi Tang, Sen Nie, and Shi Wu. 2020. Codecmr: Cross-modal retrieval for function-level binary source code matching. In Proceedings of the Advances in Neural Information Processing Systems (NeurIPS) .[42] Zimu Yuan, Muyue Feng, Feng Li, Gu Ban, Yang Xiao, Shiyang Wang, Qian Tang, He Su, Chendong Yu, Jiahuan Xu, et al . 2019. B2sfinder: Detecting open-source software reuse in cots software. In Proceedings of the IEEE/ACM Conference on Automated Software Engineering (ASE) .[43] Li Lyna Zhang, Shihao Han, Jianyu Wei, Ningxin Zheng, Ting Cao, Yuqing Yang, and Yunxin Liu. 2021. Nn-meter: Towards accurate latency prediction of deep-learning model inference on diverse edge devices. In Proceedings of the ACM International Conference on Mobile Systems, Applications, and Services (MobiSys) .[44] Qian Zhang, Yubin Lan, Kaiyi Guo, and Dong Wang. 2024. Lipwatch: Enabling Silent Speech Recognition on Smartwatches using Acoustic Sensing. Proceedings of the ACM on Interactive, Mobile, Wearable and Ubiquitous Technologies (2024). [45] Yuchen Zhao, Sayed Saad Afzal, Waleed Akbar, Osvy Rodriguez, Fan Mo, David Boyle, Fadel Adib, and Hamed Haddadi. 2022. Towards Battery-Free Machine Learning and Inference in Underwater Environ-ments. In Proceedings of the International Workshop on Mobile Comput-ing Systems and Applications (HotMobile) .[46] Davide Zoni, Andrea Galimberti, and William Fornaciari. 2023. A sur-vey on run-time power monitors at the edge. ACM Computing Surveys 
+
+(2023). 
+
+## Appendix A Further Discussions and Related Work 
+
+Extension to CPUs and GPUs. Extending InstMeter to CPUs and GPUs is challenging because their execution is far less deterministic than on MCUs. CPUs introduce deep pipelines and caches, while GPUs add massive parallelism, thread divergence, and memory coalescing. Moreover, het-erogeneous CPU–GPU coordination and data movement introduce further variability in the latency and energy cost of deep-learning model inference. Modeling these effects will require detailed micro-architectural knowledge, but is an important direction for follow-up research of InstMeter. 
+
+Source-disasm code matching. BinPro uses the string literals and function invocation information of the target codes, and then employs the Hungarian algorithm to match these two languages [ 28 ]. Building on this, B2SFinder en-hances the feature set by incorporating ‘if’ and ‘switch’ state-ments, paired with a weighted matching algorithm for im-proved accuracy [ 42 ]. Further advancements are seen with CodeCMR, which utilizes a graph neural network to analyze control flow graphs and an LSTM model to process tradi-tional literals. These are then linked through dense layers to facilitate effective matching [ 41 ]. Expanding on cross-language capabilities, tools like study [ 18 ] and BinaryAI [ 21 ]convert disasm code into an intermediate representation (IR) and pseudocode, respectively. These are then processed using transformer-based DL algorithms. All these methods focus on library and function levels matching. In InstMeter ,our design centers on loop-level code matching, providing a more granulated and precise analysis. In addition, CodeCMR, BinaryAI and [ 18 ] are based on DL-related methods, which require extensive data collection. Building upon BinPro [ 28 ]and B2SFinder [ 42 ], we extract structural and operator infor-mation from source and disasm code, allowing us to achieve finer-granularity loop-level source-disasm code matching. 
+
+## Appendix B Evaluation on the Latency Prediction B.1 Latency: Comparison with SOTA 
+
+InstMeter vs. MACs-based estimators. Figures 17a-17c shows the relative latency prediction errors of InstMeter compared to MACs-based predictors, using the mixed-layer dataset (ML-Data) with training data sizes of 5, 20 and 50 0 50 100 150 200 
+
+Relative Error Rate (%) 
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> CDF
+> InstMeter
+> MACs
+> Average
+
+(a) Ours vs. MACs (5 samples) 0 50 100 150 200 
+
+Relative Error Rate (%)  
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> CDF
+> InstMeter
+> MACs
+> Average
+
+(b) Ours vs MACs (20 samples) 0 50 100 150 200 
+
+Relative Error Rate (%) 
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> CDF
+> InstMeter
+> MACs
+> Average
+
+(c) Ours vs. MACs (50 samples) 0 50 100 150 200 
+
+Relative Error Rate (%)  
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> CDF
+> InstMeter
+> nn-Meter(300)
+> nn-Meter(500)
+
+(d) Ours vs. nn-Meter 
+
+Figure 17: The latency prediction comparisons of our InstMeter vs. MAC-based estimators and nn-Meter, with varying training data sizes on the ML-Data. 
+
+> 15
+
+samples, each tested over 10 random trials. InstMeter consis-tently achieves significantly lower prediction errors across all training set sizes and trials. Specifically, the 90th percentile relative error for InstMeter remains below approximately 30%, whereas MACs-based methods exceed 200%, demon-strating over 6.5 × improvement. These results clearly con-firm the superior robustness and accuracy of our cycle-based latency prediction compared to MAC-based estimators. 
+
+InstMeter vs. nn-Meter. Figure 17d compares latency es-timation performance between InstMeter and nn-Meter [ 43 ], where nn-Meter is trained with 300 and 500 samples using its original sampling approach, and InstMeter uses only 5 sam-ples from ML-Data. Results show that InstMeter achieves significantly lower and more stable error rates (0%–40%) compared to nn-Meter (exceeding 200%). Specifically, at the 90th percentile, nn-Meter’s errors reach about 100%, whereas InstMeter consistently maintains error rates below 30%, demon-strating over 3 × improvement with 100 × fewer samples. 
+
+## B.2 Latency: Generalization & Robustness 
+
+Generalization on other ARM MCUs and the RISC-V-based MCU. We evaluate the cross-platform generalization of InstMeter ’s latency prediction from Cortex-M4 to addi-tional MCUs: Cortex-M7, M33, and RISC-V-based ESP32-C3. For each MCU, we individually rebuild instruction libraries using platform-specific disassembled codes. As shown in Fig-ure 18a, InstMeter achieves consistent accuracy across these diverse architectures, with latency prediction errors under 30% for M4, M7, and ESP32-C3, and under 40% for M33. The slightly higher error on M33 is due to approximating CPI val-ues from M4, caused by incomplete official documentation. These results confirm that InstMeter reliably generalizes la-tency estimation across diverse MCU platforms. 
+
+Generalization across different TFLM versions. We further evaluate InstMeter ’s latency prediction generaliza-tion across two popular TFLM library versions: v2.4 and vCI. For each version, we generate instruction libraries using corresponding source files, capturing their implementation differences explicitly. The latency prediction results, shown in Figure 18b, demonstrate strong generalization, with er-rors consistently below 40% for 90% of the models. While 0 50 100 150 200     
+
+> Relative Error Rate (%)
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF  M4 M7 M33 RISC-V Average
+> (a) Different MCUs 050 100 150 200
+> Relative Error Rate (%)
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF
+> TFLMv24 TFLMvCI Average (b) Different TFLM versions
+
+Figure 18: Generalization on latency prediction across different MCUs and TFLM versions. 
+
+TFLMvCI yields slightly higher errors than v2.4, these re-sults confirm InstMeter ’s capability to generalize latency prediction across software library variations. 
+
+Robustness with different compiler settings. We as-sess the robustness of InstMeter ’s latency predictions under two widely used compiler optimizations: -Os (size optimiza-tion) and -O2 (speed optimization). Predictions are made by reusing the Cortex-M7 instruction library compiled at 
+
+-O0 , deliberately introducing instruction-level variations. The results, shown in Figure 19a, indicate robust prediction ac-curacy, with latency errors within 30% for over 90% of the models. Higher errors with -O2 are attributable to aggressive code optimizations, such as loop unrolling, which slightly degrade prediction accuracy. These results confirm the re-silience of InstMeter ’s latency prediction against common compiler variations. 
+
+Robustness across different applications. We further test the latency prediction performance of InstMeter across the keyword spotting (KWS) and image recognition (using CIFAR-10 dataset) applications. We reuse the instruction li-brary built from Cortex-M4 ( -O0 ), despite variations in data types, model complexity, and operator patterns between tasks. The latency prediction results are given in Figure 19b, showing that InstMeter can consistently achieve errors be-low 25% for over 90% of models across the two applications. This demonstrates InstMeter ’s reliable latency prediction across diverse DL workloads and input modalities. 
+
+Robustness under DVFS configurations. We evaluate the robustness of InstMeter ’s latency predictions across real-istic DVFS settings (216MHz@1.3V and 120MHz@1.1V) on the STM32F767ZI MCU, reusing the instruction library gener-ated from Teensy 4.1 (Cortex-M7, -O0 ). Ground-truth latency measurements are acquired using accurate instrumentation. The results, as shown in Figure 19c, indicate that over 90% of the latency predictions have errors under 20% across both DVFS points. These results confirm that InstMeter reliably accommodates latency variations induced by typical DVFS settings encountered in embedded scenarios. 
+
+Robustness under different temperature conditions. 
+
+We further evaluate InstMeter ’s latency prediction stability under realistic temperature variations, predicting latency at MCU chip temperatures of 21 °C and 43 °C using a common instruction library ( -O0 ). The chip temperatures are mea-sured with an FLIR E4 infrared camera. The results, shown in Figure 19d, demonstrate consistently accurate latency pre-dictions, with over 90% of models showing errors below 25% at both temperature conditions. These results highlight the minimal impact of temperature variations on InstMeter ’s latency prediction, demonstrating practical robustness in typical embedded operating environments.    
+
+> 16 050 100 150 200
+
+Relative Error Rate (%) 
+
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF
+> -Os -O2 Average
+
+(a) Compiler settings 0 50 100 150 200 
+
+Relative Error Rate (%)  
+
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF
+> KWS CIFAR10 Average
+
+(b) Applications 0 50 100 150 200 
+
+Relative Error Rate (%)  
+
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF
+> 120 Mhz @ 1.1V 216 Mhz @ 1.3V Average
+
+(c) DVFS settings 0 50 100 150 200 
+
+Relative Error Rate (%)      
+
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF  21°C 21°C
+> 21°C 43°C
+> 43°C 43°C
+> 43°C 21°C
+> Average
+
+(d) Temperatures 0 50 100 150 200 
+
+Relative Error Rate (%)  
+
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> CDF
+> GCC7.3 GCC10.3 Average
+
+(e) GCC versions 
+
+Figure 19: Robustness on the latency prediction across different TFLM versions, applications, DVFS settings, temperatures, and GCC compilers. Robustness across different GCC versions. Lastly, we evaluate the latency prediction of InstMeter across GCC com-piler versions (v7.3 and v10.3). Different compiler versions influence instruction scheduling and optimization, poten-tially affecting latency. Despite such potential variations, the results, as shown in Figure 19e, demonstrate that InstMeter can achieve latency prediction errors below 20% for over 90% of tested models. This result emphasizes InstMeter ’s strong resilience to compiler-induced variations, affirming its practical robustness in diverse compilation environments.
