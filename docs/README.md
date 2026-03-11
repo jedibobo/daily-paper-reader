@@ -6,74 +6,76 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-10
-- 运行时间：2026-03-10 19:38:14 UTC
+- 最新运行日期：2026-03-11
+- 运行时间：2026-03-11 19:31:54 UTC
 - 运行状态：成功
 - 本次总论文数：18
 - 精读区：7
 - 速读区：11
 
 ### 今日简报（AI）
-今日精选 18 篇前沿论文，深度解析 OpenPangu 推理加速与 Chiplet 架构的碳感知优化。
-- 详情：[/202603/10/README](/202603/10/README)
+今日速递 18 篇前沿成果，重点攻克 YOLO 架构搜索基准与超节点 AI 框架并行难题。
+满分论文 YOLO-NAS-Bench 揭示了自进化预测器的威力，HyperParallel 则为大规模 AI 计算提供了新范式。
+建议优先研读模型自动化设计与硬件感知优化，掌握提升边缘端推理性能与可信度的关键技术。
+- 详情：[/202603/11/README](/202603/11/README)
 
 ### 精读区论文标签
-1. [Accelerating OpenPangu Inference on NPU via Speculative Decoding](/202603/10/2603.03383v1-accelerating-openpangu-inference-on-npu-via-speculative-decoding)  
+1. [YOLO-NAS-Bench: A Surrogate Benchmark with Self-Evolving Predictors for YOLO Architecture Search](/202603/11/2603.09405v1-yolo-nas-bench-a-surrogate-benchmark-with-self-evolving-predictors-for-yolo-architecture-search)  
+   标签：评分：10.0/10、query:hwnas
+   evidence：针对YOLO架构搜索的算子和深度代理基准
+2. [HyperParallel: A Supernode-Affinity AI Framework](/202603/11/2603.03731v1-hyperparallel-a-supernode-affinity-ai-framework)  
    标签：评分：9.0/10、query:hwnas
-   evidence：在NPU硬件上加速推理
-2. [CarbonPATH: Carbon-aware pathfinding and architecture optimization for chiplet-based AI systems](/202603/10/2603.03878v1-carbonpath-carbon-aware-pathfinding-and-architecture-optimization-for-chiplet-based-ai-systems)  
+   evidence：硬件感知编排与自动化分层内存管理
+3. [VMXDOTP: A RISC-V Vector ISA Extension for Efficient Microscaling (MX) Format Acceleration](/202603/11/2603.04979v1-vmxdotp-a-risc-v-vector-isa-extension-for-efficient-microscaling-mx-format-acceleration)  
    标签：评分：9.0/10、query:hwnas
-   evidence：跨应用、架构和芯片的AI系统协同设计
-3. [AI+HW 2035: Shaping the Next Decade](/202603/10/2603.05225v1-aihw-2035-shaping-the-next-decade)  
+   evidence：用于高效微缩放格式加速的 RISC-V 指令集扩展
+4. [ArcLight: A Lightweight LLM Inference Architecture for Many-Core CPUs](/202603/11/2603.07770v1-arclight-a-lightweight-llm-inference-architecture-for-many-core-cpus)  
    标签：评分：9.0/10、query:hwnas
-   evidence：AI与硬件协同设计及效率提升的十年路线图
-4. [DLRMamba: Distilling Low-Rank Mamba for Edge Multispectral Fusion Object Detection](/202603/10/2603.06920v1-dlrmamba-distilling-low-rank-mamba-for-edge-multispectral-fusion-object-detection)  
+   evidence：挖掘多核CPU的计算潜力和内存管理
+5. [PIM-SHERPA: Software Method for On-device LLM Inference by Resolving PIM Memory Attribute and Layout Inconsistencies](/202603/11/2603.09216v1-pim-sherpa-software-method-for-on-device-llm-inference-by-resolving-pim-memory-attribute-and-layout-inconsistencies)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对边缘遥感检测的硬件感知Mamba模型蒸馏
-5. [AutoResearch-RL: Perpetual Self-Evaluating Reinforcement Learning Agents for Autonomous Neural Architecture Discovery](/202603/10/2603.07300v1-autoresearch-rl-perpetual-self-evaluating-reinforcement-learning-agents-for-autonomous-neural-architecture-discovery)  
+   evidence：针对PIM感知的内存布局与属性管理的软件方法
+6. [TrainDeeploy: Hardware-Accelerated Parameter-Efficient Fine-Tuning of Small Transformer Models at the Extreme Edge](/202603/11/2603.09511v1-traindeeploy-hardware-accelerated-parameter-efficient-fine-tuning-of-small-transformer-models-at-the-extreme-edge)  
    标签：评分：9.0/10、query:hwnas
-   evidence：资源约束下的自动神经架构发现
-6. [GOMA: Geometrically Optimal Mapping via Analytical Modeling for Spatial Accelerators](/202603/10/2603.07962v1-goma-geometrically-optimal-mapping-via-analytical-modeling-for-spatial-accelerators)  
+   evidence：极端边缘SoC的设备端训练
+7. [Compiler-First State Space Duality and Portable $O(1)$ Autoregressive Caching for Inference](/202603/11/2603.09555v1-compiler-first-state-space-duality-and-portable-o1-autoregressive-caching-for-inference)  
    标签：评分：9.0/10、query:hwnas
-   evidence：空间加速器上最优映射的解析建模
-7. [EAGLE-Pangu: Accelerator-Safe Tree Speculative Decoding on Ascend NPUs](/202603/10/2603.08088v1-eagle-pangu-accelerator-safe-tree-speculative-decoding-on-ascend-npus)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：NPU上的加速器安全树状推测解码
+   evidence：编译器优先设计，将算法映射到XLA优化通道
 
 ### 速读区论文标签
-1. [Kunlun: Establishing Scaling Laws for Massive-Scale Recommendation Systems through Unified Architecture Design](/202603/10/2602.10016v2-kunlun-establishing-scaling-laws-for-massive-scale-recommendation-systems-through-unified-architecture-design)  
+1. [Adaptive Structured Pruning of Convolutional Neural Networks for Time Series Classification](/202603/11/2602.12744v1-adaptive-structured-pruning-of-convolutional-neural-networks-for-time-series-classification)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过架构设计提高模型FLOPs利用率 (MFU)
-2. [Area-Efficient In-Memory Computing for Mixture-of-Experts via Multiplexing and Caching](/202603/10/2602.10254v1-area-efficient-in-memory-computing-for-mixture-of-experts-via-multiplexing-and-caching)  
+   evidence：针对资源受限设备的结构化剪枝
+2. [DPUConfig: Optimizing ML Inference in FPGAs Using Reinforcement Learning](/202603/11/2602.12847v1-dpuconfig-optimizing-ml-inference-in-fpgas-using-reinforcement-learning)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对MoE Transformer的面积高效存内计算架构
-3. [Automated Model Design using Gated Neuron Selection in Telecom](/202603/10/2602.10854v1-automated-model-design-using-gated-neuron-selection-in-telecom)  
+   evidence：使用强化学习优化FPGA中的机器学习推理资源分配
+3. [Chimera: Neuro-Symbolic Attention Primitives for Trustworthy Dataplane Intelligence](/202603/11/2602.12851v1-chimera-neuro-symbolic-attention-primitives-for-trustworthy-dataplane-intelligence)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限网络环境定制的NAS方法
-4. [RooflineBench: A Benchmarking Framework for On-Device LLMs via Roofline Analysis](/202603/10/2602.11506v1-rooflinebench-a-benchmarking-framework-for-on-device-llms-via-roofline-analysis)  
+   evidence：可编程数据平面的硬件感知映射协议
+4. [Memory-Efficient Structured Backpropagation for On-Device LLM Fine-Tuning](/202603/11/2602.13069v1-memory-efficient-structured-backpropagation-for-on-device-llm-fine-tuning)  
    标签：评分：8.0/10、query:hwnas
-   evidence：资源受限边缘硬件上设备端大模型的基准测试框架
-5. [Understanding the Physics of Key-Value Cache Compression for LLMs through Attention Dynamics](/202603/10/2603.01426v1-understanding-the-physics-of-key-value-cache-compression-for-llms-through-attention-dynamics)  
+   evidence：用于设备端微调的内存高效反向传播
+5. [Joint Optimization of Model Partitioning and Resource Allocation for Anti-Jamming Collaborative Inference Systems](/202603/11/2603.02579v1-joint-optimization-of-model-partitioning-and-resource-allocation-for-anti-jamming-collaborative-inference-systems)  
    标签：评分：7.0/10、query:hwnas
-   evidence：KV缓存内存瓶颈与压缩
-6. [TQCodec: Towards neural audio codec for high-fidelity music streaming](/202603/10/2603.01592v1-tqcodec-towards-neural-audio-codec-for-high-fidelity-music-streaming)  
+   evidence：边缘协作推理的模型分区与资源分配
+6. [ATD: Improved Transformer with Adaptive Token Dictionary for Image Restoration](/202603/11/2603.02581v1-atd-improved-transformer-with-adaptive-token-dictionary-for-image-restoration)  
    标签：评分：7.0/10、query:hwnas
-   evidence：高效的设备端计算和非对称网络设计
-7. [Closing the Gap Between Float and Posit Hardware Efficiency](/202603/10/2603.01615v1-closing-the-gap-between-float-and-posit-hardware-efficiency)  
+   evidence：在Transformer架构中平衡性能与计算负担
+7. [A New Class of Geometric Analog Error Correction Codes for Crossbar Based In-Memory Computing](/202603/11/2603.03723v1-a-new-class-of-geometric-analog-error-correction-codes-for-crossbar-based-in-memory-computing)  
    标签：评分：7.0/10、query:hwnas
-   evidence：提高AI数值格式的硬件效率
-8. [DynaMoE: Dynamic Token-Level Expert Activation with Layer-Wise Adaptive Capacity for Mixture-of-Experts Neural Networks](/202603/10/2603.01697v1-dynamoe-dynamic-token-level-expert-activation-with-layer-wise-adaptive-capacity-for-mixture-of-experts-neural-networks)  
+   evidence：针对基于交叉栏的存内计算加速器的纠错码
+8. [Point Cloud Feature Coding for Object Detection over an Error-Prone Cloud-Edge Collaborative System](/202603/11/2603.03890v1-point-cloud-feature-coding-for-object-detection-over-an-error-prone-cloud-edge-collaborative-system)  
    标签：评分：7.0/10、query:hwnas
-   evidence：MoE中维持计算效率的动态专家激活
-9. [AgilePruner: An Empirical Study of Attention and Diversity for Adaptive Visual Token Pruning in Large Vision-Language Models](/202603/10/2603.01236v1-agilepruner-an-empirical-study-of-attention-and-diversity-for-adaptive-visual-token-pruning-in-large-vision-language-models)  
+   evidence：边缘设备低功耗低延迟特征压缩
+9. [Fast Matrix Multiplication in Small Formats: Discovering New Schemes with an Open-Source Flip Graph Framework](/202603/11/2603.02398v1-fast-matrix-multiplication-in-small-formats-discovering-new-schemes-with-an-open-source-flip-graph-framework)  
    标签：评分：6.0/10、query:hwnas
-   evidence：视觉令牌剪枝以减轻计算开销
-10. [TeraPool: A Physical Design Aware, 1024 RISC-V Cores Shared-L1-Memory Scaled-up Cluster Design with High Bandwidth Main Memory Link](/202603/10/2603.01629v1-terapool-a-physical-design-aware-1024-risc-v-cores-shared-l1-memory-scaled-up-cluster-design-with-high-bandwidth-main-memory-link)  
+   evidence：商品硬件上的快速矩阵乘法方案
+10. [Changing the Game: The Bounce-Bind Ising Machine](/202603/11/2603.02771v1-changing-the-game-the-bounce-bind-ising-machine)  
    标签：评分：6.0/10、query:hwnas
-   evidence：具有高带宽内存链路的物理设计感知集群
-11. [SageBwd: A Trainable Low-bit Attention](/202603/10/2603.02170v1-sagebwd-a-trainable-low-bit-attention)  
+   evidence：解决伊辛机中基础的硬件速度权衡问题
+11. [Stability properties of Minimal Gated Unit neural networks](/202603/11/2603.03017v1-stability-properties-of-minimal-gated-unit-neural-networks)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于加速模型训练和推理的低比特注意力机制
+   evidence：针对有限计算资源的轻量级RNN替代方案
 
 
 <div class="dpr-home-promo-card">

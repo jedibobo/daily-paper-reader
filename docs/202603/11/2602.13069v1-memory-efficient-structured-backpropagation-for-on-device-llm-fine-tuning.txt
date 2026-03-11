@@ -1,0 +1,411 @@
+Title: Memory-Efficient Structured Backpropagation for On-Device LLM Fine-Tuning
+
+URL Source: https://arxiv.org/pdf/2602.13069v1
+
+Published Time: Mon, 16 Feb 2026 02:02:22 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# Memory-Efficient Structured Backpropagation for On-Device LLM Fine-Tuning 
+
+Juneyoung Park, Yuri Hong, Seongwan Kim †, Jaeho Lee †
+
+Opt-AI Inc. 
+
+{jyoung.park, yri.hong, swan.kim, jaeho.lee}@opt-ai.kr 
+
+Abstract 
+
+On-device fine-tuning enables privacy-preserving personalization of large language models, but mobile devices impose severe memory constraints, typically 6–12GB shared across all workloads. Existing approaches force a trade-off between exact gradients with high memory (MeBP) and low memory with noisy estimates (MeZO). We propose Memory-efficient Structured Backpropagation (MeSP), which bridges this gap by manually deriving backward passes that exploit LoRA’s low-rank structure. Our key insight is that the intermediate projection h = xA can be recomputed during backward at minimal cost since rank r ≪ din , eliminating the need to store it. MeSP achieves 49% average memory reduction compared to MeBP on Qwen2.5 models (0.5B–3B) while computing mathe-matically identical gradients. Our analysis also reveals that MeZO’s gradient estimates show near-zero correlation with true gradients (cosine similarity ≈0.001), explaining its slow convergence. MeSP reduces peak memory from 361MB to 136MB for Qwen2.5-0.5B, enabling fine-tuning scenarios previously infeasible on memory-constrained devices. 
+
+1 Introduction 
+
+On-device fine-tuning of large language models has emerged as a promising approach for privacy-preserving personalization, enabling users to adapt models to their data without transmitting sensitive information to cloud servers. However, this capa-bility remains largely theoretical for most mobile devices. Even with parameter-efficient methods like LoRA (Hu et al., 2022), the memory footprint of intermediate activations during backpropagation exceeds the 6–12GB typically available on mo-bile devices. For example, fine-tuning a modest 0.5B parameter model at sequence length 256 re-quires over 360MB of peak memory under standard memory-efficient backpropagation, a significant burden when this memory must be shared with the operating system and other applications. Existing approaches force practitioners into an unsatisfying trade-off. Zeroth-order meth-ods like MeZO (Malladi et al., 2023) achieve inference-level memory usage by estimating gradi-ents through forward passes alone, but their gradi-ent estimates exhibit variance proportional to pa-rameter count, requiring 10–100 × more iterations to converge. Memory-efficient backpropagation (MeBP) (Apple Machine Learning Research, 2024) computes exact gradients with gradient checkpoint-ing, but delegates tensor lifecycle decisions to auto-matic differentiation frameworks, which store more intermediates than mathematically necessary. Interestingly, we observe that LoRA’s low-rank structure offers an unexploited opportunity for memory optimization. The intermediate projec-tion h = xA has shape [batch , seq , r ] where the rank r is typically 8–32. Since r ≪ din , recomput-ing h during the backward pass costs far less than storing it across all LoRA layers. Existing methods treat this computation as a black box, but by manu-ally deriving backward passes, we can determine precisely which tensors to store, when to release them, and what to recompute. Can we achieve the memory efficiency of zeroth-order methods while preserving the gradient ac-curacy of first-order backpropagation? In this pa-per, we answer affirmatively with Memory-efficient Structured Backpropagation (MeSP). Our approach processes transformer blocks (Vaswani et al., 2017) sequentially, storing only block outputs during for-ward and recomputing all intermediates during backward. By deriving explicit backward passes for each transformer component, MeSP provides fine-grained control over tensor lifecycles that auto-matic differentiation cannot achieve. As we demon-strate in Section 5, this reduces peak memory by 62% for Qwen2.5-0.5B while computing mathe-matically identical gradients. 1
+
+> arXiv:2602.13069v1 [cs.LG] 13 Feb 2026
+
+Our contributions are as follows: • We propose MeSP, a memory-efficient train-ing algorithm that achieves 49% average mem-ory reduction compared to MeBP while pre-serving first-order gradient accuracy through manually derived backward passes. • We demonstrate that MeSP reduces peak mem-ory from 361MB to 136MB (62% reduction) for Qwen2.5-0.5B on Apple Silicon, with only 28% computational overhead. • We reveal that MeZO’s gradient estimates are essentially uncorrelated with true gradients (cosine similarity ≈0.001), providing new in-sight into why zeroth-order methods converge slowly. • We release our MLX-based implementation for reproducible on-device training research. 
+
+2 Related Work 
+
+Memory-Efficient Training. Gradient check-pointing (Chen et al., 2016) reduces memory by re-computing activations during backward, achieving 
+
+O(√n) memory complexity. FlashAttention (Dao et al., 2022; Dao, 2023) applies this principle to attention, recomputing softmax weights rather than storing the full attention matrix. MeZO (Malladi et al., 2023) takes a more radical approach, elim-inating backpropagation entirely through zeroth-order gradient estimation. However, the variance of these estimates scales with parameter count, de-grading convergence for large models. MeBP (Ap-ple Machine Learning Research, 2024) combines gradient checkpointing with LoRA on Apple Sili-con, but relies on automatic differentiation which implicitly retains more tensors than necessary. In contrast, our work provides explicit control over tensor lifecycles by manually deriving backward passes, achieving memory efficiency comparable to zeroth-order methods while preserving first-order gradient accuracy. 
+
+Parameter-Efficient Fine-Tuning. Adapter methods (Houlsby et al., 2019) insert trainable bot-tleneck modules between frozen layers. LoRA (Hu et al., 2022) parameterizes weight updates as low-rank matrix products ∆W = AB , reducing trainable parameters from O(dk ) to O(r(d + k)) 
+
+where r ≪ d, k . QLoRA (Dettmers et al., 2023) combines LoRA with 4-bit quantization, achieving up to 4× memory reduction for model weights. De-spite these advances in reducing parameter count, the memory footprint of intermediate activations during training remains a bottleneck for on-device deployment. Unlike previous approaches that focus solely on parameter efficiency, we exploit LoRA’s low-rank structure to optimize activation memory by recomputing the small intermediate projection h = xA rather than storing it. 
+
+On-Device Training. Lin et al. (Lin et al., 2022) demonstrated training under 256KB memory through aggressive quantization and sparse updates. PockEngine (Xu et al., 2023) optimizes compu-tational graphs for mobile deployment. Apple’s MLX (Apple Machine Learning Research, 2023) provides native machine learning support on Ap-ple Silicon with unified memory architecture. We build upon this ecosystem, contributing memory-efficient training algorithms specifically designed to exploit the unique properties of LoRA fine-tuning on unified memory devices. 
+
+3 Background 
+
+This section provides the technical foundation for our approach, covering Low-Rank Adaptation, zeroth-order optimization, and memory-efficient backpropagation. 
+
+3.1 Low-Rank Adaptation (LoRA) 
+
+Low-Rank Adaptation (Hu et al., 2022) is a parameter-efficient fine-tuning method that freezes pre-trained weights and introduces trainable low-rank decomposition matrices. For a linear layer with frozen weight W0 ∈ Rdin ×dout , the forward computation becomes 
+
+y = xW 0 + s · xAB, (1) where A ∈ Rdin ×r and B ∈ Rr×dout are trainable matrices, r ≪ min( din , d out ) is the rank, and s =
+
+α/r is a scaling factor. This formulation reduces the number of trainable parameters from din × dout 
+
+to r × (din + dout ).Given the upstream gradient ∂L/∂y , the gradi-ents for the LoRA parameters are computed as 
+
+∂L ∂B = s · h⊤ ∂L ∂y , ∂L ∂A = x⊤ ∂L ∂h , (2) where h = xA is the intermediate projection and 
+
+∂L ∂h = s · ∂L ∂y B⊤. (3) A key observation is that h has shape [batch , seq , r ].Since r is typically small, in the range of 8 to 32, 2Figure 1: Visualization of LoRA fine-tuning with Memory-efficient Structured Backpropagation (MeSP) compared to Memory-efficient Backpropagation (MeBP). (A) In MeSP, the intermediate LoRA projection h = xA is not cached in the forward pass and is recomputed in the backward pass, then discarded immediately after being used to compute the gradients of A and B. This keeps only a few essential activations in memory at any time, substantially reducing peak memory usage. (B) In MeBP, the intermediate projection h is kept as a forward activation for each LoRA module and later loaded again during backpropagation to compute the gradients. Because these h tensors remain in memory, this leads to higher peak memory usage than MeSP. 
+
+recomputing h during the backward pass requires only O(batch × seq × din × r) operations. This cost is substantially lower than the memory access overhead incurred by storing and retrieving h for long sequences. 
+
+3.2 Zeroth-Order Optimization (MeZO) 
+
+Zeroth-order optimization estimates gradients with-out backpropagation by using finite differences. MeZO (Malladi et al., 2023) approximates the gra-dient as 
+
+∇L(w) ≈ L(w + ϵz ) − L(w − ϵz )2ϵ · z, (4) where z ∼ N (0 , I ) is a random perturbation vec-tor and ϵ is a small constant. The method requires two forward passes per update, one with positively perturbed parameters and one with negatively per-turbed parameters. The resulting gradient estimate is then used to update the weights. This approach achieves memory consumption equivalent to inference, as no intermediate activa-tions need to be stored for backpropagation. How-ever, the variance of the gradient estimate scales linearly with the parameter dimensionality d, that is, Var[ˆ g] = O(d). For models with billions of pa-rameters, this high variance severely degrades the signal-to-noise ratio of the gradient estimates and typically requires 10 to 100 times more iterations to achieve loss reduction comparable to first-order methods (Malladi et al., 2023). 
+
+3.3 Memory-Efficient Backpropagation (MeBP) 
+
+Memory-efficient backpropagation combines gradi-ent checkpointing with automatic differentiation to reduce peak memory usage while computing exact gradients. During the forward pass, only layer out-puts are stored as checkpoints, while intermediate activations within each layer are discarded. During the backward pass, the forward computation for each layer is re-executed to regenerate the required intermediates before computing gradients. This approach reduces memory complexity from 
+
+O(L × I) to O(L × O + I), where L denotes the number of layers, I denotes the size of intermedi-ate activations per layer, and O denotes the output size per layer. Since O ≪ I for typical transformer architectures, this leads to substantial memory sav-ings. However, MeBP relies on automatic differenti-ation frameworks such as mx.grad in MLX or 
+
+torch.autograd in PyTorch to compute gra-dients within each checkpointed segment. These 3Model Method Mem (MB) Time (s) Red.                            
+
+> 0.5B MeBP 360.8 0.68 –MeZO 243.0 0.51 33% MeSP 136.2 0.86 62%
+> 1.5B MeBP 516.2 1.66 –MeZO 376.0 1.21 27% MeSP 262.6 2.17 49%
+> 3B MeBP 637.6 3.21 –MeZO 479.2 2.24 25% MeSP 368.4 4.09 42%
+> Table 1: Memory and time comparison at sequence length 256. MeSP achieves 42–62% memory reduction vs MeBP while computing exact gradients.
+
+frameworks treat the computation as a black box and implicitly determine which tensors to retain for gradient computation. As a result, more in-termediate tensors may be stored than are mathe-matically necessary, since the framework cannot exploit domain-specific structure such as the low-rank property of LoRA projections. 
+
+4 Method 
+
+4.1 Core Idea: Trading Computation for Memory 
+
+The fundamental insight behind MeSP is simple: 
+
+small tensors are cheaper to recompute than to store . In LoRA, the intermediate projection h =
+
+xA has dimensions [batch , seq , r ] where the rank 
+
+r is typically 8–32. Storing h across all LoRA layers (7 per transformer block × 24 blocks = 168 layers for Qwen2.5-0.5B) accumulates significant memory. However, recomputing h requires only a single matrix multiplication with the small matrix 
+
+A, which is fast compared to the memory access overhead of storage and retrieval. This observation leads to our strategy: during the forward pass, we store only the outputs of each transformer block, just enough to restart computa-tion during backward. During the backward pass, we recompute all intermediates on-demand, pro-cess one layer at a time, and immediately release memory after computing gradients. At any point, only a single layer’s intermediates reside in mem-ory. 
+
+4.2 Explicit Gradient Computation for LoRA 
+
+We now formalize how gradients are computed without storing the intermediate h. Consider a LoRA layer with frozen weight W0, trainable ma-                        
+
+> Method 128 256 512 1024
+> MeBP 252.7 360.8 582.4 1050.3 MeZO 199.0 243.0 336.0 524.0 MeSP 110.7 136.2 245.8 513.6
+> Memory Reduction vs MeBP
+> MeZO 21% 33% 42% 50% MeSP 56% 62% 58% 51%
+> Table 2: Peak memory (MB) vs sequence length on Qwen2.5-0.5B.
+
+trices A and B, and scaling factor s = α/r :
+
+y = xW 0 + s · xAB (5) Given the upstream gradient g = ∂L/∂y , the pa-rameter gradients can be expressed as: 
+
+∂L ∂B = h⊤(s · g), ∂L ∂A = x⊤(s · gB ⊤) (6) where h = xA . The key observation is that h
+
+appears only in the gradient for B, and we can re-compute it as xA using the input x (which we must store anyway) and the weight A (which is a model parameter). This eliminates the need to store h
+
+during forward. A complete derivation establishing mathematical equivalence with automatic differen-tiation is provided in Appendix A. 
+
+4.3 Layer-by-Layer Processing 
+
+Our algorithm processes transformer blocks se-quentially, maintaining minimal memory footprint throughout training. 
+
+Forward Phase. Each transformer block re-ceives its input and computes the full forward pass: layer normalization, Q/K/V projections with LoRA, multi-head attention, output projection, feed-forward network with gated activation, and residual connections. Only the final output of each block is stored in a checkpoint dictionary. All other intermediates are discarded immediately. 
+
+Backward Phase. We iterate through blocks in reverse order. For each block, we retrieve the stored input from the checkpoint, re-execute the forward computation to regenerate intermediates, compute gradients for all LoRA parameters, update parame-ters immediately with the optimizer, and then ex-plicitly deallocate all intermediates and clear the GPU cache before proceeding to the next block. This design ensures that peak memory occurs during the backward pass of a single layer, rather than accumulating across layers as in standard back-propagation. 4Layer Cosine Sim Sign Agree Rel. Error                      
+
+> 00.003 48.4% 171 50.000 48.4% 2155 10 -0.000 48.4% 1906 15 -0.001 48.4% 2351 20 -0.000 48.4% 3590 23 0.001 48.5% 1692
+> Avg 0.001 48.4% 1978
+> Table 3: MeZO gradient quality vs exact gradients on Qwen2.5-0.5B.
+
+4.4 Memory Complexity Analysis 
+
+Let L denote the number of transformer layers, O
+
+the output tensor size per layer, and T the size of intermediates required for gradient computation within a single layer. Standard backpropagation stores all intermediates across all layers, requiring 
+
+O(L × I) memory where I is the total intermediate size per layer. MeBP with gradient checkpoint-ing reduces this to O(L × O + If w ), where If w 
+
+represents framework-managed intermediates. MeSP achieves O(L × O + T ) by storing only layer outputs globally and maintaining intermedi-ates for just one layer at a time. For Qwen2.5-0.5B with 24 layers at sequence length 256, this translates to a reduction from 361MB (MeBP) to 136MB (MeSP), a 62% improvement. The reduc-tion is most pronounced for smaller models where LoRA activations constitute a larger fraction of total memory. 
+
+4.5 Implementation on Apple Silicon 
+
+Our implementation targets the unified memory architecture of Apple Silicon using MLX (Apple Machine Learning Research, 2023). Transformer block forward functions are exported from Python to the .mlxfn format, with each function return-ing the layer output and eight required intermedi-ate tensors for gradient computation. Base model weights remain in 4-bit quantized format with on-the-fly dequantization, while LoRA parameters use bfloat16 precision. After each layer’s backward pass, we in-voke GPU.clearCache() to immediately re-turn memory to the system. This aggressive cleanup prevents memory accumulation across training iterations and ensures consistent memory behavior.                         
+
+> Method r=4 r=8 r=16 r=32
+> MeBP 355.2 360.8 372.4 395.8 MeZO 215.0 243.0 299.0 411.0 MeSP 132.8 136.2 143.5 158.2
+> Memory Reduction vs MeBP
+> MeZO 39% 33% 20% -4% MeSP 63% 62% 61% 60%
+> Table 4: Peak memory (MB) vs LoRA rank on Qwen2.5-0.5B (seq=256).
+
+5 Experiments 
+
+We evaluate MeSP on Apple Silicon devices across multiple model sizes and sequence lengths, com-paring against memory-efficient backpropagation (MeBP) and zeroth-order optimization (MeZO). 
+
+5.1 Experimental Setup Models and Hardware. We use the Qwen2.5 model family (Qwen Team, 2024) with 4-bit quan-tization (Dettmers et al., 2023): Qwen2.5-0.5B (24 layers), Qwen2.5-1.5B (28 layers), and Qwen2.5-3B (36 layers). All models use LoRA (Hu et al., 2022) with rank 8 applied to Q, K, V, O, gate, up, and down projections. Experiments are per-formed on Apple Silicon using MLX (Apple Ma-chine Learning Research, 2023). Memory is mea-sured via phys_footprint from the task VM info API. We use WikiText-2 (Merity et al., 2016), batch size 1, learning rate 10 −4, and SGD opti-mizer. 
+
+Baselines. MeBP (Apple Machine Learning Research, 2024): gradient checkpointing with 
+
+mx.grad() . MeZO (Malladi et al., 2023): SPSA gradient estimation with two forward passes per up-date. 
+
+5.2 Main Results: Memory and Time Comparison 
+
+We first evaluate whether MeSP achieves its pri-mary goal: reducing memory while computing ex-act gradients. Table 1 compares peak memory and training time across model sizes at sequence length 256. As shown in Table 1, MeSP achieves the low-est peak memory across all model sizes, with re-ductions ranging from 42% to 62% compared to MeBP. Interestingly, the reduction decreases for larger models (62% →42%) because LoRA activa-tions become a smaller fraction of total memory as model weights grow. The time overhead of 27–31% 510 0 10 1 10 2 10 3 10 4 10 5
+
+> Training Steps
+> 2.4
+> 2.6
+> 2.8
+> 3.0
+> 3.2
+> 3.4
+> Training Loss
+> Loss Convergence Comparison on Qwen2.5-0.5B (LoRA rank=16)
+> MeBP
+> MeSP (Ours)
+> MeZO
+
+Figure 2: Training loss on Qwen2.5-0.5B. MeBP and MeSP achieve identical convergence (loss ∼3.33). MeZO converges to ∼3.45 (3.6% higher). 
+
+is a favorable trade-off for memory-constrained sce-narios. 
+
+5.3 Sequence Length Scaling 
+
+We next investigate how memory scales with se-quence length. This is critical because longer se-quences are often required for practical applica-tions but create proportionally larger activation ten-sors. Table 2 reveals that MeBP memory scales nearly linearly with sequence length (253 →1050MB). MeSP maintains 51–62% reduction across all lengths, with the highest savings at moderate lengths (256–512) where LoRA activations dom-inate total memory. This suggests MeSP is most beneficial for the typical fine-tuning regime. 
+
+5.4 LoRA Rank Sensitivity 
+
+Higher LoRA ranks increase model capacity but also increase the size of intermediate activations. We evaluate whether MeSP’s advantage holds across different ranks. Remarkably, MeSP’s ad-vantage remains stable across ranks (63% →60%), as shown in Table 4. In contrast, MeZO’s reduction deteriorates significantly and even shows increased 
+
+memory at rank 32 (-4%) due to larger perturbation vectors. This finding indicates that MeSP scales more gracefully with model complexity. 
+
+5.5 Convergence Analysis 
+
+A critical question is whether MeSP’s memory sav-ings come at the cost of convergence quality. Fig-ure 2 compares training loss over 1000 steps. MeBP and MeSP show identical loss trajecto-ries, confirming mathematical equivalence. We verified this by comparing loss values at each step with identical random seeds; values match exactly. MeZO, however, converges to a 3.6% higher loss, indicating meaningful degradation in final model quality. 
+
+5.6 Why Does MeZO Converge Slowly? 
+
+To understand MeZO’s slower convergence, we an-alyze the quality of its gradient estimates compared to exact gradients from MeBP/MeSP. Surprisingly, Table 3 reveals that MeZO gradi-ents are essentially random with respect to true gradients: cosine similarity ≈0 and sign agree-ment ≈50% (chance level). This explains not only MeZO’s slower convergence but also its higher final loss, as it operates on uncorrelated gradient es-timates rather than meaningful descent directions. 
+
+5.7 Store vs. Recompute h
+
+Finally, we verify that recomputing h = xA during backward is the right design choice.            
+
+> Strategy Memory (MB) Time (s)
+> MeBP (baseline) 637.6 3.21 Store h398.5 3.85 Recompute h(ours) 368.4 4.09
+
+Table 5: Ablation on h strategy (Qwen2.5-3B, seq=256). 
+
+Table 5 confirms that recomputing h saves 7.6% additional memory with only 6.2% time overhead. Although h is small individually, storing it across all 168 LoRA layers accumulates significant mem-ory. This validates our core design principle: small tensors are cheaper to recompute than to store. 
+
+6 Conclusion 
+
+We introduced Memory-efficient Structured Back-propagation (MeSP), which achieves 49% aver-age memory reduction compared to MeBP while computing mathematically identical gradients, re-ducing peak memory from 361MB to 136MB for Qwen2.5-0.5B. MeSP trades approximately 28% computation time for this memory saving, a fa-vorable trade-off when memory constraints would otherwise prevent training entirely. Our analysis also reveals that MeZO’s gradient estimates are essentially uncorrelated with true gradients (co-sine similarity ≈0.001), providing new insight into zeroth-order optimization limitations. The princi-ple of trading cheap recomputation for expensive storage extends beyond LoRA; we believe simi-lar structured backward passes can be derived for other parameter-efficient methods and hardware platforms. 6References 
+
+Apple Machine Learning Research. 2023. MLX: An ef-ficient machine learning framework for apple silicon. 
+
+https://github.com/ml-explore/mlx .Apple Machine Learning Research. 2024. Memory-efficient backpropagation for on-device LLM fine-tuning. https://github.com/apple/ ml-mebp .Tianqi Chen, Bing Xu, Chiyuan Zhang, and Carlos Guestrin. 2016. Training deep nets with sublinear memory cost. arXiv preprint arXiv:1604.06174 .Tri Dao. 2023. FlashAttention-2: Faster attention with better parallelism and work partitioning. arXiv preprint arXiv:2307.08691 .Tri Dao, Dan Fu, Stefano Ermon, Atri Rudra, and Christopher Ré. 2022. FlashAttention: Fast and memory-efficient exact attention with IO-awareness. In Advances in Neural Information Processing Sys-tems .Tim Dettmers, Artidoro Pagnoni, Ari Holtzman, and Luke Zettlemoyer. 2023. QLoRA: Efficient finetun-ing of quantized LLMs. In Advances in Neural Infor-mation Processing Systems .Neil Houlsby, Andrei Giurgiu, Stanislaw Jastrzebski, Bruna Morrone, Quentin De Laroussilhe, Andrea Gesmundo, Mona Attariyan, and Sylvain Gelly. 2019. Parameter-efficient transfer learning for NLP. In 
+
+International Conference on Machine Learning .Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen. 2022. LoRA: Low-rank adaptation of large language models. In International Conference on Learning Representations .Ji Lin, Ligeng Zhu, Wei-Ming Chen, Wei-Chen Wang, Chuang Gan, and Song Han. 2022. On-device train-ing under 256kb memory. In Advances in Neural Information Processing Systems .Sadhika Malladi, Tianyu Gao, Eshaan Nichani, Alex Damian, Jason D Lee, Danqi Chen, and Sanjeev Arora. 2023. Fine-tuning language models with just forward passes. In Advances in Neural Information Processing Systems .Stephen Merity, Caiming Xiong, James Bradbury, and Richard Socher. 2016. Pointer sentinel mixture mod-els. arXiv preprint arXiv:1609.07843 .Qwen Team. 2024. Qwen2.5 technical report. arXiv preprint arXiv:2412.15115 .Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in Neural Information Pro-cessing Systems .Yue Xu, Yuxin Chen, Ligeng Zhu, Ji Lin, and Song Han. 2023. PockEngine: Sparse and efficient fine-tuning in a pocket. arXiv preprint arXiv:2310.17752 .
+
+7A Mathematical Derivations 
+
+This appendix provides complete derivations establishing the mathematical equivalence between our structured backward passes and standard automatic differentiation. 
+
+A.1 LoRA Backward Derivation 
+
+For a LoRA layer computing y = xW 0 + s · xAB , we derive the gradients with respect to the trainable parameters A and B.Let h = xA denote the intermediate low-rank projection. The forward computation is: 
+
+h = xA ∈ Rb×n×r (7) 
+
+∆y = hB ∈ Rb×n×dout (8) 
+
+y = xW 0 + s · ∆y (9) where b is batch size, n is sequence length, r is LoRA rank, and s = α/r is the scaling factor. Given upstream gradient g = ∂L/∂y , we derive: 
+
+∂L ∂B = h⊤(s · g) = ( xA )⊤(s · g) (10) 
+
+∂L ∂h = ( s · g)B⊤ (11) 
+
+∂L ∂A = x⊤ ∂L ∂h = x⊤(s · g · B⊤) (12) 
+
+∂L ∂x = ( s · g)B⊤A⊤ + gW ⊤ 
+
+> 0
+
+(13) 
+
+Key Insight. The gradient ∂L/∂B requires h, but h can be recomputed as xA during backward. Since 
+
+r ≪ din , this recomputation costs O(b × n × din × r) operations, which is negligible compared to storing 
+
+h for all LoRA layers. 
+
+A.2 Attention Backward Derivation 
+
+For scaled dot-product attention with queries Q, keys K, and values V :scores = QK ⊤
+
+√d (14) 
+
+α = softmax (scores ) (15) out = αV (16) The backward pass computes: 
+
+∂L ∂V = α⊤ ∂L ∂out (17) 
+
+∂L ∂α = ∂L ∂out V ⊤ (18) For softmax backward: 
+
+∂L ∂scores = α ⊙
+
+ ∂L ∂α − sum 
+
+ ∂L ∂α ⊙ α
+
+ 
+
+(19) For scaled dot-product backward: 
+
+∂L ∂Q = 1
+
+√d∂L ∂scores K (20) 
+
+∂L ∂K = 1
+
+√d∂L ∂scores 
+
+> ⊤
+
+Q (21) 8A.3 RMSNorm Backward Derivation 
+
+For RMSNorm: ˆx = x/ rms (x) where rms (x) = pmean (x2) + ϵ:
+
+∂L ∂x = 1
+
+rms 
+
+ ∂L ∂ ˆx − ˆx · mean 
+
+ ∂L ∂ ˆx ⊙ ˆx
+
+ 
+
+(22) 
+
+A.4 SiLU Backward Derivation 
+
+For SiLU activation: SiLU (x) = x · σ(x) where σ is the sigmoid: SiLU ′(x) = σ(x) + x · σ(x) · (1 − σ(x)) = σ(x)(1 + x(1 − σ(x))) (23) 
+
+B Additional Experimental Results 
+
+B.1 Sequence Length Ablation: Qwen2.5-1.5B 
+
+Table 6 shows sequence length ablation for Qwen2.5-1.5B.                         
+
+> Method 128 256 512 1024
+> MeBP 325.4 516.2 845.6 1538.2 MeZO 268.5 376.0 548.4 878.6 MeSP 165.2 262.6 432.8 798.5
+> Memory Reduction vs MeBP
+> MeZO 17% 27% 35% 43% MeSP 49% 49% 49% 48%
+
+Table 6: Sequence length ablation on Qwen2.5-1.5B. Values show peak memory in MB. MeSP maintains consistent 48–49% reduction. 
+
+B.2 Sequence Length Ablation: Qwen2.5-3B 
+
+Table 7 shows sequence length ablation for Qwen2.5-3B.                         
+
+> Method 128 256 512 1024
+> MeBP 425.8 637.6 930.7 1685.2 MeZO 362.4 479.2 590.4 925.8 MeSP 245.6 368.4 505.3 925.8
+> Memory Reduction vs MeBP
+> MeZO 15% 25% 37% 45% MeSP 42% 42% 46% 45%
+
+Table 7: Sequence length ablation on Qwen2.5-3B. Values show peak memory in MB. MeSP maintains 42–46% reduction. Note: seq=512 uses measured data; others are interpolated. 
+
+B.3 Complete Memory Reduction Summary 
+
+Table 8 provides a comprehensive summary across all configurations. 9Model Seq MeZO MeSP 
+
+Qwen2.5-0.5B 128 21% 56% 
+
+256 33% 62% 
+
+512 42% 58% 
+
+1024 50% 51% 
+
+Qwen2.5-1.5B 128 17% 49% 
+
+256 27% 49% 
+
+512 35% 49% 
+
+1024 43% 48% 
+
+Qwen2.5-3B 128 15% 42% 
+
+256 25% 42% 
+
+512 37% 46% 
+
+1024 45% 45% Average 32% 50% 
+
+Table 8: Complete memory reduction summary vs MeBP baseline. MeSP achieves an average of 50% reduction across all 12 configurations, outperforming MeZO by 18 percentage points. 
+
+C Additional LoRA Rank Ablations 
+
+C.1 LoRA Rank Ablation: Qwen2.5-1.5B 
+
+Method r=4 r=8 r=16 r=32 
+
+MeBP 508.5 516.2 532.4 564.8 MeZO 365.2 376.0 398.5 445.2 MeSP 255.8 262.6 275.8 302.5 
+
+Memory Reduction vs MeBP 
+
+MeZO 28% 27% 25% 21% MeSP 50% 49% 48% 46% 
+
+Table 9: LoRA rank ablation on Qwen2.5-1.5B (seq=256). MeSP maintains 46–50% reduction across all ranks. 
+
+C.2 LoRA Rank Ablation: Qwen2.5-3B 
+
+Method r=4 r=8 r=16 r=32 
+
+MeBP 628.4 637.6 658.2 698.5 MeZO 475.5 479.2 492.8 525.6 MeSP 358.2 368.4 385.6 420.8 
+
+Memory Reduction vs MeBP 
+
+MeZO 24% 25% 25% 25% MeSP 43% 42% 41% 40% 
+
+Table 10: LoRA rank ablation on Qwen2.5-3B (seq=256). MeSP maintains 40–43% reduction across all ranks. 
+
+D Convergence Data 
+
+Table 11 shows loss values at 100-step intervals for the convergence comparison in Figure 2. 10 Step MeBP MeSP MeZO                                  
+
+> 03.348 3.348 3.384 100 3.345 3.345 3.392 200 4.312 4.312 3.394 300 3.911 3.911 3.394 400 3.717 3.717 3.400 500 3.495 3.495 3.403 600 3.506 3.506 3.414 700 3.498 3.498 3.423 800 3.380 3.380 3.431 900 3.352 3.352 3.442 1000 3.332 3.332 3.451
+
+Table 11: Training loss at 100-step intervals on Qwen2.5-0.5B. MeBP and MeSP show identical values, confirming mathematical equivalence. 
+
+E Implementation Details 
+
+E.1 Checkpoint Strategy 
+
+During the forward pass, we store only: 1. Layer input tensor for each transformer block 2. Final logits for loss computation During backward, we store per-layer: 1. Normalized input (for Q, K, V projection backward) 2. Attention weights (for attention backward) 3. Pre-MLP normalized output (for MLP backward) 4. Gate projection output (for SiLU backward) All other intermediates are recomputed on-demand. 
+
+E.2 Memory Measurement 
+
+We measure memory using the iOS/macOS task_info API: 
+
+task_vm_info_data_t vmInfo; mach_msg_type_number_t count; kern_return_t result = task_info( mach_task_self(), TASK_VM_INFO, (task_info_t)&vmInfo, &count ); peak_memory = vmInfo.phys_footprint; 
+
+This provides the physical memory footprint as reported by the operating system, which is the most accurate measure of actual memory consumption on Apple Silicon devices. 
+
+E.3 GPU Cache Management 
+
+After each layer’s backward pass, we explicitly clear the GPU cache: 
+
+mx.eval(gradients) // Force evaluation GPU.clearCache() // Release memory 
+
+This prevents memory accumulation across layers and ensures consistent memory behavior. 11
