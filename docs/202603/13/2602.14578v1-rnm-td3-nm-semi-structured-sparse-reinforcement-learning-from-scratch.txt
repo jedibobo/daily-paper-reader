@@ -1,0 +1,207 @@
+Title: RNM-TD3: N:M Semi-structured Sparse Reinforcement Learning From Scratch
+
+URL Source: https://arxiv.org/pdf/2602.14578v1
+
+Published Time: Tue, 17 Feb 2026 03:09:01 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# RNM-TD3: N:M Semi-structured Sparse Reinforcement Learning From Scratch 
+
+Isam Vrce 1 a , Andreas Kassler 1 b and Gökçe Aydos 2 c
+
+> 1
+
+Deggendorf Institute of Technology, Dieter-Görlitz-Platz 1, Deggendorf, Germany 
+
+> 2
+
+Department of Engineering Technology, Technical University of Denmark, Ballerup, Denmark {isam.vrce, andreas.kassler}@th-deg.de, gokay@dtu.dk Keywords: N:M sparsity, TD3, Reinforcement Learning, acceleration Abstract: Sparsity is a well-studied technique for compressing deep neural networks (DNNs) without com-promising performance. In deep reinforcement learning (DRL), neural networks with up to 5% of their original weights can still be trained with minimal performance loss compared to their dense counterparts. However, most existing methods rely on unstructured fine-grained sparsity, which limits hardware acceleration opportunities due to irregular computation patterns. Struc-tured coarse-grained sparsity enables hardware acceleration, yet typically degrades performance and increases pruning complexity. In this work, we present, to the best of our knowledge, the first study on N:M structured sparsity in RL, which balances compression, performance, and hardware efficiency. Our framework enforces row-wise N:M sparsity throughout training for all networks in off-policy RL (TD3), maintaining compatibility with accelerators that support N:M sparse matrix operations. Experiments on continuous-control benchmarks show that RNM-TD3, our N:M sparse agent, outperforms its dense counterpart at 50%-75% sparsity (e.g., 2:4 and 1:4), achieving up to a 14% increase in performance at 2:4 sparsity on the Ant environment. RNM-TD3 remains competitive even at 87.5% sparsity (1:8), while enabling potential training speedups. 
+
+# 1 INTRODUCTION 
+
+Modern deep learning (DL) largely relies on over-parameterized networks, whose performance scales with data, model size, and compute (Hes-tness et al., 2017; Kaplan et al., 2020). Yet, practical deployment demands low latency, low energy consumption, and small memory foot-prints. Model compression techniques, such as pruning/quantization (Han et al., 2016; Gale et al., 2019), distillation (Hinton et al., 2015), and sparse training (Frankle and Carbin, 2018; Evci et al., 2020), address these challenges by re-ducing model size while preserving accuracy. In this work, we focus on sparse training in DRL. A neural network is considered sparse when a large fraction of its parameters are zero.  
+
+> a
+
+https://orcid.org/0009-0000-1722-2812  
+
+> b
+
+https://orcid.org/0000-0002-9446-8143  
+
+> c
+
+https://orcid.org/0000-0002-4183-9086 
+
+Based on the distribution of zero-valued param-eters, sparsity can be classified into three cate-gories: Unstructured sparsity zeroes individual weights distributed across the network without any structure, often achieving high compression with minimal accuracy loss (Zhu and Gupta, 2017; Molchanov et al., 2017; Frantar and Alis-tarh, 2023). However, the irregular pattern lim-its hardware speedups. Structured sparsity re-moves entire channels, filters, blocks. This pro-cess shrinks tensors, which reduces the number of multiply and accumulate (MAC) operations. However, coarser granularity often yields lower accuracy than unstructured sparse networks at the same sparsity level (Cheng et al., 2024), with some mitigation via dependency-aware pruning at an additional computational cost (Fang et al., 2023). Semi-structured N:M sparsity enforces a constraint whereby each contiguous group of M
+
+weights contains no more than N nonzero weights (Zhou et al., 2021). When supported in hard-                                       
+
+> arXiv:2602.14578v1 [cs.LG] 16 Feb 2026 Figure 1: Illustration of a single cycle of the RNM-TD3 algorithm, demonstrated with an N:Msparsity pattern where N=2and M=4. The weight matrices depicted have dimensions R×C(rows ×columns). (Left) A dense matrix Wand an N:Msparse mask Eare combined to create the sparse matrix ˜W.This sparse matrix is trained for Ksteps, during which only the active weights update the underlying dense matrix. (Right) After K
+> training steps, the weights in the original matrix Wchange in magnitude (only at the positions of active weights), resulting in a different mask E. The updated matrix Wand the new mask Ecreate a new sparse matrix ˜W. This cycle repeats until the end of training.
+
+ware (e.g., 2:4 on NVIDIA Ampere Tensor Cores), this regularity enables accelerated matrix multi-plications during the forward pass (Mishra et al., 2021). However, accelerating backpropagation re-quires an N:M sparsity pattern along the columns of the original weight matrix W (Zhang et al., 2023; Yang et al., 2025). Beyond the 2:4 sparsity pattern, finer sparsity patterns such as 1:3 and 1:4 have also been explored (Taka et al., 2025), enabling greater flexibility. In contrast to supervised learning, DRL in-volves training on non-stationary data induced by a continually evolving policy, using bootstrap-ping with delayed rewards and moving targets (Sutton and Barto, 2018; Mnih et al., 2015). These characteristics make DRL training inher-ently unstable, and pruning can further exacer-bate this instability (Livne and Cohen, 2020). Existing sparse DRL approaches either prune pre-trained dense models (Yu et al., 2019) or employ topology-evolution strategies that involve neuron pruning and regrowth (Sokar et al., 2021; Tan et al., 2022). While effective for compression, both strategies limit training-time acceleration, as post-training pruning does not exploit sparse matrices during training. In this work, we introduce an end-to-end N:M
+
+structured sparse DRL framework that maintains a hardware-aware N:M sparsity pattern through-out training for both actor and critic networks of the state-of-the-art DRL algorithm Twin De-layed Deep Deterministic Policy Gradient (TD3). We demonstrate that the period of mask updates correlates with Sparse Architecture Divergence (SAD) (Zhou et al., 2021), providing new insights into the dynamics of sparsity during DRL train-ing. Results indicate that training an N:M sparse agent can match the performance of dense and unstructured baselines. We make the following contributions: • Framework for N:M-sparse DRL training. We maintain strict N:M constraints throughout training so that both actor and critic are com-patible with hardware-aware sparse matrix-matrix multiplications. (e.g., 2:4 on NVIDIA Ampere Tensor Cores) (Mishra et al., 2021). • SAD mask dynamics study. We relate the period of mask update to the SAD between successive masks. We find that DRL favors less frequent mask updates compared to su-pervised learning settings. Moreover, we show that maintaining a stable, non-zero SAD, which is achieved naturally through training, is correlated with improved cumulative re-ward. • Empirical validation. We demonstrate that on MuJoCo continuous-control benchmarks, our RNM-TD3 agent outperforms dense base-lines on average return and rivals unstruc-tured sparse baselines, while offering theoret-ical acceleration on hardware that supports 
+
+N:M sparse computation. The rest of the paper is structured as follows. Section 2 reviews related work. Section 3 details our methodology and introduces our sparse train-ing strategy. We evaluate our approach in Section 4 and conclude the paper in Section 5. 2 RELATED WORK 
+
+Early work on compressing neural networks in RL focused on knowledge distillation. A trained agent served as the source model, and its behavior was distilled into a compact student network, re-sulting in a model size reduction of up to 15 times with no performance loss (Rusu et al., 2015). Building on this, (Schmitt et al., 2018) introduced an unconstrained teacher-student paradigm, re-porting a 42% performance gain while requiring 
+
+∼ 10 × fewer training steps for the student. The first attempts to induce sparsity in DRL focused on post-training pruning: (i) train a dense model, (ii) remove small-magnitude weights, (iii) fine-tune the sparse model. This strategy closely mirrors iterative magnitude prun-ing techniques developed in deep supervised learning (Han et al., 2015), and was later adapted to DRL (Livne and Cohen, 2020). Works inspired by the lottery ticket hypothe-sis (LTH) (Frankle and Carbin, 2018) applied in RL show that sparse sub-networks, when trained from scratch, can match or even surpass their dense counterparts (Yu et al., 2019; Vischer et al., 2021). In offline RL, single-shot prun-ing methods (i.e., sparsity is defined at initializa-tion and remains fixed throughout training) such as SNIP (Lee et al., 2018) and GraSP (Wang et al., 2020) remain competitive even at ∼ 95% 
+
+sparsity (Arnob et al., 2021). More recently, (Ma et al., 2025) adopted a pre-training pruning scheme based on one-shot random pruning, show-ing that highly sparse DRL networks can outper-form dense baselines. Dynamic Sparse Training (DST) trains sparse models from scratch by dynamically adapting the network topology, pruning low-importance weights and regrowing new connections during training. While static sparse training can be sur-prisingly effective in RL (Graesser et al., 2022), DST methods (Mocanu et al., 2018; Evci et al., 2020) aim to optimize performance by evolving the structure alongside the weights. RLx2 (Tan et al., 2022) achieves a compression of 7.5× to 
+
+20 × with < 3% performance loss compared to the original dense counterpart. Following a similar philosophy of dynamic topology adaptation, (Sokar et al., 2021) learn binary masks to select sparse sub-networks, opti-mizing the topology via periodic updates. Ex-tending the concept of learning sub-networks within a dense network, (Arnob et al., 2024) dis-cover binary task-specific masks, enabling multi-ple specialized pathways within a single model. Most existing sparse DRL approaches focus primarily on two objectives: model compression and optimizing policy performance under sparsity constraints. However, these methods typically rely on unstructured sparsity, which suffers from irregular memory access patterns and fails to translate theoretical reductions in floating-point operations (FLOPs) into real-world speedups on standard hardware (Wen et al., 2016). In con-trast, we aim to optimize on three fronts si-multaneously: model compression, policy qual-ity, and training acceleration. Our method en-forces hardware-aware N:M sparsity from the be-ginning of the training with no dense initializa-tion. This ensures that the computational effi-ciency of the N:M pattern is utilized throughout the entire training, enabling acceleration from the very first step. 
+
+# 3 METHODOLOGY 
+
+In this section, we present RNM-TD3, an algo-rithm designed to train a row-wise N:M struc-tured sparse agent from scratch. We build on TD3, a widely used off-policy actor–critic algo-rithm. Using the deterministic TD3 algorithm as our backbone enables us to isolate the impact of N:M structured sparsity on performance with-out the additional factors introduced by stochas-tic policy methods. Figure 1 provides a high-level description of the key idea, how the row-wise N:M
+
+structured sparsity is maintained during train-ing. We first introduce the problem formulation and notation, describe our approach in more de-tail, highlight the key differences between sparse training in DRL and supervised learning and our method to stabilize training through soft-reset. 
+
+# 3.1 Problem Formulation & Notation 
+
+We frame the RL problem as a standard Markov decision process (MDP) M = ( S, A, P , r, γ). Here, 
+
+## S denotes the state space, A is the continuous action space, P represents the transition proba-bility distribution, r is the reward function, and 
+
+γ ∈ [0, 1) is the discount factor. The TD3 agent consists of a deterministic ac-tor μθ(s) and twin critics Qϕ1 , Qϕ2 , parameterized by θ and ϕ1, ϕ2, respectively. To enable hardware acceleration, we enforce a row-wise N:M sparsity pattern, meaning that for each row of a weight matrix and each group of M consecutive weights in that row, at most N weights are non-zero. Let W (ℓ) ∈ Rdout ×din denote the weight matrix of a fully connected layer ℓ, where din and dout 
+
+represent the number of input and output neu-rons, respectively. Our objective is to maximize the expected return while ensuring that W (ℓ) sat-isfies the row-wise N:M sparsity pattern: 
+
+∀ i ∈ { 1, . . . , dout }, ∀ j ∈ { 1, . . . , ⌈din /M⌉} :
+
+∥∥W (ℓ)    
+
+> i,(j−1)M+1: min {jM ,din }
+
+∥∥0 ≤ N. (1) where ∥ · ∥ 0 denotes the L0 norm, which counts the number of non-zero elements. Intuitively, Eq. (1) partitions each row of W (ℓ)
+
+into contiguous blocks of size M. Within each block, at most N entries are non-zero. Sparsity is enforced via binary masks E(ℓ) ∈ { 0, 1}dout ×din ,yielding effective weights ˜W (ℓ) = W (ℓ) ⊙ E(ℓ). The projection operator PN:M used to construct the mask is defined as: 
+
+## PN:M (W )i, j =
+
+
+
+1, if |Wi, j| is in the top-N
+
+of block (i, ⌊( j − 1)/M⌋)
+
+0, otherwise. (2) Masks are initialized to satisfy Eq. (1) and are applied to all six TD3 networks (i.e., the online actor network, the twin critic networks, and their corresponding target networks). Online masks are updated periodically during training, while remaining fixed between updates. Target net-works are updated by Polyak averaging (Lillicrap et al., 2015): 
+
+¯ψ ← τ ψ + ( 1 − τ) ¯ψ, ψ ∈ { θ, ϕ1, ϕ2}. (3) where τ is a small constant (typically τ = 0.005 )that controls the interpolation rate. However, during the online mask update, the online mask is immediately copied to the corresponding targets to maintain stability. 
+
+# 3.2 Training under N:M Sparsity 
+
+Training starts with N:M sparse neural networks. The weight matrix W is initialized using a Kaim-ing uniform distribution, adjusted to account for the reduced effective fan-in induced by the N:M
+
+sparsity constraint. Immediately after initializa-tion and prior to the first training step, we apply the projection operator from Eq. (2): 
+
+E = PN:M (W ), ˜W = W ⊙ E. (4) The resulting sparse matrix ˜W is now N:M sparse. To update the weights in the dense weights W , we propagate the gradients from the loss L only to the active weights, while the gra-dients for inactive weights are zeroed out: 
+
+∂L
+
+∂W = ∂L
+
+∂ ˜W ⊙ E. (5) After K training steps, if the magnitude of an active weight becomes smaller than that of any in-active weight within the same group of M weights, the inactive weight with the largest magnitude is reactivated at the next mask update, thereby al-tering the network topology. However, this approximation can induce un-stable mask updates, often referred to as ”mask flickering”. To quantify topological evolution, we measure the Sparse Architecture Divergence (SAD) (Zhou et al., 2021), defined as the Ham-ming distance between consecutive masks: 
+
+SAD t,t+k = ∥Et+k − Et ∥1. (6) High SAD indicates significant topological changes, while low SAD suggests convergence to a fixed sparsity pattern. While supervised learn-ing typically benefits from minimizing SAD to en-sure convergence (Zhou et al., 2021; Yang et al., 2025), our analysis suggests that DRL requires a different regime due to the non-stationary data distribution. 
+
+# 3.3 Differences Between N:M Sparse Training in DRL and Supervised Learning 
+
+In supervised learning, N:M sparse training typ-ically updates masks at every optimization step. To reduce SAD between successive mask updates and improve final accuracy, supervised learning techniques introduced a weight factor λW that progressively drives inactive weights toward zero at each step: Sparse Refined STE (SR-STE) (Zhou et al., 2021). In DRL, however, we find that superior per-formance is achieved with much less frequent mask updates, occurring every K ≫ 1 environ-ment steps. A controlled ablation study over K
+
+(Section 4.2) reveals an optimal mask update pe-riod of around K = 4000 for HalfCheetah environ-ment with 1:4 sparsity. The optimal ”K” depends on both the environment and the sparsity level. Values around K = 5000 environment steps work well across tasks and sparsity patterns. SAD de-cays approximately exponentially toward a stable Figure 2: SAD for 7 different mask update periods for the actor network in the Half Cheetah environment. SAD decays approximately exponentially regardless of the mask update period. 
+
+non-zero value (see Figure 2), in contrast to the concave decay trajectories observed in supervised learning (see Figure 4a in (Zhou et al., 2021)). This suggests that explicit SAD reduction mech-anisms, such as those in SR-STE, are unnecessary or even detrimental in the DRL setting. We ex-amined two natural variants of applying the SR-STE shrinkage factor λW within DRL: 1. Per-step application. Applying λW at every training step causes inactive weights that are masked by chance at initialization to be re-peatedly shrunk for the next K steps (i.e., un-til the next mask update). This acts as an one-shot pruning of potentially important connec-tions, leading to the premature suppression of useful weights and degraded performance. 2. Per-mask-update application. Applying λW
+
+only once when the mask is updated avoids per-step shrinkage. However, in momentum-based optimizers (e.g., Adam (Kingma and Ba, 2014)), this factor still contributes across many subsequent updates. Since the gradi-ent for inactive weights is zero, λW becomes the only factor affecting their magnitude, pro-gressively driving them toward zero between mask updates. This reduces the likelihood of weight reactivation and, consequently, limits topological flexibility. Our empirical results suggest that in DRL, the goal is not to drive SAD to zero. Instead, a stable, non-zero SAD emerges naturally when masks are updated at the appropriate frequency. Config-urations with larger SAD exhibit greater adapt-ability to changing policy dynamics, whereas fre-quent mask updates result in low SAD, which re-duces topological flexibility and harms final per-formance. 
+
+# 3.4 Stabilizing N:M Training Through Soft Reset 
+
+Training highly sparse N:M networks in inher-ently unstable environments, such as Humanoid, can lead to training instabilities. The combina-tion of an unstable environment, high sparsity ra-tios (e.g., 1:8), and dynamic sparse training from initialization often results in a network topology that lacks the capacity to model complex loco-motion dynamics during the early stages of train-ing. There is a high probability of severing the information flow from key sensory inputs (e.g., knee angle sensors) to critical actuators (e.g., leg motors) by masking important weights. Con-sequently, the agent attempts to maintain bal-ance by activating non-critical actuators, such as those in the arms, which fails to produce mean-ingful locomotion. The agent falls shortly after the start of the episode, generating a series of short episodes that prevent the accumulation of meaningful learning experiences. After a mask change, the critic suggests tar-get values for the actor, which the actor attempts to match by minimizing the error. However, due to high sparsity, the few remaining active con-nections must compensate for the missing con-nections. This is especially problematic at the beginning of training when weights are randomly initialized. To achieve the output shifts required by the critic using such limited connectivity, the actor aggressively increases the magnitude of the active weights. Given the tanh nonlinearity at the output, these high-magnitude pre-activations cause the neurons to saturate (locking at ±1). As a result, the agent repeatedly selects identical ac-tions, reducing the SAD to zero. Empirically, with a mask-update period of 
+
+K = 15 ,000 , early performance collapse occurred in approximately 80% of runs in the Humanoid task. To address this, we introduce a simple soft reset mechanism. Whenever SAD falls below a critical threshold (e.g., SAD < 10 ) during a mask update, we resample a new random N:M mask. This forces topological exploration. The soft re-set completely eliminates early collapse. After recovery, training proceeds normally, and SAD maintains a healthy non-zero value throughout the remainder of the training. Table 1: Comparison of RNM-TD3 with baselines. Results are reported as mean ± standard deviation, nor-malized relative to the dense baseline (i.e., scaled such that the dense mean and standard deviation are 1.0). Raw dense baseline scores are provided for reference: Ant-v5 ( 4453 ± 1320 ), HalfCheetah-v5 ( 10211 ± 1110 ), Humanoid-v5 ( 4868 ± 659 ), and Walker2d-v5 ( 3767 ± 833 ). TS denotes Target Sparsity ( %). RNM-TD3 and SNM has the same realized sparsity which slightly deviates from TS because the last layer remains dense (note that last layer is dense in all methods). DS-TD3 method uses the same layer sparsity parameter for actor and critic networks, so realized sparsity will always differ from target sparsity. 
+
+Environment TS(%) RNM-TD3(best) SSN-N:M (best) DS-TD3 RLx2 Act.(%) Crit.(%) Act.(%) Crit.(%) Act.(%) Crit.(%) Act./Crit.(%) Ant-v5 50 1.14 ± 0.05 (2:4 ) 1.05 ± 0.21 (4:8 ) 0.91 ± 0.18 0.93 ± 0.16 
+
+48.92 49.86 48.92 49.86 48.24 49.94 50 75 1.07 ± 0.15 (1:4 ) 0.93 ± 0.28 (1:4 ) 0.78 ± 0.16 1.01 ± 0.12 
+
+73.37 74.79 73.37 74.79 72.84 74.64 75 87.5 0.86 ± 0.16 (1:8 ) 0.75 ± 0.18 (1:8 ) 0.83 ± 0.19 0.82 ± 0.19 
+
+85.60 87.26 85.60 87.26 85.34 87.19 87.5 H.Cheetah-v5 50 1.01 ± 0.08 (4:8 ) 0.96 ± 0.08 (2:4 ) 1.05 ± 0.09 0.95 ± 0.10 
+
+48.92 49.82 48.92 49.82 47.77 49.65 50 75 0.90 ± 0.05 (1:4 ) 0.82 ± 0.07 (1:4 ) 0.95 ± 0.17 0.92 ± 0.10 
+
+73.39 74.73 73.39 74.73 73.00 74.84 75 87.5 0.72 ± 0.06 (1:8 ) 0.68 ± 0.05 (1:8 ) 0.81 ± 0.08 0.80 ± 0.05 
+
+85.62 87.18 85.62 87.18 85.23 87.05 87.5 Humanoid-v5 50 1.05 ± 0.03 (2:4 ) 1.03 ± 0.05 (2:4 ) 1.04 ± 0.02 0.99 ± 0.03 
+
+48.63 49.92 48.63 49.92 48.16 50.01 50 75 1.04 ± 0.03 (1:4 ) 1.01 ± 0.12 (1:4 ) 0.99 ± 0.06 0.93 ± 0.07 
+
+72.95 74.88 72.95 74.88 72.52 74.73 75 87.5 0.28 ± 0.20 (1:8 ) * 0.82 ± 0.35 (1:8 ) 1.02 ± 0.03 0.64 ± 0.26 
+
+85.10 87.36 85.10 87.36 84.89 87.28 87.5 Walker2d-v5 50 1.04 ± 0.13 (4:8 ) 0.94 ± 0.22 (4:8 ) 1.18 ± 0.13 0.97 ± 0.15 
+
+48.92 49.82 48.92 49.82 47.77 49.65 50 75 0.96 ± 0.09 (1:4 ) 0.89 ± 0.12 (1:4 ) 0.99 ± 0.26 0.82 ± 0.24 
+
+73.39 74.73 73.39 74.73 73.00 74.84 75 87.5 0.58 ± 0.29 (1:8 ) 0.53 ± 0.26 (2:16 ) 0.86 ± 0.30 0.83 ± 0.20 
+
+85.62 87.18 85.62 87.18 85.23 87.05 87.5 
+
+# 4 EXPERIMENTAL EVALUATION 
+
+We evaluate our proposed sparse TD3 variant, RNM-TD3, on continuous-control tasks from the Gymnasium (Towers et al., 2024) MuJoCo bench-mark suite (Todorov et al., 2012). RNM-TD3 in-troduces a general N:M structured sparsity frame-work built on top of the TD3 algorithm, agnostic to both network architecture and specific hyper-parameters. Our experimental study addresses two key questions: (i) how different N:M spar-sity patterns impact performance across diverse environments relative to dense and unstructured baselines, and (ii) how the mask-update period influences both the return and the dynamics of the sparse topology. We compare our method against four base-lines: • Dense, TD3 with dense neural networks. • SSN N:M, a static sparse network with a fixed 
+
+N:M mask sampled at initialization and never updated. • DS-TD3 (Sokar et al., 2021): A dynamic sparse training method utilizing random re-growth. • RLx2 (Tan et al., 2022): A method that prunes weights with the smallest magnitude and regrows connections based on gradient magnitude. To ensure a fair comparison, all methods use identical architectures and hyperparameters. The actor and both critic networks consist of two hid-den layers with 256 neurons. All experiments run for 1M environment steps using a standard static replay buffer and 1-step returns. Except for their specific sparsity mechanisms, all algorithms share identical TD3 settings (e.g., learning rate, batch size). Performance is reported as the average re-turn over 11 random seeds for each environment over 1M steps. 
+
+# 4.1 Comparative evaluation on continuous RL tasks 
+
+As shown in Table 1, RNM-TD3 exhibits superior performance across nearly all evaluated setups compared to static N:M sparse training (SSN), with the exception of Humanoid-v5 at 1:8 spar-sity (”*” in the table). Our method consistently achieves higher average returns with lower vari-ance, confirming that dynamic mask updates sig-nificantly improve upon static initialization. No-tably, at 2:4 sparsity, RNM-TD3 outperforms the dense baseline in all environments and remains competitive at 1:4 sparsity. In most configurations, our structured sparse approach yields performance gains over unstruc-tured dynamic methods (DS-TD3 and RLx2), achieving up to a 25% improvement in the com-plex Ant environment at 50% sparsity. While unstructured methods occasionally perform bet-ter in lower-dimensional environments or at ex-treme sparsity levels, they lack the hardware-acceleration potential inherent to our N:M struc-tured approach. We note that the original RLx2 implementa-tion (Tan et al., 2022) reports higher scores by utilizing a dynamic replay buffer and 3-step re-turns after 300K steps. However, to isolate the effect of the sparsity mechanism itself, we eval-uate all methods under a unified, standard TD3 configuration. 
+
+# Ablation Study: Impact of Initialization on N:M Sparse Training 
+
+To validate the effectiveness of the proposed ini-tialization strategy, we compare our method, which adjusts the Kaiming distribution to ac-count for the effective fan-in of N:M sparsity pat-terns, against initialization sampling from the standard Kaiming distribution used for dense net-works. Adjusting for effective fan-in results in weight values that are scaled by a factor of √M/N
+
+at initialization. The results, normalized to the dense baseline, are presented in Table 2. The most significant observation across en-vironments and sparsity levels is the reduction in variance when using the N:M adjusted initial-ization. However, under high sparsity regimes and in unstable environments (e.g., Humanoid),                                                                      
+
+> Table 2: Performance comparison between Kaim-ing initialization adjusted for N:M fan-in (N:M Adj.) against standard Kaiming initialization (Standard K.). All results are reported as normalized mean scores ±normalized standard deviation relative to the dense baselines. A mean >1.0indicates perfor-mance superior to the dense model. Env. Spar. N:M Adj. Standard K. Ant (2:4) 1.14 ±0.05 1.09 ±0.45
+> (1:4) 1.07 ±0.15 0.94 ±0.39
+> (1:8) 0.86 ±0.16 0.75 ±0.44
+> HC (2:4) 1.01 ±0.08 0.96 ±1.01
+> (1:4) 0.90 ±0.05 0.88 ±0.50
+> (1:8) 0.72 ±0.06 0.71 ±0.61
+> Hum. (2:4) 1.05 ±0.03 1.04 ±0.37
+> (1:4) 1.04 ±0.03 1.03 ±0.15
+> (1:8) 0.28 ±0.20 0.90 ±1.10
+
+√M/N scaling can produce initial weights with excessively large magnitudes, causing the actor’s outputs to saturate shortly after training begins. This saturation leads to the vanishing gradients problem. When neurons operate in the saturated regime of the tanh nonlinearity, where the deriva-tive approaches zero, gradients diminish signif-icantly during backpropagation, effectively pre-venting weight updates in the earlier layers. 
+
+# 4.2 Ablation study on mask update period 
+
+We investigate the relationship between the mask update period, SAD, and agent performance. We vary the mask update period from 10 to 20,000 environment steps in the HalfCheetah environ-ment using a 1:4 sparsity pattern. Results are averaged over 21 random seeds for 1M steps.                                                                     
+
+> Table 3: Impact of the mask update period on HalfCheetah performance and SAD with 1:4 sparsity. MA period Avg. ±Std. Act. SAD Crit. SAD 10 7895 ±816 6650 8251 ±570 17 21 100 8298 ±895 26 36 1000 8057 ±1120 128 185 2000 8286 ±1139 216 307 4000 9036 ±534 346 495 6000 8861 ±805 477 679 8000 8717 ±753 566 809 10000 8453 ±782 654 935 15000 8568 ±817 867 1243 20000 8570 ±634 1071 1469
+
+Table 3 reveals a clear trend: as the mask update period increases, the average return im-Figure 3: SAD for the HalfCheetah actor network for different sparsity patterns and mask update periods. Each curve is averaged over 11 seeds. Overall 462 runs (7 update periods × 6 sparsity patterns × 11 seeds) confirm a clear correlation between the mask update period and SAD: more frequent mask updates (smaller update periods) lead to lower SAD, while less frequent updates (larger update periods) result in higher SAD. 
+
+proves, peaking at 4,000 environment steps before degrading. Crucially, the worst-performing con-figurations, which correspond to very frequent up-dates, are associated with very low SAD values. The intuition behind the observed performance trend is as follows: • Too small update period: the network archi-tecture changes too frequently, and the mask is updated before the underlying weights can sufficiently adapt. • Too large update period: the architecture adapts too slowly, and each mask update pro-duces disruptive jumps in average return. • Intermediate update period: strikes a bal-ance between stability and adaptability, al-lowing the sparse topology to remain stable long enough to learn while still updating fre-quently enough to remain responsive, result-ing in peak performance. An additional pattern can be observed: SAD appears to be correlated with the mask update period. To test this hypothesis, we conducted ex-periments in all four environments across eight different sparsity patterns. Figure 3 shows the SAD during the training for the actor network in the HalfCheetah environment. We observe that low SAD correlates with high frequency mask up-date periods. The same qualitative behavior is observed across all environments and for both ac-tor and critic networks. Furthermore, Figure 4 indicates that, for a fixed mask update period, the sparsity level has only a minor effect on SAD. This implies that the choice of mask update pe-riod has more influence on SAD than the sparsity level. Computational Efficiency Analysis. Although our implementation does not utilize bidirectional 
+
+N:M sparse masks (i.e., row-wise and column-wise N:M sparsity pattern), the computational cost is dominated by forward passes. In our setup (one gradient update per environment step and a pol-icy delay of two), each environment step induces 7 forward passes and 2.5 backward passes across the actor, critics, and target networks. Conse-quently, even if hardware acceleration is applied only to the forward pass, the end-to-end training speedup remains substantial, but lower than the theoretical M/N factor. 
+
+# 5 CONCLUSIONS & FUTURE WORK 
+
+In this work, we introduce RNM-TD3, a semi-structured sparse DRL algorithm that maintains strict N:M sparsity throughout training. By en-forcing a hardware-aware sparsity pattern across the actor and critic networks, our method is aligned with the sparse matrix-matrix multiplica-tion accelerators. Given that the computational Figure 4: SAD for the HalfCheetah actor network across different N:M sparsity patterns and mask update periods. Each curve is averaged over 11 seeds. Across 462 runs, the sparsity level has only a minor effect on SAD for a fixed mask-update period 
+
+cost of TD3 is dominated by forward passes, our approach offers practical end-to-end training speedups, addressing a key limitation of unstruc-tured sparse methods, which often fail to trans-late theoretical FLOP reductions into real-world acceleration. Our empirical analysis highlights the critical role of mask update dynamics. We found that a moderate, non-zero Sparse Architecture Diver-gence (SAD) correlates strongly with improved performance. We hypothesize that maintaining a higher SAD helps preserve topological flexibil-ity, which may be beneficial in long-term train-ing regimes where plasticity typically diminishes. Furthermore, in environments with changing dy-namics, agents with larger SAD are expected to exhibit greater adaptability. Finally, we observe that in high sparsity regimes, weight initialization plays a crucial role, making the early training phase particularly frag-ile. To address this, future work should investi-gate novel initialization schemes specifically tai-lored for high-sparsity regimes in complex envi-ronments and adaptive mask update schedules. 
+
+# ACKNOWLEDGEMENTS 
+
+Parts of this work were supported by the project EFBL, funded by the Bavarian State Ministry for Science and the Arts, and by the High-Tech Agenda of Bavaria. 
+
+# REFERENCES 
+
+Arnob, S. Y., Ohib, R., Plis, S., and Precup, D. (2021). Single-shot pruning for offline reinforce-ment learning. arXiv preprint arXiv:2112.15579. Arnob, S. Y., Ohib, R., Plis, S., Zhang, A., Sordoni, A., and Precup, D. (2024). Efficient reinforce-ment learning by discovering neural pathways. Advances in Neural Information Processing Sys-tems, 37:18660–18694. Cheng, H., Zhang, M., and Shi, J. Q. (2024). Asurvey on deep neural network pruning: Tax-onomy, comparison, analysis, and recommenda-tions. IEEE Transactions on Pattern Analysis and Machine Intelligence. Evci, U., Gale, T., Menick, J., Castro, P. S., and Elsen, E. (2020). Rigging the lottery: Making all tickets winners. In International conference on machine learning, pages 2943–2952. PMLR. Fang, G., Ma, X., Song, M., Mi, M. B., and Wang, X. (2023). Depgraph: Towards any structural pruning. In Proceedings of the IEEE/CVF con-ference on computer vision and pattern recogni-tion, pages 16091–16101. Frankle, J. and Carbin, M. (2018). The lottery ticket hypothesis: Finding sparse, trainable neural net-works. arXiv preprint arXiv:1803.03635. Frantar, E. and Alistarh, D. (2023). Sparsegpt: Mas-sive language models can be accurately pruned in one-shot. In International conference on ma-chine learning, pages 10323–10337. PMLR. Gale, T., Elsen, E., and Hooker, S. (2019). The state of sparsity in deep neural networks. arXiv preprint arXiv:1902.09574. Graesser, L., Evci, U., Elsen, E., and Castro, P. S. (2022). The state of sparse training in deep rein-forcement learning. In International Conference on Machine Learning, pages 7766–7792. PMLR. Han, S., Mao, H., and Dally, W. J. (2016). Deep compression: Compressing deep neural networks with pruning, trained quantization and huffman coding. In International Conference on Learning Representations (ICLR). Han, S., Pool, J., Tran, J., and Dally, W. (2015). Learning both weights and connections for effi-cient neural network. Advances in neural infor-mation processing systems, 28. Hestness, J., Narang, S., Ardalani, N., Diamos, G., Jun, H., Kianinejad, H., Patwary, M. M. A., Yang, Y., and Zhou, Y. (2017). Deep learn-ing scaling is predictable, empirically. arXiv preprint arXiv:1712.00409. Hinton, G., Vinyals, O., and Dean, J. (2015). Dis-tilling the knowledge in a neural network. arXiv preprint arXiv:1503.02531. Kaplan, J., McCandlish, S., Henighan, T., Brown, T. B., Chess, B., Child, R., Gray, S., Radford, A., Wu, J., and Amodei, D. (2020). Scaling laws for neural language models. arXiv preprint arXiv:2001.08361. Kingma, D. P. and Ba, J. (2014). Adam: Amethod for stochastic optimization. CoRR, abs/1412.6980. Lee, N., Ajanthan, T., and Torr, P. H. (2018). Snip: Single-shot network pruning based on connection sensitivity. arXiv preprint arXiv:1810.02340. Lillicrap, T. P., Hunt, J. J., Pritzel, A., Heess, N., Erez, T., Tassa, Y., Silver, D., and Wierstra, D. (2015). Continuous control with deep reinforce-ment learning. arXiv preprint arXiv:1509.02971. Livne, D. and Cohen, K. (2020). Pops: Policy prun-ing and shrinking for deep reinforcement learn-ing. IEEE Journal of Selected Topics in Signal Processing, 14(4):789–801. Ma, G., Li, L., Wang, Z., Shen, L., Bacon, P.-L., and Tao, D. (2025). Network sparsity unlocks the scaling potential of deep reinforcement learning. arXiv preprint arXiv:2506.17204. Mishra, A. K., Latorre, J. A., Pool, J., Stosic, D., Stosic, D., Venkatesh, G., Yu, C., and Micikevi-cius, P. (2021). ng sparse deep neural networks. CoRR, abs/2104.08378. uses 2:4 sparsity pat-tern, metadata to encode the demultiplexer con-trol line.page 5. Mnih, V., Kavukcuoglu, K., Silver, D., et al. (2015). Human-level control through deep reinforcement learning. Nature, 518:529–533. Mocanu, D. C., Mocanu, E., Stone, P., Nguyen, P. H., Gibescu, M., and Liotta, A. (2018). Scalable training of artificial neural networks with adap-tive sparse connectivity inspired by network sci-ence. Nature communications, 9(1):2383. Molchanov, D., Ashukha, A., and Vetrov, D. (2017). Variational dropout sparsifies deep neural net-works. In International conference on machine learning, pages 2498–2507. PMLR. Rusu, A. A., Colmenarejo, S. G., Gulcehre, C., Desjardins, G., Kirkpatrick, J., Pascanu, R., Mnih, V., Kavukcuoglu, K., and Hadsell, R. (2015). Policy distillation. arXiv preprint arXiv:1511.06295. Schmitt, S., Hudson, J. J., Zidek, A., Osindero, S., Doersch, C., Czarnecki, W. M., Leibo, J. Z., Kuttler, H., Zisserman, A., Simonyan, K., et al. (2018). Kickstarting deep reinforcement learn-ing. arXiv preprint arXiv:1803.03835. Sokar, G., Mocanu, E., Mocanu, D. C., Pechenizkiy, M., and Stone, P. (2021). Dynamic sparse training for deep reinforcement learning. arXiv preprint arXiv:2106.04217. Sutton, R. S. and Barto, A. G. (2018). Reinforcement Learning: An Introduction. A Bradford Book, Cambridge, MA, USA. Taka, E., Huang, N.-C., Chang, C.-C., Wu, K.-C., Arora, A., and Marculescu, D. (2025). Systolic sparse tensor slices: Fpga building blocks for sparse and dense ai acceleration. In Proceedings of the 2025 ACM/SIGDA International Sympo-sium on Field Programmable Gate Arrays, pages 159–171. Tan, Y., Hu, P., Pan, L., Huang, J., and Huang, L. (2022). Rlx2: Training a sparse deep rein-forcement learning model from scratch. arXiv preprint arXiv:2205.15043. Todorov, E., Erez, T., and Tassa, Y. (2012). Mujoco: A physics engine for model-based control. In 2012 IEEE/RSJ International Conference on In-telligent Robots and Systems, pages 5026–5033. Towers, M., Kwiatkowski, A., Terry, J., Balis, J. U., De Cola, G., Deleu, T., Goulão, M., Kallinteris, A., Krimmel, M., KG, A., et al. (2024). Gym-nasium: A standard interface for reinforce-ment learning environments. arXiv preprint arXiv:2407.17032. Vischer, M. A., Lange, R. T., and Sprekeler, H. (2021). On lottery tickets and minimal task representations in deep reinforcement learning. arXiv preprint arXiv:2105.01648. Wang, C., Zhang, G., and Grosse, R. (2020). Pick-ing winning tickets before training by preserving gradient flow. arXiv preprint arXiv:2002.07376. Wen, W., Wu, C., Wang, Y., Chen, Y., and Li, H. (2016). Learning structured sparsity in deep neural networks. Advances in neural informa-tion processing systems, 29. Yang, C., Nie, W., Zhang, Y., Wu, Y., Zheng, X., Jiang, G., and Ji, R. (2025). Bame: Block-aware mask evolution for efficient n:m sparse training. In International conference on machine learning. Yu, H., Edunov, S., Tian, Y., and Morcos, A. S. (2019). Playing the lottery with rewards and multiple languages: lottery tickets in rl and nlp. arXiv preprint arXiv:1906.02768. Zhang, Y., Luo, Y., Lin, M., Zhong, Y., Xie, J., Chao, F., and Ji, R. (2023). Bi-directional masks for efficient n: M sparse training. In International conference on machine learning, pages 41488– 41497. PMLR. Zhou, A., Ma, Y., Zhu, J., Liu, J., Zhang, Z., Yuan, K., Sun, W., and Li, H. (2021). Learning N: M fine-grained structured sparse neural networks from scratch. In 9th International Conference on Learning Representations, ICLR 2021, Virtual Event, Austria, May 3-7, 2021. OpenReview.net. Zhu, M. and Gupta, S. (2017). To prune, or not to prune: exploring the efficacy of prun-ing for model compression. arXiv preprint arXiv:1710.01878.

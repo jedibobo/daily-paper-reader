@@ -1,0 +1,947 @@
+Title: Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation
+
+URL Source: https://arxiv.org/pdf/2603.04971v1
+
+Published Time: Fri, 06 Mar 2026 01:44:09 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+# Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation 
+
+Yilong Chen 1 2 * Naibin Gu 1 2 * Junyuan Shang 3 Zhenyu Zhang 3 Yuchen Feng 1 2 Jiawei Sheng 1 2 
+
+Tingwen Liu 1 2 Shuohuan Wang 3 Yu Sun 3 Hua Wu 3 Haifeng Wang 3
+
+## Abstract 
+
+Mixture-of-Experts (MoE) decouples model ca-pacity from per-token computation, yet their scal-ability remains limited by the physical dimensions of depth and width. To overcome this, we pro-pose Mixture of Universal Experts (M OUE) ,a MoE generalization introducing a novel scal-ing dimension: Virtual Width . In general, MoUE aims to reuse a universal layer-agnostic expert pool across layers, converting depth into virtual width under a fixed per-token activation budget. However, two challenges remain: a routing path explosion from recursive expert reuse, and a mis-match between the exposure induced by reuse and the conventional load-balancing objectives. We address these with three core components: a Stag-gered Rotational Topology for structured expert sharing, a Universal Expert Load Balance for depth-aware exposure correction, and a Univer-sal Router with lightweight trajectory state for coherent multi-step routing. Empirically, MoUE consistently outperforms matched MoE baselines by up to 1.3% across scaling regimes, enables progressive conversion of existing MoE check-points with up to 4.2% gains, and reveals a new scaling dimension for MoE architectures. 
+
+## 1. Introduction 
+
+Large language models, predominantly built on the Trans-former architecture (Vaswani et al., 2017), have driven rapid progress in natural language processing. This progress can be shaped by scaling laws, where improvements are closely coupled to increases in model size and training compute (Ka-plan et al., 2020; Hoffmann et al., 2022). However, scaling 
+
+> 1
+
+Institute of Information Engineering, Chinese Academy of Sci-ences 2School of Cyber Security, University of Chinese Academy of Sciences 3Baidu Inc. *Equal contribution. Correspondence to: Tingwen Liu <liutingwen@iie.ac.cn>. Project lead: Junyuan Shang <shangjunyuan@baidu.com>. 
+
+Preprint. March 6, 2026. Load  Balance  Control    
+
+> The Old Paradigm:
+> Local Experts
+> Universal Expert Pool
+> {𝑬 𝑼𝟎 …𝑬 𝑼𝑵 $𝟏 }
+> ……
+> 𝐋𝐚𝐲𝐞 𝐫 𝒍 '𝟑
+> The New Paradigm:
+> Universal Experts
+> ……
+> ……
+> ……
+> ……
+> Width  Scaling
+> Width  Scaling
+> Virtual  Width  Scaling
+> Depth  Scaling
+> 𝐋𝐚𝐲𝐞 𝐫 𝒍 '𝟐
+> 𝐋𝐚𝐲𝐞 𝐫 𝒍 '𝟏
+> 𝐋𝐚𝐲𝐞 𝐫 𝒍
+
+Figure 1. Overview of M OUE. A shared pool of Universal Experts is accessible from multiple layers, enabling recursive reuse under a fixed activation budget. 
+
+dense Transformers incurs a structural cost: increasing pa-rameters tends to increase both computation (FLOPs) and memory footprint proportionally. The Mixture-of-Experts (MoE) framework alleviates this tension by introducing con-ditional computation (Fedus et al., 2022; DeepSeek-AI et al., 2024; Feng et al., 2025; Wang et al., 2026), decoupling the total parameters from the per-token activated parameters. Despite their efficiency, standard MoE architectures remain constrained along two dimensions (Shazeer et al., 2017b; Lepikhin et al., 2021b; Fedus et al., 2022). In the depth 
+
+dimension, they rely on a fixed layer stacking, which makes it difficult to fully exploit depth for optimizing deep param-eters (Shazeer et al., 2017b; Lepikhin et al., 2021b); more-over, without an explicit recursive structure, they are not naturally suited to fitting complex algorithms that require reusable multi-step computation (Dehghani et al., 2019; Chen et al., 2025b). In the width dimension, performance is often bounded by the number of experts, yet scaling ex-perts brings substantial system overhead and engineering cost (Fedus et al., 2022; Li et al., 2023). This motivates a fundamental question: 
+
+Is there an architecture that can expand model capacity by reusing a model’s own depth, while introducing as little additional compute or memory overhead as possible? 
+
+For a solution, we view depth and width as two physical scaling dimensions. M OUE introduces a new understand-ing dimension for MoE, which we call Virtual Width : by 1
+
+> arXiv:2603.04971v1 [cs.LG] 5 Mar 2026 Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation
+
+reusing a shared pool of layer-agnostic Universal Experts (UEs) across layers, M OUE turns additional depth into ad-ditional effective width through composable expert paths, while keeping the per-token activation budget fixed. Intu-itively, M OUE can be seen as converting a deep, narrow MoE into an extremely wide MoE layer that performs re-cursive computation over depth. Importantly, M OUE is a strict superset of standard MoE and is seamlessly compati-ble: disabling cross-layer reuse recovers the conventional layer-local MoE, whereas enabling reuse decouples physical parameter storage from functional connectivity and unlocks path-composition capacity without requiring expert memory to grow in lockstep. However, realizing this potential raises two key training challenges. First, cross-layer reuse induces a combinatorial explosion of routing paths , making optimization harder and less stable. Second, the standard load-balancing ob-jective does not account for balanced reuse across depth ,which introduces bias toward repeatedly exposed experts and can suppress the shared pool. We address these chal-lenges with three complementary components: (i) a Stag-gered Rotational Topology that groups multiple layers into shared connectivity windows, where layers within a win-dow share the same reachable UE set while the window assignment evolves with depth; (ii) a Universal Expert Load Balance (UELB) strategy that explicitly introduces a depth-wise balancing dimension for experts under multi-layer reuse, combined with a warmup schedule to stabilize early exploration; and (iii) a Universal Router that main-tains a lightweight trajectory state to make routing decisions coherent across recursive computation steps. For evaluation, we pre-train M OUE models at multiple scales and compare them with matched MoE baselines. In a width-expansion setting, training M OUE from scratch achieves a 1.3% relative performance gain over MoE with-out increasing parameters or compute. In a depth-expansion setting, M OUE improves performance by 2.5% while keep-ing FFN parameters unchanged. Across scaling experiments, MOUE establishes a new frontier under both activated-parameter and total-parameter budgets. Moreover, thanks to its compatibility, M OUE can be warm-started from arbitrary MoE checkpoints, with gains increasing as the universal ex-pert pool grows; in continual pre-training, this progressive conversion yields an average 4.2% relative improvement, and the advantage persists through large-scale supervised fine-tuning. In short, M OUE reframes MoE scaling with 
+
+Virtual Width , turning depth into reusable capacity via cross-layer expert reuse under a fixed activation budget. 
+
+## 2. Preliminary 
+
+The Mixture-of-Experts (MoE) architecture transforms the dense computational paradigm of Transformers by intro-ducing conditional computation (Fedus et al., 2022). For-mally, an MoE layer replaces the static feed-forward net-work (FFN) with a parameterized set of expert functions 
+
+E = {Ei}Ni=1 . Given an input token representation x ∈ Rd,a gating network Gθ : Rd → ∆N −1 computes a routing distribution P (x) = softmax( Wg x). To decouple model capacity from inference cost, a sparse selection mechanism 
+
+T (x) = TopK (P (x), k ) is applied, activating only a subset of experts. The layer output is the probability-weighted sum of these activated experts:         
+
+> y=X
+> i∈T (x)
+> Pi(x)
+> P
+> j∈T (x)Pj(x)Ei(x).(1)
+
+While this architecture successfully scales parameter count, it remains bound by a fixed depth topology and linear mem-ory growth with respect to expert count, limiting its ability to model complex recursive dependencies or scale width efficiently without prohibitive resource costs. 
+
+Standard Load Balancing Optimization. A critical chal-lenge in training MoE models is the expert collapse phe-nomenon. To counteract this, standard protocols optimize an auxiliary load-balancing loss Lbalance alongside the task loss. This is typically formulated as the dot product of the aver-age routing probability vector P and the expert utilization fraction vector f over a batch of N tokens:      
+
+> Lbalance =N
+> NX
+> i=1
+> fi·Pi.(2)
+
+This objective inherently assumes a uniform prior over ex-pert utility. However, as we shall distinguish in subsequent sections, this formulation is structurally inadequate for ar-chitectures employing recursive expert reuse, where expert utility can be inherently heterogeneous by design. 
+
+## 3. Motivation: Case for Parameter Reuse 
+
+Standard practice implicitly assumes that increasing com-putational depth must come from introducing new, layer-specific parameters at every layer. We challenge this view and posit that deep networks exhibit substantial functional redundancy : certain specialized operators are repeatedly required and invoked across different levels of semantic abstraction, so strict layer-wise parameter partitioning is neither necessary nor efficient. To evaluate this hypothesis, we analyze the CKA similarity 
+
+of expert weights in a trained standard MoE (Chen et al., 2024a;b). First, we observe clear local functional per-sistence : within the consecutive window of L2–L4, many expert pairs achieve CKA larger than 0.4, and the overall CKA similarity is commonly above 0.3. We further repeat the same analysis on a larger Qwen-30B (Activated 3B) 
+
+model after SFT, where expert similarities are even higher; detailed results are provided in the appendix. 2Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation  
+
+> Figure 2. Expert similarity heatmap across shallow (L2, L3) and deep (L8, L9) layers in a trained MoE. Adjacent layers exhibit strong similarity, and specific experts re-emerge across distant layers, motivating cross-layer expert reuse.
+
+More importantly, we find pronounced long-range similar-ity . While adjacent layers are indeed much more similar, the very first layers and the very last layers still retain more than 30% similarity. This suggests that certain functional operators are not simply replaced as depth increases, but persist (or reappear) across large depth gaps. These findings suggest that enabling cross-layer expert reuse can mitigate the redundancy caused by repeatedly learning similar expert functions at different depths in standard MoE, thereby allowing more efficient utilization of depth and increased effective capacity through parameter sharing and path composition under a fixed activation budget. 
+
+## 4. The Mixture of Universal Experts (M OUE) 
+
+4.1. General Framework 
+
+To relax the rigid layer-partitioning assumption in standard MoEs, we propose M OUE, which reinterprets a deep MoE not as a static stack of disjoint expert sets, but as a recursive computation over a unified addressable expert space. 
+
+Recursive Formulation. Consider a Transformer of depth 
+
+L. We decompose experts into layer-local sets Elocal  
+
+> ℓ
+
+and a shared pool of Universal Experts (UEs) Eu, with E⋆ =(S 
+
+> ℓ
+
+Elocal  
+
+> ℓ
+
+) ∪ E u. M OUE is defined by a connectivity map-ping C : E⋆ × { 1, . . . , L } → { 0, 1} that specifies which experts are reachable at each layer. The MoE update at layer 
+
+ℓ becomes a conditional query over this topology: 
+
+h(ℓ) = h(ℓ−1) +
+
+X
+
+> Ei∈E ⋆
+
+C(Ei, ℓ ) · π(ℓ) 
+
+> i
+
+(h(ℓ−1) ) · Ei(h(ℓ−1) ). (3) For UEs, C(u, ℓ ) can be active for multiple layers, enabling cross-layer reuse: the same expert parameters can be in-voked at different semantic stages, decoupling parameter storage from depth-wise computation. 
+
+Theoretical Capacity and Optimization Bottleneck: Vir-tual Width Cross-layer expert reuse unlocks substantial combinatorial capacity, which we term Virtual Width .While standard MoE expands compositional space by in-creasing physical width (more experts per layer, and thus linear memory growth with depth), allowing a shared pool of Nu experts at each layer enables the router to form expo-nentially many depth-L expert paths:    
+
+> |T | MOUE ≈Nu
+> k
+> !! L
+> .(4)
+
+This exponential growth leverages depth-wise composition without increasing expert storage beyond Nu. However, such Virtual Width introduces optimization challenges: un-constrained reuse creates a vast routing space, weakens gra-dient signals, and may cause repeated selection of the same experts. Thus, effective utilization of this capacity requires structural constraints and tailored training objectives. 
+
+4.2. Structural Optimization: Staggered Connectivity 
+
+To make Virtual Width trainable, we need to constrain con-nectivity. In principle, there are many possible reuse topolo-gies; in our exploration, we found that a simple yet struc-tured design works best in practice: the Staggered Rota-tional Topology . It acts as a structural regularizer on the connectivity map C, enforcing a controlled evolution of the reachable expert space with depth. 
+
+Two-Level Expert Ring with Staggered Rotation. We organize the expert pool using a hierarchical two-level ring structure. At the coarse level, a large sliding window de-fines the union of experts accessible to a connectivity group comprising G consecutive layers, ensuring that all layers within the group share the same set of reachable experts. Within this window, a smaller sliding window allocates a private subset of experts to each layer, while the remain-ing experts constitute a shared pool of Universal Experts (UEs) available for cross-layer reuse. To further enhance flexibility and diversity in expert reuse, we index all UEs on a ring and apply a staggered rotation mechanism: for each connectivity group, the shared UE window shifts by a stride s along the ring, such that the set of accessible UEs for group g(ℓ) = ⌊(ℓ − 1) /G ⌋ at layer ℓ is given by 
+
+C(Ej , ℓ ) = 
+
+I (j ∈ [g(ℓ) · s, . . . , g (ℓ) · s + W − 1] (mod Nu)) ,
+
+(5) where Nu is the total number of UEs and W is the window size. This design enforces local specialization via layer-private experts while enabling controlled, smoothly evolving cross-layer reuse through staggered rotation of the shared expert pool. As a result, the model achieves a principled balance between specialization and reuse, supporting both efficient optimization and rich compositional capacity. 
+
+Implementation. We realize C as per-layer allow-lists over global expert IDs, masking unreachable experts (routing 3Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation Contextual Pathway  
+
+> (Dynamic State 𝑼 (")
+> Fase -Weights)
+
+(A) Conceptual Overview        
+
+> Standard MoE
+> Universal Expert Pool
+> {𝑬 𝑼𝟎 …𝑬 𝑼𝑵 $𝟏 }
+> ……
+> Mixture of Universal Experts
+
+(B) Stagger Topology                       
+
+> Layer 2
+> Layer 1
+> Layer 0
+> Depth  Scaling
+> L0
+> L1
+> L2
+> ……
+> Universal Expert
+> Pool { 𝑬 𝑼𝟎 …𝑬 𝑼𝑵 '𝟏 }
+> 𝒉 (𝟏 )
+> Universal Router
+> Semanic Pathway
+> (Static, ℎ∗𝑾 *)
+> Gating
+> Layer 2 Blowout
+> UELB Strategy
+> (Connectivity -Normalized Loss)
+> 𝑳𝒐𝒔𝒔 ~+𝟏
+> 𝒄 𝒋
+> ∗𝒇 𝒋 ∗𝑷 𝒋
+> Online State Update
+> (Fast -Weights 𝑼 )
+> 𝒉 (𝟐 )
+> Parameter
+> Update
+> Update 𝑼 based on
+> alignment error
+> Layer 3
+> Layer 4
+> Width Scaling Virtual Width Scaling
+> {𝑬 𝑳𝟎 }{𝑬 𝑳𝟎 }
+
+(C) Universal Router            
+
+> Width Scaling
+> ……
+> Window Size 𝑊 Window Size 𝑊
+> Window Shift
+> Local Experts
+> {𝑬 𝑳𝟎 }
+> Local Experts
+> {𝑬 𝑳 𝟏 }
+> Local Experts
+> {𝑬 𝑳 𝟐 }
+> Local Experts
+> {𝑬 𝑳 𝑵 &𝟏 }
+> …… Local Experts
+> {𝑬 𝑳 𝟑 }
+> Local Experts
+> {𝑬 𝑳 𝑵 &𝟐 }
+> Window Size 𝑊
+> L3
+> L4
+> L5
+> L6
+> L7
+> LN -4
+> LN -3
+> LN -2
+> LN -1
+> Layers
+> UELB Strategy
+> Local Experts
+> {𝑬 𝑳𝟐 }
+> Local Experts
+> {𝑬 𝑳𝟏 }
+> Local Experts
+> {𝑬 𝑳𝟎 }
+> Local Experts
+> {𝑬 𝑳𝟑 }
+> Local Experts
+> {𝑬 𝑳𝟒 }
+> Universal Router
+
+Figure 3. An illustration of M OUE. Each layer routes tokens to a small set of experts, consisting of layer-local experts and a shared pool of Universal Experts (UEs). UEs are connected to multiple layers (under a constrained topology), enabling cross-layer reuse while keeping the per-token activation budget fixed. Standard LBL             
+
+> ……
+> ……
+> ……
+> ……
+> Balance in Width
+> Unbalance in Depth
+> Balance  in  Depth
+> Universal LBL
+> ……
+> ……
+> ……
+> ……
+> Balance in Width
+> Encourage Broader Exploration
+> UELB
+> Shared Universal Experts Shared Universal Experts
+> 𝐋𝐚𝐲𝐞 𝐫 𝒍 "𝟑
+> 𝐋𝐚𝐲𝐞 𝐫 𝒍 "𝟐
+> 𝐋𝐚𝐲𝐞 𝐫 𝒍 "𝟏
+> 𝐋𝐚𝐲𝐞 𝐫 𝒍
+
+Figure 4. LBL only focuses on balancing expert selection within each layer, while ULBL promotes balanced and diverse expert selection both across depth and width. 
+
+logits set to −∞ ) before Top-k selection. This reduces the per-layer routing space from Nu to W , transforming global routing into a sequence of localized decisions and improv-ing optimization stability. 1 Additional design variants are discussed in Appendix C.In practice, the maximum window size can be chosen based on the expert-parallel (EP) size so that all experts within the same node are reachable. This keeps routing within a single node and avoids introducing additional inter-node communication overhead. 
+
+4.3. Universal Expert Load Balance (UELB) 
+
+While staggered connectivity makes routing feasible, it exposes a fundamental mismatch: standard load balanc-ing offers weak optimization signals for recursive, multi-step expert reuse. Because M OUE relies on exponentially many depth-wise expert paths, the objective must encourage 
+
+1Routing complexity is reduced from O(L · Nu) (all-to-all) to 
+
+O(L · W ).
+
+not only intra-layer balance but also inter-layer diversity and path coverage. Traditional load balancing struggles due to (i) Heterogeneous Exposure : shared experts are over-penalized for being reachable from many layers; and (ii) Combinatorics Blindness : it ignores path redundancy across layers, causing underutilization of Virtual Width. Based on these observations, we propose Universal Expert Load Balance (UELB) . The core innovation is to introduce a reuse-aware depth-wise balancing dimension: “balance” is no longer defined purely within a layer, but is calibrated across recursive reuse opportunities over depth. The guid-ing principle is simple: load balancing should be enforced 
+
+relative to topological opportunity . That is, the objective should penalize an expert only when it is over-preferred 
+
+within the contexts where it is available , rather than because it is reachable more often by design. Concretely, let cj = P
+
+ℓ C(Ej , ℓ ) denote expert j’s topolog-ical degree (exposure count). UELB rescales the universal branch by 1/c j , so the objective reflects per-exposure uti-lization rather than cross-layer aggregated usage: 
+
+LUELB = αloc 
+
+X
+
+ℓ
+
+X
+
+i∈E loc 
+
+¯fi ¯Pi
+
++ αu
+
+X
+
+j∈E u
+
+1
+
+cj
+
+LX
+
+ℓ=1 
+
+C(Ej , ℓ ) ¯f (ℓ)
+
+j ¯P (ℓ)
+
+j
+
+!
+
+.
+
+(6) 
+
+where ¯f and ¯P are the average routing frequency and ex-pected utilization. The normalization serves two purposes: it removes architecture-induced penalties from heteroge-neous exposure (decoupling reachability from preference), and it provides an optimizable depth-wise balance signal 4Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation 
+
+that encourages more uniform coverage of the shared expert space across recursive steps, thereby converting combinato-rial path complexity into usable capacity. In practice, we estimate UELB group-wise (layers sharing the same reachability mask) and compute a group-level auxiliary loss with a scale correction to avoid an artificial loss shrinkage due to concatenation. We further apply a lightweight warmup to encourage early exploration of the shared pool and prevent premature path collapse. 
+
+4.4. Universal Router 
+
+Staggered connectivity makes the routing search space local, and UELB removes exposure-induced bias while promot-ing depth-wise balance. Still, a standard router treats layer decisions as independent, which is at odds with M OUE: use-ful capacity comes from coherent multi-step compositions over depth. We therefore introduce the Universal Router ,which augments routing with a lightweight trajectory state so decisions can depend on the evolving computation path. 
+
+Dual-Pathway Routing. We decompose routing logits into a semantic pathway and a contextual pathway: 
+
+z(ℓ) = h(ℓ)Wg + bg + β · Sim (h(ℓ), U (ℓ)). (7) The semantic term performs standard affine matching. The contextual term uses a state matrix U (ℓ) as fast weights over depth: with a projected key k(ℓ) = h(ℓ)Wk, we define Sim (h(ℓ), U (ℓ))j = ⟨u(ℓ) 
+
+> j
+
+, k (ℓ)⟩, biasing selection toward experts consistent with the current trajectory. 
+
+Online Fast-Weight Update. After routing, we update U (ℓ)
+
+online as a forward-only state without backpropagation. Let 
+
+K be the token key matrix, p∗ be a detached routing target, 
+
+ˆp = softmax( KU ⊤), and δ = ˆ p − p∗. We apply 
+
+U (ℓ) ← U (ℓ) − ηℓ · δ⊤KNtok 
+
+. (8) This keeps activation memory unchanged relative to a stan-dard MoE and adds only a small per-layer overhead com-pared to expert FFNs. Full description in Appendix E. 
+
+4.5. Progressive Warm-Start 
+
+Training M OUE from scratch is the cleanest setting but can be costly. We therefore propose a Progressive Transfor-mation Strategy to convert an existing pre-trained MoE checkpoint into M OUE with a curriculum-style transition. 
+
+1. Initializing the Universal Pool. We construct the initial UE pool Eu by cloning a representative subset of experts from the source MoE. Rather than expensive clustering, we use a simple heuristic: experts with high activation rates in intermediate layers, which tend to be more general-purpose, are selected as UEs; the remaining experts stay layer-local to preserve layer-specific knowledge. 
+
+2. Curriculum Routing Warmup via Logit Suppression. 
+
+To introduce cross-layer reuse without disrupting the pre-trained feature space, we keep the original local router and add a parallel universal projection. We then apply a time-dependent negative bias to the universal branch: 
+
+z(ℓ) 
+
+> i
+
+=
+
+(
+
+h(ℓ−1) · W local  
+
+> r
+
+[·, i ] if Ei ∈ E local 
+
+> ℓ
+
+h(ℓ−1) · W u 
+
+> r
+
+[·, i ] − β(t) if Ei ∈ E u (9) with β(t) ≥ 0 annealed from a large value (suppressing UE usage at the start) to 0, so the model gradually shifts from the original layer-local behavior to topology-aware reuse. Full details in Appendix F. 
+
+## 5. Experiments 
+
+5.1. Experimental Setup Data and Training. We pre-train on samples from OLMo 2 Mix 1124 (3.4T tokens) and follow a fixed data-to-parameter ratio, reserving 2M tokens for validation. All models are trained with Megatron on H800 GPUs using sequence length 4096; we match tokens and activated budgets for iso-parameter and iso-compute comparisons. For warm-start conversion, we initialize from MoE checkpoints and perform continued training under matched settings. 
+
+Baselines and Scaling Settings. We evaluate with lm-evaluation-harness (Gao et al., 2023) against two Qwen-3 style MoE backbones spanning different scales and routing granularities: (i) MoE-160M with 12 experts and top-2 rout-ing, and (ii) MoE-700M with 64 experts and top-8 routing. Our main comparisons study two settings. Width expan-sion: MOUE increases capacity only through Virtual Width (larger path space), without increasing activated parameters or total physical parameters. Depth expansion: MOUE performs depth scaling by sharing FFN parameters across depth. We report three budgets: activated parameters (Act), total physical parameters (TP), and virtual parameters (VP), where VP counts the effective capacity including Virtual Width. Full details are in Appendix G. 
+
+5.2. Main Result Width Expansion We investigate width expansion, where MoUE increases effective capacity by enlarging the Univer-sal Expert pool without raising activated or total parameters; only virtual parameters grow, reflecting more compositional paths. As shown in Table 1, this yields consistent accuracy gains at fixed compute budgets: for MoE 12A2, Avg. im-proves from 41.0 to 42.3, and for MoE 64A8, from 43.8 to 44.7, with notable improvements on LogiQA, BoolQ, and LAMBADA. Performance scales further as VP increases, demonstrating that MoUE effectively translates additional virtual capacity into measurable improvements. 5Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation 
+
+Table 1. Main results of MoUE width/depth expansion on two Qwen-3 style MoE baselines (MoE-0.16B and MoE-0.7B). We expand the 
+
+virtual width (×2, ×3, ×4) and depth (×2, ×3) via cross-layer expert reuse. 
+
+Model Act. TP. VP. Commonsense & Reading Comprehension Continued LM 
+
+Avg.         
+
+> SciQ PIQA WG ARC-E ARC-C Hella. LogiQA BoolQ Lam.
+
+MoE 12A2 L12 0.1B 0.16B 0.16B 52.0 62.9 49.4 41.3 19.9 30.1 19.7 57.3 36.4 41.0 
+
+Width scaling 
+
+MOUE 18A2 0.1B 0.16B 0.19B 52.6 62.6 50.2 41.1 21.6 30.1 21.4 57.6 36.2 41.5 MOUE 24A2 0.1B 0.16B 0.22B 52.5 63.3 50.9 41.8 21.6 29.3 19.7 59.6 36.1 41.6 MOUE 36A2 0.1B 0.16B 0.28B 52.6 63.3 51.2 41.4 20.4 31.0 23.2 60.1 37.1 42.3 
+
+Depth scaling 
+
+MOUE L18 0.12B 0.16B 0.2B 52.8 62.4 52.2 40.0 22.2 30.4 24.6 60.9 37.4 42.5 MOUE L24 0.13B 0.18B 0.24B 55.1 62.8 52.8 39.0 23.2 30.7 25.8 60.3 38.8 43.2 MOUE L36 0.16B 0.19B 0.32B 56.0 63.7 53.7 39.9 24.1 31.5 26.7 61.2 39.6 44.0 MoE 64A8 L16 0.3B 0.7B 0.7B 56.2 65.5 51.5 43.7 22.1 32.9 23.0 57.6 41.8 43.8 
+
+Width scaling 
+
+MOUE 96A8 0.3B 0.7B 0.9B 56.7 65.5 51.6 43.2 22.4 33.1 23.8 57.7 42.6 44.1 MOUE 128A8 0.3B 0.7B 1.16B 57.2 65.1 51.7 44.7 22.7 32.4 24.5 57.8 43.4 44.4 MOUE 192A8 0.3B 0.7B 1.61B 57.8 64.7 52.8 44.4 23.1 32.8 25.3 57.9 43.3 44.7 
+
+Depth scaling 
+
+MOUE L24 0.38B 0.75B 0.98B 57.2 65.3 52.9 42.7 23.8 33.2 26.4 59.3 42.8 44.8 MOUE L32 0.46B 0.8B 1.25B 57.2 65.6 53.6 43.2 24.8 33.5 27.8 60.2 43.5 45.5 MOUE L48 0.61B 0.9B 1.8B 58.3 65.2 54.3 44.0 25.8 33.9 28.8 61.0 44.2 46.2 
+
+Figure 5. Left: LM training loss versus training steps. Middle: Validation loss versus training FLOPs. Right: Max/Mean ratio versus training steps (routing skew / load-balance indicator). 
+
+Depth Expansion We next examine depth expansion, where MoUE scales the number of computation steps by reusing experts across layers, thus increasing depth with mini-mal growth in FFN parameters. This approach is highly parameter-efficient: for the 12A2 backbone, M OUE L36 achieves Avg. 44.0 (+3.0) with TP only slightly above base-line; for 64A8, M OUE L48 reaches Avg. 46.2 (+2.4) at TP=0.9B. Gains increase with model depth and scale, and notably, M OUE L36 surpasses MoE 64A8 L16 in accuracy while using about half as activated and total parameters, demonstrating strong scalability under constrained budgets. 
+
+Training Dynamics and Stability. Figure 5 summarizes the training-time behavior. Under width expansion, MoUE achieves better validation loss at the same FLOPs, indicat-ing improved compute efficiency without increasing Act or TP. Under depth expansion, MoUE overtakes the base-line early and the gap continues to widen as training pro-ceeds, suggesting a higher performance ceiling with longer training. Across settings, the Max/Mean ratio remains well-controlled, consistent with stable routing dynamics induced by staggered connectivity and UELB. 
+
+Scaling Analysis across TP, VP, and Act. Figure 6 sum-marizes scaling trends across three budgets: total parame-ters (TP), virtual parameters (VP), and activated parameters (Act). M OUE consistently achieves higher average accu-racy than MoE at matched TP, VP, or Act. For TP, width scaling improves accuracy without increasing physical stor-age, while depth scaling yields even larger gains with only modest TP growth, demonstrating parameter efficiency. For VP, increasing virtual parameters leads to clear accuracy improvements, with depth expansion showing a steeper ac-curacy gain than width expansion, indicating more effective use of virtual capacity. For Act, M OUE outperforms stan-dard MoE at the same activated budget, and the advantage grows as Act increases, showing that MoUE leverages com-binatorial computation to better utilize activated parameters. 
+
+Progressive Warm-Start Training M OUE from scratch 6Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation                                                                                                                                                                    
+
+> Table 2. Comprehensive evaluation of open-source MoE baselines and corresponding M OUE settings. Each baseline is an open-source MoE model; below each are three M OUE variants with their specific metrics.
+> Model Act. VP. ARC-c ARC-e GSM8K HellaS. HumanE. NQ Tri.QA Wino. MMLU AVG
+> JetMoE-8E, adapted by supervised fine-tuning.
+> Vanilla MoE 2.2B 8.0B 64.4 79.0 44.7 78.7 42.7 20.4 49.5 56.6 47.7 53.7 MOUE 10A2 2.2B 9.7B 66.8 78.8 42.2 78.4 48.2 20.9 50.7 54.1 46.3 54.1 MOUE 12A2 2.2B 11.3B 65.1 79.4 45.1 80.3 42.7 21.4 50.5 56.8 48.2 54.4 MOUE 16A2 2.2B 14.6B 65.8 79.9 45.0 79.5 45.7 20.5 51.2 57.9 47.9 54.8
+> OLMoE-64E, adapted by supervised fine-tuning.
+> Vanilla MoE 1.3B 6.9B 57.0 76.7 36.3 62.1 24.2 18.1 45.3 52.3 47.1 46.5 MOUE 68A8 1.3B 7.3B 61.0 79.2 34.0 59.4 27.4 18.1 44.1 54.4 47.3 47.2 MOUE 72A8 1.3B 7.7B 61.4 79.5 35.5 58.7 29.3 18.0 44.5 56.5 46.0 47.7 MOUE 76A8 1.3B 8.1B 62.7 79.9 34.0 62.1 27.4 19.1 47.6 55.3 47.7 48.4
+> OLMoE-64E, adapted by continued pre-training.
+> Vanilla MoE 1.3B 6.9B 37.3 40.2 31.0 26.3 13.4 9.6 18.4 49.1 46.3 30.2 MOUE 68A8 1.3B 7.3B 43.7 45.9 33.5 26.2 14.0 9.3 22.0 49.9 47.5 32.4 MOUE 72A8 1.3B 7.7B 42.0 48.9 30.0 29.4 13.4 10.7 30.2 48.5 50.4 33.7 MOUE 76A8 1.3B 8.1B 50.9 58.2 31.5 26.4 14.6 8.0 22.9 50.4 47.1 34.4
+> Figure 6. Left: Average accuracy versus total parameters, with point size representing activated parameters. Middle: Average accuracy versus virtual parameters, with point size representing activated parameters. Right: Average accuracy versus activated parameters.
+
+is ideal but costly, so we investigate converting existing MoE checkpoints into M OUE with minimal extra training and unchanged compute budgets. As shown in Table 2, MOUE consistently surpasses the original MoE baselines, with average gains of 1.1% for JetMoE-8E and 1.9% for OLMoE-64E, and up to +4.2% on OLMoE-64E-CPT. Im-portantly, increasing the size of the universal expert pool leads to monotonic accuracy improvements, highlighting the benefit of recursive virtual width and the effectiveness of our progressive warm-start strategy. 
+
+5.3. Ablation Studies Setup. We evaluate ablations under matched training to-kens and a fixed activated-parameter budget on the M OUE 36A2 setting, and report validation perplexity. This isolates whether each component is necessary to make Virtual Width 
+
+usable rather than merely expressible .
+
+Components Ablation. Ablation results in Table 3 high-light the necessity of each key component in MoUE. Remov-ing the staggered rotational topology leads to the largest degradation (+2.54 PPL), showing that Virtual Width re-quires structured connectivity for effective optimization; omitting universal experts also hurts performance, confirm-ing the importance of cross-layer reuse. Among topology variants, our staggered rotational design consistently out-performs alternatives. For load balancing, replacing the proposed UELB with standard methods substantially in-creases perplexity (+0.97), and dropping connectivity nor-malization further degrades results, due to biased expert exposure and reduced path diversity. Probabilistic warmup helps early training. Finally, ablations on the router show that removing the contextual pathway or the fast-weight update both impair performance, indicating that coherent multi-step routing decisions—rather than shallow, stateless choices—are critical for leveraging recursive reuse. To-gether, these findings validate the necessity of structured connectivity, connectivity-aware load balancing, and state-ful routing for realizing the benefits of Virtual Width. 
+
+Warm-Start Warmup Ablation. The warm-start conver-sion relies on a logit-suppression curriculum β(t) (Sec-tion F): at the beginning, universal experts are strongly suppressed so the converted model behaves like the source MoE; β(t) is then annealed to 0 to gradually introduce reuse. 7Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation 
+
+Table 3. Eval perplexity for ablations on the M OUE framework under matched training tokens and a fixed activated-parameter budget. “w/o” denotes removing the corresponding component from the full M OUE model.            
+
+> Method Perplexity ↓
+> MOUE 36A2 (full model) 25.40
+> Connectivity / Expert Topology
+> w/o Staggered Rotational Topology 27.94 (+2.54) w/o Universal Experts 26.05 (+0.65)
+> Routing Mechanism
+> w/o Contextual Pathway 25.83 (+0.43) w/o Fast-Weight Update 25.59 (+0.19)
+> Load Balancing Strategy
+> w/o UELB (standard load balance) 26.37 (+0.97) w/o Connectivity Normalization 25.75 (+0.35) w/o Probabilistic Warmup 25.66 (+0.26) MoE 12A2 (iso-activate / full parameter) 26.25 (+0.85)
+
+If we ablate this warmup and turn on universal routing immediately, the pre-trained representations are disrupted and routing becomes unstable, which degrades convergence and downstream quality. This confirms that warm-starting MOUE is not merely a parameter copy, but requires a con-trolled transition to the recursive reuse topology. 
+
+5.4. Analysis Universal Expert Utilization. We analyze the activa-tion frequency of Universal Experts across layers to assess whether M OUE achieves cross-layer reuse. As shown in Figure 7, UELB enables Universal Experts to be activated broadly in both shallow and deep layers, with usage pat-terns comparable to layer-private experts. In deeper layers, private experts show specialization but are still selected by multiple layers, demonstrating effective parameter sharing. 
+
+UELB Improves Load Balance Dynamics. To assess train-ing stability, we monitor routing skew via the Max/Mean ratio. Figure 5 (right) shows that without UELB, routing quickly collapses, while UELB maintains low skew through-out. By normalizing for expert exposure and enforcing depth-wise balance, UELB ensures that Virtual Width trans-lates to capacity rather than repeated paths. 
+
+Effect of Universal Expert Pool Size. Figure 10 shows that increasing the number of Universal Experts (UEs) per layer in the warm-start setting improves performance up to an optimal point (12 UEs), after which further increases degrade results. This demonstrates that moderate sharing effectively exploits cross-layer redundancy, but excessive sharing can harm layer-specific specialization. 
+
+Domain Specialization of Universal Experts. As shown in Figure 9, universal experts develop distinct domain pref-
+
+Table 4. Ablation study on connectivity topologies. We compare our Staggered Rotational design against alternative connectiv-ity schemes under matched training tokens and a fixed activated-parameter budget.              
+
+> Topology Scheme Perplexity ↓Circuit Pattern Staggered Rotational (Ours) 25.40 Re-entrant Loops
+> Forward Sliding Window 25.87 (+0.47) Sequential Drift Reverse-Order Connection 25.93 (+0.53) Disordered Flow Sandwich Architecture 25.61 (+0.21) Rigid Stratification Full All-to-All (Unconstrained) 27.94 (+2.54) Random / Unstable
+
+Figure 7. Expert Utilization Heatmap. LE: Local Expert, UE: Universal Expert 
+
+erences (e.g., some specialize in Math, others in Code), indicating spontaneous functional specialization and vali-dating the Universal Router’s ability to dynamically match tokens to relevant experts. 
+
+Layer-wise Utilization of Universal Experts. In Figure 8, that UEs are used sparsely in early layers but much more in deeper layers, suggesting the model learns to rely on LEs for low-level features and on UEs for high-level reasoning. 
+
+Topology Impact and Functional Circuits. Table 4 shows that the staggered rotational topology yields the best perfor-mance and forms stable expert circuits, while other topolo-gies introduce instability or disordered expert flow, high-lighting the importance of structured connectivity for com-positional capacity. 
+
+## 6. Related Work 
+
+Sparse MoE models (Shazeer et al., 2017a) employ learn-able gating to activate a subset of experts per token, enabling efficient scaling (Lepikhin et al., 2021a; Fedus et al., 2022; Jiang et al., 2024; Gu et al., 2025; Chen et al., 2025a). Rout-ing approaches span load balancing (Fedus et al., 2022; Lepikhin et al., 2021a), hash-based (Roller et al., 2021), expert-choice (Zhou et al., 2022), BASE layers (Lewis et al., 2021), and soft mixtures (Puigcerver et al., 2024), but do not address the recursive, multi-layer exposure of universal experts in MoUE. 
+
+Universal Transformers (Dehghani et al., 2019; Lan et al., 2020; Ng & Wang, 2024) and earlier works on recur-rence (Braitenberg, 1986; Gers et al., 2000) introduce re-8Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation 
+
+currence via shared transformations, with recent research revisiting recurrence for implicit reasoning (Deng et al., 2023; Hao et al., 2024) and test-time scaling (Geiping et al., 2025). Further Discussion in Appendix A. 
+
+## 7. Conclusion 
+
+In this work, we introduce Mixture of Universal Ex-perts (M OUE), a novel framework that scales Mixture-of-Experts models through cross-layer expert reuse and virtual width. By leveraging a structured connectivity topology, connectivity-normalized load balancing, and a stateful rout-ing mechanism, M OUE significantly expands model capac-ity without increasing the activated parameter or compute budget. Extensive experiments demonstrate that M OUE consistently outperforms standard MoE baselines in both width and depth expansion settings, achieving greater effi-ciency and scalability. 
+
+## References 
+
+Bisk, Y., Zellers, R., LeBras, R., Gao, J., and Choi, Y. PIQA: reasoning about physical commonsense in nat-ural language. In The Thirty-Fourth AAAI Conference on Artificial Intelligence, AAAI 2020, The Thirty-Second Innovative Applications of Artificial Intelligence Confer-ence, IAAI 2020, The Tenth AAAI Symposium on Edu-cational Advances in Artificial Intelligence, EAAI 2020, New York, NY, USA, February 7-12, 2020 , pp. 7432–7439. AAAI Press, 2020. URL https://aaai.org/ojs/ index.php/AAAI/article/view/6239 .Braitenberg, V. Vehicles: Experiments in Synthetic Psy-chology . MIT Press, Cambridge, MA, 1986. ISBN 9780262521123. URL https://mitpress.mit. edu/9780262521123/vehicles/ .Chen, Y., Shang, J., Zhang, Z., Cui, S., Liu, T., Wang, S., Sun, Y., and Wu, H. LEMON: Reviving stronger and smaller LMs from larger LMs with linear param-eter fusion. In Ku, L.-W., Martins, A., and Sriku-mar, V. (eds.), Proceedings of the 62nd Annual Meet-ing of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 8005–8019, Bangkok, Thailand, 2024a. Association for Computational Linguis-tics. doi: 10.18653/v1/2024.acl-long.434. URL https: //aclanthology.org/2024.acl-long.434 .Chen, Y., Zhang, L., Shang, J., Zhang, Z., Liu, T., Wang, S., and Sun, Y. DHA: learning decoupled-head attention from transformer checkpoints via adaptive heads fusion. In Globersons, A., Mackey, L., Belgrave, D., Fan, A., Pa-quet, U., Tomczak, J. M., and Zhang, C. (eds.), Advances in Neural Information Processing Systems 38: Annual Conference on Neural Information Processing Systems 2024, NeurIPS 2024, Vancouver, BC, Canada, December 10 - 15, 2024 , 2024b. URL http://papers. nips.cc/paper_files/paper/2024/hash/ 518a75257f37b32f711082dff33c2ffc-Abstract-Conferen html .Chen, Y., Shang, J., Zhang, Z., Sheng, J., Liu, T., Wang, S., Sun, Y., Wu, H., and Wang, H. Mixture of hidden-dimensions: Not all hidden-states’ dimensions are needed in transformer. In Forty-second International Confer-ence on Machine Learning , 2025a. URL https:// openreview.net/forum?id=H9CDAY3DPW .Chen, Y., Shang, J., Zhang, Z., Xie, Y., Sheng, J., Liu, T., Wang, S., Sun, Y., Wu, H., and Wang, H. Inner thinking transformer: Leveraging dynamic depth scaling to foster adaptive internal thinking, 2025b. URL https: //arxiv.org/abs/2502.13842 .Clark, C., Lee, K., Chang, M.-W., Kwiatkowski, T., Collins, M., and Toutanova, K. BoolQ: Exploring the surpris-ing difficulty of natural yes/no questions. In Burstein, J., Doran, C., and Solorio, T. (eds.), Proceedings of the 2019 Conference of the North American Chapter of the Association for Computational Linguistics: Human Lan-guage Technologies, Volume 1 (Long and Short Papers) ,pp. 2924–2936, Minneapolis, Minnesota, 2019. Associ-ation for Computational Linguistics. doi: 10.18653/v1/ N19-1300. URL https://aclanthology.org/ N19-1300 .Clark, P., Cowhey, I., Etzioni, O., Khot, T., Sabharwal, A., Schoenick, C., and Tafjord, O. Think you have solved question answering? try arc, the AI2 reasoning challenge. 
+
+ArXiv preprint , abs/1803.05457, 2018a. URL https: //arxiv.org/abs/1803.05457 .Clark, P., Cowhey, I., Etzioni, O., Khot, T., Sabharwal, A., Schoenick, C., and Tafjord, O. Think you have solved question answering? try arc, the ai2 reasoning challenge. 
+
+ArXiv preprint , abs/1803.05457, 2018b. URL https: //arxiv.org/abs/1803.05457 .Dai, D., Deng, C., Zhao, C., Xu, R. X., Gao, H., Chen, D., Li, J., Zeng, W., Yu, X., Wu, Y., Xie, Z., Li, Y. K., Huang, P., Luo, F., Ruan, C., Sui, Z., and Liang, W. Deepseekmoe: Towards ultimate expert specialization in mixture-of-experts language models, 2024. URL https: //arxiv.org/abs/2401.06066 .DeepSeek-AI, Liu, A., Feng, B., Wang, B., Wang, B., Liu, B., Zhao, C., Dengr, C., Ruan, C., Dai, D., Guo, D., Yang, D., Chen, D., Ji, D., Li, E., Lin, F., Luo, F., Hao, G., Chen, G., Li, G., Zhang, H., Xu, H., Yang, H., Zhang, H., Ding, H., Xin, H., Gao, H., Li, H., Qu, H., Cai, J. L., Liang, J., Guo, J., Ni, J., Li, J., Chen, J., Yuan, J., Qiu, J., Song, J., Dong, K., Gao, K., Guan, K., Wang, L., Zhang, 9Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation 
+
+L., Xu, L., Xia, L., Zhao, L., Zhang, L., Li, M., Wang, M., Zhang, M., Zhang, M., Tang, M., Li, M., Tian, N., Huang, P., Wang, P., Zhang, P., Zhu, Q., Chen, Q., Du, Q., Chen, R. J., Jin, R. L., Ge, R., Pan, R., Xu, R., Chen, R., Li, S. S., Lu, S., Zhou, S., Chen, S., Wu, S., Ye, S., Ma, S., Wang, S., Zhou, S., Yu, S., Zhou, S., Zheng, S., Wang, T., Pei, T., Yuan, T., Sun, T., Xiao, W. L., Zeng, W., An, W., Liu, W., Liang, W., Gao, W., Zhang, W., Li, X. Q., Jin, X., Wang, X., Bi, X., Liu, X., Wang, X., Shen, X., Chen, X., Chen, X., Nie, X., Sun, X., Wang, X., Liu, X., Xie, X., Yu, X., Song, X., Zhou, X., Yang, X., Lu, X., Su, X., Wu, Y., Li, Y. K., Wei, Y. X., Zhu, Y. X., Xu, Y., Huang, Y., Li, Y., Zhao, Y., Sun, Y., Li, Y., Wang, Y., Zheng, Y., Zhang, Y., Xiong, Y., Zhao, Y., He, Y., Tang, Y., Piao, Y., Dong, Y., Tan, Y., Liu, Y., Wang, Y., Guo, Y., Zhu, Y., Wang, Y., Zou, Y., Zha, Y., Ma, Y., Yan, Y., You, Y., Liu, Y., Ren, Z. Z., Ren, Z., Sha, Z., Fu, Z., Huang, Z., Zhang, Z., Xie, Z., Hao, Z., Shao, Z., Wen, Z., Xu, Z., Zhang, Z., Li, Z., Wang, Z., Gu, Z., Li, Z., and Xie, Z. Deepseek-v2: A strong, economical, and efficient mixture-of-experts language model, 2024. URL 
+
+https://arxiv.org/abs/2405.04434 .Dehghani, M., Gouws, S., Vinyals, O., Uszkoreit, J., and Kaiser, L. Universal transformers. In 7th International Conference on Learning Representations, ICLR 2019, New Orleans, LA, USA, May 6-9, 2019 . OpenReview.net, 2019. URL https://openreview.net/forum? id=HyzdRiR9Y7 .Deng, Y., Prasad, K., Fernandez, R., Smolensky, P., Chaud-hary, V., and Shieber, S. Implicit chain of thought rea-soning via knowledge distillation, 2023. URL https: //arxiv.org/abs/2311.01460 .Fedus, W., Zoph, B., and Shazeer, N. Switch transform-ers: Scaling to trillion parameter models with simple and efficient sparsity. The Journal of Machine Learning Research , 23(1):5232–5270, 2022. Feng, Y., Shen, B., Gu, N., Zhao, J., Fu, P., Lin, Z., and Wang, W. Dive into moe: Diversity-enhanced reconstruc-tion of large language models from dense into mixture-of-experts. ArXiv preprint , abs/2506.09351, 2025. URL 
+
+https://arxiv.org/abs/2506.09351 .Gao, L., Tow, J., Abbasi, B., Biderman, S., Black, S., DiPofi, A., Foster, C., Golding, L., Hsu, J., Le Noac’h, A., Li, H., McDonell, K., Muennighoff, N., Ociepa, C., Phang, J., Reynolds, L., Schoelkopf, H., Skowron, A., Sutawika, L., Tang, E., Thite, A., Wang, B., Wang, K., and Zou, A. A framework for few-shot language model evaluation, 2023. URL https://zenodo. org/records/10256836 .Geiping, J., McLeish, S., Jain, N., Kirchenbauer, J., Singh, S., Bartoldson, B. R., Kailkhura, B., Bhatele, A., and Goldstein, T. Scaling up test-time compute with latent reasoning: A recurrent depth approach, 2025. URL 
+
+https://arxiv.org/abs/2502.05171 .Gers, F. A., Schmidhuber, J., and Cummins, F. Learning to forget: Continual prediction with lstm. Neural Com-putation , 12:2451–2471, 2000. URL https://api. semanticscholar.org/CorpusID:11598600 .Gu, N., Zhang, Z., Feng, Y., Chen, Y., Fu, P., Lin, Z., Wang, S., Sun, Y., Wu, H., Wang, W., and Wang, H. Elastic moe: Unlocking the inference-time scalability of mixture-of-experts, 2025. URL https://arxiv.org/abs/ 2509.21892 .Hao, S., Sukhbaatar, S., Su, D., Li, X., Hu, Z., Weston, J., and Tian, Y. Training large language models to reason in a continuous latent space, 2024. URL https:// arxiv.org/abs/2412.06769 .Hoffmann, J., Borgeaud, S., Mensch, A., Buchatskaya, E., Cai, T., Rutherford, E., Casas, D. d. L., Hendricks, L. A., Welbl, J., Clark, A., et al. Training compute-optimal large language models. ArXiv preprint , abs/2203.15556, 2022. URL https://arxiv.org/abs/2203.15556 .Jiang, A. Q., Sablayrolles, A., Roux, A., Mensch, A., Savary, B., Bamford, C., Chaplot, D. S., Casas, D. d. l., Hanna, E. B., Bressand, F., et al. Mixtral of ex-perts. ArXiv preprint , abs/2401.04088, 2024. URL 
+
+https://arxiv.org/abs/2401.04088 .Kaplan, J., McCandlish, S., Henighan, T., Brown, T. B., Chess, B., Child, R., Gray, S., Radford, A., Wu, J., and Amodei, D. Scaling laws for neural language models. 
+
+ArXiv preprint , abs/2001.08361, 2020. URL https: //arxiv.org/abs/2001.08361 .Lan, Z., Chen, M., Goodman, S., Gimpel, K., Sharma, P., and Soricut, R. ALBERT: A lite BERT for self-supervised learning of language representations. In 8th International Conference on Learning Representations, ICLR 2020, Ad-dis Ababa, Ethiopia, April 26-30, 2020 . OpenReview.net, 2020. URL https://openreview.net/forum? id=H1eA7AEtvS .Lepikhin, D., Lee, H., Xu, Y., Chen, D., Firat, O., Huang, Y., Krikun, M., Shazeer, N., and Chen, Z. Gshard: Scaling giant models with conditional computation and automatic sharding. In 9th International Conference on Learning Representations, ICLR 2021, Virtual Event, Austria, May 3-7, 2021 . OpenReview.net, 2021a. URL https:// openreview.net/forum?id=qrwe7XHTmYb .Lepikhin, D., Lee, H., Xu, Y., Chen, D., Firat, O., Huang, Y., Krikun, M., Shazeer, N., and Chen, Z. Gshard: Scaling giant models with conditional computation and automatic 10 Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation 
+
+sharding. In 9th International Conference on Learning Representations (ICLR 2021), Virtual Event, Austria, May 3-7, 2021 . OpenReview.net, 2021b. URL https:// openreview.net/forum?id=qrwe7XHTmYb .Lewis, M., Bhosale, S., Dettmers, T., Goyal, N., and Zettlemoyer, L. BASE layers: Simplifying training of large, sparse models. In Meila, M. and Zhang, T. (eds.), Proceedings of the 38th International Confer-ence on Machine Learning, ICML 2021, 18-24 July 2021, Virtual Event , volume 139 of Proceedings of Ma-chine Learning Research , pp. 6265–6274. PMLR, 2021. URL http://proceedings.mlr.press/v139/ lewis21a.html .Li, J., Jiang, Y., Zhu, Y., Wang, C., and Xu, H. Ac-celerating distributed MoE training and inference with lina. In 2023 USENIX Annual Technical Conference (USENIX ATC 23) , pp. 945–959, Boston, MA, July 2023. USENIX Association. ISBN 978-1-939133-35-9. URL https://www.usenix.org/conference/ atc23/presentation/li-jiamin .Liu, J., Cui, L., Liu, H., Huang, D., Wang, Y., and Zhang, Y. Logiqa: A challenge dataset for machine reading comprehension with logical reasoning. In Bessiere, C. (ed.), Proceedings of the Twenty-Ninth International Joint Conference on Artificial Intelligence, IJCAI 2020 , pp. 3622–3628. ijcai.org, 2020. doi: 10.24963/ijcai.2020/ 501. URL https://doi.org/10.24963/ijcai. 2020/501 .Ludziejewski, J., Krajewski, J., Adamczewski, K., Pióro, M., Krutul, M., Antoniak, S., Ciebiera, K., Król, K., Odrzygózdz, T., Sankowski, P., Cygan, M., and Jaszczur, S. Scaling laws for fine-grained mixture of experts. In 
+
+Forty-first International Conference on Machine Learn-ing, ICML 2024, Vienna, Austria, July 21-27, 2024 .OpenReview.net, 2024. URL https://openreview. net/forum?id=yoqdlynCRs .Muennighoff, N., Soldaini, L., Groeneveld, D., Lo, K., Mor-rison, J., Min, S., Shi, W., Walsh, P., Tafjord, O., Lambert, N., Gu, Y., Arora, S., Bhagia, A., Schwenk, D., Wadden, D., Wettig, A., Hui, B., Dettmers, T., Kiela, D., Farhadi, A., Smith, N. A., Koh, P. W., Singh, A., and Hajishirzi, H. Olmoe: Open mixture-of-experts language models, 2024. URL https://arxiv.org/abs/2409.02060 .Ng, K.-S. and Wang, Q. Loop neural networks for parame-ter sharing, 2024. URL https://arxiv.org/abs/ 2409.14199 .Paperno, D., Kruszewski, G., Lazaridou, A., Pham, N. Q., Bernardi, R., Pezzelle, S., Baroni, M., Boleda, G., and Fernández, R. The LAMBADA dataset: Word pre-diction requiring a broad discourse context. In Erk, K. and Smith, N. A. (eds.), Proceedings of the 54th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 1525–1534, Berlin, Germany, 2016. Association for Computational Linguistics. doi: 10.18653/v1/P16-1144. URL https: //aclanthology.org/P16-1144 .Puigcerver, J., Ruiz, C. R., Mustafa, B., and Houlsby, N. From sparse to soft mixtures of experts. In The Twelfth International Conference on Learning Representations, ICLR 2024, Vienna, Austria, May 7-11, 2024 . OpenRe-view.net, 2024. URL https://openreview.net/ forum?id=jxpsAj7ltE .Roller, S., Sukhbaatar, S., Szlam, A., and Weston, J. Hash layers for large sparse models. In Ranzato, M., Beygelz-imer, A., Dauphin, Y. N., Liang, P., and Vaughan, J. W. (eds.), Advances in Neural Information Processing Sys-tems 34: Annual Conference on Neural Information Pro-cessing Systems 2021, NeurIPS 2021, December 6-14, 2021, virtual , pp. 17555–17566, 2021. Sakaguchi, K., Bras, R. L., Bhagavatula, C., and Choi, Y. Winogrande: An adversarial winograd schema challenge at scale. In The Thirty-Fourth AAAI Conference on Ar-tificial Intelligence, AAAI 2020, The Thirty-Second In-novative Applications of Artificial Intelligence Confer-ence, IAAI 2020, The Tenth AAAI Symposium on Edu-cational Advances in Artificial Intelligence, EAAI 2020, New York, NY, USA, February 7-12, 2020 , pp. 8732–8740. AAAI Press, 2020. URL https://aaai.org/ojs/ index.php/AAAI/article/view/6399 .Shazeer, N., Mirhoseini, A., Maziarz, K., Davis, A., Le, Q. V., Hinton, G. E., and Dean, J. Outrageously large neural networks: The sparsely-gated mixture-of-experts layer. In 5th International Conference on Learning Rep-resentations, ICLR 2017, Toulon, France, April 24-26, 2017, Conference Track Proceedings . OpenReview.net, 2017a. URL https://openreview.net/forum? id=B1ckMDqlg .Shazeer, N., Mirhoseini, A., Maziarz, K., Davis, A., Le, Q. V., Hinton, G. E., and Dean, J. Outrageously large neu-ral networks: The sparsely-gated mixture-of-experts layer. In 5th International Conference on Learning Represen-tations (ICLR 2017), Toulon, France, April 24-26, 2017, Conference Track Proceedings , 2017b. URL https: //openreview.net/forum?id=B1ckMDqlg .Shen, Y., Guo, Z., Cai, T., and Qin, Z. Jetmoe: Reach-ing llama2 performance with 0.1m dollars, 2024. URL 
+
+https://arxiv.org/abs/2404.07413 .Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., and Polosukhin, I. Attention is all you need. In Guyon, I., von Luxburg, U., Bengio, 11 Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation 
+
+S., Wallach, H. M., Fergus, R., Vishwanathan, S. V. N., and Garnett, R. (eds.), Advances in Neural Information Processing Systems 30: Annual Conference on Neural Information Processing Systems 2017, December 4-9, 2017, Long Beach, CA, USA , pp. 5998–6008, 2017. Wang, H., Wu, H., Wu, T., Sun, Y., Liu, J., Yu, D., Ma, Y., He, J., He, Z., Hong, D., Liu, Q., Wang, S., Shang, J., Zhang, Z., Ding, Y., Zeng, J., Yang, J., Shen, L., Chen, R., Yin, W., Ding, S., Dai, D., Feng, S., Bao, S., He, B., Chen, Y., Jiao, Z., Zhang, R., Chen, Z., Dang, Q., Deng, K., Jiang, J., Gong, E., Wang, G., Sha, Y., Liu, Y., Zheng, Y., Xu, W., Liu, J., Zeng, Z., Qu, Y., Li, Z., Zhang, Z., Wang, X., Xu, Z., Xu, X., Huang, Z., Wang, D., Chen, B., Chang, Y., Yuan, X., Huang, S., Zhao, Q., Ding, X., Qiao, S., Yang, B., Tang, B., Li, B., Wang, B., Tang, B., Zheng, B., Cui, B., Ke, B., Zhang, B., Zhang, B., Zhang, B., Liu, B., Zhang, C., Li, C., Xu, C., Pang, C., Zhang, C., Yuan, C., Chen, C., Cui, C., Yin, C., Gan, C., Chai, C., Fang, C., Han, C., Zhang, D., Feng, D., Zhu, D., Sun, D., Li, D., Li, D., Liu, D., Liu, D., Ding, F., Hu, F., Li, F., Mo, F., Wu, F., Liu, F., Hu, G., Lu, G., Yong, G., Tian, G., Wang, G., Ni, G., Wu, G., Wang, G., Liu, G., Li, G., Li, H., Liang, H., Ming, H., Wang, H., Lu, H., Lin, H., Zhou, H., Lou, H., Du, H., Zhang, H., Chen, H., Du, H., Liu, H., Zhou, H., Jiang, H., Tian, H., Wang, H., Geng, H., Yin, H., Chen, H., Xue, H., Liu, H., Zhang, H., Xu, H., Chen, H., Zhang, H., Zhang, H., Lu, H., Chen, H., Wang, H., He, H., Liu, H., Zhong, H., Ruan, H., Lu, J., Liang, J., Hu, J., Hu, J., Yang, J., Li, J., Chen, J., Wu, J., Yang, J., Jiang, J., Wang, J., Chen, J., Liu, J., Zhou, J., Lv, J., Zhou, J., Liu, J., Han, J., Sun, J., Fang, J., Liu, J., Liu, J., Hu, J., Qian, J., Yan, J., Du, J., Wang, J., Wu, J., Li, J., Wang, J., Li, J., Lu, J., Yu, J., Liu, J., Feng, J., Huang, J., Zhang, J., Liang, J., Xia, J., Yu, J., Chen, J., Feng, J., Xiang, J., Li, J., Liu, K., Chen, K., Su, K., Hu, K., Zhou, K., Chen, K., Wei, K., Huang, K., Wu, K., Chen, K., Han, L., Sun, L., Wen, L., Meng, L., Yu, L., Ouyang, L., Zhang, L., Ji, L., Wang, L., Sun, M., Tian, M., Li, M., Zeng, M., Zhang, M., Hong, M., Zhou, M., Huang, M., Chen, M., Cai, M., Gu, N., Qiu, N., Wang, N., Qiu, P., Zhao, P., Zou, P., Wang, Q., Xin, Q., Wang, Q., Zhu, Q., Luo, Q., Yang, Q., He, Q., Wu, Q., Li, Q., Bao, Q., Zhang, Q., Liu, Q., Xie, Q., Zhan, R., Dai, R., Peng, R., Liu, R., Xu, R., Wang, R., Zhang, R., Liu, R., Shi, R., Wang, R., Kang, S., Lu, S., Yu, S., Gong, S., Hu, S., Zheng, S., Guo, S., Fan, S., Liu, S., Gu, S., Zhang, S., Yao, S., Zhang, S., Liu, S., Liang, S., He, S., Yang, S., He, S., Dai, S., Wu, S., Long, S., Deng, S., Dong, S., Liang, S., Hu, T., Xu, T., Lv, T., Yang, T., Wei, T., Gao, T., Sun, T., Zhang, T., Luo, T., He, W., Luan, W., Yin, W., Zhang, W., Zhou, W., Gong, W., Li, W., Huang, W., Dang, W., Zhu, W., Zhang, W., Tan, W., Huang, W., Chang, W., Du, W., Miao, W., Luo, W., Wu, W., Shi, X., Zhao, X., Gao, X., Zhang, X., Yu, X., Wang, X., Wang, X., Luo, X., Ma, X., Tan, X., Lin, X., Wang, X., Peng, X., Wu, X., Xu, X., Yuan, X., Cui, X., Han, X., Liu, X., Fei, X., Wu, X., Wang, X., Zhang, X., Sun, X., Wang, X., Huang, X., Zhu, X., Yu, X., Xu, X., Wang, X., Li, X., Zhu, X., Xu, X., Lv, X., Li, X., Wei, X., Chen, X., Shi, Y., Wang, Y., Li, Y., Liu, Y., Cheng, Y., Gao, Y., Liang, Y., Wang, Y., Wang, Y., Yang, Y., Liu, Y., Fu, Y., Wang, Y., Lin, Y., Chen, Y., Shen, Y., Han, Y., Yang, Y., Chai, Y., Wang, Y., Song, Y., Zhang, Y., Wang, Y., Guo, Y., Kou, Y., Chen, Y., Guo, Y., Wang, Y., Chen, Y., Wang, Y., Wu, Y., Lin, Y., Yang, Y., Xing, Y., Lei, Y., Tu, Y., Chen, Y., Zhang, Y., Li, Y., Ma, Y., Dai, Y., Zhang, Y., Ran, Y., Sun, Y., Zhang, Y.-W. M., Liu, Y., Liu, Y., Zhou, Y., Zhang, Y., Han, Y., Wang, Y., Gao, Y., Luo, Y., Dong, Y., Hu, Y., Cao, Y., Yun, Y., Chen, Y., Gao, Y., Li, Y., Zhang, Y., Fan, Y., Ma, Y., Zhang, Y., Xie, Y., Xu, Y., Zhang, Y., Liu, Y., Li, Y., Wang, Y., Lu, Y., Cai, Z., Zhao, Z., Zhang, Z., Lin, Z., Dong, Z., Pan, Z., Liu, Z., Dong, Z., Zhang, Z., Zhang, Z., Wu, Z., Wei, Z., Ning, Z., Li, Z., Li, Z., Qian, Z., Li, Z., Li, Z., Chen, Z., Dong, Z., Feng, Z., Feng, Z., Deng, Z., Yu, Z., Chen, Z., Zheng, Z., Guo, Z., Zhang, Z., Sun, Z., Liu, Z., Lin, Z., Huang, Z., Zhu, Z., Zhao, Z., Chen, Z., Zhu, Z., Xu, Z., Liang, Z., and Gao, Z. Ernie 5.0 technical report, 2026. URL 
+
+https://arxiv.org/abs/2602.04705 .Welbl, J., Liu, N. F., and Gardner, M. Crowdsourcing multiple choice science questions. In Derczynski, L., Xu, W., Ritter, A., and Baldwin, T. (eds.), Proceedings of the 3rd Workshop on Noisy User-generated Text , pp. 94–106, Copenhagen, Denmark, 2017. Association for Computational Linguistics. doi: 10.18653/v1/W17-4413. URL https://aclanthology.org/W17-4413 .Zellers, R., Holtzman, A., Bisk, Y., Farhadi, A., and Choi, Y. HellaSwag: Can a machine really finish your sen-tence? In Korhonen, A., Traum, D., and Màrquez, L. (eds.), Proceedings of the 57th Annual Meeting of the Association for Computational Linguistics , pp. 4791– 4800, Florence, Italy, 2019. Association for Computa-tional Linguistics. doi: 10.18653/v1/P19-1472. URL 
+
+https://aclanthology.org/P19-1472 .Zhou, Y., Lei, T., Liu, H., Du, N., Huang, Y., Zhao, V. Y., Dai, A. M., Chen, Z., Le, Q. V., and Laudon, J. Mixture-of-experts with expert choice routing. In Koyejo, S., Mohamed, S., Agarwal, A., Belgrave, D., Cho, K., and Oh, A. (eds.), Advances in Neural Information Processing Systems 35: Annual Conference on Neural Information Processing Systems 2022, NeurIPS 2022, New Orleans, LA, USA, November 28 - December 9, 2022 , 2022. 12 Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation 
+
+## A. Related Work 
+
+A.1. Mixture-of-Experts and Conditional Computation 
+
+Sparse MoE models activate a small subset of experts per token to scale total parameters without proportional com-pute growth. The sparsely-gated MoE layer (Shazeer et al., 2017a) introduced learnable gating for conditional compu-tation. Subsequent work scale this paradigm to hundreds of billions of parameters (Lepikhin et al., 2021a; Fedus et al., 2022; Jiang et al., 2024) and demonstrate strong open-source performance with a moderate number of experts. Recent work has explored finer-grained expert specializa-tion (Dai et al., 2024) and unified scaling laws for MoE models (Ludziejewski et al., 2024). Despite this progress, standard designs typically partition experts by layer, mak-ing total expert memory scale linearly with the number of experts and limiting the reuse of learned operators across depth. 
+
+A.2. Routing and Load Balancing 
+
+Training MoE models requires careful routing design to avoid expert collapse and improve utilization. Prior work commonly uses auxiliary load-balancing losses (Fedus et al., 2022; Lepikhin et al., 2021a), capacity constraints, and rout-ing regularization. Alternative routing strategies include hash-based assignment (Roller et al., 2021), expert-choice routing (Zhou et al., 2022), and BASE layers (Lewis et al., 2021). Soft mixture approaches (Puigcerver et al., 2024) relax discrete routing entirely. M OUE introduces a struc-turally new challenge: universal experts are exposed to multiple layers by design, which breaks the uniform prior assumption behind standard load balancing. Our UELB ob-jective explicitly normalizes for connectivity and stabilizes routing under recursive reuse. 
+
+A.3. Recurrence and Parameter Reuse Across Depth 
+
+Universal Transformers (Dehghani et al., 2019) explore re-currence across depth by reapplying a shared transformation, offering an inductive bias of iterative refinement but often requiring additional width to maintain capacity. MOUE retains the iterative refinement perspective while relaxing strict parameter tying: it reuses a shared set of experts with learned routing over a constrained topology, enabling richer compositions than repeatedly applying an identical block. 
+
+## B. General Framework 
+
+This appendix contains the full version of Section 4.1, in-cluding an extended discussion condensed in the main paper. 
+
+B.1. General Framework 
+
+To transcend the architectural rigidities of standard MoEs, we propose the M OUE. This framework reinterprets the deep neural network not as a static stack of heterogeneous layers, but as a recursive computational process over a uni-fied, globally accessible expert space. 
+
+Recursive Formulation via Connectivity Topology Let us consider a Transformer of conceptual depth L. We de-compose the expert space into two disjoint sets: a set of layer-specific local experts Elocal  
+
+> ℓ
+
+and a globally shared pool of Universal Experts (UEs), Eu. The total expert universe is denoted by E⋆ = ( S 
+
+> ℓ
+
+Elocal  
+
+> ℓ
+
+) ∪ E u.The architecture of M OUE is defined by a flexible Connec-tivity Topology Mapping C : E⋆ × { 1, . . . , L } → { 0, 1},which prescribes the adjacency matrix of the bipartite graph between computational layers and the expert pool. Con-cretely, for a local expert E ∈ E local  
+
+> ℓ
+
+we set C(E, ℓ ) = 1 and 
+
+C(E, m ) = 0 for m̸ = ℓ; for a universal expert u ∈ E u, the topology decides the set of layers where C(u, ℓ ) = 1 . The forward propagation at layer ℓ is modeled as a conditional query over this topology: 
+
+h(ℓ) = h(ℓ−1) +
+
+X
+
+> Ei∈E ⋆
+
+C(Ei, ℓ ) · π(ℓ) 
+
+> i
+
+(h(ℓ−1) ) · Ei(h(ℓ−1) ). (10) Crucially, for universal experts, the mapping C(u, ℓ ) can be active across multiple layers. This enables the router to learn a dynamic policy that reuses parameters at varying levels of semantic abstraction, effectively decoupling the parameter space from the computational depth. 
+
+Theoretical Capacity: The Virtual Width Hypothesis 
+
+The defining advantage of the M OUE framework is the exponential expansion of model capacity through combina-torics, a property we term Virtual Width . In a standard MoE, the number of functional paths is constrained by the physical width of the layer. In contrast, under a fully con-nected M OUE topology where universal experts are accessi-ble at every step, the router constructs a computational path by selecting any k experts from Nu at each of the L steps. The magnitude of the functional path space T scales accord-ing to: 
+
+|T | MOUE ≈
+
+ Nu
+
+k
+
+ L
+
+. (11) This formulation highlights that the functional path space can grow exponentially with depth, even though parameter storage grows only linearly with the number of universal experts. In other words, M OUE can support a much larger set of composable expert paths without proportionally in-creasing physical expert memory. We describe this as a free lunch in physical expert memory :13 Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation 
+
+once the activated-parameter budget is fixed, increasing reuse opportunities can increase effective capacity without requiring expert memory to grow in lockstep. This does not mean optimization is free—the rest of this section focuses on the constraints needed to make this capacity usable in practice. 
+
+Depth–Width Exchange via Loop MoE Virtual Width can be interpreted as a depth–width exchange . Consider a win-dow of W consecutive layers that share the same accessible universal expert set (i.e., the same expert mask). If we con-ceptually tie this window into a loop, then routing within the window resembles a Loop MoE : instead of allocating distinct experts for each layer, the model repeatedly queries a reusable expert pool over multiple steps. Increasing the number of steps (depth) enlarges the space of expert com-positions, playing a role analogous to increasing width in a conventional MoE. This exchange is the core of the fourth-dimension scaling: we turn additional depth into additional effective width by reuse, while keeping the activated expert budget per token unchanged. 
+
+The Optimization Bottleneck However, this theoretical capacity comes at the cost of severe Optimization Com-plexity . If the connectivity C permits all-to-all access, the router confronts a massive search space at every layer, cre-ating a dimensionality problem of size L × Nu.This highlights an important modeling perspective: M OUE induces a rapidly growing space of possible expert composi-tions over depth, which can translate into increased effective capacity without requiring the physical expert memory to grow at the same rate. This is an idealized statement about combinatorics; in practice, the challenge is to make the router reliably discover diverse, useful paths. This introduces two distinct failure modes. First, as Nu
+
+grows to increase capacity, the router must discriminate among a vast number of experts at every step. This dilutes the gradient signal, leading to high variance and training instability. Second, without structural constraints, recursive reuse can precipitate a “Deep Equilibrium Trap,” where the model converges to a fixed-point solution by selecting the same subset of generic experts repeatedly. This repetitive dependency prevents the model from exploiting the com-binatorial potential of Virtual Width, effectively collapsing the deep network into a shallow recurrent loop. Thus, re-alizing the benefits of combinatorial path capacity requires structural constraints that render optimization tractable. 
+
+## C. Staggered Connectivity 
+
+This appendix contains the full version of Section 4.2, in-cluding details that are condensed in the main paper. 
+
+Algorithm 1 Progressive Warm-Start (MoE → MOUE)  
+
+> 1:
+
+Input: MoE checkpoint; topology (G, W, s ); warmup schedule β(t) 
+
+> 2:
+
+Initialize Eu by copying selected MoE experts; keep others as local experts  
+
+> 3:
+
+for t = 1 to T do  
+
+> 4:
+
+Compute local routing logits z(ℓ) 
+
+> local
+> 5:
+
+Compute universal routing logits z(ℓ) 
+
+> u
+
+− β(t) 
+
+> 6:
+
+Route with combined logits; apply staggered connec-tivity C 
+
+> 7:
+
+Optimize task loss + UELB (connectivity-normalized auxiliary loss)  
+
+> 8:
+
+end for  
+
+> 9:
+
+Output: Warm-started M OUE checkpoint 
+
+C.1. Structural Optimization: Staggered Connectivity 
+
+To bridge the gap between the theoretical potential of MOUE and its practical optimization difficulties, we pro-pose the Staggered Rotational Topology . This design acts as a structural regularizer on the connectivity map C, enforc-ing a controlled evolution of the expert space. 
+
+Topology Design Space. The connectivity map C admits many plausible designs (e.g., all-to-all, fixed window shar-ing, random sparsification, block-circulant masks). In our exploration, we found that a compact, ring-based construc-tion strikes the best balance between expressivity and train-ability. The key is to make reuse structured : the router should not face an unstructured global search at every layer, yet the reachable set should evolve with depth to avoid trivial loops. 
+
+Two-Level Expert Ring (Coarse Shared Window + Fine Private Window). We structure the expert universe on a two-level ring. First, a large sliding window defines the 
+
+set of experts visible to a connectivity group of G consec-utive layers: all layers in the group share the same reach-able set. Second, within this group-visible set, a small 
+
+sliding window assigns a disjoint subset as layer-private ex-perts for each layer; the remaining experts form the shared UE bucket that can be reused across the group (and, via rotation, across depth). This construction gives a simple specialization–reuse decomposition while keeping masks easy to implement and analyze. 
+
+Staggered Rotational Topology We structure the universal expert pool Eu as a logical ring buffer (experts are indexed on a ring). We first group consecutive layers into connec-tivity groups of size G (e.g., G = 3 layers share the same universal expert mask). Let g(ℓ) = ⌊(ℓ − 1) /G ⌋ be the group index of layer ℓ. We enforce a sliding window over the expert ring with expert-window size W and stride s
+
+(shift per group). The connectivity function for universal 14 Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation 
+
+experts is strictly constrained as: 
+
+C(Ej , ℓ ) = 
+
+I (j ∈ [g(ℓ) · s, . . . , g (ℓ) · s + W − 1] (mod Nu)) .
+
+(12) This imposition creates a band-diagonal structure on the expert-layer adjacency matrix, ensuring that the set of acces-sible experts shifts progressively with network depth, while remaining constant within each G-layer group. 
+
+Implementation: Layer-wise Reachability Lists In im-plementation, we instantiate C as a per-layer reachability allow-list over global expert IDs. Each MoE layer masks out experts that are not in its allow-list by setting their routing logits to −∞ before Top-k selection, so the allow-list only controls reachability and does not encode any ordering or preference. A connectivity group corresponds to a contigu-ous block of G layers that share an identical allow-list; the staggered rotation is implemented by shifting the universal window start by stride s between adjacent groups. To align with our notation, we partition global IDs into a contiguous local block per layer plus a universal block shared across layers, so that Nu, W , G, s, and Top-k map directly to a concrete mask construction. 
+
+From Window Sharing to Staggered Sharing The sim-plest window-sharing scheme fixes a single universal mask and applies it to all layers. This directly implements the depth–width exchange, but scales poorly when extended globally: the router repeatedly faces a large, unstructured search space, and reuse can collapse to trivial loops. The 
+
+staggered design keeps G (layers per group), W (reach-able universal experts), and the per-token top-k fixed, but 
+
+rotates the reachable experts across groups via stride s. This retains the local loop property (reuse within a small depth range), while reducing global complexity and improving optimization stability. 
+
+Solving the Optimization Bottleneck This topological con-straint directly addresses the optimization bottleneck dis-cussed above by transforming the global routing problem into a sequence of localized sub-problems. By reducing the active search space at any layer from Nu to W (where 
+
+W ≪ Nu), we ensure that the router learns to discriminate only among a locally relevant subset of experts. Furthermore, the sliding window mechanism serves to break repetitive sequential dependencies. Since the window shifts, a specific expert Ej appears in different relative positions within the window at different layers. This forces the expert to function as a “position-agnostic operator,” robust to vary-ing contexts. Despite this reduction in instantaneous search space, the Virtual Width remains exponential. The number of unique paths is preserved as |T | ≈ Q
+
+> ℓ
+
+ Wk
+
+, allowing the model to retain massive capacity scaling while ensuring optimization feasibility. 
+
+## D. Universal Expert Load Balance (UELB) 
+
+This appendix contains the full version of Section 4.3. Ad-ditional implementation details on group-wise estimation and scale correction are provided in Appendix G. 
+
+D.1. Universal Expert Load Balance (UELB) 
+
+While the Staggered Topology resolves structural complex-ity, it introduces a severe statistical imbalance which we identify as the Heterogeneous Exposure Problem . This represents a core theoretical conflict between recursive ar-chitectures and standard optimization objectives. 
+
+The Principle of Architectural Bias Correction The stan-dard Load Balancing Loss (Eq. 2) operates on the assump-tion of Homogeneous Prior Utility: it presumes that in an initialized state, every expert should be selected with uni-form probability 1/N . The M OUE topology, however, ex-plicitly violates this assumption. A universal expert Eu is structurally connected to cu layers, while a local expert is connected to only one. If the standard LBL is applied directly, the loss function aggregates probability mass for Eu from cu distinct sources. It misinterprets this architecturally induced accumulation as “over-utilization” and heavily penalizes the universal experts. This results in a gradient bias that is not a penalty on suboptimal routing, but a penalty on the architecture itself. The optimization process consequently suppresses universal experts to equalize their total usage with local experts, effectively dismantling the shared pool and negating the Virtual Width advantage. 
+
+Universal Expert Load Balance Strategy To rectify this structural misalignment, we propose the UELB strategy, which introduces a Connectivity-Normalization Principle .We posit that load balancing must be enforced relative to topological opportunity rather than absolute usage. We formulate the UELB objective as a composite function: 
+
+LUELB =αloc 
+
+X
+
+> ℓ
+
+X
+
+> i∈E loc
+
+¯fi ¯Pi
+
++ αu
+
+X
+
+> j∈E u
+
+1
+
+cj
+
+> L
+
+X
+
+> ℓ=1
+
+C(Ej , ℓ ) · ¯f (ℓ) 
+
+> j
+
+¯P (ℓ)
+
+> j
+
+!
+
+,
+
+(13) where cj = P 
+
+> ℓ
+
+C(Ej , ℓ ) represents the topological degree of expert j, ¯fi and ¯Pi denote the average routing frequency and expected load (or utilization probability) for expert i
+
+at the local branch, respectively. The term 1/c j acts as a theoretical correction factor that transforms the cumulative probability sum back into an average layer-wise utilization rate . By optimizing this objective, we ensure that the router is penalized only if an expert is over-utilized within the contexts where it is available . This effectively decouples 15 Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation 
+
+“architectural popularity” (designed by topology) from “rout-ing popularity” (learned from data), enabling the model to fully leverage universal expert recurrence without gradient interference. 
+
+How We Estimate ¯f and ¯P in Practice In implementation, we estimate ¯f and ¯P at the granularity of a connectivity group : a set of layers that share the same universal expert mask (i.e., identical C(·, ℓ )). Concretely, for each group we collect, across all tokens in the batch and all layers in the group, (i) the router probabilities over the reachable experts and (ii) the discrete token assignments (Top-k indices) used to compute per-expert token counts. We then concatenate these tensors and compute a single Switch-style auxiliary loss for the group. 
+
+Probabilistic Warmup as Regularization Complementing this objective, we address the exploration dilemma inher-ent to the expanded Virtual Width. Early in training, the router tends to collapse to local minima before exploring the full combinatorial potential. We introduce a probabilistic warmup bias added to the universal logits, which boosts exploration of the universal pool in the initial phase and is annealed away later. We implement warmup by adding a shared-expert logit bias to the universal bucket before the softmax: at training progress t, we multiply the pre-softmax mass of universal experts by a scalar ratio ρ(t) and equiva-lently add b(t) = log ρ(t) to their logits. 
+
+Calibrating αloc and αu Because group-wise aggregation changes the scale of the auxiliary loss, we calibrate αloc and 
+
+αu as deterministic functions of (i) the number of layers per connectivity group, (ii) the number of shared experts, and (iii) Top-k, so the auxiliary-loss magnitude transfers across model sizes and reuse topologies. 
+
+Strict Control Baseline To isolate the effect of UELB from other factors, our primary control baseline uses the same topology C and the same router, and only swaps the auxiliary objective: UELB vs. the standard load-balancing loss. 
+
+## E. Universal Router 
+
+This appendix contains the full version of Section 4.4, in-cluding connectivity-group state sharing and the stateless-router control. 
+
+E.1. Universal Router 
+
+While the Staggered Topology effectively constrains the instantaneous search space to a tractable subset, navigating the resulting high-dimensional combinatorial manifold re-quires a routing mechanism capable of context awareness beyond immediate local representations. Standard stateless routers, which treat layer-wise decisions as independent events, inherently fail to capture the recursive dependencies and long-range correlations distinct to the M OUE frame-work. To bridge this gap, we propose the Universal Router, a dynamic decision-making module designed to maintain trajectory coherence across the depth of the network by inte-grating historical state information into the expert selection. 
+
+Dual-Pathway Routing Mechanism To navigate the com-plex path space defined in Section 2, we introduce a stateful Universal Router. We decompose the routing process into two distinct pathways: 
+
+z(ℓ) = h(ℓ)Wg + bg
+
+| {z }
+
+> Semantic Pathway
+
++ β · Sim (h(ℓ), U (ℓ))
+
+| {z }
+
+> Contextual Pathway
+
+. (14) The Semantic Pathway handles the static, affine matching between token features and expert capabilities. The Con-textual Pathway incorporates a dynamic state matrix U (ℓ)
+
+(depth fast-weights) to capture trajectory history. We com-pute similarity using a projected key k(ℓ) = h(ℓ)Wk ∈ Rdk
+
+and Sim (h(ℓ), U (ℓ))j = ⟨u(ℓ) 
+
+> j
+
+, k (ℓ)⟩. Here, K is the matrix of projected keys for all tokens in the batch and p∗ denotes a detached routing target distribution. 
+
+Online State Update We implement fast weights as a forward-only state and update them online after routing. Concretely, we detach U (ℓ) from autograd and perform a no-gradient update using the current token keys K and a de-tached routing target p∗ (either masked router probabilities or the hard routing map). Let ˆp = softmax( KU ⊤) be the contextual prediction and δ = ˆ p − p∗. We update with: 
+
+U (ℓ) ← U (ℓ) − ηℓ · δ⊤KNtok 
+
+, (15) where Ntok is the number of tokens used for normalization, and ηℓ can optionally decay with depth. Importantly, we do not backpropagate gradients through this update, keeping activation memory unchanged relative to the MoE baseline. 
+
+State Sharing Within Connectivity Groups To align the router state with the reuse topology, we share the fast-weight state across layers that have the same reachability mask. Layers with identical allow-lists reuse a single U instance, so the contextual pathway tracks trajectories within a fixed local subgraph of reachable experts rather than resetting per layer. 
+
+Stateless Router Baseline Our stateless-router control dis-ables the contextual pathway by setting β = 0 and skipping the fast-weight update, while keeping the same topology, expert parameters, and training setup. This baseline isolates whether trajectory state is necessary for navigating the reuse graph. 
+
+## F. Progressive Warm-Start 
+
+This appendix contains the full version of the progressive warm-start procedure summarized in the main paper. 16 Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation 
+
+F.1. Progressive Warm-Start 
+
+While training M OUE from scratch yields optimal topology-aware representations, the computational cost can be pro-hibitive. To leverage existing high-performance checkpoints, we propose a Progressive Transformation Strategy that converts a standard pre-trained MoE into M OUE via a three-stage warm-start process. This approach relies on the ob-servation that standard MoEs naturally develop redundant functional clusters across layers (as shown in Figure 2). 
+
+Spectral Initialization of the Universal Pool To leverage the capabilities of pre-trained standard MoE models and accelerate convergence, we propose a streamlined Progres-sive Transformation Strategy . This approach initializes the M OUE architecture by inheriting weights from a source MoE and employing a curriculum-based transition to the recursive topology. 
+
+1. Heuristic Initialization of Universal Experts We con-struct the initial Universal Expert pool Eu by selecting a representative subset of experts from the pre-trained model. Rather than complex clustering, we employ a simplified heuristic: experts with the highest activation rates across intermediate layers (indicating high generalizability) are cloned to initialize Eu. The remaining experts serve as the initial Local Experts Elocal , preserving the layer-specific semantic knowledge of the original model. 
+
+2. Curriculum Routing Warmup via Logit Suppression 
+
+To integrate the Universal Experts without disrupting the pre-trained feature space, we introduce a dedicated router projection W u 
+
+> r
+
+at each layer, running in parallel with the preserved local router W local  
+
+> r
+
+. To manage the transition, we employ a Logit Suppression Strategy that imposes a time-dependent negative bias on the universal branch. Formally, let z(ℓ) ∈ R|E ⋆| denote the routing logits at layer 
+
+ℓ. Here, z(ℓ) 
+
+> i
+
+for expert Ei is computed as: 
+
+z(ℓ) 
+
+> i
+
+=
+
+(
+
+h(ℓ−1) · W local  
+
+> r
+
+[·, i ] if Ei ∈ E local 
+
+> ℓ
+
+h(ℓ−1) · W u 
+
+> r
+
+[·, i ] − β(t) if Ei ∈ E u (16) where β(t) ≥ 0 is a scalar bias controlled by a curriculum scheduler. The final gating probabilities are obtained via 
+
+π(ℓ) = Softmax (z(ℓ)).At the beginning of training ( t = 0 ), we initialize β(0) →∞ (e.g., 10 4), which suppresses the activation probability of Eu to near-zero, forcing the model to rely solely on Elocal 
+
+> ℓ
+
+and preserving the original behavior. As training proceeds, 
+
+β(t) is linearly annealed to 0, allowing the gradients to gradually warm up the parameters of the universal router 
+
+W u 
+
+> r
+
+and smoothly integrate the recursive topology. 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 
+
+> Layer Index
+> 0
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> Activation Ratio (%)
+
+Figure 8. Token Routing Proportion to Universal Experts per Layer after SFT warm-start training. math code commonsense 
+
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> Proportion (%)
+> Expert Index 0
+> Expert Index 1
+> Expert Index 2
+> Expert Index 3
+
+Figure 9. Activation differences of universal experts across do-mains. Experiments are conducted with 4 universal experts per layer. 
+
+## G. Experimental Setup 
+
+This appendix contains the full version of Section 5.1. 
+
+G.1. Experimental Setup Scope of this appendix. Data/training protocol and iso-parameter / iso-compute definitions are already given in Section 5.1; we do not repeat them here. 
+
+Evaluation. We employed the lm-evaluation-harness (Gao et al., 2023) to evaluate our models. For common sense and reading comprehension tasks, we report 0-shot accu-racy results for SciQ (Welbl et al., 2017), PIQA (Bisk et al., 2020), WinoGrande (WG) (Sakaguchi et al., 2020), ARC Easy (ARC-E) (Clark et al., 2018b), and 10-shot HellaSwag (Hella.) (Zellers et al., 2019), alongside 25-shot accuracy for ARC Challenge (ARC-C) (Clark et al., 2018a). In the assessments of continued QA and text understanding, we report 0-shot accuracy for LogiQA (Liu et al., 2020), 32-shot BoolQ (Clark et al., 2019), and 0-shot LAMBADA (Lam.) (Paperno et al., 2016). All reported results are calcu-lated with the mean and stderr of multiple experiments. 17 Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation 0 4 8 12 16 24 32 48  
+
+> Number of UEs per Layer
+> 45
+> 46
+> 47
+> 48
+> 49
+> 50
+> Avg. Performance
+> Vanilla MoE
+> MoUE
+> Figure 10. Effect of the number of universal experts in warm-start experiments.
+
+Baseline. Following the architecture of Qwen-3, we evalu-ate two MoE backbones, both using standard top-k routing with experts local to each layer: • MoE-160M: 18 layers, hidden size 768, 12 attention heads, 4 query groups, 12 experts per layer, top-k = 2 ,and MoE FFN hidden size 192. • MoE-700M: 16 layers, hidden size 1536, 16 attention heads, 4 query groups, 64 experts per layer, top-k = 8 ,and MoE FFN hidden size 96. All non-M OUE components (tokenization, optimizer, learning-rate schedule, data sampling, and evaluation har-ness) are kept identical between MoE and M OUE. Detailed configurations are summarized in Table 5. For the pro-gressive warm-start experiments with existing checkpoints, we utilize JetMoE-8B (Shen et al., 2024) and OLMoE-7B (Muennighoff et al., 2024) as our base models and con-vert them into the UE architecture. 
+
+Scaling Settings and Budget Metrics. Our goal is to as-sess whether M OUE provides consistent benefits across both model scale and routing granularity. The two base-lines above correspond to fine-grained routing (12 experts with top-2) and coarse-grained routing (64 experts with top-
+
+8), respectively. We study two expansion settings: width expansion , where M OUE does not increase activated pa-rameters or total physical parameters and only enlarges the expressivity via Virtual Width; and depth expansion , where MOUE performs depth scaling by sharing FFN parameters across depth. We report results under three budgets: Act 
+
+(activated parameters), TP (total physical parameters), and 
+
+VP (virtual parameters), where VP accounts for the effective capacity when Virtual Width is considered. This protocol directly tests whether M OUE yields a better scaling frontier under both fine-grained and coarse-grained MoE regimes. 
+
+## H. Topology Settings and Fair Comparisons 
+
+When comparing connectivity schemes (e.g., all-to-all, fixed window sharing, and staggered rotational sharing), we keep the window size W and the number of activatable ex-perts per layer fixed. The only difference is the connec-tivity structure (which experts are reachable at each layer). This ensures that topology ablations reflect optimization and routing effects rather than changes in activated-parameter budgets. 18 Mixture of Universal Experts: Scaling Virtual Width via Depth-Width Transformation 
+
+Table 5. Training and routing hyperparameters used in our experiments. Values are reported for the Qwen-3 style MoE backbones and are kept identical between MoE and M OUE unless explicitly noted. 
+
+Hyperparameter Value Notes 
+
+Sequence length 4096 shared Global batch size 256 shared Optimizer AdamW β = (0 .9, 0.95) , weight decay 0.1
+
+LR schedule cosine shared Peak LR 5 × 10 −4 shared Warmup fraction 5% tokens shared MoE aux loss coef. 10 −3 MoE baseline DN (data/param ratio) 200 shared Connectivity group size G 5 layers sharing the same expert mask MoE-160M: layers 18 Qwen-3 style MoE-160M: hidden size 768 Qwen-3 style MoE-160M: heads / groups 12 /4 attention / query groups MoE-160M: experts / top-k 12 /2 per layer MoE-160M: MoE FFN hidden 192 per expert MoE-700M: layers 16 Qwen-3 style MoE-700M: hidden size 1536 Qwen-3 style MoE-700M: heads / groups 16 /4 attention / query groups MoE-700M: experts / top-k 64 /8 per layer MoE-700M: MoE FFN hidden 96 per expert UELB αloc 1.0 calibrated UELB αu 0.5 calibrated UELB warmup b0 0.75 initial universal logit bias UELB warmup r 5% token % Universal Router β 0.1 contextual pathway weight Fast-weight lr η 0.1 online update learning rate 
+
+19
