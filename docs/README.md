@@ -6,73 +6,72 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-14
-- 运行时间：2026-03-14 19:16:39 UTC
+- 最新运行日期：2026-03-15
+- 运行时间：2026-03-15 19:16:04 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日深度解析 17 篇 AI 论文，重点聚焦移动端算子效率优化与 RISC-V 神经形态芯片设计。
-核心结论展示了 LLM 编写高效移动端算子的潜力，以及可配置 SoC 对脉冲神经网络加速的显著提升。
-建议关注端侧多模态模型与硬件协同设计，探索如何利用自动化工具提升 AIoT 设备的计算能效。
-- 详情：[/202603/14/README](/202603/14/README)
+今日精选 17 篇论文，深度解析循环局部性符号分析与消费级 GPU 上的智能体高效推理。
+重点关注 AgentServe 的软硬协同设计，以及通过“虚构重用”推
+- 详情：[/202603/15/README](/202603/15/README)
 
 ### 精读区论文标签
-1. [MobileKernelBench: Can LLMs Write Efficient Kernels for Mobile Devices?](/202603/14/2603.11935v1-mobilekernelbench-can-llms-write-efficient-kernels-for-mobile-devices)  
+1. [Fully Symbolic Analysis of Loop Locality: Using Imaginary Reuse to Infer Real Performance](/202603/15/2603.10196v1-fully-symbolic-analysis-of-loop-locality-using-imaginary-reuse-to-infer-real-performance)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对移动设备后端的自动化算子生成
-2. [SNAP-V: A RISC-V SoC with Configurable Neuromorphic Acceleration for Small-Scale Spiking Neural Networks](/202603/14/2603.11939v1-snap-v-a-risc-v-soc-with-configurable-neuromorphic-acceleration-for-small-scale-spiking-neural-networks)  
+   evidence：循环局部性与性能推断的编译器支持
+2. [AgentServe: Algorithm-System Co-Design for Efficient Agentic AI Serving on a Consumer-Grade GPU](/202603/15/2603.10342v1-agentserve-algorithm-system-co-design-for-efficient-agentic-ai-serving-on-a-consumer-grade-gpu)  
    标签：评分：9.0/10、query:hwnas
-   evidence：具有可配置神经形态加速功能的RISC-V SoC，用于边缘计算
-3. [HiAER-Spike Software-Hardware Reconfigurable Platform for Event-Driven Neuromorphic Computing at Scale](/202603/14/2602.18072v1-hiaer-spike-software-hardware-reconfigurable-platform-for-event-driven-neuromorphic-computing-at-scale)  
+   evidence：针对消费级GPU的高效AI服务算法-系统协同设计
+3. [OSUM-Pangu: An Open-Source Multidimension Speech Understanding Foundation Model Built upon OpenPangu on Ascend NPUs](/202603/15/2603.10862v1-osum-pangu-an-open-source-multidimension-speech-understanding-foundation-model-built-upon-openpangu-on-ascend-npus)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对昇腾NPU的非CUDA软硬件栈进行优化
+4. [HiAP: A Multi-Granular Stochastic Auto-Pruning Framework for Vision Transformers](/202603/15/2603.12222v1-hiap-a-multi-granular-stochastic-auto-pruning-framework-for-vision-transformers)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：用于硬件高效子网络的自动剪枝框架
+5. [Pip-Stereo: Progressive Iterations Pruner for Iterative Optimization based Stereo Matching](/202603/15/2602.20496v1-pip-stereo-progressive-iterations-pruner-for-iterative-optimization-based-stereo-matching)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对类脑计算协同设计的软硬件栈
-4. [K-Search: LLM Kernel Generation via Co-Evolving Intrinsic World Model](/202603/14/2602.19128v2-k-search-llm-kernel-generation-via-co-evolving-intrinsic-world-model)  
+   evidence：硬件感知的RNN算子与针对边缘部署的剪枝技术
+6. [DyQ-VLA: Temporal-Dynamic-Aware Quantization for Embodied Vision-Language-Action Models](/202603/15/2603.07904v1-dyq-vla-temporal-dynamic-aware-quantization-for-embodied-vision-language-action-models)  
    标签：评分：8.0/10、query:hwnas
-   evidence：机器学习系统的自动GPU内核生成与优化
-5. [Explainable and Hardware-Efficient Jamming Detection for 5G Networks Using the Convolutional Tsetlin Machine](/202603/14/2603.07336v1-explainable-and-hardware-efficient-jamming-detection-for-5g-networks-using-the-convolutional-tsetlin-machine)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：针对FPGA部署的硬件高效位级推理
-6. [Mitigating the Memory Bottleneck with Machine Learning-Driven and Data-Aware Microarchitectural Techniques](/202603/14/2603.07683v1-mitigating-the-memory-bottleneck-with-machine-learning-driven-and-data-aware-microarchitectural-techniques)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：通过数据感知微架构技术缓解内存瓶颈
+   evidence：针对具身智能模型边缘部署的动态量化框架
 
 ### 速读区论文标签
-1. [CORVET: A CORDIC-Powered, Resource-Frugal Mixed-Precision Vector Processing Engine for High-Throughput AIoT applications](/202603/14/2602.19268v1-corvet-a-cordic-powered-resource-frugal-mixed-precision-vector-processing-engine-for-high-throughput-aiot-applications)  
+1. [FAST-Prefill: FPGA Accelerated Sparse Attention for Long Context LLM Prefill](/202603/15/2602.20515v1-fast-prefill-fpga-accelerated-sparse-attention-for-long-context-llm-prefill)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于节能边缘人工智能的资源节约型向量引擎
-2. [Mobile-O: Unified Multimodal Understanding and Generation on Mobile Device](/202603/14/2602.20161v2-mobile-o-unified-multimodal-understanding-and-generation-on-mobile-device)  
+   evidence：针对长文本大模型的FPGA稀疏注意力加速
+2. [Heterogeneous Memory Design Exploration for AI Accelerators with a Gain Cell Memory Compiler](/202603/15/2602.21278v1-heterogeneous-memory-design-exploration-for-ai-accelerators-with-a-gain-cell-memory-compiler)  
    标签：评分：8.0/10、query:hwnas
-   evidence：适用于移动设备的紧凑多模态模型
-3. [KnapSpec: Self-Speculative Decoding via Adaptive Layer Selection as a Knapsack Problem](/202603/14/2602.20217v1-knapspec-self-speculative-decoding-via-adaptive-layer-selection-as-a-knapsack-problem)  
+   evidence：AI加速器的存储设计探索与编译器
+3. [PASTA: A Modular Program Analysis Tool Framework for Accelerators](/202603/15/2602.22103v1-pasta-a-modular-program-analysis-tool-framework-for-accelerators)  
    标签：评分：8.0/10、query:hwnas
-   evidence：建模特定硬件延迟以通过自适应选择最大化吞吐量
-4. [GauS: Differentiable Scheduling Optimization via Gaussian Reparameterization](/202603/14/2602.20427v1-gaus-differentiable-scheduling-optimization-via-gaussian-reparameterization)  
+   evidence：用于硬件加速器的模块化程序分析工具
+4. [InnerQ: Hardware-aware Tuning-free Quantization of KV Cache for Large Language Models](/202603/15/2602.23200v1-innerq-hardware-aware-tuning-free-quantization-of-kv-cache-for-large-language-models)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于软件编译和硬件综合的可微分算子调度
-5. [A prior information informed learning architecture for flying trajectory prediction](/202603/14/2603.06863v1-a-prior-information-informed-learning-architecture-for-flying-trajectory-prediction)  
+   evidence：硬件感知的KV缓存量化，旨在降低解码延迟和内存占用
+5. [VLN-Cache: Enabling Token Caching for VLN Models with Visual/Semantic Dynamics Awareness](/202603/15/2603.07080v1-vln-cache-enabling-token-caching-for-vln-models-with-visualsemantic-dynamics-awareness)  
    标签：评分：7.0/10、query:hwnas
-   evidence：硬件高效的轨迹预测框架
-6. [Space-Control: Process-Level Isolation for Sharing CXL-based Disaggregated Memory](/202603/14/2603.06951v1-space-control-process-level-isolation-for-sharing-cxl-based-disaggregated-memory)  
+   evidence：用于边缘设备实时部署的令牌缓存
+6. [Scalable optical neural network with nonlocally coupled coherent photonic processor](/202603/15/2603.07174v1-scalable-optical-neural-network-with-nonlocally-coupled-coherent-photonic-processor)  
    标签：评分：7.0/10、query:hwnas
-   evidence：基于CXL的分离式内存隔离的软硬件协同设计
-7. [OV-DEIM: Real-time DETR-Style Open-Vocabulary Object Detection with GridSynthetic Augmentation](/202603/14/2603.07022v1-ov-deim-real-time-detr-style-open-vocabulary-object-detection-with-gridsynthetic-augmentation)  
+   evidence：通过光子集成电路实现能效深度学习
+7. [Real-Time Glottis Detection Framework via Spatial-decoupled Feature Learning for Nasal Transnasal Intubation](/202603/15/2603.07630v1-real-time-glottis-detection-framework-via-spatial-decoupled-feature-learning-for-nasal-transnasal-intubation)  
    标签：评分：7.0/10、query:hwnas
-   evidence：严格延迟约束下的实时推理
-8. [The Model Knows Which Tokens Matter: Automatic Token Selection via Noise Gating](/202603/14/2603.07135v1-the-model-knows-which-tokens-matter-automatic-token-selection-via-noise-gating)  
+   evidence：适用于嵌入式和边缘设备的高效检测框架
+8. [FrameVGGT: Frame Evidence Rolling Memory for streaming VGGT](/202603/15/2603.07690v1-framevggt-frame-evidence-rolling-memory-for-streaming-vggt)  
    标签：评分：7.0/10、query:hwnas
-   evidence：自动令牌选择以降低推理成本
-9. [VLN-Cache: Enabling Token Caching for VLN Models with Visual/Semantic Dynamics Awareness](/202603/14/2603.07080v2-vln-cache-enabling-token-caching-for-vln-models-with-visualsemantic-dynamics-awareness)  
+   evidence：有界内存流式处理与KV缓存增长管理
+9. [Small Target Detection Based on Mask-Enhanced Attention Fusion of Visible and Infrared Remote Sensing Images](/202603/15/2603.06925v1-small-target-detection-based-on-mask-enhanced-attention-fusion-of-visible-and-infrared-remote-sensing-images)  
    标签：评分：6.0/10、query:hwnas
-   evidence：通过Token缓存避免冗余计算以实现实时部署
-10. [A Lightweight Digital-Twin-Based Framework for Edge-Assisted Vehicle Tracking and Collision Prediction](/202603/14/2603.07338v1-a-lightweight-digital-twin-based-framework-for-edge-assisted-vehicle-tracking-and-collision-prediction)  
+   evidence：用于遥感目标检测的轻量级融合网络
+10. [SLNet: A Super-Lightweight Geometry-Adaptive Network for 3D Point Cloud Recognition](/202603/15/2603.07454v1-slnet-a-super-lightweight-geometry-adaptive-network-for-3d-point-cloud-recognition)  
    标签：评分：6.0/10、query:hwnas
-   evidence：适用于资源受限边缘设备的轻量化框架
-11. [A Unified Framework for Knowledge Transfer in Bidirectional Model Scaling](/202603/14/2603.07506v1-a-unified-framework-for-knowledge-transfer-in-bidirectional-model-scaling)  
+   evidence：用于3D点云识别的超轻量级骨干网络
+11. [Integration of deep generative Anomaly Detection algorithm in high-speed industrial line](/202603/15/2603.07577v1-integration-of-deep-generative-anomaly-detection-algorithm-in-high-speed-industrial-line)  
    标签：评分：6.0/10、query:hwnas
-   evidence：跨架构尺寸的双向模型缩放统一框架
+   evidence：针对高速工业生产线在线部署设计的架构
 
 
 <div class="dpr-home-promo-card">
