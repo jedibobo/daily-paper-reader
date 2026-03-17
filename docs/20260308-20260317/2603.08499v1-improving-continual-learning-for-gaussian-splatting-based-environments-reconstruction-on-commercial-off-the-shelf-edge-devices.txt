@@ -1,0 +1,792 @@
+Title: Improving Continual Learning for Gaussian Splatting based Environments Reconstruction on Commercial Off-the-Shelf Edge Devices
+
+URL Source: https://arxiv.org/pdf/2603.08499v1
+
+Published Time: Tue, 10 Mar 2026 02:41:56 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# Improving Continual Learning for Gaussian Splatting based Environments Reconstruction on Commercial Off-the-Shelf Edge Devices 
+
+## Ivan Zaino Politecnico di Torino Matteo Risso Politecnico di Torino Daniele Jahier Pagliari Politecnico di Torino Miguel de Prado VERSES Toon Van de Maele VERSES Alessio Burrello Politecnico di Torino 
+
+## Abstract 
+
+Novel view synthesis (NVS) is increasingly relevant for edge robotics, where compact and incrementally updatable 3D scene models are needed for SLAM, navigation, and inspec-tion under tight memory and latency budgets. Variational Bayesian Gaussian Splatting (VBGS) enables replay-free continual updates for the 3DGS algorithm by maintaining a probabilistic scene model, but its high-precision computa-tions and large intermediate tensors make on-device train-ing impractical. We present a precision-adaptive optimiza-tion framework that enables VBGS training on resource-constrained hardware without altering its variational for-mulation. We (i) profile VBGS to identify memory/latency hotspots, (ii) fuse memory-dominant kernels to reduce ma-terialized intermediate tensors, and (iii) automatically as-sign operation-level precisions via a mixed-precision search with bounded relative error. Across the Blender, Habitat, and Replica datasets, our optimised pipeline reduces peak memory from 9.44 GB to 1.11 GB and training time from 
+
+∼234 min to ∼61 min on an A5000 GPU, while preserv-ing (and in some cases improving) reconstruction quality of the state-of-the-art VBGS baseline. We also enable for the first time NVS training on a commercial embedded plat-form, the Jetson Orin Nano, reducing per-frame latency by 
+
+∼19 × compared to 3DGS. 
+
+## 1. Introduction 
+
+On-device 3D environment reconstruction is a key capabil-ity for embodied intelligence, enabling Simultaneous Lo-calization and Mapping (SLAM) and visual navigation un-der strict compute, memory, and latency constraints. In re-alistic deployments, the robot will build and refine a scene model from a sequential image stream collected through an on-board camera. However, offloading these data to build an offline model could be detrimental due to bandwidth, connectivity, and privacy constraints [8]. Therefore, a central challenge is to learn scene represen-tations that are both accurate and efficient to be computed on embedded hardware (HW). Neural Radiance Fields (NeRF) [14] approaches provide high-fidelity novel-view synthesis, but are typically too expensive for on-board use due to slow optimisation and limited real-time through-put ( 10 − 30 hours on an A5000 GPU [4]). 3D Gaussian Splatting (3DGS) [9] has recently emerged, offering a bet-ter quality vs compute efficiency trade-off. This has mo-tivated extensive work on rendering at-the-edge , includ-ing mobile-friendly Gaussian splatting and collaborative/of-floaded pipelines [11, 19]. While 3DGS is a promising solution, edge robotics re-quires not only efficient rendering but also on-device train-ing and model updates to cope with evolving or unknown environments without resorting to data offloading. Se-quential updates introduce a continual-learning regime [21], where naive incremental optimisation can cause catas-trophic forgetting and degrade quality in regions that are not revisited. Hence, most 3DGS pipelines rely on replay mechanisms (i.e., storing past views and periodically re-training the model) [2, 7, 12, 22], further increasing com-pute and memory demands for model re-training. Only a few recent works explicitly target training or incremental updates under resource constraints [10, 20, 23]. Variational Bayes Gaussian Splatting (VBGS) [18] has been designed to cope with the problem of continual up-dates by casting GS training as variational inference [1] over a probabilistic mixture model. On the other hand, to enable better replay-free continual learning, VBGS relies on high precision (i.e., fp64 ) and materialises large intermediate tensors during sufficient-statistics accumulation to ensure the numerical stability of the algorithm. In the baseline im-plementation of [18], VBGS requires ∼234 minutes on an  
+
+> arXiv:2603.08499v1 [cs.CV] 9 Mar 2026 Train cam
+> Train cam
+> Test cam
+> NVS pipeline
+> I1I2
+> I∗
+> Training set
+> Test set
+> render
+> train
+> Figure 1. Novel view synthesis setup: observed training views (in gray) are used for training. Test views (in red) are used to evaluate rendering quality from unseen viewpoints.
+
+A5000 GPU and 9.44 GB peak GPU memory, which does not fit a typical edge platform memory, such as the 8 GB available on a Jetson Orin Nano. In this work, we tackle the problem of porting Novel View Synthesis (NVS) training at the edge, by propos-ing a precision-adaptive optimisation framework that makes VBGS training feasible on resource-constrained HW with-out modifying its objective or variational update rules. Our main contributions are: • We profile the baseline VBGS algorithm to localise la-tency and peak-memory hotspots in the pipeline via function-level profiling. • We propose two optimizations for memory and latency improvement, i.e., (i) fusing memory-dominant kernels to eliminate large intermediate tensors, and (ii) an au-tomatic mixed-precision search assigning operation-level precision under explicit numerical-stability constraints. • We achieve ∼ 4× training speedup and ∼ 9× peak-memory reduction relative to the VBGS baseline [18] on an A5000 GPU across the Blender [14], Habitat [16], and Replica [17] datasets with on-par or better reconstruction error, enabling for the first time its execution on a Jetson Orin Nano. 
+
+## 2. Background and Related Works 
+
+2.1. Novel view synthesis 
+
+Fig. 1 shows a common NVS setup where a set of posed observed images (shown in gray) is used to train a model which is then used to render novel views from unseen cam-era poses (shown in red). A popular approach, NeRF [14], effectively models scenes as a neural volumetric radiance field rendered via differentiable volumetric integration, but its ray-marching-style optimization is computationally heavy. Efficient vari-ants [3, 5, 6, 15] improve training and/or rendering on desk-top GPUs, yet training remains too expensive for edge de-ployment. For these reasons, we do not further consider NeRF in our analysis, and instead focus on 3DGS [9], the new de facto standard in this field, and on VBGS [18], a probabilistic derivation that improves training in a contin-ual learning setup.                                                    
+
+> Method Continual Replay free Edge training COTS HW
+> Voyager [11] n.a. n.a. n.a. ✓
+> ECO-GS [19] n.a. n.a. n.a. ✓
+> 3DGS [9] ✗n.a. ✗✓
+> Grendel [25] ✗n.a. ✗✓
+> CLNeRF [2] ✓✗✗✓
+> G. S. SLAM [12] ✓✗✗✓
+> SplaTAM [7] ✓✗✗✓
+> REACT3D [20] ✓✗✓✗
+> RTGS [10] ✓✗✓✗
+> GauSPU [23] ✓✗✓✗
+> VBGS [18] ✓✓✗✓
+> Ours ✓✓✓✓
+> Table 1. State-of-the-art GS methods.
+
+2.1.1. 3D Gaussian Splatting (3DGS) 
+
+3DGS [9] models a scene as a set of anisotropic 3D Gaussians and renders them via differentiable rasteriza-tion, achieving real-time rendering with competitive quality. Training optimizes Gaussian parameters (e.g., position, co-variance, opacity, and view-dependent appearance) by min-imizing a photometric reconstruction loss. Follow-up work has largely focused on efficient deployment, especially fast edge/mobile rendering or streaming variants [11, 19], but the cost of training and model updates has not been op-timized, remaining challenging to execute on Commercial Off-the-Shelf (COTS) edge devices. This issue becomes central in online mapping and SLAM [7, 12, 24], where sequential observations require frequent updates. The resulting bottleneck has motivated distributed training systems such as Grendel [26] and HW-accelerated or specialized pipelines for faster incremental updates [10, 20, 23]. Tab. 1 shows that 3DGS [9] and Gren-del [26] are compatible with COTS HW but are not de-signed for edge training, being too slow to be executed on board. REACT3D [20] (and similar approaches [10, 23]) instead use custom HW to accelerate the update step, thus being incompatible with COTS platforms. 
+
+2.1.2. Variational Bayes Gaussian Splatting 
+
+In on-device NVS, observations arrive sequentially, so mod-els must be updated from a non-stationary stream where catastrophic forgetting can degrade reconstruction in less revisited regions [13]. As shown in Tab. 1, many contin-ual NeRF and GS-based mapping pipelines mitigate this problem by replaying crucial frames seen in the past dur-ing model update [2, 7, 12, 22], further increasing the on-device update latency proportionally to the number of re-plays stored on-board. To eliminate this latency overhead, which makes edge-training either unfeasible or very slow, VBGS [18] treats Gaussian parameters probabilistically and performs closed-form, accumulative variational updates un-der conjugate exponential-family modelling [1], which reg-ularize parameter changes and reduce forgetting without the VBGS generative model M            
+
+> πzp
+> Component n
+> (μs,n ,Σs,n )→sp
+> (μc,n ,Σc,n )→cp
+> n= 1 , . . . , N
+> sp
+> cp
+> zpselects component n
+> p= 1 , . . . , P
+
+Figure 2. VBGS generative model M overview. A point p with position sp and color cp is generated by a component n given a latent assignment zp, coming from a categorical distribution with parameter π. Gray circles denote observed data. 
+
+need for replay buffers. However, VBGS requires fp64 
+
+precision for probabilistic computation, making it difficult to deploy efficiently on resource-constrained edge devices, which motivates the proposed work. VBGS [18] models observations with the mixture model 
+
+M depicted in Fig. 2. M includes N Gaussian com-ponents weighted by z ∼ Cat( π). Each component has two modalities: a spatial variable s (3D Cartesian co-ordinates) and a color one c (RGB), modelled as mul-tivariate Gaussians conditioned on the components, i.e., 
+
+s | z=n ∼ N (μs,n , Σs,n ) and c | z=n ∼ N (μc,n , Σc,n ).VBGS treats the parameters μ, Σ and z as random vari-ables distributed as a Normal–Inverse–Wishart prior on 
+
+(μ, Σ) ∼ NIW( m, κ, V, n ) and a Dirichlet prior on the mixture weights, π ∼ Dirichlet( α). These represent the conjugate priors that enable closed-form updates [18]. A high-level view of the training loop of the M gen-erative model is reported in Algorithm 1. For each image and its corresponding camera parameters, the point cloud 
+
+Xt (hereinafter denoted as frame ) is derived. The algo-rithm starts from the model M and the sufficient statis-tics S trained on the previous frame (initialized at 0 for the first frame). Additionally, it considers M0, the ini-tialization model in which the components are reassigned (only the μ parameters are updated) at every step. The loop first performs this reassign step to avoid compo-nent under-utilization: it evaluates Evidence Lower Bound (ELBO ) deltas over batches of points of size B, aggregates them, samples n 3D points biased toward low-ELBO (high-error) regions, randomly samples n Gaussian components among those not yet updated, and reinitializes them by set-ting their spatial and color means to the sampled points. The 
+
+ELBO is computed through the compute elbo delta 
+
+function, which provides (i) the ELBO , i.e., the varia-tional lower bound on the data log-likelihood, where a lower 
+
+ELBO indicates a poorer explanation of the data and (ii) responsibilities R, i.e., per-sample soft assignment weights that quantify how strongly each Gaussian component ex-plains each observation. The training loop then runs the 
+
+fit step to update the running model M: for each batch 
+
+XB , it computes responsibilities R, derives per-sample suf-ficient statistics Su, aggregates them into ∆S by weight-
+
+Algorithm 1 VBGS training pipeline 
+
+Require: Initial model M0, running model M. 
+
+> 1:
+
+Initialize stats (Sprior , S space , S color ) = S 
+
+> 2:
+
+for each frame Xt do 
+
+M0 ← reassign (M0, X t):
+
+for each batch XB in Xt do 
+
+(ELBO , ) ← compute elbo delta (M0, X t)
+
+Sample n points biased to low ELBO 
+
+Pick n least-used components 
+
+Reinitialize selected components in M0
+
+(spatial/color means ← sampled points) 
+
+return M0
+
+(M, S ) ← fit (M0, M, X t, S ):
+
+for each batch XB in Xt do 
+
+( , R ) ← compute elbo delta (M0, X B )
+
+Compute “unsummed” statistics Su
+
+from XB and M
+
+∆S ← sum stats over samples (R, S u)
+
+S ← S + ∆ S
+
+M ← update from statistics (M, S )
+
+return (M, S )
+
+ing with R (sum stats over samples ), and accumu-lates them into the global statistics buffer S. After process-ing all batches, VBGS updates the posterior parameters in closed form from S (update from statistics ), re-turning the updated (M, S ). For more details on the algo-rithm, readers are referred to [18]. 
+
+## 3. Motivation: VBGS bottlenecks 
+
+We perform a fine-grained analysis of latency and peak memory consumption across the two macro-routines of VBGS, namely reassign and fit (Algorithm 1). For this analysis, we use a 512 × 512 RGB image with a model size N of 10 5 components and a batch size B of 500, as in the reference VBGS work [18]. 
+
+3.1. Latency-driven analysis 
+
+We profile a single iteration of the VBGS training loop using the TensorBoard profiler (XProf) 1, which collects traces and attributes runtime to high-level function calls. Fig. 3 shows the runtime split between the fit 
+
+and reassign routines. Two functions dominate the end-to-end latency: the compute elbo delta , in-     
+
+> 1https://www.tensorflow.org/guide/profiler 0% 20% 40% 60% 80% 100%
+
+Percentage 
+
+> reassign step
+> fit step
+> compute_elbo_delta
+> sum_stats_over_samples
+> other operations
+
+Figure 3. Runtime breakdown of VBGS between the reassignment and fitting steps. 0 25 50 75 100 125 150 175 200         
+
+> 0
+> 5
+> 10
+> 15 fit step
+> GPU memory usage
+> compute_elbo_delta
+> sum_stats_over_samples
+> other operations
+> 020 40 60 80 100 120
+> Latency (ms)
+> 0
+> 5reassign step
+> Memory usage (GiB)
+
+Figure 4. Memory profile during a fit step (top) and a reassign step (bottom) window. The shaded areas represent the function executed during that timestep. 
+
+voked in both reassign and fit , computes the 
+
+ELBO and the data-to-component assignments; the 
+
+sum stats over samples multiplies the matrix of point-component sufficient statistics Su with the assign-ment matrix R and aggregates across the batch dimension 
+
+B to update model parameters (Algorithm 1). The cost of both functions is proportional to the batch size B and the number of mixture components N .In the reassign step (Fig. 3-bottom), the work-load is dominated by compute elbo delta , occupy-ing 84.4% of execution time, while the remaining 15.6% is spent on other operations. In the fit step (Fig. 3-top), time is split between compute elbo delta (42.4%) and 
+
+sum stats over samples (45.8%), with the remain-ing 11.8% attributed to other operations. The latter includes updating the model, transposing tensors, or, in the case of the reassign step, modifying unused component means. 
+
+3.2. Memory-driven analysis 
+
+Fig. 4 shows the memory (and absolute latency) profile of a single iteration of each step in Algorithm 1 on an A5000 GPU (we profile only GPU memory, since we are not con-strained by the CPU one). Two transient spikes (the first at 10.9 GB and the second at 11.3 GB) dominate the footprint. By profiling memory allocations, we found these spikes belonging to sum stats over samples function. As 
+
+Algorithm 2 sum stats over samples (baseline): materialise-then-reduce weighted statistics. 
+
+Require: responsibilities R ∈ RB×N , unsummed statis-tics Su ∈ RB×K 
+
+> 1:
+
+B: batch size; N : number of mixture components; K:flattened parameter dimension  
+
+> 2:
+
+for each parameter p ∈ (m, κ, V, n ) do  
+
+> 3:
+
+K = dim( p) 
+
+> 4:
+
+Broadcasted product (materialised)  
+
+> 5:
+
+Initialize ∆S ∗ ← 0B×N ×K 
+
+> 6:
+
+for b ← 1 to B do  
+
+> 7:
+
+for n ← 1 to N do  
+
+> 8:
+
+for k ← 1 to K do  
+
+> 9:
+
+∆S ∗[b, n, k ] ← R[b, n ] · Su[b, k ] 
+
+> 10:
+
+Reduction over batch  
+
+> 11:
+
+Initialize ∆S ← 0N ×K 
+
+> 12:
+
+for n ← 1 to N do  
+
+> 13:
+
+for k ← 1 to K do  
+
+> 14:
+
+∆S [n, k ] ← PBb=1 ∆S ∗[b, n, k ] 
+
+> 15:
+
+return ∆S 
+
+shown in Algorithm 2, this function computes weighted sufficient-statistics reductions using posterior responsibili-ties R and unsummed statistics Su, which provide the in-formation for updating the parameters for each point of the batch. For each parameter to be updated (color and position prior parameters), this function sums the sufficient statis-tics over the batch dimension and assigns them to the cor-rect Gaussian component. In the baseline implementation, this computation follows a materialise-then-reduce pattern, resulting in a memory peak during matrix ∆S∗ material-ization. The biggest allocation happens when updating the parameter V (Sec. 2.1.1, scale matrix of the NIW distribu-tion): this parameter’s dimension is K = 3 × 3, which re-sults in an intermediate tensor of shape (B, N, 9) . With val-ues of N and B parameters specified before, it corresponds to an allocation of ≈ 9.4 GB in fp64 . This motivates a key optimisation goal: eliminating (or fusing away) large broad-casted intermediates within sum stats over samples 
+
+to reduce peak memory usage. 
+
+## 4. Methods 
+
+We propose two complementary strategies to make VBGS training feasible on edge platforms. First, to resolve the observed memory peaks, we applied kernel fusion to the baseline implementation to remove the dominant transient 
+
+allocations identified in Sec. 3.2. Second, to jointly re-duce runtime and memory footprint, we introduce an au-tomatic mixed-precision pipeline that assigns reduced nu-merical precision to selected operations while enforcing an explicit numerical-stability constraint. All the algorithms Algorithm 3 sum stats over samples : fused con-traction (no intermediate allocation) 
+
+Require: Rensposibilities R ∈ RB×N , unsummed suffi-cient statistics Su ∈ RB×K 
+
+> 1:
+
+B: batch dim, N : number of components, K: flattened parameter dimension  
+
+> 2:
+
+Fused multiply-accumulate contraction  
+
+> 3:
+
+Initialize ∆S ← 0N ×K 
+
+> 4:
+
+for b ← 1 to B do  
+
+> 5:
+
+for n ← 1 to N do  
+
+> 6:
+
+for k ← 1 to K do  
+
+> 7:
+
+∆S[n, k ] ← ∆S [n, k ] + R[b, n ] · Su[b, k ] 
+
+> 8:
+
+return ∆S 0 25 50 75 100 125 150 175 200 
+
+> Latency (ms)
+> 0
+> 5
+> 10
+> 15
+> Memory usage (GiB)
+> GPU memory usage
+> compute_elbo_delta
+> sum_stats_over_samples
+> other operations
+
+Figure 5. Effect of replacing a materialise-then-reduce implemen-tation with a fused contraction (Algorithm 3). 
+
+and techniques discussed hereinafter are based on and im-plemented in the JAX framework, as the baseline VBGS implementation [18]. 
+
+4.1. Memory-driven kernel fusion 
+
+The profiling analysis in Sec. 3.2 shows that peak memory is dominated by sum stats over samples .We reformulate it as a fused contraction. Let R ∈ RB×N
+
+denote responsibilities and Su ∈ RB×K denote the per-parameter unsummed sufficient statistics (flattened), where 
+
+K is the parameter dimensionality (e.g., K = 9 for a 3 × 3
+
+covariance statistic). The baseline in Algorithm 2 computes the weighted reduction by first materializing the broad-casted product: 
+
+∆S∗[b, n, k ] = R[b, n ] Su[b, k ], ∆S∗ ∈ RB×N ×K , (1) and then reducing over the batch dimension, 
+
+∆S[n, k ] = 
+
+> B
+
+X
+
+> b=1
+
+∆S∗[b, n, k ], ∆S ∈ RN ×K . (2) This materialize-then-reduce strategy incurs an additional 
+
+O(BN K ) peak-memory footprint due to ∆S∗. We replace it with an equivalent fused contraction (Algorithm 3) that directly accumulates along the contracting axis (the batch dimension), 
+
+∆S = R⊤Su, (3) This reformulation reduces the peak-memory complexity of the weighted reduction from O(B N K ) to O(N K ) (plus the already-required storage of R and Su). We implement Eq. (3) using a contraction primitive (Algorithm 3) so that the JAX-XLA compiler can generate an efficient kernel without materializing broadcasted intermediates. The effect on memory-over-time behaviour is shown in Fig. 5. Our new implementation shows no degradation in latency while reducing the memory by 68.9%. 
+
+4.2. Automatic mixed-precision search 
+
+The original VBGS algorithm [18] trains the model with high precision ( fp64 ) to avoid instability in accumulative statistics, normalisation, and likelihood-related computa-tions. However, it incurs high latency, energy consumption, and memory usage. We propose an automatic precision-assignment procedure that selectively downcasts operations while preserving numerical correctness to reduce the av-erage precision of VBGS operations. Our algorithm re-ceives as input a user-defined tolerance ε, a function f ,and its inputs x. Notably, the proposed algorithm is com-pletely general and can be applied to any JAX function, also outside the scope of GS. In the context of this pa-per, we target the functions compute elbo delta and 
+
+sum stats over samples , that account for the largest share of VBGS’s runtime (Sec. 3.1). The output is a preci-sion configuration Π∗ for the selected function. 
+
+Problem formulation. Consider a shape-static function f
+
+(i.e., a function whose input, output, and intermediate tensor shapes are fixed and known at compile time) that is staged into a sequence of L elementary operations: 
+
+f = fL ◦ fL−1 ◦ · · · ◦ f1, (4) We associate each operation fi with a precision choice πi ∈P, where P is a finite set of candidate formats (i.e., {fp16 ,
+
+TF32 , fp32 , fp64 }). A mixed-precision configuration is 
+
+Π = {π1, . . . , π L}, yielding a precision-annotated compu-tation 
+
+f (Π) = f (πL) 
+
+> L
+
+◦ · · · ◦ f (π1)1 . (5) We seek a configuration that reduces execution cost while bounding deviation from a high-precision reference. Let yh = f (Π h)(x) be the output under the all-highest-precision configuration Πh. For a candidate configuration 
+
+Π, we define a numerically robust relative error: 
+
+err(Π) = ∥yh − f (Π) (x)∥2
+
+max( ∥yh∥2, τ ) , (6) where τ > 0 prevents ill-conditioning when ∥yh∥2 ≈ 0.The precision search problem is: 
+
+Π⋆ = arg min  
+
+> Π
+
+T
+
+
+
+f (Π) 
+
+s.t. err(Π) ≤ ε, (7) Precision-aware pass        
+
+> Structure-aware pass
+> Latency-aware pass
+> Export precision map Π∗
+> Compilation (offline)
+> Load πi←Π∗(fi)
+> Cast inputs to πi
+> Execute node fi
+> Repeat for all nodes
+> Runtime (online)
+> Figure 6. Compilation and runtime behaviour overview of the mixed-precision search algorithm.
+
+where T (·) denotes measured wall-clock latency and ε is a user-defined tolerance. The search proceeds in three refinement passes (illus-trated in Fig. 6): (i) Precision-aware pass: determines a numerically stable configuration under the constraint in Eq. (7); (ii) Structure-aware pass: performs local graph exploration to recover safe downcasts missed by the first pass; (iii) Latency-aware pass: removes downcasts that do not yield speedup after accounting for cast overhead. 
+
+4.2.1. Precision-aware pass 
+
+We represent the staged computation using its jaxpr repre-sentation, i.e., the graph-form intermediate representation employed internally by JAX, where nodes correspond to elementary operations and edges encode data dependen-cies. For each candidate precision level π ∈ P , we esti-mate its global output sensitivity by downcasting it in iso-lation and measuring the induced output deviation using Eq. (6). Specifically, let Π(i←π) denote the configuration that matches Πh except that operation i is executed at pre-cision π. We define an operation’s sensitivity score: 
+
+Mπ [i] = err 
+
+
+
+Π(i←π)
+
+. (8) Then, starting from the lowest-precision configuration Πlow 
+
+(all operations downcasted), we iteratively promote opera-tions to the highest precision in order of decreasing sensi-tivity Mπ [i] of that precision until err(Π) ≤ ε. We call the newly obtained configuration Π1. We then consider only the nodes that have been upcasted , and try to set all of them to the 2nd lowest precision. If the error criterion is not met, we repeat the greedy type promotion in reverse sensitivity order described above. We iteratively proceed in the same way for additional intermediate precisions (if any). 
+
+4.2.2. Structure-aware pass 
+
+The configuration obtained after the previous pass, de-noted Π(pr ), is numerically stable but not necessarily cost-optimal. This can occur because the first pass uses single-node perturbations, which may over-promote nodes with high individual sensitivity. We therefore run a local refine-ment starting from all downcasted nodes (“seeds”): for each seed, we attempt to downcast its graph neighbours (produc-ers/consumers) by one precision level, keeping the change if the output constraint remains satisfied. Downcasted nodes become new seeds, expanding the search until no further safe downcasts are found. The result is a refined stable con-figuration Π(struct ).
+
+4.2.3. Latency-aware pass 
+
+Not all safe downcasts inserted in the previous steps im-prove wall-clock time, because the cast operation itself can create operational overhead and inhibit compiler node fu-sion. Therefore, starting from the lowest precision, we benchmark candidate cast-bounded regions (subgraphs ex-ecuted at identical reduced precision whose inputs/outputs require explicit casts). For each region C, we define the net gain: ∆T (C) = Thigh (C) −
+
+
+
+Tlow (C) + Tcast (C)
+
+
+
+where 
+
+Thigh and Tlow are the latencies of the region at the bench-marked precision and at the one immediately higher (e.g., 
+
+fp16 and TF32 ). If ∆T (C) ≤ 0, the region is reverted to the next higher precision. If still tagged as a cast-bound re-gion, it is reinserted into the candidates to be benchmarked for the next precision. This pruning step yields the final con-figuration Π⋆, which retains precision reductions that pro-vide latency improvements. 
+
+4.3. Compilation and search overhead 
+
+Our mixed-precision algorithm incurs a one-time offline cost. First, one iteration of VBGS proceeds normally at the highest precision through the first frame to ensure the model is updated and non-zero statistics are computed. When processing frame 2, the optimization is triggered upon the first call to a function marked for compilation (e.g., 
+
+compute elbo delta ). Notably, in this work, we ap-ply our algorithm to functions whose relative output error is data independent , namely compute elbo delta and 
+
+sum stats over samples . Experimentally, we vali-dated that the precision assignment is independent of scene content, being unchanged for in-domain frames and white-noise, and thus optimized it on a white-noise frame. Let |V | denote the number of operations (nodes) in the staged graph and |P| the number of candidate precisions. The precision-aware pass requires up to O(|V | · |P| )
+
+modified evaluations (and corresponding compilations, depending on implementation) to compute sensitivity scores, followed by a linear-time promotion step. The structure-aware and latency-aware passes add a bounded number of evaluations proportional to the attempted local downcasts and pruned regions. At runtime, the precomputed operation-to-precision map is loaded, and the function is executed through a JAX JIT wrapper, incurring negligible overhead beyond standard JIT compilation. A new offline run is required only if the function code, tolerance ε, candidate set P, or static input 0 25 50 75 100 125 150 175 200   
+
+> Frames
+> 10
+> 12
+> 14
+> 16
+> 18
+> 20
+> 22
+> PSNR [dB]
+> fp32 TF32 fp64
+
+Figure 7. PSNR evolution of VBGS under different homogeneous precision variants on the Habitat Van Gogh Room environment. 
+
+shapes/dtypes change. Since VBGS functions are shape-static and environment-agnostic, precision maps are com-puted once on a workstation and reused on our edge HW for every dataset. 
+
+## 5. Experimental Results 
+
+5.1. Setup 
+
+We evaluate our method on three standard NVS bench-marks, i.e., Blender [14], Replica [17], and Habitat [16]. Blender contains 8 3D synthetic forward-facing objects, while Replica and Habitat provide, respectively, 4 and 3 photo-realistic indoor environments with accurate camera poses and depth maps. Across datasets, we use the standard train/val splits [18] and report results on held-out views. We evaluate task performance as the reconstruction qual-ity measured by the Peak Signal-to-Noise Ratio (PSNR) on novel views. The PSNR is computed as: PSNR =10 log 10 
+
+ 255 2/MSE , where MSE denotes the Mean Squared Error, i.e., the average over all RGB channels and all pixels of the squared pixel-wise differences between the reconstructed and ground-truth images. As previously dis-cussed, we evaluate training performance as the continual 
+
+fitting cost of the GS model, rather than the novel-view ren-dering time emphasized in prior edge-oriented works. We report wall-clock time to fit a single new frame and the peak GPU memory reached during fitting. We consider two deployment targets: an NVIDIA RTX A5000 workstation GPU (24 GB high-bandwidth memory, 27.8 TFLOPS) and, as an edge target, an NVIDIA Jetson Orin Nano embedded GPU (8 GB CPU and GPU shared memory, 1.28 TFLOPS). 
+
+5.2. Baseline homogeneous-precision results 
+
+Before exploring mixed-precision variants with the algo-rithm described in Sec. 4.2, we first study homogeneous precision assignments on a representative scenario, i.e., the 
+
+Van Gogh Room from Habitat [16]. We select this scene because it represents a middle ground in difficulty within the dataset, i.e., a medium-sized room of average complex-ity. We tested fp16 , fp32 , TF32 , and fp64 as target 20     
+
+> 40
+> 60
+> Time per frame [s]
+> Time per frame [s]
+> Peak PSNR [dB]
+> 0
+> 25
+> 50
+> 75
+> 100
+> Assignments [%]  fp16
+> TF32
+> fp32
+> fp64
+> 1e-8 1e-7 1e-6 1e-5 1e-4
+> Tolerance
+> 60
+> 40
+> 20
+> 0
+> Time saved [s]  fp32
+> TF32
+> fp16
+> 15
+> 20
+> Peak PSNR [dB]
+
+Figure 8. Tolerance sweep for the mixed-precision search on Habi-tat Van Gogh Room .
+
+precisions. Starting from the Ampere NVIDIA GPU gen-eration, fp32 MatMul can run in TensorFloat-32 (TF32), a 19-bit HW format that reduces mantissa precision to in-crease throughput: operands are stored in fp32 , but the MatMul computation uses TF32 and accumulates in fp32 .For brevity, we denote this mode as TF32 .We fit a VBGS model with N =10 5 and B = 500 on 200 frames processed sequentially. After fitting each frame, evaluation is performed by computing the average PSNR and 95% confidence interval on a fixed set of 100 held-out validation views. As shown in Fig. 7, fp64 (i.e., the same data type used by VBGS [18]) provides the best and most stable reconstruction quality and is used as our baseline. When evaluating the PSNR at the end of the fitting, using 
+
+TF32 or fp32 instead of fp64 reduces the PSNR by 6.85 dB and 3.96 dB, respectively, demonstrating that a homo-geneous reduction in precision is detrimental to the algo-rithm’s performance. Homogeneous fp16 results are omit-ted due to numerical instabilities preventing convergence. 
+
+5.3. Tolerance selection for the mixed-precision search algorithm 
+
+As explained in Sec. 4.2, our mixed-precision pipeline re-quires a user-defined tolerance ϵ. This tolerance is selected 
+
+once and then kept fixed across all experiments and scenes. To choose ϵ, we run a sweep on the same representative workload of the previous Sec. 5.2. Fig. 8 summarizes the effect of ϵ on the runtime-to-quality trade-off and on the re-sulting precision map. The top panel reports runtime per frame (left axis) together with peak PSNR (right axis) as 
+
+ϵ is relaxed. ϵ=10 −4 leads to a clear quality drop, while 
+
+ϵ=10 −5 and below preserve stable renderings. The mid-Table 2. PSNR (dB) on Blender (left block) and Habitat (center block) and Replica (right block). All models are evaluated after 200 training frames on 100 unseen validation frames. Values are reported as μ ± σ. The best performance for each scene is shown in bold .                             
+
+> lego chair drums ficus hotdog materials mic ship Van Gogh Room Apartment Skokloster Castle Room0 Room1 Office0 Office1
+> 3DGS 19.10 20.59 15.04 19.41 19.81 16.11 23.03 21.15 20.55 19.18 14.30 23.76 26.98 33.03 33.88
+
+(w. replay) ±1.02 ±0.85 ±1.13 ±0.90 ±1.86 ±1.45 ±0.72 ±0.82 ±4.02 ±5.32 ±4.36 ±4.04 ±2.71 ±3.13 ±2.44                
+
+> 3DGS 8.86 10.73 8.25 13.22 9.72 9.66 16.14 12.27 10.14 10.57 10.74 10.52 11.54 14.55 14.66
+
+(w/o. replay) ±5.79 ±2.48 ±5.09 ±4.63 ±6.10 ±5.11 ±3.30 ±5.34 ±6.44 ±6.96 ±9.45 ±4.73 ±4.00 ±11 .17 ±9.59                
+
+> VBGS 22.17 22.44 19.50 21.93 24.32 20.67 24.53 22.28 21.54 24.33 17.12 20.74 21.60 27.56 30.04
+
+(baseline) ±0.80 ±1.01 ±0.50 ±0.76 ±0.85 ±1.39 ±0.61 ±0.97 ±3.07 ±3.22 ±3.22 ±2.65 ±1.52 ±2.41 ±3.23                
+
+> VBGS 21.86 22.67 19.66 22.12 24.45 20.72 24.75 22.44 22.12 24.49 17.06 19.79 20.52 26.97 29.39
+
+(optimized) ±0.79 ±1.05 ±0.50 ±0.79 ±0.85 ±1.43 ±0.62 ±0.98 ±2.67 ±3.22 ±2.88 ±2.90 ±1.87 ±2.39 ±3.33 
+
+Table 3. Performance of 3DGS and VBGS training before/after our optimizations on deployment targets. †OOM on Jetson.              
+
+> Implementation Per-frame average latency Memory usage
+> A5000 (3DGS w. replay) ∼410 s 4.14 GB A5000 (VBGS) 70.12 s 9.44 GB
+> A5000 (Optimized VBGS) 18.33 s 1.11 GB
+> Jetson (3DGS w. replay) ∼3470 s 6.54 GB Jetson (Baseline VBGS) n.a. †n.a. †
+> Jetson (Optimized VBGS) ∼180 s 2.53 GB
+
+dle panel explains this behavior through the induced preci-sion assignments: smaller ϵ values keep most primitives at high precision, whereas larger ϵ progressively allows lower-precision execution for an increasing fraction of nodes. Al-though ϵ=10 −7 and ϵ=10 −6 produce approximately the same number of TF32 assignments, the ϵ=10 −6 configu-ration yields a substantially larger runtime reduction, indi-cating that the additional TF32 assignments occur on par-ticularly runtime-critical operations. Based on this sweep, we set ϵ=10 −6 as a single global tolerance for all subse-quent experiments, achieving the best quality-to-training-time trade-off. Importantly, as discussed in Sec. 4.3, the input frames of the mixed-precision search algorithm are distributed as Gaussian white-noise, thus making the preci-sion assignment environment-agnostic. 
+
+5.4. Benchmark experiments results 
+
+Reconstruction quality. Tab. 2 compares the quality of the trained model in terms of PSNR considering 3DGS (with and without replay buffer), the baseline VBGS, and our optimized VBGS version on the Blender, Habitat, and Replica datasets. Our optimized pipeline yields PSNR that is comparable to the baseline VBGS implementation and outperforms 3DGS without a replay buffer under the same training budget. When compared with the base-line VBGS, improvements are observed in several scenes, whereas small degradations can occur in some cases (e.g., the Sklokoster Castle Habitat, which is the most detailed scene in the datasets and thus requires finer-grained preci-sion to capture details correctly). Although 3DGS with a re-play buffer achieves the highest PSNR on Replica, this set-ting incurs huge latency overhead as shown in Tab. 3. Over-all, our optimizations are not designed to increase PSNR, but to retain similar reconstruction quality while reducing the system cost of VBGS training. For a qualitative compar-ison and convergence behavior of VBGS implementations, we refer the reader to the supplementary material. 
+
+Runtime and memory. Tab. 3 reports system-level mea-surements on a NVIDIA A5000 and on a Nvidia Jetson Orin Nano. On the A5000, our optimized VBGS imple-mentation reduces the per-frame latency from 70.12 s to 18.33 s ( 4× speedup) and lowers peak GPU memory from 9.44 GB to 1.11 GB ( 9× reduction) compared to baseline VBGS. This corresponds to reducing the end-to-end train-ing time for a 200-frame run from ∼234 minutes to ∼61 minutes. Moreover, compared to 3DGS with replay, the end-to-end training time is reduced by more than 22 × with our optimized pipeline. On the Jetson Orin Nano, the base-line implementation cannot be executed due to OOM fail-ures, while the optimized pipeline achieves a per-frame la-tency of 180 s, reflecting the substantially lower compute throughput and memory bandwidth of the embedded GPU. The higher memory usage observed on the Jetson com-pared to the A5000 is due to the Jetson’s unified memory architecture (shared between CPU and GPU), whereas the A5000 reports GPU-only memory usage. While slower than the desktop GPU, this result demonstrates the feasibility of VBGS training under the embedded memory budget, which is the primary constraint motivating this work, and although the latency remains high, we argue that in real edge use-cases, input frames could be smaller, and fewer components may need updating. These results are dataset-agnostic as the image size, the batch size, and the number of components remain consistent across environments. 
+
+## 6. Conclusion 
+
+We presented a set of optimizations, including kernel fusion and mixed-precision node assignment, that reduce the peak memory footprint and improve the throughput of VBGS training, enabling on-board novel-view synthesis updates. Our optimizations reduce the memory footprint compared to the baseline by ∼9× and the average latency by ∼4×,while reaching a comparable or better PSNR. References 
+
+[1] David M Blei, Alp Kucukelbir, and Jon D McAuliffe. Vari-ational inference: A review for statisticians. Journal of the American statistical Association , 112(518):859–877, 2017. 1, 2 [2] Zhipeng Cai and Matthias M¨ uller. Clnerf: Continual learning meets nerf. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 23185–23194, 2023. 1, 2 [3] Anpei Chen, Zexiang Xu, Andreas Geiger, Jingyi Yu, and Hao Su. Tensorf: Tensorial radiance fields. In Computer Vision – ECCV 2022: 17th European Conference, Tel Aviv, Israel, October 23–27, 2022, Proceedings, Part XXXII , page 333–350, Berlin, Heidelberg, 2022. Springer-Verlag. 2 [4] Kangle Deng, Andrew Liu, Jun-Yan Zhu, and Deva Ra-manan. Depth-supervised nerf: Fewer views and faster train-ing for free. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 12882– 12891, 2022. 1 [5] Sara Fridovich-Keil, Alex Yu, Matthew Tancik, Qinhong Chen, Benjamin Recht, and Angjoo Kanazawa. Plenoxels: Radiance fields without neural networks. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 5501–5510, 2022. 2 [6] Sara Fridovich-Keil, Giacomo Meanti, Frederik Rahbæk Warburg, Benjamin Recht, and Angjoo Kanazawa. K-planes: Explicit radiance fields in space, time, and appearance. In 
+
+Proceedings of the IEEE/CVF conference on computer vi-sion and pattern recognition , pages 12479–12488, 2023. 2 [7] Nikhil Keetha, Jay Karhade, Krishna Murthy Jatavallabhula, Gengshan Yang, Sebastian Scherer, Deva Ramanan, and Jonathon Luiten. Splatam: Splat track & map 3d gaussians for dense rgb-d slam. In Proceedings of the IEEE/CVF con-ference on computer vision and pattern recognition , pages 21357–21366, 2024. 1, 2 [8] Ben Kehoe, Sachin Patil, Pieter Abbeel, and Ken Goldberg. A survey of research on cloud robotics and automation. IEEE Transactions on automation science and engineering , 12(2): 398–409, 2015. 1 [9] Bernhard Kerbl, Georgios Kopanas, Thomas Leimk¨ uhler, and George Drettakis. 3d gaussian splatting for real-time radiance field rendering. ACM Transactions on Graphics ,2023. 1, 2 [10] Leshu Li, Jiayin Qin, Jie Peng, Zishen Wan, Huaizhi Qu, Ye Han, Pingqing Zheng, Hongsen Zhang, Yu Cao, Tianlong Chen, et al. Rtgs: Real-time 3d gaussian splatting slam via multi-level redundancy reduction. In Proceedings of the 58th IEEE/ACM International Symposium on Microarchitecture ,pages 1838–1851, 2025. 1, 2 [11] Zheng Liu, He Zhu, Xinyang Li, Yirun Wang, Yujiao Shi, Wei Li, Jingwen Leng, Minyi Guo, and Yu Feng. Voyager: Real-time splatting city-scale 3d gaussians on your phone. 
+
+arXiv preprint arXiv:2506.02774 , 2025. 1, 2 [12] Hidenobu Matsuki, Riku Murai, Paul HJ Kelly, and An-drew J Davison. Gaussian splatting slam. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 18039–18048, 2024. 1, 2 [13] Michael McCloskey and Neal J. Cohen. Catastrophic inter-ference in connectionist networks. Psychology of Learning and Motivation , 24:109–165, 1989. 2 [14] Ben Mildenhall, Pratul P. Srinivasan, Matthew Tancik, Jonathan T. Barron, Ravi Ramamoorthi, and Ren Ng. Nerf: Representing scenes as neural radiance fields for view synthesis. In European Conference on Computer Vision (ECCV) , 2020. 1, 2, 7 [15] Thomas M¨ uller, Alex Evans, Christoph Schied, and Alexan-der Keller. Instant neural graphics primitives with a multires-olution hash encoding. ACM Trans. Graph. , 41(4), 2022. 2 [16] Manolis Savva et al. Habitat: A platform for embodied ai re-search. In Proceedings of the IEEE International Conference on Computer Vision (ICCV) , 2019. 2, 7 [17] Julian Straub et al. The replica dataset: A digital replica of indoor spaces. In arXiv preprint arXiv:1906.05797 , 2019. 2, 7[18] Toon Van de Maele, Catal Ozan, Tschantz Alexan-der, L. Buckley Christopher, and Verbelen Tim. Vari-ational bayesian gaussian splatting. arXiv preprint arXiv:2410.03592 , 2024. 1, 2, 3, 5, 7 [19] Yujie Wan, Chenxuan Liu, Shuai Wang, Tong Zhang, James Jianqiao Yu, Kejiang Ye, Dusit Niyato, and Chengzhong Xu. Edge collaborative gaussian splatting with integrated rendering and communication. arXiv preprint arXiv:2510.22718 , 2025. 1, 2 [20] Hongyi Wang, Zhenhua Zhu, Tianchen Zhao, Yunfei Xiang, Zehao Wang, Jincheng Yu, Huazhong Yang, Yuan Xie, and Yu Wang. React3d: Real-time edge accelerator for incre-mental training in 3d gaussian splatting based slam systems. In Proceedings of the 58th IEEE/ACM International Sympo-sium on Microarchitecture , pages 1852–1866, 2025. 1, 2 [21] Liyuan Wang, Xingxing Zhang, Hang Su, and Jun Zhu. Acomprehensive survey of continual learning: Theory, method and application. IEEE transactions on pattern analysis and machine intelligence , 46(8):5362–5383, 2024. 1 [22] Liyuan Wang, Xingxing Zhang, Hang Su, and Jun Zhu. Acomprehensive survey of continual learning: Theory, method and application. IEEE Transactions on Pattern Analysis and Machine Intelligence , 46(8):5362–5383, 2024. 1, 2 [23] Lizhou Wu, Haozhe Zhu, Siqi He, Jiapei Zheng, Chixiao Chen, and Xiaoyang Zeng. Gauspu: 3d gaussian splat-ting processor for real-time slam systems. In 2024 57th IEEE/ACM International Symposium on Microarchitecture (MICRO) , pages 1562–1573. IEEE, 2024. 1, 2 [24] Chi Yan, Delin Qu, Dan Xu, Bin Zhao, Zhigang Wang, Dong Wang, and Xuelong Li. Gs-slam: Dense visual slam with 3d gaussian splatting. In Proceedings of the IEEE/CVF con-ference on computer vision and pattern recognition , pages 19595–19604, 2024. 2 [25] Hexu Zhao, Haoyang Weng, Daohan Lu, Ang Li, Jinyang Li, Aurojit Panda, and Saining Xie. On scaling up 3d gaussian splatting training. In European Conference on Computer Vi-sion , pages 14–36. Springer, 2024. 2 [26] Hexu Zhao, Haoyang Weng, Daohan Lu, Ang Li, Jinyang Li, Aurojit Panda, and Saining Xie. On scaling up 3d gaussian splatting training. In International Conference on Learning Representations , pages 35642–35661, 2025. 2 Improving Continual Learning for Gaussian Splatting based Environments Reconstruction on Commercial Off-the-Shelf Edge Devices 
+
+# Supplementary Material 0 100 200 
+
+Step 
+
+> 16
+> 18
+> 20
+> 22
+> PSNR (dB)
+
+chair   
+
+> 0100 200
+
+Step 
+
+> 17.5
+> 18.0
+> 18.5
+> 19.0
+> 19.5
+> PSNR (dB)
+
+drums   
+
+> 0100 200
+
+Step 
+
+> 20.5
+> 21.0
+> 21.5
+> 22.0
+> PSNR (dB)
+
+ficus   
+
+> 0100 200
+
+Step 
+
+> 20
+> 22
+> 24
+> PSNR (dB)
+
+hotdog   
+
+> 0100 200
+
+Step 
+
+> 16
+> 18
+> 20
+> 22
+> PSNR (dB)
+
+lego   
+
+> 0100 200
+
+Step 
+
+> 19
+> 20
+> 21
+> PSNR (dB)
+
+materials   
+
+> 0100 200
+
+Step 
+
+> 23.0
+> 23.5
+> 24.0
+> 24.5
+> PSNR (dB)
+
+mic   
+
+> 0100 200
+
+Step 
+
+> 20
+> 21
+> 22
+> PSNR (dB)
+
+ship  
+
+> VBGS (optimized) VBGS (baseline)
+
+Figure 9. Performance comparison of the VBGS baseline implementation and our optimized training pipeline on 100 validation frames on the Replica dataset. 0 100 200 
+
+Step 
+
+15 
+
+20 
+
+25 
+
+> PSNR (dB)
+
+apartment_1 
+
+0 100 200 
+
+Step 
+
+14 
+
+16 
+
+18 
+
+20 
+
+> PSNR (dB)
+
+skokloster-castle 
+
+0 100 200 
+
+Step 
+
+15 
+
+20 
+
+> PSNR (dB)
+
+van-gogh-room 
+
+VBGS (optimized) VBGS (baseline) 
+
+Figure 10. Performance comparison of the VBGS baseline implementation and our optimized training pipeline on 100 validation frames on the Habitat dataset. 
+
+Fig. 9, Fig. 11 and Fig. 10 provide a finer-grained view of the training timeline of our optimized implementation. The curves indicate that the achieved performance remains stable throughout training. Fig. 12 and Fig. 13 report qualitative renderings for the baseline and our optimized pipeline alongside the ground-truth camera image. Overall, both approaches yield comparable visual reconstructions. 0 100 200 
+
+Step 
+
+5
+
+10 
+
+15 
+
+20 
+
+> PSNR (dB)
+
+room0 
+
+0 100 200 
+
+Step 
+
+5
+
+10 
+
+15 
+
+20 
+
+> PSNR (dB)
+
+room1 
+
+0 100 200 
+
+Step 
+
+15 
+
+20 
+
+25 
+
+> PSNR (dB)
+
+office0 
+
+0 100 200 
+
+Step 
+
+20 
+
+25 
+
+30 
+
+> PSNR (dB)
+
+office1  
+
+> VBGS (optimized) VBGS (baseline)
+
+Figure 11. Performance comparison of the VBGS baseline implementation and our optimized training pipeline on 100 validation frames on the Replica dataset. ground-truth 
+
+chair drums ficus hotdog lego materials mic ship 
+
+> baseline optimized
+
+Blender comparison - frame 199 
+
+Figure 12. Quality comparison of renderings generated from models trained on 200 Blender frames. ground-truth 
+
+apartment_1 skokloster-castle van-gogh-room 
+
+> ground-truth
+
+office0 office1 room0 room1  
+
+> baseline
+> baseline
+> optimized
+> optimized
+> Habitat comparison - frame 199 Replica comparison - frame 199
+
+Figure 13. Quality comparison of renderings generated from models trained on 200 Habitat and Replica frames.

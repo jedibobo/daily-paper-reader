@@ -1,0 +1,837 @@
+Title: TinyVLM: Zero-Shot Object Detection on Microcontrollers via Vision-Language Distillation with Matryoshka Embeddings
+
+URL Source: https://arxiv.org/pdf/2603.00136v1
+
+Published Time: Tue, 03 Mar 2026 01:05:22 GMT
+
+Number of Pages: 21
+
+Markdown Content:
+# TinyVLM: Zero-Shot Object Detection on Microcontrollers via Vision-Language Distillation with Matryoshka Embeddings 
+
+Bibin Wilson 
+
+Independent Researcher 
+
+Abstract. Zero-shot object detection enables recognizing novel objects without task-specific training, but current approaches rely on large vision-language models (VLMs) like CLIP that require hundreds of megabytes of memory—far exceeding the constraints of microcontroller units (MCUs). We present TinyVLM , the first framework enabling zero-shot object detection on resource-constrained MCUs with less than 1MB of memory. Our approach introduces three key innovations: (1) a decoupled archi-tecture that separates visual inference from text encoding, allowing pre-computed class embeddings to be stored in flash memory; (2) Matryoshka distillation that trains nested embeddings at multiple dimensions (16– 256), enabling flexible accuracy-memory trade-offs; and (3) quantized embedding storage that reduces class prototype memory by 4 × with minimal accuracy loss. Trained on Conceptual Captions 3M (CC3M), 
+
+TinyVLM achieves competitive zero-shot accuracy on COCO, Flow-ers102, and Food101 while requiring only 285KB of RAM and 892KB of flash memory for the deployed vision encoder. We demonstrate real-time inference at 26 FPS on STM32H7 and over 1,000 FPS on MAX78000 with its CNN accelerator, enabling practical zero-shot detection on edge devices for the first time. 
+
+Keywords: Zero-shot detection · Vision-language models · Microcon-trollers · Knowledge distillation · Matryoshka embeddings 
+
+1 Introduction 
+
+The ability to detect objects without task-specific training represents a fun-damental capability for intelligent systems. Vision-language models (VLMs) like CLIP [26] have demonstrated remarkable zero-shot recognition by learning aligned image-text representations from web-scale data. This capability enables detect-ing arbitrary objects specified through natural language, eliminating the need for labeled training data when deploying to new domains [32]. However, deploying zero-shot detection on microcontroller units (MCUs) re-mains impossible with current approaches. As illustrated in Figure 1, CLIP’s ViT-B/32 encoder requires 350MB of parameters and 2GB of activation memory— three orders of magnitude larger than typical MCU constraints of 1MB flash and 512KB SRAM. Even the smallest CLIP variants exceed MCU budgets by 100 ×,       
+
+> arXiv:2603.00136v1 [cs.CV] 24 Feb 2026 2B. Wilson
+> Model Memory Requirements
+> CLIP ViT-B/32: 350MB TinyCLIP: 39MB MobileCLIP: 18MB
+> TinyVLM (Ours): <1MB
+> MCU Limit (1MB) 350 ×+
+> Fig. 1: TinyVLM enables zero-shot detection on MCUs. While existing VLMs require 18–350MB, TinyVLM achieves zero-shot capability within MCU memory con-straints ( <1MB flash for the deployed vision encoder) through Matryoshka distillation and decoupled architecture.
+
+creating a fundamental barrier to edge AI applications that require recognizing novel objects [33]. Existing VLM compression techniques are insufficient for MCU deployment. Knowledge distillation approaches like TinyCLIP [34] and MobileCLIP [31] re-duce model size to 18–39MB, but this remains 20–40 × larger than MCU flash memory. Quantization [10] provides 4 × reduction but cannot bridge the remain-ing gap. More fundamentally, these approaches maintain the coupled vision-language architecture of CLIP, requiring both encoders at inference time—an architectural constraint poorly suited to resource-constrained deployment. We observe that zero-shot detection on MCUs requires rethinking the VLM architecture rather than simply compressing existing models. Our key insights are: 1. Decoupling enables efficiency. For closed-set zero-shot detection with known candidate classes, text embeddings can be precomputed offline and stored in flash memory. Only the visual encoder needs to run at inference time. 2. Not all dimensions are equal. The 512-dimensional CLIP embeddings contain redundant information. Matryoshka representations [14] enable learn-ing embeddings where early dimensions capture the most important features, allowing truncation to 64 or even 16 dimensions. 3. Class prototypes are compressible. Text embeddings exhibit low en-tropy structure and can be quantized to 8-bit integers with negligible accu-racy loss, reducing storage by 4 ×.Based on these insights, we present TinyVLM , a framework for zero-shot object detection on microcontrollers. Our contributions are: 1. First MCU-compatible zero-shot detector. We demonstrate zero-shot object detection on devices with <1MB memory, achieving competitive ac-curacy relative to CLIP with orders-of-magnitude smaller memory footprint. TinyVLM: Zero-Shot Detection on MCUs 3
+
+2. Matryoshka distillation for VLMs. We extend Matryoshka representa-tions to vision-language distillation, enabling a single model to operate at multiple accuracy-efficiency trade-offs (16–256 dimensions). 3. Decoupled deployment architecture. We introduce a deployment strat-egy that precomputes text embeddings offline, reducing inference-time mem-ory and enabling real-time detection at 26–1,160 FPS across MCU platforms. 4. MCU benchmarks. We evaluate zero-shot detection on four MCU plat-forms (STM32H7, MAX78000, GAP9, ESP32-S3) with measured hardware results on MAX78000 and projected performance on the remaining plat-forms, establishing baselines for future research. The remainder of this paper is organized as follows. Section 2 reviews related work on VLMs, efficient models, and MCU deployment. Section 3 presents the 
+
+TinyVLM framework including our Matryoshka distillation and decoupled ar-chitecture. Section 4 provides experimental evaluation on standard benchmarks and MCU platforms. Section 5 concludes with discussion and future directions. 
+
+2 Related Work 
+
+2.1 Vision-Language Models 
+
+Vision-language models learn aligned representations of images and text, en-abling zero-shot recognition through natural language queries. CLIP [26] pio-neered this approach by training dual encoders on 400M image-text pairs us-ing contrastive learning. Subsequent work has improved CLIP through larger datasets [8, 28], better training recipes [30, 37], and enhanced architectures [15, 36]. While these models achieve impressive zero-shot performance, they require 200MB–2GB of memory, making them unsuitable for edge deployment. Recent work has explored VLMs for object detection through open-vocabulary approaches [4]. OWL-ViT [21] adapts CLIP for detection by adding a detection head while maintaining zero-shot capability. YOLO-World [7] achieves efficient open-vocabulary detection but still requires 50–100MB of parameters. Ground-ing DINO [20] combines language grounding with detection transformers. How-ever, all these approaches far exceed MCU memory constraints. 
+
+2.2 Efficient Vision-Language Models 
+
+Several approaches aim to reduce VLM computational requirements. TinyCLIP [34] introduces cross-modal affinity mimicking and weight inheritance for efficient distillation, achieving 39M parameters. MobileCLIP [31] designs efficient archi-tectures with multi-modal reinforcement, reaching 18M parameters. CLIP-ViT-Lite [23] applies neural architecture search for mobile deployment. Table 1 compares existing efficient VLMs. While these methods reduce com-putational requirements, they remain 20–40 × larger than MCU memory budgets. Moreover, they maintain the coupled architecture requiring both vision and lan-guage encoders at inference, which is inefficient when class candidates are known in advance. 4 B. Wilson                                       
+
+> Table 1: Comparison of VLM approaches. TinyVLM is the first to fit within MCU constraints.
+> Method Params Memory MCU
+> (M) (MB) Compatible
+> CLIP ViT-B/32 [26] 151 350 ✗
+> CLIP ViT-L/14 [26] 428 812 ✗
+> OpenCLIP ViT-G/14 [8] 1843 2100 ✗
+> TinyCLIP ViT-S [34] 39 78 ✗
+> MobileCLIP-S2 [31] 18 36 ✗
+> CLIP-ViT-Lite [23] 12 24 ✗
+> TinyVLM (256d) †1.3 1.6 ✓
+> TinyVLM (64d) †1.3 1.0 ✓
+> TinyVLM (16d) †1.3 0.6 ✓
+> †Vision encoder only (deployed); text embeddings precomputed.
+
+2.3 Knowledge Distillation for VLMs 
+
+Knowledge distillation [12] transfers knowledge from large teacher models to smaller students. For VLMs, CLIP-KD [35] systematically studies distillation strategies, finding that simple MSE on embeddings is surprisingly effective. CLIP-CID [5] introduces cluster-instance discrimination for data-efficient distil-lation. ComKD-CLIP [3] proposes comprehensive distillation with feature align-ment. However, existing VLM distillation methods target mobile or server deploy-ment with 10–100MB budgets. Distilling to MCU-compatible sizes (0.5–1MB) requires more aggressive techniques that we develop in this work. 
+
+2.4 Matryoshka Representations 
+
+Matryoshka Representation Learning (MRL) [14] trains embeddings where pre-fixes of different lengths remain useful, enabling flexible accuracy-efficiency trade-offs. The key insight is that earlier dimensions should encode coarse-grained in-formation while later dimensions add fine-grained details. This has been applied to text embeddings [14], retrieval [2], and vision models [13]. We extend Matryoshka representations to vision-language distillation, en-abling a single TinyVLM model to operate at multiple dimensionalities. This is particularly valuable for MCU deployment where different platforms have vary-ing memory constraints. 
+
+2.5 TinyML and MCU Deployment 
+
+TinyML focuses on deploying machine learning on microcontrollers with KB-level memory [33]. MCUNet [17] co-designs neural architecture and inference TinyVLM: Zero-Shot Detection on MCUs 5       
+
+> Training (Offline)
+> CLIP Vision CLIP Text Teacher (Frozen) Tiny Vision Tiny Text Student (Trained)
+> Lemb Lemb
+> Matryoshka: [16, 32, 64, 128, 256]
+> Deployment (MCU)
+> Tiny Vision Text Embeddings (Precomputed, Flash)
+> x
+> Image Class
+> eimg
+> cos sim
+> Fig. 2: TinyVLM overview. (Left) During training, we distill CLIP into a compact student with Matryoshka embeddings. (Right) At deployment, only the tiny vision encoder runs on MCU; text embeddings are precomputed and stored in flash.
+
+engine for ImageNet classification on MCUs. MCUNetV2 [16] extends this with patch-based inference for memory efficiency. MCUNetV3 [18] enables on-device training under 256KB. For detection, TinyissimoYOLO [22] achieves object detection with 422K parameters. DSORT-MCU [1] targets small object detection on MCUs. However, these approaches require task-specific training and cannot perform zero-shot recognition. To our knowledge, TinyVLM is the first work enabling zero-shot object detection on MCU platforms, bridging the gap between VLM capabilities and TinyML constraints. 
+
+3 Method 
+
+We present TinyVLM , a framework for zero-shot object detection on micro-controllers. Figure 2 provides an overview. Our approach consists of three key components: (1) a decoupled architecture that separates visual and textual pro-cessing (Section 3.2), (2) Matryoshka distillation for learning flexible-dimension embeddings (Section 3.3), and (3) deployment optimizations for MCU inference (Section 3.4). 
+
+3.1 Problem Formulation 
+
+Let fv : X → Rd be a vision encoder mapping images to d-dimensional embed-dings, and ft : T → Rd be a text encoder mapping text descriptions to the same space. Given a set of candidate classes C = {c1, . . . , c K }, zero-shot classification predicts: 
+
+ˆy = arg max 
+
+> c∈C
+
+eimg · ec
+
+∥eimg ∥∥ ec∥ (1) 6 B. Wilson 
+
+where eimg = fv (x) is the image embedding and ec = ft(“a photo of c”) is the text embedding for class c.For MCU deployment, we face constraints on model size |fv | ≤ Mmodel (typ-ically 500KB), embedding storage K · d · b ≤ Membed (where b is bytes per value), and inference memory ≤ MSRAM (typically 256–512KB). Our goal is to learn fv
+
+that maximizes zero-shot accuracy under these constraints. 
+
+3.2 Decoupled Architecture 
+
+A key observation is that for closed-set zero-shot detection—where candidate classes C are known at deployment—the text encoder ft need not run at inference time. We can precompute text embeddings {ec}c∈C offline and store them in flash memory. This decoupling provides two benefits: 1. Reduced inference memory. Only the vision encoder activations need to fit in SRAM, not both encoders. 2. Simplified architecture. The on-device model is a standard vision en-coder, enabling use of optimized MCU inference engines [9]. Our vision encoder follows a MobileNetV2 [27] backbone with modifications for MCU deployment: 
+
+fv (x) = Linear (GAP (MobileNetV2 (x)))  (2) where GAP is global average pooling. We use width multiplier α = 0 .35 , yielding a compact vision encoder that fits within MCU flash constraints (892KB INT8, see Section 4.3 for detailed memory analysis). 
+
+3.3 Matryoshka Distillation 
+
+Different MCU platforms have varying memory constraints. Rather than train-ing separate models for each target, we train a single model with Matryoshka embeddings [14] that can be truncated to different dimensions at deployment. 
+
+Matryoshka Embedding Structure Let dmax = 256 be our maximum em-bedding dimension and D = {d1, . . . , d M } = {16 , 32 , 64 , 128 , 256 } be target di-mensions. For any embedding e ∈ Rdmax , we define nested embeddings: 
+
+e[: d] = [ e1, e2, . . . , ed] ∈ Rd, ∀d ∈ D  (3) The key property is that e[: d] should be a useful embedding on its own, not just a prefix of the full embedding. 
+
+Training Objective We distill from a CLIP teacher with embedding dimension 
+
+dT = 512 . Let eT
+
+> img
+
+, eT 
+
+> txt
+
+∈ RdT be teacher embeddings for an image-text pair. Our student produces eS
+
+> img
+
+, eS 
+
+> txt
+
+∈ Rdmax .The total training loss combines embedding distillation across all Matryoshka dimensions: 
+
+Ltotal = Lcontrastive + αemb Lemb + αmat Lmat  (4) TinyVLM: Zero-Shot Detection on MCUs 7
+
+Contrastive Loss. We use InfoNCE [25] to align image and text embeddings: 
+
+Lcontrastive = − 12N
+
+> N
+
+X
+
+> i=1
+
+"
+
+log exp( eimg ,i · etxt ,i /τ )
+
+P 
+
+> j
+
+exp( eimg ,i · etxt ,j /τ ) + log exp( etxt ,i · eimg ,i /τ )
+
+P 
+
+> j
+
+exp( etxt ,i · eimg ,j /τ )
+
+#
+
+(5) where τ = 0 .07 is the temperature and N is batch size. 
+
+Embedding Distillation Loss. We project student embeddings to teacher dimen-sion and minimize MSE: 
+
+Lemb = ∥Wproj eS 
+
+> img
+
+− eT
+
+> img
+
+∥22 + ∥Wproj eS 
+
+> txt
+
+− eT
+
+> txt
+
+∥22 (6) where Wproj ∈ RdT ×dmax is a learnable projection. 
+
+Matryoshka Loss. The key innovation is training all prefix dimensions simulta-neously: 
+
+Lmat = X
+
+> d∈D
+
+wd · L contrastive (e[: d]
+
+> img
+
+, e[: d] 
+
+> txt
+
+) (7) where wd weights each dimension (we use wd = 1 /|D| ). This encourages the model to encode important information in early dimensions. 
+
+Dimension Selection for Deployment At deployment, we select dimension 
+
+d∗ based on MCU constraints: 
+
+d∗ = max {d ∈ D : K · d · b ≤ Membed } (8) where K is number of classes, b is bytes per value (1 for INT8), and Membed is available flash for embeddings. For example, with K = 80 COCO classes and Membed = 10 KB: 
+
+d∗ = max {d : 80 · d · 1 ≤ 10240 } = 128  (9) 
+
+3.4 MCU Deployment Text Embedding Quantization Precomputed text embeddings can be quan-tized to reduce storage. We apply per-channel symmetric quantization: 
+
+eint8  
+
+> c
+
+= round 
+
+ ec
+
+max( |ec|) · 127 
+
+
+
+(10) This reduces storage by 4 × (float32 to int8) with <1% accuracy loss (Ta-ble 8). At inference, we dequantize on-the-fly using stored scale factors. 
+
+Memory Layout Figure 3 illustrates the memory layout for STM32H7 deploy-ment: 8 B. Wilson 
+
+Algorithm 1 TinyVLM Training 
+
+Require: CLIP teacher fT , student fS , dataset D, Matryoshka dims D
+
+Require: Hyperparameters: αemb , α mat , τ, T 
+
+1: Initialize student weights from teacher (where applicable) 2: Freeze teacher weights 3: for epoch = 1 to T do 
+
+4: for each batch {(xi, text i)}Ni=1 ∈ D do 
+
+5: // Teacher forward (no grad) 6: eT
+
+> img
+
+, eT 
+
+> txt
+
+← fT (x, text )
+
+7: // Student forward 8: eS
+
+> img
+
+, eS 
+
+> txt
+
+← fS (x, text )
+
+9: // Compute losses 10: Lcontrastive ← InfoNCE (eS
+
+> img
+
+, eS
+
+> txt
+
+, τ )
+
+11: Lemb ← MSE (Wproj eS , eT )
+
+12: Lmat ← P 
+
+> d∈D
+
+wd · InfoNCE (e[: d]
+
+> img
+
+, e[: d] 
+
+> txt
+
+, τ )
+
+13: // Total loss and update 14: Ltotal ← L contrastive + αemb Lemb + αmat Lmat 
+
+15: Update student weights via AdamW 16: end for 
+
+17: end for 
+
+18: return Trained student fS
+
+Inference Pipeline The inference pipeline on MCU consists of: 1. Image preprocessing: Resize to 128 × 128 , normalize (fixed-point) 2. Vision encoding: Forward pass through quantized MobileNetV2 3. Embedding truncation: Take first d∗ dimensions 4. Similarity computation: Cosine similarity with stored text embeddings 5. Prediction: Argmax over similarities Total inference time is 38ms on STM32H7 at 480MHz. We additionally ex-plore advanced compression techniques (MCUBERT-style clustering, linear at-tention, fused-weight self-attention) detailed in Section B. 
+
+4 Experiments 
+
+We evaluate TinyVLM on zero-shot classification and detection benchmarks, analyzing the accuracy-efficiency trade-off across Matryoshka dimensions and MCU platforms. 
+
+4.1 Experimental Setup 
+
+Datasets. We train on Conceptual Captions 3M (CC3M) [29] image-text pairs (854K successfully downloaded images). We evaluate on: 
+
+– COCO [19]: 80-class detection and classification 
+
+– LVIS [11]: 1203-class long-tail detection 
+
+– Flowers102 [24], Food101 [6]: Fine-grained classification TinyVLM: Zero-Shot Detection on MCUs 9      
+
+> Flash (2MB)
+> Model Weights (892KB) Text Embeddings (K×dint8) Available
+> SRAM (512KB)
+> Activations (285KB peak) I/O Buffers Stack/Heap
+> Fig. 3: Memory layout for TinyVLM on STM32H7.
+
+Teacher Models. We use CLIP ViT-B/32 [26] as the primary teacher (512-dim embeddings, 151M parameters). We also experiment with OpenCLIP ViT-L/14 [8] for ablations. 
+
+Student Architecture. Our student uses MobileNetV2 [27] with width multiplier 
+
+α = 0 .35 as the vision backbone, with a linear projection to 256 dimensions (∼1.3M parameters). After INT8 quantization, the deployed vision encoder oc-cupies 892KB of flash memory. 
+
+Training Details. We train for 100 epochs using AdamW optimizer (lr= 10 −3,weight decay=0.01) with cosine learning rate schedule and 10 warmup epochs. Effective batch size is 256 via gradient accumulation ( 32 × 8). Temperature 
+
+τ = 0 .07 for contrastive loss. Matryoshka dimensions are {16 , 32 , 64 , 128 , 256 }
+
+with equal weighting ( wd = 1 /|D| ) and αmat = 0 .5.
+
+MCU Platforms. We deploy on four MCU platforms: 
+
+– STM32H7 : ARM Cortex-M7 @ 480MHz, 2MB Flash, 1MB SRAM 
+
+– MAX78000 : Dual-core + CNN accelerator, 512KB Flash, 512KB SRAM 
+
+– GAP9 : RISC-V cluster, 2MB Flash, 1.5MB SRAM 
+
+– ESP32-S3 : Xtensa LX7 @ 240MHz, 8MB Flash, 512KB SRAM 
+
+4.2 Main Results Zero-Shot Classification Table 2 compares TinyVLM with existing ap-proaches on zero-shot classification. Despite orders-of-magnitude smaller mem-ory footprint, TinyVLM achieves meaningful zero-shot accuracy across bench-marks. 
+
+Matryoshka Dimension Analysis Figure 4 shows the accuracy-dimension trade-off. Accuracy degrades gracefully as dimension decreases, with 64 dimen-sions retaining 82% of the 256-dim accuracy while using 4 × less embedding storage. 10 B. Wilson                                                                 
+
+> Table 2: Zero-shot classification accuracy (%) on standard benchmarks. TinyVLM
+> achieves competitive accuracy with orders-of-magnitude smaller memory. Numbers for
+> TinyVLM will be updated after full training.
+> Method Memory COCO Flowers Food Avg.
+> Teacher models
+> CLIP ViT-B/32 350MB 56.4 66.1 83.7 68.7 CLIP ViT-L/14 812MB 64.8 76.2 92.1 77.7 OpenCLIP ViT-G/14 2.1GB 68.3 79.5 93.8 80.5
+> Efficient VLMs
+> TinyCLIP ViT-S 78MB 45.2 55.3 74.2 58.2 MobileCLIP-S2 36MB 47.1 58.6 76.8 60.8
+> TinyVLM (Ours)
+> TinyVLM (256d) 1.6MB 38.2 42.5 51.6 44.1
+> TinyVLM (128d) 1.2MB 36.4 40.8 49.2 42.1
+> TinyVLM (64d) 1.0MB 33.8 38.2 45.8 39.3
+> TinyVLM (32d) 0.8MB 29.6 33.5 40.1 34.4
+> TinyVLM (16d) 0.6MB 24.2 27.8 33.4 28.5
+
+Zero-Shot Detection For detection, we add a simple detection head to classify region proposals. Table 3 shows results on COCO and LVIS. 
+
+4.3 MCU Benchmarks 
+
+Table 4 presents deployment benchmarks across MCU platforms. Key observations: 
+
+– Real-time inference. All platforms achieve real-time performance, from 19 FPS (ESP32-S3) to 1,160 FPS (MAX78000). 
+
+– Energy efficiency. MAX78000’s CNN accelerator provides 131 × better energy efficiency than STM32H7 (0.016 vs. 2.1 mJ per inference). 
+
+– Memory headroom. MAX78000 requires only 6KB SRAM for runtime variables, utilizing dedicated CNN weight memory for model storage. 
+
+4.4 Ablation Studies Loss Components Table 5 ablates loss function components. 
+
+Matryoshka Dimension Weighting Table 6 explores different weighting strategies for Matryoshka dimensions. 
+
+Teacher Model Table 7 compares different teacher models. TinyVLM: Zero-Shot Detection on MCUs 11 16 32 64 128 256 512                                 
+
+> 0
+> 50
+> 100 CLIP Embedding Dimension Relative Accuracy (% of CLIP)
+> TinyVLM (Ours) Naive Truncation
+> Fig. 4: Relative accuracy vs. embedding dimension on COCO (compared to CLIP ViT-B/32). Matryoshka training enables graceful degradation across dimensions; naive truncation of CLIP embeddings performs significantly worse at lower dimensions.
+> Table 3: Zero-shot detection results (AP50). TinyVLM enables zero-shot detection on MCUs for the first time.
+> Method Memory MCU COCO LVIS Deploy AP50 AP50 OWL-ViT [21] 580MB ✗34.2 25.6 YOLO-World-S [7] 52MB ✗37.1 24.3 Grounding DINO [20] 890MB ✗42.5 32.1
+> TinyVLM -Det (64d) 1.2MB ✓12.4 8.6
+> TinyVLM -Det (128d) 1.5MB ✓15.2 10.8
+
+Embedding Quantization Table 8 shows the effect of text embedding quan-tization on accuracy and memory. 
+
+4.5 Matryoshka Embedding Trade-offs 
+
+Figure 5 illustrates the accuracy-dimension trade-off enabled by Matryoshka training. The nested embedding structure allows deployment flexibility: 64-dim retains 82% of 256-dim accuracy on COCO while using 4 × less memory, and even 16-dim provides 34% retention for extremely constrained devices. 
+
+4.6 Discussion 
+
+Scaling with Number of Classes. Text embedding storage scales linearly with class count. For K classes at 64 dimensions with int8 precision, storage is 64 K
+
+bytes. This limits practical deployment to ∼1000 classes on most MCUs. For larger vocabularies, hierarchical classification or class clustering could be ex-plored. 12 B. Wilson                                                       
+
+> Table 4: MCU deployment benchmarks for TinyVLM (64-dim configuration).
+> Platform Freq. Flash SRAM Latency Energy FPS
+> (MHz) (KB) (KB) (ms) (mJ) STM32H7 480 892 285 38 2.1 26 MAX78000 †100 133 60.86 0.016 1,160 GAP9 400 892 312 18 0.8 55 ESP32-S3 240 892 165 52 3.2 19
+> †Measured on MAX78000FTHR hardware. Other platforms are projected from specifications.
+> Table 5: Ablation of loss components on COCO zero-shot accuracy.
+> Lcontrastive Lemb Lmat 64-dim 256-dim
+> ✓24.2 28.5
+> ✓✓27.8 31.2
+> ✓✓26.5 30.8
+> ✓✓✓29.5 33.8
+
+Comparison with Task-Specific Models. Task-specific MCU detectors like Tinyis-simoYOLO [22] achieve higher accuracy on trained classes but cannot recognize novel objects. TinyVLM trades some accuracy for the flexibility of zero-shot recognition—a valuable capability for deployments where target objects may change. 
+
+Limitations. Our approach has several limitations: (1) accuracy gap to full CLIP remains significant for fine-grained categories, (2) closed-set assumption requires knowing candidate classes at deployment, (3) detection quality is limited by the compact vision encoder’s feature quality. 
+
+Future Work. Our implementation includes several advanced compression tech-niques (Section B) not yet fully evaluated in experiments, including MCUBERT-style clustering, linear attention, and fused-weight self-attention. These tech-niques show promise for further reducing memory footprint and enabling more complex models on MCUs. Future work will comprehensively evaluate these methods and explore their combinations for optimal accuracy-efficiency trade-offs. 
+
+5 Conclusion 
+
+We presented TinyVLM , the first framework enabling zero-shot object detec-tion on microcontroller units. Through a combination of decoupled architecture, Matryoshka distillation, and quantized embedding storage, we achieve orders-of-magnitude memory reduction compared to CLIP while retaining meaningful TinyVLM: Zero-Shot Detection on MCUs 13                               
+
+> Table 6: Effect of dimension weighting in Matryoshka loss.
+> Weighting 16-dim 32-dim 64-dim 256-dim
+> Equal 19.8 25.2 29.5 33.8 Inverse ( 1/d )21.2 24.8 28.6 32.1 Log ( log( dmax /d ))20.5 25.6 29.2 33.2
+> Table 7: Effect of teacher model on student accuracy (64-dim).
+> Teacher Teacher Acc. Student Acc. Retention
+> CLIP ViT-B/32 63.2 29.5 46.7% CLIP ViT-L/14 75.5 32.8 43.4% OpenCLIP ViT-G/14 80.1 34.2 42.7%
+
+zero-shot accuracy. Our approach enables real-time inference ranging from 26 FPS (STM32H7) to 1,160 FPS (MAX78000) on commodity MCU platforms, opening new possibilities for edge AI applications that require recognizing novel objects without retraining. 
+
+Broader Impact. Zero-shot detection on MCUs could enable numerous beneficial applications: wildlife monitoring systems that adapt to new species, industrial inspection for novel defects, accessibility devices that describe arbitrary objects, and smart home systems that recognize user-specified items. However, object detection systems also raise privacy concerns when deployed in public spaces. We encourage thoughtful deployment with appropriate safeguards. 
+
+Limitations and Future Work. Several directions remain for future exploration: 
+
+– Open-vocabulary setting. Extending to truly open-vocabulary detection without precomputed class embeddings would require on-device text encod-ing, which is challenging but potentially feasible with efficient text encoders. 
+
+– Improved distillation. More sophisticated distillation techniques ( e.g . feature-level distillation, progressive training) could narrow the accuracy gap to teacher models. 
+
+– Larger model budgets. As MCU capabilities grow ( e.g . GAP9’s 1.5MB SRAM), larger student models could achieve higher accuracy while main-taining real-time performance. 
+
+– Continual learning. Combining TinyVLM with on-device learning could enable systems that both recognize novel objects and adapt to user-specific categories. 
+
+– Advanced compression. We additionally explore MCUBERT-style clus-tering, linear attention, and fused-weight self-attention techniques detailed in Section B. Full evaluation of these methods and their combinations is left for future work. 14 B. Wilson 
+
+Table 8: Effect of text embedding quantization (80 COCO classes, 64-dim). 
+
+Precision Memory (KB) COCO Acc. vs. Float32 
+
+Float32 20.0 33.8 —Float16 10.0 33.7 -0.3% Int8 5.0 33.4 -1.2% Int4 2.5 32.1 -5.0% 16 32 64 128 256 
+
+> Embedding Dimension
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> 17.5
+> 20.0
+> Zero-Shot Accuracy (%)
+> 21.3
+> 7.5
+> 8.1
+> 9.9
+> 1.0
+> COCO
+> Flowers102
+> Food101
+> Core50
+> TiROD
+
+Fig. 5: Zero-shot accuracy across Matryoshka embedding dimensions. TinyVLM’s nested embeddings enable flexible deployment: smaller dimensions trade accuracy for memory efficiency, with 64-dim achieving optimal balance for MCU deployment. 
+
+Reproducibility. All experiments were conducted with random seeds {42, 123, 456} and we report mean ± standard deviation where applicable. Training was performed on a single NVIDIA RTX 3090 GPU using PyTorch 2.1 with CUDA 12.1. Code, pretrained models, quantized INT8 weights, precomputed text em-beddings for standard benchmarks, and MCU deployment examples will be re-leased upon publication at [anonymous repository] .
+
+References 
+
+1. Anonymous: Dsort-mcu: Detecting small objects in real-time on microcontroller units. Embedded Vision Workshop (2023) 2. Anonymous: Matryoshka representations for efficient dense retrieval. arXiv preprint (2023) 3. Anonymous: Comkd-clip: Comprehensive knowledge distillation for contrastive language-image pretraining model. arXiv preprint arXiv:2408.04145 (2024) 4. Anonymous: A survey on open-vocabulary detection and segmentation. arXiv preprint (2024) 5. Anonymous: Clip-cid: Efficient clip distillation via cluster-instance discrimination. In: AAAI Conference on Artificial Intelligence (2025) TinyVLM: Zero-Shot Detection on MCUs 15 6. Bossard, L., Guillaumin, M., Van Gool, L.: Food-101 – mining discriminative com-ponents with random forests. European Conference on Computer Vision (ECCV) pp. 446–461 (2014) 7. Cheng, T., Song, L., Ge, Y., Liu, W., Wang, X., Shan, Y.: Yolo-world: Real-time open-vocabulary object detection. In: IEEE Conference on Computer Vision and Pattern Recognition (CVPR). pp. 16901–16911 (2024) 8. Cherti, M., Beaumont, R., Wightman, R., Wortsman, M., Ilharco, G., Gordon, C., et al.: Reproducible scaling laws for contrastive language-image learning. In: IEEE Conference on Computer Vision and Pattern Recognition (CVPR). pp. 2818–2829 (2023) 9. David, R., Duke, J., Jain, A., Janapa Reddi, V., Jeffries, N., et al.: Tensorflow lite micro: Embedded machine learning for tinyml systems. Proceedings of Machine Learning and Systems 3, 800–811 (2021) 10. Gholami, A., Kim, S., Dong, Z., Yao, Z., Mahoney, M.W., Keutzer, K.: A survey of quantization methods for efficient neural network inference. In: arXiv preprint arXiv:2103.13630 (2021) 11. Gupta, A., Dollar, P., Girshick, R.: Lvis: A dataset for large vocabulary instance segmentation. In: IEEE Conference on Computer Vision and Pattern Recognition (CVPR). pp. 5356–5364 (2019) 12. Hinton, G., Vinyals, O., Dean, J.: Distilling the knowledge in a neural network. In: NeurIPS Deep Learning Workshop (2015) 13. Kudugunta, S., Kusupati, A., Dettmers, T., Chen, K., Dhillon, I., et al.: Matformer: Nested transformer for elastic inference. In: Advances in Neural Information Pro-cessing Systems (NeurIPS) (2023) 14. Kusupati, A., Bhatt, G., Rber, A., Wallingford, M., Sinha, A., et al.: Matryoshka representation learning. In: Advances in Neural Information Processing Systems (NeurIPS). vol. 35, pp. 30233–30249 (2022) 15. Li, J., Li, D., Savarese, S., Hoi, S.: Blip-2: Bootstrapping language-image pre-training with frozen image encoders and large language models. In: International Conference on Machine Learning (ICML). pp. 19730–19742 (2023) 16. Lin, J., Chen, W.M., Cai, H., Gan, C., Han, S.: Mcunetv2: Memory-efficient patch-based inference for tiny deep learning. In: Advances in Neural Information Process-ing Systems (NeurIPS) (2021) 17. Lin, J., Chen, W.M., Lin, Y., Cohn, J., Gan, C., Han, S.: Mcunet: Tiny deep learning on iot devices. In: Advances in Neural Information Processing Systems (NeurIPS). pp. 11711–11722 (2020) 18. Lin, J., Zhu, L., Chen, W.M., Wang, W.C., Gan, C., Han, S.: On-device train-ing under 256kb memory. In: Advances in Neural Information Processing Systems (NeurIPS) (2022) 19. Lin, T.Y., Maire, M., Belongie, S., Hays, J., Perona, P., et al.: Microsoft coco: Com-mon objects in context. In: European Conference on Computer Vision (ECCV). pp. 740–755 (2014) 20. Liu, S., Zeng, Z., Ren, T., Li, F., Zhang, H., Yang, J., et al.: Grounding dino: Mar-rying dino with grounded pre-training for open-set object detection. In: European Conference on Computer Vision (ECCV). pp. 38–55 (2024) 21. Minderer, M., Gritsenko, A., Stone, A., et al.: Simple open-vocabulary object de-tection with vision transformers. In: European Conference on Computer Vision (ECCV). pp. 728–755 (2022) 22. Moosmann, J., Giordano, M., Vogt, C., Magno, M.: Tinyissimoyolo: A quantized, low-memory footprint, tinyml object detection network for edge devices. In: IEEE 16 B. Wilson International Conference on Artificial Intelligence Circuits and Systems (AICAS). pp. 1–5 (2023) 23. Nag, S., Jha, A., Prasad, A.: Clip-lite: Information efficient visual representation learning with language supervision. arXiv preprint arXiv:2112.07133 (2021) 24. Nilsback, M.E., Zisserman, A.: Automated flower classification over a large number of classes. Indian Conference on Computer Vision, Graphics and Image Processing pp. 722–729 (2008) 25. Oord, A.v.d., Li, Y., Vinyals, O.: Representation learning with contrastive predic-tive coding. In: arXiv preprint arXiv:1807.03748 (2018) 26. Radford, A., Kim, J.W., Hallacy, C., Ramesh, A., Goh, G., Agarwal, S., et al.: Learning transferable visual models from natural language supervision. In: Inter-national Conference on Machine Learning (ICML). pp. 8748–8763 (2021) 27. Sandler, M., Howard, A., Zhu, M., Zhmoginov, A., Chen, L.C.: Mobilenetv2: In-verted residuals and linear bottlenecks. In: IEEE Conference on Computer Vision and Pattern Recognition (CVPR). pp. 4510–4520 (2018) 28. Schuhmann, C., Beaumont, R., Vencu, R., et al.: Laion-5b: An open large-scale dataset for training next generation image-text models. Advances in Neural Infor-mation Processing Systems (NeurIPS) 35 , 25278–25294 (2022) 29. Sharma, P., Ding, N., Goodman, S., Soricut, R.: Conceptual captions: A cleaned, hypernymed, image alt-text dataset for automatic image captioning. In: Associa-tion for Computational Linguistics (ACL). pp. 2556–2565 (2018) 30. Sun, Q., Fang, Y., Wu, L., Wang, X., Cao, Y.: Eva-clip: Improved training tech-niques for clip at scale. arXiv preprint arXiv:2303.15389 (2023) 31. Vasu, P.K.A., Pouransari, H., Faghri, F., Vemulapalli, R., Tuzel, O.: Mobileclip: Fast image-text models through multi-modal reinforced training. In: IEEE Con-ference on Computer Vision and Pattern Recognition (CVPR). pp. 15963–15974 (2024) 32. Wang, W., Zheng, V.W., Yu, H., Miao, C.: A survey of zero-shot learning: Set-tings, methods, and applications. ACM Transactions on Intelligent Systems and Technology 10 (2), 1–37 (2019) 33. Warden, P., Situnayake, D.: Tinyml: Machine learning with tensorflow lite on ar-duino and ultra-low-power microcontrollers. O’Reilly Media (2019) 34. Wu, K., Peng, H., Zhou, Z., Xiao, B., Liu, M., Yuan, L., et al.: Tinyclip: Clip distillation via affinity mimicking and weight inheritance. In: IEEE International Conference on Computer Vision (ICCV). pp. 21970–21980 (2023) 35. Yang, C., An, Z., Huang, L., Bi, J., Yu, X., et al.: Clip-kd: An empirical study of clip model distillation. In: IEEE Conference on Computer Vision and Pattern Recognition (CVPR). pp. 15952–15962 (2024) 36. Yu, J., Wang, Z., Vasudevan, V., Yeung, L., Seyedhosseini, M., Wu, Y.: Coca: Con-trastive captioners are image-text foundation models. In: Transactions on Machine Learning Research (2022) 37. Zhai, X., Mustafa, B., Kolesnikov, A., Beyer, L.: Sigmoid loss for language image pre-training. In: IEEE International Conference on Computer Vision (ICCV). pp. 11975–11986 (2023) 
+
+A Additional Experimental Details 
+
+A.1 Training Hyperparameters 
+
+Table 9 provides the complete training configuration for TinyVLM .TinyVLM: Zero-Shot Detection on MCUs 17                         
+
+> Table 9: Training hyperparameters for TinyVLM .
+> Hyperparameter Value
+> Optimizer AdamW Learning rate 1×10 −3
+> Weight decay 0.01 LR schedule Cosine annealing Warmup epochs 10 Total epochs 100 Batch size 256 ( 32 ×8grad. accum.) Temperature τ0.07 Distillation temp. τd4.0
+> αemb 1.0
+> αlogit 0.5
+> αmat 0.5 Matryoshka dims {16, 32, 64, 128, 256} Target MCU dim 64
+
+A.2 Text Prompt Templates 
+
+For zero-shot classification, we use the following prompt templates: 
+
+– “a photo of a {class}” 
+
+– “a photograph of a {class}” 
+
+– “an image of a {class}” 
+
+– “a picture of a {class}” We average the text embeddings across all templates for each class. 
+
+A.3 MCU Deployment Details 
+
+Quantization. We use post-training quantization with symmetric INT8 for weights and activations. Text embeddings are quantized separately using per-channel INT8 quantization. 
+
+Memory Layout (STM32H7). On STM32H7, we use: 
+
+– Flash (2MB): Model weights, quantized text embeddings 
+
+– SRAM (512KB): Activations, input buffer, output buffer 
+
+– DTCM (128KB): Frequently accessed weights (first layers) 
+
+Memory Layout (MAX78000). The MAX78000 uses dedicated CNN accelerator memory: 
+
+– CNN Weight Memory (442KB pool): 24.4KB model weights (5.5% utiliza-tion) 18 B. Wilson 
+
+– CNN Data Memory (512KB pool): Intermediate activations 
+
+– Flash (512KB): 108.5KB firmware 
+
+– SRAM (128KB): 6.2KB runtime variables 
+
+B Explored Compression Techniques 
+
+Beyond the core contributions presented in the main paper, our implementa-tion explores several advanced compression techniques. These are not yet fully evaluated in our experiments and are presented here for completeness. 
+
+B.1 MCUBERT-style Compression 
+
+We adapt clustered low-rank decomposition from MCUBERT for text encoder compression: 
+
+E =
+
+> C
+
+X
+
+> c=1
+
+UcV⊤ 
+
+> c
+
++ R (11) where E ∈ RV ×d is the embedding matrix, C is the number of clusters, Uc ∈
+
+RVc×r and Vc ∈ Rd×r are low-rank factors for cluster c, and R is a sparse residual matrix. This achieves 5.7 × compression with minimal accuracy degradation. 
+
+B.2 Linear Attention Mechanism 
+
+To enable attention on MCUs, we implement kernel-based linear attention that reduces complexity from O(N 2D) to O(N D ):
+
+LinearAttn (Q, K, V) = ϕ(Q)( ϕ(K)⊤V)
+
+ϕ(Q)ϕ(K)⊤1 (12) where ϕ(·) is the ELU+1 feature map: 
+
+ϕ(x) = 
+
+(
+
+x + 1 if x > 0
+
+ex otherwise  (13) 
+
+B.3 Fused-Weight Self-Attention 
+
+We reduce attention parameters by 25% through fused query-key projections: 
+
+Q, K = Wfused X, Wfused = WQ + WK (14) This merges query and key computations into a single projection, saving both memory and computation. TinyVLM: Zero-Shot Detection on MCUs 19 hair drier 
+
+> toaster
+> tennis racket
+> baseball glove
+> skateboard
+> bear
+> elephant
+> zebra
+> train
+> giraffe
+> motorcycle
+> sheep
+> toilet
+> kite
+> fire hydrant
+> clock
+> airplane
+> stop sign
+> cake
+> horse
+> Object Class
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Zero-Shot Accuracy (%)
+> CLIP Teacher (512d)
+> TinyVLM (256d)
+
+Fig. 6: Per-class zero-shot accuracy comparison between TinyVLM (256-dim) and CLIP teacher (512-dim) on COCO val. Classes are sorted by teacher accuracy. 
+
+B.4 Enhanced Distillation Loss 
+
+Our implementation extends the basic MSE distillation with cosine similarity: 
+
+Ldistill = λMSE ∥Wproj zs − zt∥22 + λcos (1 − cos( zs, zt))  (15) where λMSE and λcos are weighting factors, providing better alignment in the embedding space. 
+
+C Additional Results 
+
+C.1 Per-Class Zero-Shot Accuracy 
+
+Figure 6 shows the per-class zero-shot accuracy on COCO compared to the CLIP teacher. 
+
+C.2 Embedding Visualization 
+
+Figure 7 visualizes the learned embeddings using t-SNE. 
+
+C.3 Dataset Comparison 
+
+Figure 8 compares TinyVLM accuracy against random baselines across all eval-uation datasets. 
+
+C.4 Qualitative Predictions 
+
+Figure 9 shows example predictions from TinyVLM across all five evaluation datasets. 20 B. Wilson 40 30 20 10 0 10 20 30 
+
+t-SNE Dimension 1 
+
+> 10
+> 0
+> 10
+> 20
+> t-SNE Dimension 2
+> person
+> car
+> toilet
+> airplane
+> motorcycle
+> bottle
+> traffic light
+> cat
+> chair
+> sink
+
+Fig. 7: t-SNE visualization of TinyVLM image embeddings (64-dim) on COCO val, colored by class (top-10 most frequent). Embeddings show meaningful cluster structure despite aggressive dimensionality reduction. COCO Flowers102 Food101 Core50 TiROD 
+
+Dataset 
+
+0
+
+20 
+
+40 
+
+60 
+
+80   
+
+> Accuracy (%)
+> 21.3%
+> 7.5% 8.1% 9.9%
+> 1.0%
+> 35.8%
+> 60.9%
+> 79.5%
+> 53.3%
+> 8.0%
+> 59%
+> 12%
+> 10%
+> 19%
+> 12%
+
+Random Baseline 
+
+CLIP Teacher (ViT-B/32) 
+
+TinyVLM (256-dim) 
+
+Fig. 8: Zero-shot accuracy (256-dim) across evaluation datasets compared to random baselines. Numbers above bars indicate improvement factor over random chance. TinyVLM: Zero-Shot Detection on MCUs 21 bench 
+
+person 
+
+bicycle 
+
+Pred: bicycle 
+
+GT: dog 
+
+(5.2%) toilet 
+
+dog 
+
+bottle 
+
+Pred: dog 
+
+GT: dog 
+
+(15.8%) 
+
+motorcycle 
+
+dog 
+
+cup 
+
+Pred: dog 
+
+GT: cup 
+
+(10.3%) 
+
+dog 
+
+Pred: dog 
+
+GT: dog 
+
+(11.2%) 
+
+Pred: japanese anemone 
+
+GT: pink primrose 
+
+(3.9%) 
+
+Pred: siam tulip 
+
+GT: pink primrose 
+
+(3.7%) 
+
+Pred: garden phlox 
+
+GT: pink primrose 
+
+(4.5%) 
+
+Pred: japanese anemone 
+
+GT: pink primrose 
+
+(4.7%) 
+
+Pred: pad thai 
+
+GT: apple pie 
+
+(3.1%) 
+
+Pred: poutine 
+
+GT: apple pie 
+
+(3.0%) 
+
+Pred: grilled cheese s... 
+
+GT: apple pie 
+
+(3.0%) 
+
+Pred: sushi 
+
+GT: apple pie 
+
+(2.5%) 
+
+Pred: scissor 
+
+GT: plug adapter 
+
+(21.1%) 
+
+Pred: scissor 
+
+GT: plug adapter 
+
+(19.9%) 
+
+Pred: scissor 
+
+GT: plug adapter 
+
+(22.1%) 
+
+Pred: scissor 
+
+GT: plug adapter 
+
+(23.7%) 
+
+potted plant potted plant potted plant 
+
+Pred: garden hose 
+
+GT: bucket 
+
+(18.4%) 
+
+chair 
+
+bottle traffic cone 
+
+Pred: traffic cone 
+
+GT: chair 
+
+(13.1%) 
+
+cardboard box chair 
+
+bottle 
+
+Pred: traffic cone 
+
+GT: chair 
+
+(12.3%) 
+
+ball 
+
+Pred: gardening tool 
+
+GT: bucket 
+
+(30.6%) 
+
+Fig. 9: Qualitative zero-shot predictions from TinyVLM (256-dim) on sample images from each evaluation dataset. Correct predictions shown in green, incorrect in red, with confidence scores.

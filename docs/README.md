@@ -6,72 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-15
-- 运行时间：2026-03-15 19:16:04 UTC
+- 最新运行日期：2026-03-08 ~ 2026-03-17
+- 运行时间：2026-03-17 05:49:42 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日精选 17 篇论文，深度解析循环局部性符号分析与消费级 GPU 上的智能体高效推理。
-重点关注 AgentServe 的软硬协同设计，以及通过“虚构重用”推
-- 详情：[/202603/15/README](/202603/15/README)
+深度研读 17 篇前沿文献，重点聚焦存内计算（DCiM）精度优化与电子皮肤 SNN 实时分类系统。
+OpenACMv2 框架实现了精度约束下的存内计算协同优化，同时 TinyVLM 等成果展示了在微控制器上运行零样本检测与持续学习的巨大潜力。
+推荐关注边缘侧 AI 的软硬协同趋势，探索如何在资源受限的 MCU 上实现更复杂的视觉感知任务。
+- 详情：[/20260308-20260317/README](/20260308-20260317/README)
 
 ### 精读区论文标签
-1. [Fully Symbolic Analysis of Loop Locality: Using Imaginary Reuse to Infer Real Performance](/202603/15/2603.10196v1-fully-symbolic-analysis-of-loop-locality-using-imaginary-reuse-to-infer-real-performance)  
+1. [OpenACMv2: An Accuracy-Constrained Co-Optimization Framework for Approximate DCiM](/20260308-20260317/2603.13042v1-openacmv2-an-accuracy-constrained-co-optimization-framework-for-approximate-dcim)  
+   标签：评分：10.0/10、query:hwnas
+   evidence：数字存内计算的精度约束架构搜索
+2. [An Event-Driven E-Skin System with Dynamic Binary Scanning and real time SNN Classification](/20260308-20260317/2603.10537v1-an-event-driven-e-skin-system-with-dynamic-binary-scanning-and-real-time-snn-classification)  
    标签：评分：9.0/10、query:hwnas
-   evidence：循环局部性与性能推断的编译器支持
-2. [AgentServe: Algorithm-System Co-Design for Efficient Agentic AI Serving on a Consumer-Grade GPU](/202603/15/2603.10342v1-agentserve-algorithm-system-co-design-for-efficient-agentic-ai-serving-on-a-consumer-grade-gpu)  
+   evidence：集成感知与类脑计算的硬件系统
+3. [SRAM-Based Compute-in-Memory Accelerator for Linear-decay Spiking Neural Networks](/20260308-20260317/2603.12739v1-sram-based-compute-in-memory-accelerator-for-linear-decay-spiking-neural-networks)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对消费级GPU的高效AI服务算法-系统协同设计
-3. [OSUM-Pangu: An Open-Source Multidimension Speech Understanding Foundation Model Built upon OpenPangu on Ascend NPUs](/202603/15/2603.10862v1-osum-pangu-an-open-source-multidimension-speech-understanding-foundation-model-built-upon-openpangu-on-ascend-npus)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对昇腾NPU的非CUDA软硬件栈进行优化
-4. [HiAP: A Multi-Granular Stochastic Auto-Pruning Framework for Vision Transformers](/202603/15/2603.12222v1-hiap-a-multi-granular-stochastic-auto-pruning-framework-for-vision-transformers)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：用于硬件高效子网络的自动剪枝框架
-5. [Pip-Stereo: Progressive Iterations Pruner for Iterative Optimization based Stereo Matching](/202603/15/2602.20496v1-pip-stereo-progressive-iterations-pruner-for-iterative-optimization-based-stereo-matching)  
+   evidence：用于高能效SNN的SRAM存算一体加速器
+4. [Real-Time Stream Compaction for Sparse Machine Learning on FPGAs](/20260308-20260317/2602.23281v1-real-time-stream-compaction-for-sparse-machine-learning-on-fpgas)  
    标签：评分：8.0/10、query:hwnas
-   evidence：硬件感知的RNN算子与针对边缘部署的剪枝技术
-6. [DyQ-VLA: Temporal-Dynamic-Aware Quantization for Embodied Vision-Language-Action Models](/202603/15/2603.07904v1-dyq-vla-temporal-dynamic-aware-quantization-for-embodied-vision-language-action-models)  
+   evidence：基于FPGA的GNN硬件加速与延迟优化
+5. [RAPID: Redundancy-Aware and Compatibility-Optimal Edge-Cloud Partitioned Inference for Diverse VLA models](/20260308-20260317/2603.07949v1-rapid-redundancy-aware-and-compatibility-optimal-edge-cloud-partitioned-inference-for-diverse-vla-models)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对具身智能模型边缘部署的动态量化框架
+   evidence：针对资源受限边缘设备的边云分区推理
+6. [Improving Continual Learning for Gaussian Splatting based Environments Reconstruction on Commercial Off-the-Shelf Edge Devices](/20260308-20260317/2603.08499v1-improving-continual-learning-for-gaussian-splatting-based-environments-reconstruction-on-commercial-off-the-shelf-edge-devices)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：针对资源受限硬件的精度自适应优化
 
 ### 速读区论文标签
-1. [FAST-Prefill: FPGA Accelerated Sparse Attention for Long Context LLM Prefill](/202603/15/2602.20515v1-fast-prefill-fpga-accelerated-sparse-attention-for-long-context-llm-prefill)  
+1. [TinyVLM: Zero-Shot Object Detection on Microcontrollers via Vision-Language Distillation with Matryoshka Embeddings](/20260308-20260317/2603.00136v1-tinyvlm-zero-shot-object-detection-on-microcontrollers-via-vision-language-distillation-with-matryoshka-embeddings)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对长文本大模型的FPGA稀疏注意力加速
-2. [Heterogeneous Memory Design Exploration for AI Accelerators with a Gain Cell Memory Compiler](/202603/15/2602.21278v1-heterogeneous-memory-design-exploration-for-ai-accelerators-with-a-gain-cell-memory-compiler)  
+   evidence：针对资源受限微控制器的效率优化零样本检测
+2. [Latent Replay Detection: Memory-Efficient Continual Object Detection on Microcontrollers via Task-Adaptive Compression](/20260308-20260317/2603.00138v1-latent-replay-detection-memory-efficient-continual-object-detection-on-microcontrollers-via-task-adaptive-compression)  
    标签：评分：8.0/10、query:hwnas
-   evidence：AI加速器的存储设计探索与编译器
-3. [PASTA: A Modular Program Analysis Tool Framework for Accelerators](/202603/15/2602.22103v1-pasta-a-modular-program-analysis-tool-framework-for-accelerators)  
+   evidence：微控制器上内存高效的持续目标检测
+3. [PM2Lat: Highly Accurate and Generalized Prediction of DNN Execution Latency on GPUs](/20260308-20260317/2603.00549v1-pm2lat-highly-accurate-and-generalized-prediction-of-dnn-execution-latency-on-gpus)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于硬件加速器的模块化程序分析工具
-4. [InnerQ: Hardware-aware Tuning-free Quantization of KV Cache for Large Language Models](/202603/15/2602.23200v1-innerq-hardware-aware-tuning-free-quantization-of-kv-cache-for-large-language-models)  
+   evidence：预测GPU上的DNN执行延迟，用于平衡硬件性能
+4. [Capstone: Power-Capped Pipelining for Coarse-Grained Reconfigurable Array Compilers](/20260308-20260317/2603.00909v1-capstone-power-capped-pipelining-for-coarse-grained-reconfigurable-array-compilers)  
    标签：评分：8.0/10、query:hwnas
-   evidence：硬件感知的KV缓存量化，旨在降低解码延迟和内存占用
-5. [VLN-Cache: Enabling Token Caching for VLN Models with Visual/Semantic Dynamics Awareness](/202603/15/2603.07080v1-vln-cache-enabling-token-caching-for-vln-models-with-visualsemantic-dynamics-awareness)  
+   evidence：CGRA编译器的功耗感知扩展
+5. [RAPID: Redundancy-Aware and Compatibility-Optimal Edge-Cloud Partitioned Inference for Diverse VLA Models](/20260308-20260317/2603.07949v2-rapid-redundancy-aware-and-compatibility-optimal-edge-cloud-partitioned-inference-for-diverse-vla-models)  
    标签：评分：7.0/10、query:hwnas
-   evidence：用于边缘设备实时部署的令牌缓存
-6. [Scalable optical neural network with nonlocally coupled coherent photonic processor](/202603/15/2603.07174v1-scalable-optical-neural-network-with-nonlocally-coupled-coherent-photonic-processor)  
+   evidence：针对VLA模型的边缘-云分区推理，满足实时性需求
+6. [Deterministic Differentiable Structured Pruning for Large Language Models](/20260308-20260317/2603.08065v1-deterministic-differentiable-structured-pruning-for-large-language-models)  
    标签：评分：7.0/10、query:hwnas
-   evidence：通过光子集成电路实现能效深度学习
-7. [Real-Time Glottis Detection Framework via Spatial-decoupled Feature Learning for Nasal Transnasal Intubation](/202603/15/2603.07630v1-real-time-glottis-detection-framework-via-spatial-decoupled-feature-learning-for-nasal-transnasal-intubation)  
+   evidence：针对硬件友好型模型的结构化剪枝
+7. [Rethinking Attention Output Projection: Structured Hadamard Transforms for Efficient Transformers](/20260308-20260317/2603.08343v1-rethinking-attention-output-projection-structured-hadamard-transforms-for-efficient-transformers)  
    标签：评分：7.0/10、query:hwnas
-   evidence：适用于嵌入式和边缘设备的高效检测框架
-8. [FrameVGGT: Frame Evidence Rolling Memory for streaming VGGT](/202603/15/2603.07690v1-framevggt-frame-evidence-rolling-memory-for-streaming-vggt)  
+   evidence：减少Transformer的参数量、内存占用和推理成本
+8. [Grow, Assess, Compress: Adaptive Backbone Scaling for Memory-Efficient Class Incremental Learning](/20260308-20260317/2603.08426v1-grow-assess-compress-adaptive-backbone-scaling-for-memory-efficient-class-incremental-learning)  
    标签：评分：7.0/10、query:hwnas
-   evidence：有界内存流式处理与KV缓存增长管理
-9. [Small Target Detection Based on Mask-Enhanced Attention Fusion of Visible and Infrared Remote Sensing Images](/202603/15/2603.06925v1-small-target-detection-based-on-mask-enhanced-attention-fusion-of-visible-and-infrared-remote-sensing-images)  
+   evidence：内存高效的自适应骨干网络缩放与容量利用率评估
+9. [SketchGraphNet: A Memory-Efficient Hybrid Graph Transformer for Large-Scale Sketch Corpora Recognition](/20260308-20260317/2603.07521v1-sketchgraphnet-a-memory-efficient-hybrid-graph-transformer-for-large-scale-sketch-corpora-recognition)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于遥感目标检测的轻量级融合网络
-10. [SLNet: A Super-Lightweight Geometry-Adaptive Network for 3D Point Cloud Recognition](/202603/15/2603.07454v1-slnet-a-super-lightweight-geometry-adaptive-network-for-3d-point-cloud-recognition)  
+   evidence：用于大规模识别的内存高效全局注意力机制
+10. [ECG Classification on PTB-XL: A Data-Centric Approach with Simplified CNN-VAE](/20260308-20260317/2603.07558v1-ecg-classification-on-ptb-xl-a-data-centric-approach-with-simplified-cnn-vae)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于3D点云识别的超轻量级骨干网络
-11. [Integration of deep generative Anomaly Detection algorithm in high-speed industrial line](/202603/15/2603.07577v1-integration-of-deep-generative-anomaly-detection-algorithm-in-high-speed-industrial-line)  
+   evidence：显著减少可训练参数的简化CNN架构
+11. [TempoFit: Plug-and-Play Layer-Wise Temporal KV Memory for Long-Horizon Vision-Language-Action Manipulation](/20260308-20260317/2603.07647v1-tempofit-plug-and-play-layer-wise-temporal-kv-memory-for-long-horizon-vision-language-action-manipulation)  
    标签：评分：6.0/10、query:hwnas
-   evidence：针对高速工业生产线在线部署设计的架构
+   evidence：高效VLA推理的分层时间KV内存
 
 
 <div class="dpr-home-promo-card">
