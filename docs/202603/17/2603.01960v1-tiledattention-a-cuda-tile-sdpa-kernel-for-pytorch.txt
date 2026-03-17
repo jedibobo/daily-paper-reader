@@ -1,0 +1,293 @@
+Title: TiledAttention: a CUDA Tile SDPA Kernel for PyTorch
+
+URL Source: https://arxiv.org/pdf/2603.01960v1
+
+Published Time: Tue, 03 Mar 2026 04:12:40 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# TiledAttention: a CUDA Tile SDPA Kernel for PyTorch 
+
+Taimur Khan [0000-0001-7833-5474] 
+
+Helmholtz Centre for Environmental Research - UFZ 
+
+Abstract. TiledAttention is a scaled dot-product attention ( SDPA )forward operator for SDPA research on NVIDIA GPUs. Implemented in cuTile Python (TileIR) and exposed as a PyTorch-callable function, it is easier to modify than low-level CUDA templates while retaining realistic behavior via online softmax and tiled K, V streaming. The approach is both performant and directly editable at the schedule level from Python (tile shapes, staging, shared-memory layout), enabling rapid, reproducible kernel research without template-heavy CUDA/CUTLASS rewrites. We benchmark TiledAttention on an NVIDIA DGX GB10 node with a reproducible harness and compare against PyTorch SDPA (auto-dispatch) and explicit unfused baselines across sequence length, head dimension, and precision (FP16/BF16). While production fused baselines remain stronger overall, TiledAttention delivers large speedups over standard eager attention paths and is available for direct use within PyTorch workflows, providing a practical balance between performance and customizability. 
+
+Code: https://github.com/thisistaimur/TiledAttention 
+
+Supplementary Material: https://doi.org/10.5281/zenodo.18787737 
+
+Keywords: attention · SDPA · HPC engineering · tiling · GPUs · pytorch 
+
+· CUDA 
+
+# 1 Introduction 
+
+Foundation models in both language and vision increasingly rely on long-context attention, making scaled dot-product attention ( SDPA ) a recurring bottleneck in training and inference [ 11 ,7, 8,18 ,12 ,15 ]. In the long-sequence regime, attention becomes strongly bandwidth- and locality-sensitive, so kernel schedule quality directly affects throughput. This focus is also practical for European HPC deployments, where CUDA-capable NVIDIA GPU systems remain common in recent EuroHPC and TOP500 snapshots [5,17]. Tiling partitions the computation into blocks sized for on-chip memory and high data reuse; in attention this corresponds to blockwise score/softmax updates while streaming K, V tiles. Recent CUDA Tile / TileIR and cuTile Python expose these schedule choices at a higher level than template-heavy CUDA development [3,4,1].  
+
+> arXiv:2603.01960v1 [cs.LG] 2 Mar 2026 2Khan, T.
+
+For SDPA research, a persistent issue is iteration cost: many high-performance kernels are difficult to modify without deep low-level changes, which slows experi-mentation with new attention variants. This paper studies TiledAttention , an online-softmax tiled SDPA forward operator expressed as a cuTile Python kernel. Our goal is to provide a simple and modifiable kernel for rapid, reproducible attention-kernel experimentation on DGX-class CUDA systems. The broader literature spans early neural attention, transformer-era SDPA, and efficient alternatives for long context [6,19,16,13,10]. Figure 1 gives a high-level intuition: as sequence length S increases, SDPA increasingly dominates end-to-end throughput.      
+
+> Long context: attention dominates token throughput
+> Other ops Attention
+> Fig. 1. Conceptual view: as Sgrows, SDPA increasingly dominates end-to-end through-put.
+
+Contributions. We make three contributions: 
+
+– Modifiable cuTile SDPAkernel: a forward SDPA operator expressed as a Python tile program with online softmax updates and no materialization of the full attention matrix. 
+
+– DGX-ready reproducibility workflow: a measurement suite with explicit warmup, timing, correctness checks, and version pinning, demonstrated on DGX GB10 and portable to other DGX systems. 
+
+– FM-oriented evidence for text and vision regimes: scaling trends across sequence length S, head dimension D, and dtype (FP16/BF16), plus sensitivity analysis over key tiling parameters for foundation-model use cases [11,7,8,18,12,15]. The rest of the paper follows the following organization: Section 2 presents the method, Section 3 gives implementation and evaluation details, and Section 4 reports results. 
+
+# 2 Method 
+
+2.1 Scaled dot-product attention 
+
+Given queries Q ∈ RS×D, keys K ∈ RS×D, and values V ∈ RS×D, SDPA computes 
+
+O = softmax 
+
+ QK ⊤
+
+√D + M
+
+
+
+V, (1) where M is a mask (e.g., causal or padding). Materializing the score matrix 
+
+QK ⊤ ∈ RS×S is prohibitive for long S, motivating blockwise implementations. TiledAttention for PyTorch 3
+
+2.2 Online softmax and blockwise attention 
+
+The FlashAttention line of work [ 10 ,9 ] established blockwise, IO-aware attention as a strong baseline. It streams K, V tiles while maintaining running softmax statistics (running max and normalization), avoiding materialization of the S × S
+
+score matrix. 
+
+2.3 Implementations and customization trade-offs 
+
+Production-grade attention kernels are often written in low-level CUDA/CUTLASS-style templates or JIT-compiled DSLs (e.g., Triton). While these achieve high performance, the implementation complexity can make it hard to (i) explore alternative schedules, (ii) isolate bottlenecks, and (iii) reproduce results across environments. cuTile Python offers a tile-programming model that maps to a CUDA tile IR, keeping the kernel surface area accessible while enabling realistic schedules on modern GPUs. TiledAttention uses this model to expose tiling/staging parameters directly in Python. Table 1 summarizes the high-level positioning of TiledAttention versus the fused SDPA baseline used in our evaluation.             
+
+> Table 1. Comparison summary (high-level).
+> TiledAttention Fused PyTorch SDPA baseline Implementation sub-strate cuTile Python tile program Hand-tuned CUDA /tem-plates Customization knobs Explicit tile sizes, staging, lay-outs exposed Limited; changes require low-level edits Goal Study/tune attention repro-ducibly with realistic perfor-mance Max performance, production focus Evaluation Reproducible harness + sensi-tivity study Used as baseline under same harness
+
+# 3 Details 
+
+We target a systems-oriented kernel study with three explicit goals. 
+
+G1: Real and modifiable kernel in cuTile. Implement SDPA forward with online softmax and masking, not a simplified microkernel, while keeping schedule choices easy to change. 
+
+G2: FM-relevant scaling for text and vision. Track a strong baseline across shape regimes representative of deployed foundation models, especially D=64/128 and S ∈ [512 , 8192] [11,7,8,18,12,15]. 4 Khan, T. 
+
+G3: Transparent reproducibility. Provide a benchmark harness and report-ing that make results repeatable and interpretable across DGX-class CUDA systems. We focus on the forward operator because it is (i) a common inference hot spot and (ii) an easier baseline to validate correctness and performance before extending to backward, KV-cache, and fused epilogues. 
+
+3.1 TiledAttention Kernel Design Tensor shapes and layout We assume inputs q, k, v with shape [ B, H, S, D ]. For kernel execution, we reshape to [ BH, S, D ] and tile the S dimension. To enable coalesced key loads, we access K⊤ (conceptually Kt ∈ RBH ×D×S ). 
+
+Blockwise online softmax Each cooperative thread array (CTA) owns a block of queries Qtile ∈ RTM ×D and streams tiles of K, V along the sequence dimension. For each K, V tile, the kernel computes partial scores Sij = ⟨qi, k j ⟩/√D, applies a mask, and updates the online softmax state. We maintain, per query row i in the CTA tile: 
+
+mi ← max( mi, max  
+
+> j
+
+Sij ), (2) 
+
+ℓi ← ℓi · emold   
+
+> i−mi
+
++ X
+
+> j
+
+eSij −mi , (3) 
+
+oi ← oi · emold   
+
+> i−mi
+
++ X
+
+> j
+
+eSij −mi vj , (4) where mi is the running max, ℓi is the running normalizer, and oi ∈ RD is the running output accumulator. After streaming all tiles, we write Oi = oi/ℓ i.
+
+Numerical choices Inputs are FP16 or BF16. We accumulate dot products, softmax statistics, and output accumulation in FP32 for stability (matching common practice in high-performance attention kernels). We optionally support causal and padding masks; causal masking avoids reading or contributing to tiles strictly above the diagonal.            
+
+> Load Qtile →Stream K, V tiles + score/mask →Update ( m, ℓ, o ); normalize + store
+> Fig. 2. Figure 2: TiledAttention forward pipeline at a glance.
+
+3.2 Implementation API We expose a minimal functional API: 
+
+sdpa(q, k, v, causal, scale) → o. (5) The API matches common frameworks: q,k,v are contiguous tensors in [ B, H, S, D ], 
+
+causal selects causal masking, and scale defaults to 1 /√D.TiledAttention for PyTorch 5                 
+
+> Table 2. Tuning/search parameters exposed by TiledAttention (representative). Parameter Typical values Effect
+> TM(Q rows) 64, 128 CTA work per launch; affects occu-pancy and reuse
+> TN(KV columns) 64, 128, 256 Streaming granularity; impacts mem-ory coalescing and softmax update cost Stages /prefetch 1–4 Hides global memory latency via pipelining Shared-mem lay-out row/col swizzles Impacts bank conflicts and vectorized loads
+
+PyTorch entry point. TiledAttention is available as a Python package that integrates with PyTorch. A typical usage pattern is: 
+
+import torch from tiledattention import sdpa # q,k,v must be CUDA tensors with dtype float16 or bfloat16. o = sdpa(q, k, v, causal=True) # q,k,v: [B, H, S, D] 
+
+Compilation and caching The cuTile kernel is JIT-compiled and cached by a key ( TM , T N , D, dtype , causal ), avoiding recompilation and ensuring steady-state measurement. 
+
+Benchmark harness We evaluate kernels using a reproducible harness with the following policies: 
+
+– Warmup: run Nw iterations to trigger compilation and stabilize clocks. 
+
+– Timing: CUDA events around the forward call; report median and p95 over 
+
+Nr repetitions. 
+
+– Correctness: for small shapes (e.g., S ≤ 256), compare to a high-precision reference (FP32) within a tolerance that accounts for FP16/BF16. 
+
+– Isolation: synchronize before timing, avoid interleaving other GPU work. All runs are executed on a DGX GB10 node; the same scripts apply to other DGX systems with CUDA-compatible stacks. 
+
+3.3 Experimental Setup 
+
+We sweep a workload grid intended to cover common foundation-model attention shapes: 
+
+– Sequence length S ∈ { 512 , 1024 , 2048 , 4096 , 8192 }.
+
+– Head dimensions D ∈ { 64 , 96 , 128 , 160 }.
+
+– Dtypes: FP16 and BF16. 6 Khan, T.            
+
+> Table 3. Reproducibility checklist for the measured runs in this artifact. Item Value System NVIDIA DGX GB10 host GPU GPU driver 580.126.09 CUDA toolkit CUDA 13.1 (V13.1.115) cuTile 1.1.0 PyTorch 2.10.0+cu130 Timing method CUDA events; median + p95 over Nrruns Profiler NVIDIA Nsight
+
+– Masking: causal and non-causal. This grid is anchored in common transformer deployments: D=64 is common in BERT- and ViT-style models [ 11 , 12 , 15 ], while D=128 is prevalent in larger decoder-only language models such as GPT-3, PaLM, and LLaMA-family sys-tems [ 7, 8, 18 ]. Sequence lengths 512–2048 cover short-to-mid context workloads common in serving and fine-tuning, while 4096–8192 capture long-context pressure in modern FM deployments. We compare TiledAttention to fused PyTorch SDPA on the same node with identical tensor initialization, streams, and timing methodology. We also report explicit unfused baselines ( torch sdpa math and standard eager attention) for context. 
+
+# 4 Results 
+
+The full results of the benchmark with summaries and NSight [ 2] logs are available in the Supplementary Material [ 14 ]. We report (i) time per forward and (ii) throughput, normalized to tokens/s for interpretability ( B: batch, H: heads, 
+
+S: sequence). Throughput = B · H · S
+
+time (tokens/s) . (6) 
+
+4.1 Throughput scaling vs sequence length 
+
+Figure 3 plots throughput versus S for FP16 and BF16; long-S trends reflect memory traffic, while short-S is overhead- and utilization-limited. 
+
+Observed behavior in our runs. Across the full study grid (80 points: S ∈{512 , 1024 , 2048 , 4096 , 8192 }, D ∈ { 64 , 96 , 128 , 160 }, FP16/BF16, causal/non-causal), TiledAttention achieves a mean throughput ratio of 0 .632 × versus fused PyTorch SDPA (median 0 .634 ×), with 4 wins out of 80 points. The closest regime is D=128 (mean 0 .947 ×, 4/20 wins). For D ∈ { 64 , 96 , 160 }, fused 
+
+SDPA remains faster on average. We also observe a transition around S ≈ 2048: short-S points can approach parity, while long-S becomes more sensitive to memory traffic and instruction mix. For example, in FP16 non-causal at D=128, 
+
+TiledAttention reaches 73 .62 TFLOP/s at S=4096 versus 78 .98 for fused 
+
+SDPA , and 73 .38 versus 88 .84 at S=8192. TiledAttention for PyTorch 7  
+
+> Fig. 3. Throughput versus sequence length for D=128 (FP16/BF16, non-causal).
+
+4.2 Explicit baseline summary 
+
+To make the value proposition explicit for HPC users, we report TiledAttention 
+
+not only against fused PyTorch SDPA , but also against unfused baselines. Table 4 shows that while fused SDPA is still the strongest overall baseline, 
+
+TiledAttention provides large speedups over standard eager attention and PyTorch’s math SDPA path across the full grid.                 
+
+> Table 4. Aggregate throughput summary over 80 study points (tokens/s ratio). Comparison Mean ratio Median ratio Win count
+> TiledAttention /fused PyTorch SDPA
+> 0.632 ×0.634 ×4 / 80
+> TiledAttention / Py-Torch SDPA (math) 28.15 ×20.31 ×80 / 80
+> TiledAttention /standard eager attention 14.36 ×10.76 ×80 / 80
+
+4.3 Regime map over ( S, D )
+
+A regime heatmap is a compact way to summarize which shapes are competitive. Figure 5 illustrates the intended presentation: cells show TiledAttention 
+
+performance as a percentage of fused PyTorch SDPA (100% is parity). In the measured regime map, the largest gaps appear at higher or non-power-of-two head dimensions (notably D=160 and D=96), while D=128 remains closest to parity. Averaged over all sequence lengths, dtypes, and masking modes, throughput ratios ( TiledAttention /fused SDPA ) are: D=64 : 0 .727 ×, D=96 : 0.513 ×, D=128 : 0 .947 ×, D=160 : 0 .343 ×.8 Khan, T.       
+
+> Fig. 4. Explicit baseline comparison (FP16): TiledAttention vs fused PyTorch SDPA ,math-SDPA , and eager attention.
+> Fig. 5. Relative performance regime map ( TiledAttention as % of fused PyTorch
+> SDPA ) for FP16 non-causal runs.
+
+4.4 Profiling-guided bottleneck analysis 
+
+To interpret scaling trends, we profile representative shapes with Nsight Compute (counters) and Nsight Systems (timeline/API overhead). We track throughput, memory traffic, and stalls to identify when the kernel becomes memory-bound, what limits short-S, and which knobs move these regimes. In our experience, long-S shapes show high shared- and global-memory pressure, so staging depth and shared-memory layout can dominate. Short-S
+
+shapes can be limited by insufficient parallelism and overheads, where larger TM
+
+may help at the cost of occupancy. For non-causal FP16 at B= 1, H =8, S = 4096 , D = 128, one-pass Nsight Com-pute shows TiledAttention at 1 .176 ms versus fused SDPA at 1 .103 ms for the primary kernel. At S=2048 , D = 64, the kernels are near parity ( TiledAttention TiledAttention for PyTorch 9
+
+0.2103 ms, fused SDPA 0.2095 ms). For causal S=4096 , D = 128, TiledAtten-tion reports 0 .6696 ms versus 0 .6302 ms for fused SDPA . Overall, this confirms the same shape-dependent profile: the gap is narrowest in the tuned D=64 regime and wider at longer D=128 sequences. For reproducibility, we provide raw profiler artifacts and summaries in the supplemtary matrials: ncu_*.ncu-rep ,
+
+ncu_*_raw.csv , and ncu_profile_summary_*.md ; timeline traces are included as *.nsys-rep when collected.   
+
+> Fig. 6. Normalized bandwidth proxy versus sequence length (FP16, D=128, non-causal).
+
+4.5 Sensitivity to tiling parameters 
+
+A central advantage of expressing the kernel as a tile program is the ability to expose and sweep tiling parameters. Table 5 summarizes the best-performing tile settings by regime and reports sensitivity: how far performance drops when using a non-optimal but reasonable tile choice.                       
+
+> Table 5. Best tile settings by regime from the measured tuning sweep. Regime Shapes Best ( TM, T N)Runner-up Sensitivity Short SS=1024 , D =128 (64, 128) (64, 64) 3.92% Mid SS=4096 , D =128 (64, 128) (64, 64) 8.53% Long SS=8192 , D =128 (64, 128) (64, 64) 9.39%
+
+4.6 Optimization ladder on reduced benchmark 
+
+To show what the tile-programming workflow provides in practice, Table 6 reports a focused reduced benchmark before/after schedule-policy refinements. The key 10 Khan, T. 
+
+point is not a universal win from one static configuration, but that a shape-aware policy recovers performance across mixed regimes without low-level CUDA rewrites.                  
+
+> Table 6. Reduced benchmark ( {(1024,64), (2048,64), (4096,128) }, FP16, non-causal): ratio to fused PyTorch SDPA throughput. Config (1024 ,64) (2048 ,64) (4096 ,128)
+> async default fp32 0.766 ×0.668 ×1.017 ×
+> async tm64 tn64 fp16acc 0.779 ×0.698 ×0.968 ×
+> async auto (shape-aware) 0.775 ×0.694 ×1.017 ×
+
+# 5 Discussion 
+
+Across our runs, two knobs dominate first-order behavior: tile sizes ( TM , T N ) and staging depth. Larger tiles can improve reuse and streaming efficiency but may reduce occupancy through shared-memory and register pressure. Reliable com-parison therefore requires a stable harness (warmup, isolated stream, median/p95 reporting), especially with JIT-compiled kernels. 
+
+When should HPC users adopt TiledAttention ? Table 7 summarizes a prag-matic deployment view. The primary advantage is controllability and iteration speed for architecture-specific tuning and research, while fused SDPA remains the default for maximum out-of-the-box throughput. 
+
+Strong competitors make custom-kernel value clearer. The FlashAttention fam-ily [ 10 ,9] remains a strong external competitor and sets a high bar for attention performance. Against that context, the value of TiledAttention is practi-cal: fast kernel iteration, clear schedule controls, and reproducible profiling for architecture-specific tuning in HPC settings. 
+
+Why short-S can win while long-S loses. At short sequence lengths, tuned tile shapes can deliver good locality and low overhead, yielding isolated wins (e.g., 
+
+S=512 , D = 128). Around S ≈ 2048, the kernel transitions from an overhead-sensitive regime to a sustained streaming regime. As S increases further, the number of streamed tiles and online-softmax update work grows, and the current kernel’s occupancy/instruction-mix limitations become more visible. In contrast, fused production SDPA kernels maintain higher sustained throughput in the long-context regime. TiledAttention for PyTorch 11 
+
+Table 7. Decision guide for HPC deployment. Priority Recommended path Rationale Peak production throughput across broad shapes Fused PyTorch SDPA Best aggregate perfor-mance in this study. Rapid kernel itera-tion / schedule re-search 
+
+TiledAttention Python-level tile policy changes with reproducible profiling loop. Custom mask-ing/layout experi-ments 
+
+TiledAttention Easier to modify kernel behavior than template-heavy CUDA paths. Replacing unfused attention baselines 
+
+TiledAttention Large gains vs eager and math-SDPA paths (Ta-ble 4). 
+
+# 6 Limitations and Future Work 
+
+This work has three main limitations. First, we evaluate only the forward pass; backward and fused variants are future work. Second, we target Grace–Blackwell / Blackwell-class GPUs; portability to other architectures may require additional schedules. Third, we study a deliberately small tuning space; extending to larger search spaces is an important next step. 
+
+# 7 Conclusion 
+
+We presented TiledAttention , a tiled online-softmax SDPA forward operator expressed as a cuTile Python tile program on Grace–Blackwell. Beyond a kernel implementation, we contributed a reproducible benchmark harness and an analysis that highlights how performance scales with sequence length, head dimension, dtype, and tiling choices. Our results support a practical workflow for performance engineering of foundation-model primitives on HPC systems. 
+
+# References 
+
+1. cutile python documentation. NVIDIA Documentation, https://docs.nvidia. com/cuda/cutile-python/ , accessed 2026-01-31 2. Nsight Deep Learning Designer — developer.nvidia.com. https://developer. nvidia.com/nsight-dl-designer , [Accessed 26-02-2026] 3. Nvidia cuda tile. NVIDIA Developer, https://developer.nvidia.com/cuda/tile ,accessed 2026-01-31 4. Tile ir — introduction. NVIDIA Documentation, https://docs.nvidia.com/cuda/ tile-ir/latest/sections/introduction.html , accessed 2026-01-31 5. Towards a european hpc/ai ecosystem. Procedia Computer Science (2025). https: //doi.org/10.1016/j.procs.2025.02.269 , https://doi.org/10.1016/j.procs. 2025.02.269 12 Khan, T. 6. Bahdanau, D., Cho, K., Bengio, Y.: Neural machine translation by jointly learning to align and translate. arXiv preprint arXiv:1409.0473 (2014), https://arxiv.org/ abs/1409.0473 
+
+7. Brown, T.B., Mann, B., Ryder, N., Subbiah, M., Kaplan, J., Dhariwal, P., Nee-lakantan, A., Shyam, P., Sastry, G., Askell, A., et al.: Language models are few-shot learners. Advances in Neural Information Processing Systems (2020) 8. Chowdhery, A., Narang, S., Devlin, J., Bosma, M., Mishra, G., Roberts, A., Barham, P., Chung, H.W., Sutton, C., Gehrmann, S., et al.: Palm: Scaling language modeling with pathways. arXiv preprint arXiv:2204.02311 (2022), https://arxiv.org/abs/ 2204.02311 
+
+9. Dao, T.: Flashattention-2: Faster attention with better parallelism and work par-titioning. arXiv preprint arXiv:2307.08691 (2023), https://arxiv.org/abs/2307. 08691 
+
+10. Dao, T., Fu, D.Y., Ermon, S., Rudra, A., R´ e, C.: Flashattention: Fast and memory-efficient exact attention with io-awareness. arXiv preprint arXiv:2205.14135 (2022), 
+
+https://arxiv.org/abs/2205.14135 
+
+11. Devlin, J., Chang, M.W., Lee, K., Toutanova, K.: Bert: Pre-training of deep bidirectional transformers for language understanding. In: Proceedings of NAACL-HLT (2019) 12. Dosovitskiy, A., Beyer, L., Kolesnikov, A., Weissenborn, D., Zhai, X., Unterthiner, T., Dehghani, M., Minderer, M., Heigold, G., Gelly, S., Uszkoreit, J., Houlsby, N.: An image is worth 16x16 words: Transformers for image recognition at scale. In: International Conference on Learning Representations (ICLR) (2021), https: //arxiv.org/abs/2010.11929 
+
+13. Han, K., Xiao, A., Wu, E., Guo, J., Xu, C., Wang, Y.: A survey of transformers. arXiv preprint arXiv:2106.04554 (2021), https://arxiv.org/abs/2106.04554 
+
+14. Khan, T.: Tiledattention on nvidia dgx gb10: Supplementary benchmark and nsight compute results (2026). https://doi.org/10.5281/ZENODO.18787737 , https:// zenodo.org/doi/10.5281/zenodo.18787737 
+
+15. Radford, A., Kim, J.W., Hallacy, C., Ramesh, A., Goh, G., Agarwal, S., Sastry, G., Askell, A., Mishkin, P., Clark, J., Krueger, G., Sutskever, I.: Learning transferable visual models from natural language supervision. arXiv preprint arXiv:2103.00020 (2021), https://arxiv.org/abs/2103.00020 
+
+16. Tay, Y., Dehghani, M., Bahri, D., Metzler, D.: Efficient transformers: A survey. arXiv preprint arXiv:2009.06732 (2020), https://arxiv.org/abs/2009.06732 
+
+17. TOP500: Top500 june 2024 highlights (2024), https://www.top500.org/lists/ top500/2024/06/highs/ , accessed 2026-02-16 18. Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi, A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava, P., Bhosale, S., et al.: Llama 2: Open foundation and fine-tuned chat models. arXiv preprint arXiv:2307.09288 (2023), https://arxiv. org/abs/2307.09288 
+
+19. Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A.N., Kaiser, L., Polosukhin, I.: Attention is all you need. Advances in Neural Information Processing Systems (2017)

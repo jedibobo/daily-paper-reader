@@ -6,73 +6,84 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-08 ~ 2026-03-17
-- 运行时间：2026-03-17 05:49:42 UTC
+- 最新运行日期：2026-03-17
+- 运行时间：2026-03-17 19:57:57 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
+- 本次总论文数：21
+- 精读区：10
 - 速读区：11
 
 ### 今日简报（AI）
-深度研读 17 篇前沿文献，重点聚焦存内计算（DCiM）精度优化与电子皮肤 SNN 实时分类系统。
-OpenACMv2 框架实现了精度约束下的存内计算协同优化，同时 TinyVLM 等成果展示了在微控制器上运行零样本检测与持续学习的巨大潜力。
-推荐关注边缘侧 AI 的软硬协同趋势，探索如何在资源受限的 MCU 上实现更复杂的视觉感知任务。
-- 详情：[/20260308-20260317/README](/20260308-20260317/README)
+今日精选 21 篇论文聚焦边缘 AI，深度探索微控制器与 FPGA 上的高效模型部署。
+满分神作
+- 详情：[/202603/17/README](/202603/17/README)
 
 ### 精读区论文标签
-1. [OpenACMv2: An Accuracy-Constrained Co-Optimization Framework for Approximate DCiM](/20260308-20260317/2603.13042v1-openacmv2-an-accuracy-constrained-co-optimization-framework-for-approximate-dcim)  
+1. [PrototypeNAS: Rapid Design of Deep Neural Networks for Microcontroller Units](/202603/17/2603.15106v1-prototypenas-rapid-design-of-deep-neural-networks-for-microcontroller-units)  
    标签：评分：10.0/10、query:hwnas
-   evidence：数字存内计算的精度约束架构搜索
-2. [An Event-Driven E-Skin System with Dynamic Binary Scanning and real time SNN Classification](/20260308-20260317/2603.10537v1-an-event-driven-e-skin-system-with-dynamic-binary-scanning-and-real-time-snn-classification)  
+   evidence：针对资源受限微控制器的零样本神经架构搜索
+2. [Ultra Fast Calorimeter Simulation with Generative Machine Learning on FPGAs](/202603/17/2603.13490v1-ultra-fast-calorimeter-simulation-with-generative-machine-learning-on-fpgas)  
    标签：评分：9.0/10、query:hwnas
-   evidence：集成感知与类脑计算的硬件系统
-3. [SRAM-Based Compute-in-Memory Accelerator for Linear-decay Spiking Neural Networks](/20260308-20260317/2603.12739v1-sram-based-compute-in-memory-accelerator-for-linear-decay-spiking-neural-networks)  
+   evidence：专为 FPGA 部署设计的硬件感知模型
+3. [Collapse or Preserve: Data-Dependent Temporal Aggregation for Spiking Neural Network Acceleration](/202603/17/2603.13810v1-collapse-or-preserve-data-dependent-temporal-aggregation-for-spiking-neural-network-acceleration)  
    标签：评分：9.0/10、query:hwnas
-   evidence：用于高能效SNN的SRAM存算一体加速器
-4. [Real-Time Stream Compaction for Sparse Machine Learning on FPGAs](/20260308-20260317/2602.23281v1-real-time-stream-compaction-for-sparse-machine-learning-on-fpgas)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：基于FPGA的GNN硬件加速与延迟优化
-5. [RAPID: Redundancy-Aware and Compatibility-Optimal Edge-Cloud Partitioned Inference for Diverse VLA models](/20260308-20260317/2603.07949v1-rapid-redundancy-aware-and-compatibility-optimal-edge-cloud-partitioned-inference-for-diverse-vla-models)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限边缘设备的边云分区推理
-6. [Improving Continual Learning for Gaussian Splatting based Environments Reconstruction on Commercial Off-the-Shelf Edge Devices](/20260308-20260317/2603.08499v1-improving-continual-learning-for-gaussian-splatting-based-environments-reconstruction-on-commercial-off-the-shelf-edge-devices)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限硬件的精度自适应优化
+   evidence：利用SIMD架构效率的时间聚合卷积
+4. [Evaluating Four FPGA-accelerated Space Use Cases based on Neural Network Algorithms for On-board Inference](/202603/17/2603.14091v1-evaluating-four-fpga-accelerated-space-use-cases-based-on-neural-network-algorithms-for-on-board-inference)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对星载推理的FPGA加速空间应用案例
+5. [Covariance-Guided Resource Adaptive Learning for Efficient Edge Inference](/202603/17/2603.14577v1-covariance-guided-resource-adaptive-learning-for-efficient-edge-inference)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：高效边缘推理的资源自适应学习
+6. [SkipOPU: An FPGA-based Overlay Processor for Large Language Models with Dynamically Allocated Computation](/202603/17/2603.14785v1-skipopu-an-fpga-based-overlay-processor-for-large-language-models-with-dynamically-allocated-computation)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：用于动态LLM执行的FPGA覆盖处理器
+7. [bitSMM: A bit-Serial Matrix Multiplication Accelerator](/202603/17/2603.14988v1-bitsmm-a-bit-serial-matrix-multiplication-accelerator)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：用于实时决策的航天器载神经网络加速器
+8. [MONET: Modeling and Optimization of neural NEtwork Training from Edge to Data Centers](/202603/17/2603.15002v1-monet-modeling-and-optimization-of-neural-network-training-from-edge-to-data-centers)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对异构加速器上神经网络训练的软硬件协同设计
+9. [DUET: Disaggregated Hybrid Mamba-Transformer LLMs with Prefill and Decode-Specific Packages](/202603/17/2603.15530v1-duet-disaggregated-hybrid-mamba-transformer-llms-with-prefill-and-decode-specific-packages)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对混合Mamba-Transformer模型的解耦加速器协同设计
+10. [Co-Design of Memory-Storage Systems for Workload Awareness with Interpretable Models](/202603/17/2603.15571v1-co-design-of-memory-storage-systems-for-workload-awareness-with-interpretable-models)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：存储系统与固件算法的协同设计
 
 ### 速读区论文标签
-1. [TinyVLM: Zero-Shot Object Detection on Microcontrollers via Vision-Language Distillation with Matryoshka Embeddings](/20260308-20260317/2603.00136v1-tinyvlm-zero-shot-object-detection-on-microcontrollers-via-vision-language-distillation-with-matryoshka-embeddings)  
+1. [Boosting Entropy with Bell Box Quantization](/202603/17/2603.01599v1-boosting-entropy-with-bell-box-quantization)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限微控制器的效率优化零样本检测
-2. [Latent Replay Detection: Memory-Efficient Continual Object Detection on Microcontrollers via Task-Adaptive Compression](/20260308-20260317/2603.00138v1-latent-replay-detection-memory-efficient-continual-object-detection-on-microcontrollers-via-task-adaptive-compression)  
+   evidence：针对边缘设备能效的量化感知预训练
+2. [Tiny-DroNeRF: Tiny Neural Radiance Fields aboard Federated Learning-enabled Nano-drones](/202603/17/2603.01850v1-tiny-dronerf-tiny-neural-radiance-fields-aboard-federated-learning-enabled-nano-drones)  
    标签：评分：8.0/10、query:hwnas
-   evidence：微控制器上内存高效的持续目标检测
-3. [PM2Lat: Highly Accurate and Generalized Prediction of DNN Execution Latency on GPUs](/20260308-20260317/2603.00549v1-pm2lat-highly-accurate-and-generalized-prediction-of-dnn-execution-latency-on-gpus)  
+   evidence：针对资源受限纳米无人机和微控制器的微型NeRF
+3. [TiledAttention: a CUDA Tile SDPA Kernel for PyTorch](/202603/17/2603.01960v1-tiledattention-a-cuda-tile-sdpa-kernel-for-pytorch)  
    标签：评分：8.0/10、query:hwnas
-   evidence：预测GPU上的DNN执行延迟，用于平衡硬件性能
-4. [Capstone: Power-Capped Pipelining for Coarse-Grained Reconfigurable Array Compilers](/20260308-20260317/2603.00909v1-capstone-power-capped-pipelining-for-coarse-grained-reconfigurable-array-compilers)  
+   evidence：用于计算利用率优化的CUDA Tile内核
+4. [OnDA: On-device Channel Pruning for Efficient Personalized Keyword Spotting](/202603/17/2603.02247v1-onda-on-device-channel-pruning-for-efficient-personalized-keyword-spotting)  
    标签：评分：8.0/10、query:hwnas
-   evidence：CGRA编译器的功耗感知扩展
-5. [RAPID: Redundancy-Aware and Compatibility-Optimal Edge-Cloud Partitioned Inference for Diverse VLA Models](/20260308-20260317/2603.07949v2-rapid-redundancy-aware-and-compatibility-optimal-edge-cloud-partitioned-inference-for-diverse-vla-models)  
+   evidence：通过结构化通道剪枝实现关键词检出的设备端架构自适应
+5. [DyQ-VLA: Temporal-Dynamic-Aware Quantization for Embodied Vision-Language-Action Models](/202603/17/2603.07904v2-dyq-vla-temporal-dynamic-aware-quantization-for-embodied-vision-language-action-models)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对VLA模型的边缘-云分区推理，满足实时性需求
-6. [Deterministic Differentiable Structured Pruning for Large Language Models](/20260308-20260317/2603.08065v1-deterministic-differentiable-structured-pruning-for-large-language-models)  
+   evidence：边缘部署的动态量化
+6. [Adaptive MLP Pruning for Large Vision Transformers](/202603/17/2603.08100v1-adaptive-mlp-pruning-for-large-vision-transformers)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对硬件友好型模型的结构化剪枝
-7. [Rethinking Attention Output Projection: Structured Hadamard Transforms for Efficient Transformers](/20260308-20260317/2603.08343v1-rethinking-attention-output-projection-structured-hadamard-transforms-for-efficient-transformers)  
+   evidence：通过自适应剪枝减少计算和内存需求
+7. [ImprovedGS+: A High-Performance C++/CUDA Re-Implementation Strategy for 3D Gaussian Splatting](/202603/17/2603.08661v1-improvedgs-a-high-performance-ccuda-re-implementation-strategy-for-3d-gaussian-splatting)  
    标签：评分：7.0/10、query:hwnas
-   evidence：减少Transformer的参数量、内存占用和推理成本
-8. [Grow, Assess, Compress: Adaptive Backbone Scaling for Memory-Efficient Class Incremental Learning](/20260308-20260317/2603.08426v1-grow-assess-compress-adaptive-backbone-scaling-for-memory-efficient-class-incremental-learning)  
+   evidence：针对计算效率的硬件优化CUDA内核
+8. [Uncovering a Winning Lottery Ticket with Continuously Relaxed Bernoulli Gates](/202603/17/2603.08914v1-uncovering-a-winning-lottery-ticket-with-continuously-relaxed-bernoulli-gates)  
    标签：评分：7.0/10、query:hwnas
-   evidence：内存高效的自适应骨干网络缩放与容量利用率评估
-9. [SketchGraphNet: A Memory-Efficient Hybrid Graph Transformer for Large-Scale Sketch Corpora Recognition](/20260308-20260317/2603.07521v1-sketchgraphnet-a-memory-efficient-hybrid-graph-transformer-for-large-scale-sketch-corpora-recognition)  
+   evidence：通过可微优化寻找稀疏子网络以降低内存和计算成本
+9. [Towards Batch-to-Streaming Deep Reinforcement Learning for Continuous Control](/202603/17/2603.08588v1-towards-batch-to-streaming-deep-reinforcement-learning-for-continuous-control)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于大规模识别的内存高效全局注意力机制
-10. [ECG Classification on PTB-XL: A Data-Centric Approach with Simplified CNN-VAE](/20260308-20260317/2603.07558v1-ecg-classification-on-ptb-xl-a-data-centric-approach-with-simplified-cnn-vae)  
+   evidence：针对资源受限硬件的流式强化学习
+10. [FlexServe: A Fast and Secure LLM Serving System for Mobile Devices with Flexible Resource Isolation](/202603/17/2603.09046v1-flexserve-a-fast-and-secure-llm-serving-system-for-mobile-devices-with-flexible-resource-isolation)  
    标签：评分：6.0/10、query:hwnas
-   evidence：显著减少可训练参数的简化CNN架构
-11. [TempoFit: Plug-and-Play Layer-Wise Temporal KV Memory for Long-Horizon Vision-Language-Action Manipulation](/20260308-20260317/2603.07647v1-tempofit-plug-and-play-layer-wise-temporal-kv-memory-for-long-horizon-vision-language-action-manipulation)  
+   evidence：移动端LLM服务的NPU资源隔离
+11. [Wrong Code, Right Structure: Learning Netlist Representations from Imperfect LLM-Generated RTL](/202603/17/2603.09161v1-wrong-code-right-structure-learning-netlist-representations-from-imperfect-llm-generated-rtl)  
    标签：评分：6.0/10、query:hwnas
-   evidence：高效VLA推理的分层时间KV内存
+   evidence：从大模型生成的RTL中学习网表表示以进行电路分析
 
 
 <div class="dpr-home-promo-card">

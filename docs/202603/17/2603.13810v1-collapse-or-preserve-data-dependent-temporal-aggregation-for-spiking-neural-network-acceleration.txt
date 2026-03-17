@@ -1,0 +1,824 @@
+Title: Collapse or Preserve: Data-Dependent Temporal Aggregation for Spiking Neural Network Acceleration
+
+URL Source: https://arxiv.org/pdf/2603.13810v1
+
+Published Time: Tue, 17 Mar 2026 04:59:18 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# Collapse or Preserve: Data-Dependent Temporal Aggregation for Spiking Neural Network Acceleration 
+
+Jiahao Qin 
+
+Jiahao.qin19@gmail.com 
+
+## Abstract 
+
+Spike sparsity is widely believed to enable efficient spiking neural network (SNN) inference on GPU hardware. We demonstrate this is an illusion: five distinct sparse computation strategies on Apple M3 Max all fail to outperform dense convolution, because SIMD architectures cannot exploit the fine-grained, unstructured sparsity of i.i.d. binary spikes. Instead, we propose Temporal Aggregated Convolution (TAC) , which exploits convolution linearity to pre-aggregate K spike frames before a single convolution call, reducing T calls to T /K . On rate-coded data, TAC achieves 13 .8× speedup with +1 .6% accuracy on MNIST and +5 .4% on Fashion-MNIST—a simultaneous improvement in both speed and accuracy. However, on event-based data where the temporal dimension carries genuine motion information, TAC’s temporal collapse is harmful. We therefore introduce TAC-TP (Temporal Preservation), which shares each group’s convolution output across K independent LIF steps, preserving full temporal resolution for downstream layers. On DVS128-Gesture, TAC-TP achieves 95 .1% accuracy (vs. 96 .3% baseline) with 50% fewer convolution calls, while standard TAC drops to 91 .3% . Our key finding is that the optimal temporal aggregation strategy is data-dependent : collapse the temporal dimension for rate-coded data (noise reduction) but preserve it for event data (information retention). Speedup is hardware-agnostic: TAC achieves 11 .0× on NVIDIA V100, confirming the mechanism transfers across GPU architectures. All operators are open-source in the mlx-snn library. 
+
+## 1 Introduction 
+
+Spiking neural networks (SNNs) process information through discrete spike events, mimicking bio-logical neural communication [Maass, 1997]. A central claimed advantage is computational efficiency through spike sparsity : since only a fraction of neurons fire at each timestep, multiply-accumulate operations involving zero should be skippable [Roy et al., 2019]. This holds on neuromorphic hardware with dedicated sparse routing [Davies et al., 2018, Furber et al., 2014, Merolla et al., 2014], but does it transfer to GPUs? We find that it does not. We systematically test five approaches to exploit spike sparsity for con-volutional SNN layers on modern GPU hardware. All fail to outperform dense convolution. The fundamental reason is architectural: GPU SIMD lanes execute identical operations on all vector elements regardless of value. For spikes with firing rate ρ = 0 .1, the probability that an entire SIMD lane of width W = 32 is zero is (1 − ρ)W ≈ 0.035 —only 3.5% of lanes could be skipped, less than the branch overhead. Rather than fighting the GPU architecture, we work with it. We propose Temporal Aggregated Convolution (TAC) , which reduces the number of dense convolution calls by exploiting convolution linearity across the temporal dimension. Instead of convolving each of T spike frames separately, 
+
+Preprint. 
+
+> arXiv:2603.13810v1 [cs.LG] 14 Mar 2026
+
+TAC pre-aggregates groups of K frames with exponential decay weights and convolves the aggregate once, reducing calls from T to T /K .On rate-coded data (MNIST, Fashion-MNIST), TAC delivers remarkable results: 13 .8× speedup with +1 .6% accuracy improvement on MNIST and +5 .4% on Fashion-MNIST. This is not a speed-accuracy trade-off—it is a pure improvement. The accuracy gain arises because TAC’s temporal collapse acts as ensemble averaging over K independent Poisson samples, reducing input variance. However, on event-based data (DVS128-Gesture) where temporal structure encodes genuine motion information, TAC’s temporal collapse is harmful: accuracy drops from 96 .3% to 91 .3% at K = 2 .This motivates our second contribution: TAC-TP (Temporal Preservation), which performs the same temporal aggregation for the convolution but broadcasts the result back to K independent LIF steps, preserving the full temporal dimension T for downstream layers. TAC-TP achieves 95 .1% on DVS-Gesture with 50% fewer convolution calls—within 1.2% of baseline. The contrasting behavior of TAC and TAC-TP reveals a key insight: the optimal temporal aggregation strategy is data-dependent . In rate-coded data, each timestep is an independent sample of the same underlying image; temporal collapse reduces variance and improves accuracy. In event-based data, each timestep captures a different phase of a dynamic scene; temporal preservation is essential for motion-sensitive classification. Our contributions: 1. A systematic negative result: five methods for exploiting spike sparsity on GPU hardware all fail, with a formal analysis of the GPU-sparsity mismatch (Section 3). 2. TAC : temporal aggregation with temporal collapse, achieving simultaneous speedup and accuracy gain on rate-coded data, with a formal approximation bound (Section 4.2). 3. TAC-TP : temporal aggregation with temporal preservation for event-based data, maintaining temporal resolution while reducing convolution calls (Section 4.3). 4. A data-dependent analysis establishing when to collapse vs. preserve the temporal dimension, validated on three datasets with multi-seed experiments (Section 5.5). 5. Open-source implementation in the mlx-snn library, available on PyPI. 
+
+## 2 Related Work 
+
+Sparse SNN acceleration. The promise of spike-driven computation has motivated extensive neuromorphic hardware: Intel Loihi [Davies et al., 2018], SpiNNaker [Furber et al., 2014], and IBM TrueNorth [Merolla et al., 2014] achieve genuine energy savings through event-driven processing. However, the majority of SNN research uses conventional GPUs via SpikingJelly [Fang et al., 2023] or snnTorch [Eshraghian et al., 2023]. While sparsity is often cited as motivation [Roy et al., 2019, Kundu et al., 2021], few works rigorously measure whether sparsity provides GPU speedup. Our work fills this gap. 
+
+Efficient SNN training. Surrogate gradient methods [Neftci et al., 2019, Zenke and Vogels, 2021] enable gradient-based SNN training. Online learning rules [Bellec et al., 2020] avoid full backpropa-gation through time. Temporal efficient training [Deng et al., 2022] re-weights temporal gradients for fewer timesteps. Architecture-level optimizations include pruning [Chen et al., 2021] and attention-guided compression [Kundu et al., 2021]. Our work is complementary: we reduce the cost of spatial convolution at each timestep, combinable with any temporal optimization. 
+
+Convolutional SNN architectures. Spatio-temporal backpropagation [Wu et al., 2018] enabled deep Conv SNNs. Batch normalization for SNNs [Kim and Panda, 2021] and deeper architec-tures [Zheng et al., 2021] pushed accuracy closer to ANNs. Parametric LIF [Fang et al., 2021] learns per-channel time constants. Temporal-wise attention [Yao et al., 2021] and temporal-channel joint attention [Zhu et al., 2024] exploit temporal structure via attention mechanisms. Mamba-Spike [Qin and Liu, 2025] combines spiking front-ends with state space models for efficient temporal processing. Our TAC operates at the convolution level and provides theoretical speedup guarantees rather than adding attention or recurrence overhead. 2Table 1: Five spike sparsity exploitation methods on Apple M3 Max. Dense Conv2d baseline: 1.0 ×.None achieve meaningful sparsity-based speedup.                     
+
+> Method Speedup Sparsity Used? Failure Mode Temporal Delta Conv 1.28 ×No Temporal batching, not sparsity Weight-Gather <1.0×Attempted Irregular memory access Graph Compilation 1.4×No General optimization Sparse GEMM <1.0×Attempted No structured sparsity Custom Metal SIMD 0.01 ×Attempted Cannot beat vendor GEMM
+
+## 3 Why Spike Sparsity Fails on GPUs 
+
+In a standard convolutional SNN, each layer applies Yt = W ∗ St at every timestep, where St ∈{0, 1}C×H×W is the binary spike tensor. At firing rate ρ = 0 .1, approximately 90% of entries are zero, suggesting up to 10 × speedup by skipping zero multiplications. We test this expectation with five systematically designed approaches on Apple M3 Max (40-core GPU, 128GB unified memory), using Conv2d( Cin =2, Cout =128, K=3), input 64 × 64 , T =16, B=16. 
+
+Method 1: Temporal Delta Convolution. Convolve only the change ∆St = St − St−1. For i.i.d. spikes, the delta tensor has ∼ 2ρ(1 − ρ) nonzero entries— denser than the original at low firing rates. Temporal batching yields 1.28 × speedup from trivial parallelism, not sparsity. 
+
+Method 2: Weight-Gather Sparse Convolution. Use index-gather to extract nonzero positions. All configurations are slower than dense convolution: irregular memory access patterns defeat the GPU’s cache hierarchy optimized for coalesced access. 
+
+Method 3: Graph Compilation. JIT compilation via mx.compile provides 1.4× speedup from general operation fusion, independent of sparsity. The compiler does not perform value-dependent conditional execution. 
+
+Method 4: Sparse GEMM. Compress zero rows in the im2col matrix. For Cin = 2 , K = 3 : only 
+
+(0 .9) 18 ≈ 15% of rows are compressible. For deeper layers with Cin = 128 : (0 .9) 1152 ≈ 0—no rows are compressible. 
+
+Method 5: Custom Metal SIMD Kernels. Hand-written GPU kernels with SIMD group operations are 100 ×+ slower than vendor-optimized GEMM. Years of hardware-software co-optimization cannot be replicated. The failure is fundamental, not incidental: 
+
+Proposition 1 (SIMD Sparsity Bound) . Let S ∈ { 0, 1}n be a spike vector with i.i.d. entries Si ∼
+
+Bernoulli (ρ), processed by a SIMD unit of width W . The fraction of skippable lanes (all elements zero) is fskip = (1 − ρ)W . For ρ = 0 .1, W = 32 : fskip = 0 .035 . The theoretical maximum speedup 
+
+1/(1 − fskip ) = 1 .036 × is less than the overhead of checking. 
+
+GPU architectures maximize throughput for regular computation [Hennessy and Patterson, 2017]. The hardware lottery [Hooker, 2021] dictates that sparse, data-dependent branching—exactly what spike sparsity requires—is antithetical to SIMD. Neuromorphic chips succeed because they were designed around this sparsity; GPUs were not. 
+
+## 4 Temporal Aggregated Convolution 
+
+4.1 Key Insight: Reduce Calls, Not Cost 
+
+A standard convolutional SNN layer processes T timesteps with T independent convolution calls: 
+
+Vt = βV t−1 + W ∗ St − Vth · Sout 
+
+> t−1
+
+, t = 1 , . . . , T, (1) where β ∈ (0 , 1) is the membrane decay constant. Each convolution W ∗ St is a dense GEMM—the most GPU-optimized primitive. Our operators reduce the count from T to T /K by exploiting the mathematical structure of convolution. 3Algorithm 1 TAC Forward Pass (Temporal Collapse) 
+
+Require: Spike frames S ∈ { 0, 1}T ×B×C×H×W , kernel W , decay β, group size K 
+
+> 1:
+
+Initialize membrane V ← 0 
+
+> 2:
+
+for k = 0 , . . . , T /K − 1 do  
+
+> 3:
+
+Ak ← PK−1 
+
+> j=0
+
+βK−1−j · SkK +j ▷ Temporal aggregation  
+
+> 4:
+
+Yk ← Conv2d (Ak, W ) ▷ Single dense conv call  
+
+> 5:
+
+V ← βK · V + Yk ▷ Membrane update  
+
+> 6:
+
+Sout  
+
+> k
+
+← Θ( V − Vth ) ▷ Spike generation  
+
+> 7:
+
+V ← V − Sout  
+
+> k
+
+· Vth ▷ Reset  
+
+> 8:
+
+end for  
+
+> 9:
+
+return {Sout  
+
+> k
+
+}T /K −1 
+
+> k=0
+
+▷ Output has T /K timesteps 
+
+4.2 TAC: Temporal Aggregation with Collapse 
+
+TAC exploits the linearity of convolution : since W ∗(P 
+
+> i
+
+αiXi) = P 
+
+> i
+
+αi(W ∗Xi), we pre-aggregate multiple input frames before convolving once. 
+
+Definition 1 (TAC Operator) . Given spike frames {SkK , . . . , S kK +K−1} for group k, define the temporal aggregate: 
+
+Ak =
+
+> K−1
+
+X
+
+> j=0
+
+βK−1−j · SkK +j , (2) 
+
+where exponential weights βK−1−j mirror LIF membrane decay. TAC computes W ∗ Ak once per group, replacing K calls with one. The output temporal dimension is T /K .
+
+For continuous-valued inputs (first layer), TAC is exact by linearity. For deeper layers with binary spike inputs, TAC approximates K sequential LIF steps with a single step on the aggregated input: 
+
+Theorem 1 (TAC Approximation Error Bound) . Let {St}Tt=1 be binary spike frames with firing rate 
+
+ρ. The membrane potential error between exact per-step computation and TAC with group size K
+
+satisfies: 
+
+E ∥V exact  
+
+> T
+
+− V TAC  
+
+> T
+
+∥22
+
+ ≤ C · ρ(1 − ρ) · K · ∥ W ∥2 
+
+> F
+
+, (3) 
+
+where C depends on β and spatial dimensions. The error scales linearly with K and firing rate variance ρ(1 − ρ).Proof sketch. The error arises from the interaction between spatial convolution and temporal spiking nonlinearity. Within each group, TAC applies one spike generation instead of K sequential ones. The membrane potential difference accumulates through mismatched intermediate spike patterns. Since each spike is Bernoulli( ρ) with variance ρ(1 − ρ), and K mismatches accumulate, the total error variance scales as K · ρ(1 − ρ) · ∥ W ∥2 
+
+> F
+
+. Full proof in Appendix A. 
+
+Why does TAC improve accuracy on rate-coded data? For rate-coded static images, each timestep is an independent Bernoulli sample of the same image. The aggregation Ak =P 
+
+> j
+
+βK−1−j SkK +j averages over K such samples, reducing variance: Var (Ak) ∝ ρ(1 − ρ)/K . This implicit denoising creates smoother, more informative inputs for convolutional kernels—analogous to ensemble averaging. Figure 1 illustrates the TAC pipeline for one group of K = 4 frames. 
+
+4.3 TAC-TP: Temporal Aggregation with Preservation 
+
+TAC collapses the temporal dimension from T to T /K . For rate-coded data where timesteps are redundant, this is beneficial. But for event-based data where each timestep captures a different temporal slice of a dynamic scene, this collapse discards information essential for classification. 
+
+TAC-TP addresses this by performing the same temporal aggregation for the convolution operation but broadcasting the result back to K timesteps for independent LIF processing: 4T = 8 : S1 S2 S3 S4                 
+
+> Group 1
+> S5S6S7S8
+> Group 2
+> ··· Ng= T/K groups
+> for k = 1, …, N g
+> Group k (K = 4)
+> SkK
+> SkK+1
+> SkK+2
+> SkK+3
+> × β 3
+> × β 2
+> × β 1
+> × β 0
+> Σβ
+> ΣiβK−1−i · S kK+i
+> XkConv2d(W)
+> 1 GEMM / group
+> YkBN
+> LIF Neuron
+> V←β · V + Y k
+> S = Θ(V − V th )V←V − S · V th
+> Sout k
+> K→1
+> T/K = 2 : Sout 1Sout 2
+
+Figure 1: TAC (Temporal Collapse) operator. K input spike frames are pre-aggregated with expo-nential decay weights into a single frame Ak, which undergoes one Conv2d call (instead of K). The LIF neuron fires once per group, producing T /K output timesteps. This temporal collapse acts as ensemble averaging on rate-coded data, improving accuracy while providing up to 13 .8× speedup. 
+
+Algorithm 2 TAC-TP Forward Pass (Temporal Preservation) 
+
+Require: Spike frames S ∈ { 0, 1}T ×B×C×H×W , kernel W , decay β, group size K
+
+1: Initialize membrane V ← 0
+
+2: for k = 0 , . . . , T /K − 1 do 
+
+3: Ak ← PK−1 
+
+> j=0
+
+βK−1−j · SkK +j ▷ Temporal aggregation (same as TAC) 
+
+4: Yk ← Conv2d (Ak, W ) ▷ Single dense conv call 
+
+5: for j = 0 , . . . , K − 1 do ▷ Temporal broadcast 
+
+6: V ← β · V + Yk ▷ LIF update with shared conv output 
+
+7: Sout  
+
+> kK +j
+
+← Θ( V − Vth ) ▷ Independent spike per timestep 
+
+8: V ← V − Sout  
+
+> kK +j
+
+· Vth ▷ Reset 
+
+9: end for 
+
+10: end for 
+
+11: return {Sout  
+
+> t
+
+}T −1 
+
+> t=0
+
+▷ Output has full T timesteps 
+
+Key difference from TAC. Lines 5–8 in Algorithm 2 replace the single LIF step in Algorithm 1 with K independent LIF steps using the same convolution output Yk. This preserves the output temporal dimension at T (instead of T /K ), allowing downstream layers and the output classifier to access full temporal information. The visual contrast between Figures 1 and 2 highlights this distinction: TAC produces one output per group (collapse), while TAC-TP produces K outputs per group (preserve). 
+
+Why TAC-TP helps on event data. Event camera data encodes genuine temporal dynamics— different gesture phases produce different spike patterns across time. The output layer (e.g., a VotingLayer that averages predictions over T timesteps) requires temporal diversity to make accurate predictions. Under cascaded TAC with K = 2 across 5 layers, the output temporal dimension collapses to T / 25 = T / 32 —effectively destroying temporal information. TAC-TP maintains T throughout, preserving the LIF dynamics’ ability to generate temporally diverse spike patterns even though the spatial (convolution) component is shared within each group. 
+
+Why TAC-TP hurts on rate-coded data. Rate-coded frames are i.i.d. Poisson samples of the same image; the temporal dimension carries no information beyond repeated sampling. TAC’s collapse acts as ensemble averaging that reduces variance and improves accuracy. TAC-TP preserves this noisy temporal dimension, forcing the network to learn to average out redundant variation, wasting model capacity. 5T = 8 : S1 S2 S3 S4                             
+
+> Group 1
+> S5S6S7S8
+> Group 2
+> ··· Ng= T/K groups
+> for k = 1, …, N g
+> Group k (K = 4)
+> SkK
+> SkK+1
+> SkK+2
+> SkK+3
+> × β 3
+> × β 2
+> × β 1
+> × β 0
+> Σβ
+> ΣiβK−1−i · S kK+i
+> XkConv2d(W)
+> 1 GEMM / group
+> YkBN Broadcast ×K
+> K Independent LIF Steps V←β·V + Y k
+> fi re & reset V←β·V + Y k
+> fi re & reset V←β·V + Y k
+> fi re & reset V←β·V + Y k
+> fi re & reset
+> V state
+> K Output Spikes
+> Sout kK
+> Sout kK+1
+> Sout kK+2
+> Sout kK+3
+> K→K
+> T = 8 : So1So2So3So4So5So6So7So8Full temporal resolution preserved
+
+Figure 2: TAC-TP (Temporal Preservation) operator. The same aggregation and single Conv2d call as TAC, but the output Yk is broadcast to K independent LIF steps, each producing a separate output spike. This preserves the full temporal dimension T , which is critical for event-based data where temporal structure encodes motion information. 
+
+Computational cost. Both TAC and TAC-TP reduce convolution calls from T to T /K . However, TAC also reduces LIF steps from T to T /K , while TAC-TP retains T LIF steps. Since LIF dynam-ics (element-wise operations) are much cheaper than convolution (GEMM), TAC-TP’s wall-clock speedup ( ∼ 1.2×) is more modest than TAC’s ( ∼ 5–14 ×) but still provides meaningful reduction in the dominant compute cost. 
+
+4.4 Other Operators: FTC, IMC, TCC 
+
+We also explored three alternative mathematical approaches. All proved impractical; we summarize them briefly (details in Appendix C). 
+
+Fourier Temporal Convolution (FTC) replaces LIF’s fixed first-order IIR filter with a learnable biquad IIR filter with BIBO stability guarantees. FTC adds computation for IIR filtering without reducing convolution calls, resulting in 0.6× speedup (a slowdown) and −0.5% accuracy on MNIST. 
+
+Information-Theoretic Channel Gating (IMC) models spike channels as Binary Symmetric Chan-nels and gates low-capacity channels. The gating overhead exceeds savings: 0.8× speedup with no accuracy improvement. 
+
+Temporal Collapse Convolution (TCC) skips convolution during spike-free windows. For typical firing rates, the probability of an entire spatial frame being silent is (1 − ρ)C·H·W ≈ 0, so TCC provides no speedup ( 0.9×). The consistent failure of these alternatives reinforces our core insight: reducing the number of convolution calls (TAC/TAC-TP) is the effective strategy, not reducing the cost of individual calls. 
+
+## 5 Experiments 
+
+5.1 Setup Hardware and framework. Training experiments run on Apple M3 Max (40-core GPU, 128GB unified memory) using mlx-snn v0.5 [Hannun et al., 2023]. CUDA inference benchmarks are reproduced on NVIDIA Tesla V100-SXM2-16GB (PyTorch 2.7, CUDA 11.8) to confirm hardware-agnostic speedup. 
+
+Datasets. MNIST and Fashion-MNIST : 28 × 28 images, rate-coded into T = 25 binary spike frames via Poisson sampling. 60K train / 10K test. DVS128-Gesture [Amir et al., 2017]: Neuromor-6Table 2: Results on MNIST and Fashion-MNIST (3 seeds, mean ±std). TAC achieves simultaneous speedup and accuracy improvement. TAC-TP underperforms on rate-coded data because temporal preservation retains noise rather than signal.                                                              
+
+> MNIST Fashion-MNIST Operator Acc. (%) ∆Speedup Acc. (%) ∆Speedup Baseline 97 .22 ±0.15 —1.0×83 .14 ±0.77 —1.0×
+> TAC K=4 98 .78 ±0.08 +1.56 5.3×87 .98 ±0.37 +4.84 5.5×
+> TAC K=8 98 .85 ±0.04 +1.63 9.2×88 .50 ±0.24 +5.36 9.3×
+> TAC K=16 98 .82 ±0.07 +1.60 13 .8×88 .34 ±0.16 +5.20 13 .6×
+> TAC-TP K=4 93 .20 ±1.78 −4.02 ∼5×76 .38 ±0.36 −6.76 ∼5×
+
+Table 3: Results on DVS128-Gesture ( 64 × 64 , T = 16 , 256 epochs). TAC-TP preserves temporal resolution and significantly outperforms TAC. Conv calls are counted per forward pass across all 5 conv layers.                                 
+
+> Operator Accuracy (%) Conv Calls Time/ep (s) Speedup Baseline 96 .30 ±0.45 80 69.0 1.0×
+> TAC-TP K=2 95 .13 ±1.01 40 57.5 1.2×
+> TAC-TP K=4 93 .820 58.1 1.2×
+> TAC-TP K=8 92 .010 56.0 1.2×
+> TAC K=2 91 .340 46.6 1.5×
+
+phic event camera recordings of 11 hand gestures. Events binned into T = 16 frames at 64 × 64 with 2 polarity channels. 1,176 train / 288 test. 
+
+Architecture. MNIST/Fashion-MNIST: Conv(1 →32, K=3) →BN →LIF →Pool(2) →Conv(32 →64, K=3) →BN →LIF →Pool(2) 
+
+Parameters: ∼230K. DVS-Gesture: 5 ×{Conv(128, K=3,pad=1) →BN →LIF →MaxPool(2)} →FC →LIF →VotingLayer(10 voters, 11 classes). Parameters: ∼914K. 
+
+Training. Adam optimizer, lr= 10 −3, cosine annealing. MNIST/FMNIST: 15 epochs, β = 0 .9, fast sigmoid surrogate ( α = 25 ), cross-entropy loss, batch size 128. DVS-Gesture: 256 epochs with warm restarts ( Tmax = 64 ), β = 0 .5, arctan surrogate ( α = 2 .0), MSE loss on firing rate vs. one-hot target, batch size 16, detach reset. Three seeds per configuration. 
+
+5.2 Rate-Coded Data: MNIST and Fashion-MNIST 
+
+Table 2 presents the main results and Figure 3 visualizes the speedup and accuracy trends. Key observations: 
+
+TAC achieves simultaneous speedup and accuracy improvement. Across all K ∈ { 4, 8, 16 }, TAC improves accuracy while providing 5–14 × speedup. On MNIST, all TAC variants achieve ∼98.8% regardless of K, suggesting rate-coded temporal structure is simple enough for full collapse. On Fashion-MNIST, TAC provides +5 .4% absolute improvement at K = 8 , with the accuracy gain saturating at moderate K.
+
+TAC-TP significantly underperforms. TAC-TP K = 4 drops to 93 .2% on MNIST ( −4.0% ) and 
+
+76 .4% on Fashion-MNIST ( −6.8% ). This confirms that temporal preservation is counterproductive on rate-coded data: the temporal dimension is noise, and preserving it forces the network to waste capacity learning to average it out. Higher K values for TAC-TP ( K = 8 , 16 ) show further degradation (Appendix D). 
+
+5.3 Event Data: DVS128-Gesture 
+
+Table 3 shows DVS-Gesture results, revealing the opposite pattern from rate-coded data. 7Baseline TAC 
+
+K=4 
+
+TAC 
+
+K=8 
+
+TAC 
+
+K=16 
+
+0.0 
+
+2.5 
+
+5.0 
+
+7.5 
+
+10.0 
+
+12.5 
+
+15.0 
+
+> Training Speedup
+> 5.3×
+> 9.2×
+> 13.8×
+> 5.5×
+> 9.3×
+> 13.6×
+
+## (a) Speedup (M3 Max) 
+
+> MNIST
+> FMNIST
+
+Baseline TAC 
+
+K=4 
+
+TAC 
+
+K=8 
+
+TAC 
+
+K=16 
+
+80 
+
+85 
+
+90 
+
+95 
+
+100 
+
+> Test Accuracy (%)
+
+## (b) Accuracy (M3 Max) 
+
+> MNIST
+> FMNIST
+
+Figure 3: TAC efficiency on rate-coded data (M3 Max). (a) Training speedup scales near-linearly with group size K, reaching 13 .8× at K = 16 . (b) TAC simultaneously improves accuracy by +1 .6% 
+
+(MNIST) and +5 .4% (FMNIST) through implicit ensemble averaging of Poisson samples. Baseline TAC-TP 
+
+> K=2
+> TAC-TP
+> K=4
+> TAC-TP
+> K=8
+> TAC
+> K=2
+
+0
+
+20 
+
+40 
+
+60 
+
+80 
+
+100 
+
+> Conv Calls
+> 80
+> 40
+> 20
+> 10
+> 40
+
+## (a) Conv Calls 
+
+> Baseline TAC-TP
+> K=2
+> TAC-TP
+> K=4
+> TAC-TP
+> K=8
+> TAC
+> K=2
+
+85.0 
+
+87.5 
+
+90.0 
+
+92.5 
+
+95.0 
+
+97.5 
+
+100.0 
+
+> Accuracy (%)
+> 96.3
+> 95.1
+> 93.8
+> 92.0
+> 91.3
+
+## (b) Accuracy 
+
+> Baseline TAC-TP
+> K=2
+> TAC-TP
+> K=4
+> TAC-TP
+> K=8
+> TAC
+> K=2
+
+0
+
+20 
+
+40 
+
+60 
+
+80   
+
+> Time / Epoch (s)  69s
+> 58s 58s 56s
+> 47s
+
+## (c) Training Time 
+
+Figure 4: DVS-Gesture efficiency comparison. (a) TAC-TP reduces convolution calls by 2–8× while TAC K = 2 uses the same 40 calls but collapses temporal resolution. (b) TAC-TP K = 2 retains 
+
+95 .1% accuracy ( −1.2% ), significantly outperforming TAC’s 91 .3% . (c) Wall-clock training time per epoch shows meaningful reduction for all operators. 
+
+TAC-TP outperforms TAC by +3 .8% at K = 2 . With the same number of convolution calls (40), TAC-TP achieves 95 .1% vs. TAC’s 91 .3% . The difference is entirely attributable to temporal preservation: TAC-TP maintains 16 output timesteps for the VotingLayer, while TAC collapses to 
+
+16 /25 < 1 timestep through cascaded layers. 
+
+TAC-TP K = 2 achieves near-baseline accuracy. At 95 .1% (−1.2% from baseline), TAC-TP halves the dominant computational cost (convolution calls: 40 vs. 80) with modest accuracy loss. The graceful degradation continues: K = 4 yields 93 .8% with 4× fewer conv calls, and K = 8 yields 
+
+92 .0% with 8× fewer. 
+
+Competitive with literature. Our baseline of 96 .3% at 64 × 64 compares favorably to Spiking-Jelly’s [Fang et al., 2023] 93 .75% at 128 × 128 resolution, validating the experimental setup. 8Table 4: Cross-platform validation on NVIDIA V100 (PyTorch/snnTorch, 3 seeds). Same architecture, hyperparameters, and epochs as M3 Max experiments. Training speedup computed from total training time.                                                                 
+
+> MNIST Fashion-MNIST Operator Acc. (%) Time (s) Speedup Acc. (%) Time (s) Speedup Baseline 98 .56 ±0.24 692 1.0×88 .11 ±0.29 682 1.0×
+> TAC K=4 98 .29 ±0.05 137 5.1×82 .97 ±0.32 137 5.0×
+> TAC K=8 97 .16 ±0.10 80 8.7×75 .86 ±0.12 82 8.3×
+> TAC K=16 97 .11 ±0.14 53 13 .1×75 .82 ±0.39 57 12 .0×
+> TAC-TP K=4 97 .84 ±0.36 455 1.5×87 .03 ±0.72 461 1.5×TAC K=4 TAC K=8 TAC K=16 TAC-TP K=4
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> Training Speedup
+> 5.3×
+> 9.2×
+> 13.8×
+> 5.0× 5.1×
+> 8.7×
+> 13.1×
+> 1.5×
+
+Cross-Platform Speedup (MNIST) 
+
+> Apple M3 Max
+> NVIDIA V100
+
+Figure 5: Cross-platform speedup on MNIST. TAC’s near-linear speedup with K is consistent across Apple M3 Max (MLX) and NVIDIA V100 (PyTorch), confirming the mechanism is hardware-agnostic. TAC-TP provides modest speedup ( 1.5×) as LIF dynamics still run per-timestep. 
+
+5.4 Cross-Platform Validation: NVIDIA V100 
+
+To confirm that TAC’s benefits are not framework- or hardware-specific, we reproduce all MNIST/Fashion-MNIST experiments on NVIDIA V100-SXM2-16GB using PyTorch 2.7 + snnTorch 0.9 with identical architectures, hyperparameters, and seeds. Table 4 reports both training accuracy and wall-clock training time. The V100 results closely reproduce the M3 Max findings: TAC achieves 5–13 × training speedup with competitive accuracy, and TAC-TP K = 4 recovers near-baseline accuracy ( 87 .0% vs. 88 .1% 
+
+on FMNIST) while providing 1.5× speedup. Notably, the V100 baseline accuracy ( 98 .56% MNIST, 
+
+88 .11% FMNIST) closely matches the M3 Max baseline ( 97 .22% , 83 .14% ), with V100 slightly higher due to the different framework (snnTorch vs. mlx-snn) and potentially different random number generation. The speedup mechanism—reducing convolution kernel launches—is hardware-agnostic 
+
+and benefits any SIMD processor. 
+
+5.5 Analysis: When to Collapse vs. Preserve 
+
+The contrasting results in Tables 2 and 3 reveal a fundamental principle: the temporal dimension carries different information depending on the data encoding. 
+
+Rate-coded static data: temporal dimension as noise. Each timestep is an independent Bernoulli sample of the same underlying image. The temporal dimension encodes the same information T
+
+times with sampling noise. TAC’s temporal collapse acts as an ensemble average over K samples, 9Table 5: Summary: TAC vs. TAC-TP across data types. The optimal strategy depends on whether the temporal dimension carries information (event) or noise (rate-coded).                
+
+> Rate-Coded (MNIST) Event (DVS-Gesture) Strategy ∆Acc Speedup ∆Acc Speedup TAC (collapse) K=2 +1.6% ∼2×−5.0% 1.5 ×
+> TAC-TP (preserve) K=2 ——−1.2% 1.2 ×
+
+Table 6: Comparison with published SNN methods. Our contribution is speedup, not SOTA accuracy. Methods marked † use significantly deeper architectures. ‡: our snnTorch reproduction on V100 with identical setup.                                          
+
+> Method Architecture MNIST FMNIST DVS-Gesture STBP [Wu et al., 2018] Conv, 5 layers 99.42 ——tdBN [Zheng et al., 2021] †ResNet-19 ——96.87 TCJA-SNN [Zhu et al., 2024] †TCJA-7B —94.80 97.60 SpikingJelly [Fang et al., 2023] CSNN, 5 layers ——93.75 snnTorch Baseline ‡Conv, 2 layers 98.56 88.11 —Ours: Baseline (M3 Max) Conv, 2/5 layers 97.22 83.14 96.30 Ours: TAC K= 8 (M3 Max) Conv, 2 layers 98.85 88.50 —Ours: TAC-TP K= 2 Conv, 5 layers ——95.13
+
+reducing variance: Var 
+
+ 1
+
+K
+
+> K−1
+
+X
+
+> j=0
+
+SkK +j
+
+ = ρ(1 − ρ)
+
+K . (4) This variance reduction directly explains TAC’s accuracy improvement and TAC-TP’s accuracy loss: TAC denoises while TAC-TP preserves noise. 
+
+Event-based dynamic data: temporal dimension as signal. Each timestep captures a different temporal slice of a dynamic scene. Adjacent frames are correlated but not identical—they represent different phases of a gesture. TAC-TP preserves this temporal structure: although the convolution output is shared within each group (an approximation), the LIF dynamics and spike generation operate independently per timestep, maintaining temporal expressiveness for the downstream VotingLayer. 
+
+Practical guideline. Use TAC (collapse) for rate-coded/static data → speedup + accuracy gain. Use TAC-TP (preserve) for event/dynamic data → convolution reduction with minimal accuracy cost. This can be determined at deployment time based on the data source (frame camera vs. event camera). 
+
+5.6 Comparison with Published SNN Methods 
+
+Table 6 contextualizes our results against published SNN methods. Our contribution is not SOTA accuracy—which requires deeper architectures—but demonstrating that TAC provides meaning-ful speedup with minimal accuracy trade-off. To ensure a fair comparison, we include both our mlx-snn results (M3 Max) and a snnTorch reproduction on V100 with identical architecture and hyperparameters. The snnTorch baseline on V100 (98.56% MNIST, 88.11% FMNIST) provides a framework-fair reference: our TAC K = 8 on M3 Max (98.85%, 88.50%) exceeds the snnTorch baseline while running 8.7× faster. On DVS-Gesture, our baseline (96.30%) exceeds SpikingJelly’s 93.75%, and TAC-TP K = 2 retains 95.1% with half the convolution cost. 10 6 Discussion and Conclusion 
+
+Implications for the SNN community. Our negative result on spike sparsity has practical conse-quences: claims of “ N × theoretical speedup from sparsity” should be accompanied by wall-clock measurements on actual hardware. The real advantages of SNNs on GPUs—temporal processing, event-driven data efficiency, and biological plausibility—are distinct from computational sparsity, which requires dedicated neuromorphic hardware. 
+
+TAC as data-dependent operator. The collapse/preserve distinction is a principled design choice, not a hack. It follows directly from the information content of the temporal dimension: collapse noise (rate-coded), preserve signal (event). This analysis may generalize to other temporal processing architectures beyond SNNs. 
+
+Limitations. We test on compact architectures (2-layer for MNIST, 5-layer for DVS-Gesture). TAC-TP’s wall-clock speedup ( 1.2×) is modest compared to its convolution call reduction ( 2×)because LIF dynamics still run per-timestep. DVS-Gesture TAC-TP K ≥ 4 results are from a single seed. Validation on larger datasets (CIFAR-10, ImageNet) and deeper architectures is needed. 
+
+Future directions. Learnable aggregation weights (replacing fixed exponential decay) could adapt to intermediate temporal structure. Combining TAC-TP with temporal attention [Yao et al., 2021] may allow the network to learn which timesteps to share convolution outputs for. Hardware-specific optimization—fusing aggregation and convolution into a single GPU kernel—could further improve TAC-TP’s wall-clock speedup. 
+
+Conclusion. We presented a two-part investigation into convolutional SNN acceleration. Five methods for exploiting spike sparsity on GPU all fail due to the fundamental SIMD-sparsity mismatch. Instead, Temporal Aggregated Convolution reduces computation by exploiting convolution linearity across time. TAC (temporal collapse) achieves 13 .8× speedup on Apple M3 Max and 11 .0× on NVIDIA V100 with +1 .6% accuracy on MNIST. TAC-TP (temporal preservation) achieves 95 .1% 
+
+on DVS-Gesture with 50% fewer convolution calls. The key insight is that the optimal aggregation strategy is data-dependent: collapse for rate-coded data, preserve for event data. All operators are open-source in mlx-snn .
+
+## References 
+
+Arnon Amir, Brian Taba, David Berg, Timothy Melano, Jeffrey McKinstry, Carmelo Di Nolfo, Tapan Nayak, Alexander Andreopoulos, Guillaume Garrber, Myron Goldberg, et al. A low power, fully event-based gesture recognition system. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition , pages 7243–7252, 2017. Guillaume Bellec, Franz Scherr, Anand Subramoney, Elias Hajek, Darjan Salaj, Robert Legenstein, and Wolfgang Maass. A solution to the learning dilemma for recurrent networks of spiking neurons. 
+
+Nature Communications , 11:3625, 2020. Yanqi Chen, Zhaofei Yu, Wei Fang, Tiejun Huang, and Yonghong Tian. Pruning of deep spiking neural networks through gradient rewiring. In Proceedings of the International Joint Conference on Artificial Intelligence , pages 1713–1719, 2021. Mike Davies, Narayan Srinivasa, Tsung-Han Lin, Gautham Chinya, Yongqiang Cao, Sri Harsha Choday, Georgios Dimou, Prasad Joshi, Nabil Imam, Shyam Jain, et al. Loihi: A neuromorphic manycore processor with on-chip learning. IEEE Micro , 38(1):82–99, 2018. Shikuang Deng, Yuhang Li, Shanghang Zhang, and Shi Gu. Temporal efficient training of spiking neural network via gradient re-weighting. In International Conference on Learning Representations ,2022. Jason K Eshraghian, Max Ward, Emre O Neftci, Xinxin Wang, Gregor Lenz, Girish Dwivedi, Mohammed Bennamoun, Doo Seok Jeong, and Wei D Lu. Training spiking neural networks using lessons from deep learning. Proceedings of the IEEE , 111(9):1016–1054, 2023. 11 Wei Fang, Zhaofei Yu, Yanqi Chen, Timothée Masquelier, Tiejun Huang, and Yonghong Tian. Incorporating learnable membrane time constant to enhance learning of spiking neural networks. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 2661–2671, 2021. Wei Fang, Yanqi Chen, Jianhao Ding, Zhaofei Yu, Timothée Masquelier, Ding Chen, Liwei Huang, Huihui Zhou, Guoqi Li, and Yonghong Tian. SpikingJelly: An open-source machine learning infrastructure platform for spike-based intelligence. Science Advances , 9(40):eadi1480, 2023. Steve B Furber, Francesco Galluppi, Steve Temple, and Luis A Plana. The SpiNNaker project. 
+
+Proceedings of the IEEE , 102(5):652–665, 2014. Awni Hannun, Jagrit Pasesotto, Angelos Katharopoulos Sharma, Sam Shleifer, et al. MLX: An array framework for Apple silicon. https://github.com/ml-explore/mlx , 2023. Apple Machine Learning Research. John L Hennessy and David A Patterson. Computer Architecture: A Quantitative Approach . Morgan Kaufmann, 6th edition, 2017. Sara Hooker. The hardware lottery. Communications of the ACM , 64(12):58–65, 2021. Youngeun Kim and Priyadarshini Panda. Revisiting batch normalization for training low-latency deep spiking neural networks from scratch. Frontiers in Neuroscience , 15:773954, 2021. Souvik Kundu, Massoud Pedram, and Peter A Beerel. Spike-thrift: Towards energy-efficient deep spiking neural networks by limiting spiking activity via attention-guided compression. In 
+
+Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision , pages 3953–3962, 2021. Wolfgang Maass. Networks of spiking neurons: the third generation of neural network models. 
+
+Neural Networks , 10(9):1659–1671, 1997. Paul A Merolla, John V Arthur, Rodrigo Alvarez-Icaza, Andrew S Cassidy, Jun Sawada, Filipp Akopyan, Bryan L Jackson, Nabil Imam, Chen Guo, Yutaka Nakamura, et al. A million spiking-neuron integrated circuit with a scalable communication network and interface. Science , 345 (6197):668–673, 2014. Emre O Neftci, Hesham Mostafa, and Friedemann Zenke. Surrogate gradient learning in spiking neural networks: Bringing the power of gradient-based optimization to spiking neural networks. 
+
+IEEE Signal Processing Magazine , 36(6):51–63, 2019. Jiahao Qin and Feng Liu. Mamba-spike: Enhancing the mamba architecture with a spiking front-end for efficient temporal data processing. In Computer Graphics International (CGI 2024) ,volume 15339 of Lecture Notes in Computer Science , pages 299–312. Springer, 2025. doi: 10.1007/978-3-031-82021-2\_23. Kaushik Roy, Akhilesh Jaiswal, and Priyadarshini Panda. Towards spike-based machine intelligence with neuromorphic computing. Nature , 575(7784):607–617, 2019. Yujie Wu, Lei Deng, Guoqi Li, Jun Zhu, and Luping Shi. Spatio-temporal backpropagation for training high-performance spiking neural networks. Frontiers in Neuroscience , 12:331, 2018. Man Yao, Huanhuan Gao, Guangshe Zhao, Dingheng Wang, Yihan Lin, Zhaoxu Yang, and Guoqi Li. Temporal-wise attention spiking neural networks for event streams classification. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 10221–10230, 2021. Friedemann Zenke and Tim P Vogels. The remarkable robustness of surrogate gradient learning for instilling complex function in spiking neural networks. Neural Computation , 33(4):899–925, 2021. Hanle Zheng, Yujie Wu, Lei Deng, Yifan Hu, and Guoqi Li. Going deeper with directly-trained larger spiking neural networks. In Proceedings of the AAAI Conference on Artificial Intelligence ,volume 35, pages 11062–11070, 2021. Rui-Jie Zhu, Qihang Zhao, Guoqi Li, and Jason K Eshraghian. TCJA-SNN: Temporal-channel joint attention for spiking neural networks. IEEE Transactions on Neural Networks and Learning Systems , 2024. 12 A Proof of Theorem 1 (TAC Approximation Error Bound) 
+
+We prove the error bound by analyzing the membrane potential discrepancy between exact per-step computation and TAC’s grouped computation. 
+
+Setup. Consider a single convolutional SNN layer processing T timesteps with group size K (assume 
+
+K|T ). Let V exact  
+
+> t
+
+denote the membrane potential under exact computation: 
+
+V exact  
+
+> t
+
+= βV exact  
+
+> t−1
+
++ W ∗ St − Vth · Θ( V exact  
+
+> t−1
+
+− Vth ), (5) and V TAC  
+
+> t
+
+under TAC: 
+
+V TAC  
+
+> kK
+
+= βK V TAC  
+
+> (k−1) K
+
++ W ∗ Ak − Vth · Θ( V TAC  
+
+> (k−1) K
+
+− Vth ), (6) where Ak = PK−1 
+
+> j=0
+
+βK−1−j SkK +j .
+
+Error decomposition. The error at group boundary kK :
+
+ϵk = V exact  
+
+> kK
+
+− V TAC  
+
+> kK
+
+(7) 
+
+= βK ϵk−1 +
+
+
+
+> K−1
+
+X
+
+> j=0
+
+βK−1−j W ∗ SkK +j − W ∗ Ak
+
+| {z } 
+
+> =0 by linearity
+
++ ∆ spike (k)
+
+| {z }
+
+> spike mismatch
+
+. (8) The convolution linearity term vanishes exactly. The spike mismatch ∆spike (k) arises from intermedi-ate spikes within the group: |∆spike (k)| ≤ Vth (K − 1) .
+
+Expected error bound. Since spikes are Bernoulli( ρ): 
+
+E[|∆spike (k)|2] ≤ V 2 
+
+> th
+
+(K − 1) · ρ(1 − ρ) · Nspatial , (9) where Nspatial = C · H′ · W ′. Unrolling the recurrence yields the stated bound with C =
+
+V 2 
+
+> th
+
+Nspatial /(1 − β2K ).
+
+## B TAC-TP Temporal Resolution Analysis 
+
+Proposition 2 (TAC-TP Temporal Resolution Guarantee) . Let a network have L layers, each applying TAC-TP with group size Kℓ. The output temporal dimension at every layer ℓ is T —the same as the input temporal dimension—regardless of Kℓ values. In contrast, TAC with group sizes Kℓ produces output temporal dimension T / QLℓ=1 Kℓ.Proof. TAC-TP’s inner loop (Algorithm 2, lines 5–8) generates K independent spike outputs per group, producing exactly T /K · K = T output timesteps per layer. This is independent of K and composes across layers: L layers each preserving T gives output dimension T .TAC (Algorithm 1) generates one spike output per group, giving T /K outputs per layer. Cascading 
+
+L layers: T → T /K 1 → T / (K1K2) → · · · → T / Q Kℓ.For DVS-Gesture with T = 16 and L = 5 layers at K = 2 : TAC gives 16 /25 = 0 .5 (i.e., < 1 output timestep for the VotingLayer), while TAC-TP gives 16 timesteps. This explains TAC-TP’s +3 .8% 
+
+advantage. 
+
+## C Other Operators: FTC, IMC, TCC Details 
+
+Fourier Temporal Convolution (FTC). FTC replaces LIF’s fixed first-order IIR filter H(z) = 1/(1 − βz −1) with a learnable biquad: H(z) = ( b0 + b1z−1 + b2z−2)/(1 + a1z−1 + a2z−2), with BIBO stability guaranteed by r = σ(rraw ) < 1. FTC does not reduce convolution calls and introduces IIR filtering overhead. 13 Information-Theoretic Channel Gating (IMC). IMC models each channel as a Binary Symmetric Channel with capacity CBSC = 1 − Hb(ρ). Channels with firing rates near 0.5 are gated out. The minimum channel width for I bits of information is Cout ≥ I/ (1 − Hb(ρ)) . Gating overhead exceeds savings. 
+
+Temporal Collapse Convolution (TCC). TCC skips convolution during spike-free windows. The probability of a silent frame is (1 − ρ)C·H·W . For C = 128 , H = W = 32 : (0 .9) 131072 ≈ 0. TCC is theoretically exact but requires firing rates so low that entire frames are silent. 
+
+## D Full Per-Seed Results 
+
+Table 7: Per-seed best test accuracy on MNIST (T=25, 15 epochs). 
+
+Operator Seed 0 Seed 1 Seed 2 Mean ± Std Baseline 97.09 97.43 97.13 97 .22 ± 0.15 
+
+TAC K=4 98.69 98.89 98.75 98 .78 ± 0.08 
+
+TAC K=8 98.81 98.90 98.83 98 .85 ± 0.04 
+
+TAC K=16 98.74 98.81 98.91 98 .82 ± 0.07 
+
+TAC-TP K=4 90.66 94.66 94.27 93 .20 ± 1.78 
+
+TAC-TP K=8 89.91 91.00 88.31 89 .74 ± 1.10 
+
+TAC-TP K=16 87.73 91.00 92.11 90 .28 ± 1.82 
+
+TCC 96.95 98.00 97.64 97 .53 ± 0.43 
+
+FTC (order 2) 96.42 96.93 96.71 96 .69 ± 0.21 
+
+IMC 97.40 97.41 97.57 97 .46 ± 0.08 
+
+Table 8: Per-seed best test accuracy on Fashion-MNIST (T=25, 15 epochs). 
+
+Operator Seed 0 Seed 1 Seed 2 Mean ± Std Baseline 82.07 83.91 83.45 83 .14 ± 0.77 
+
+TAC K=4 87.47 88.38 88.08 87 .98 ± 0.37 
+
+TAC K=8 88.48 88.21 88.81 88 .50 ± 0.24 
+
+TAC K=16 88.14 88.54 88.35 88 .34 ± 0.16 
+
+TAC-TP K=4 76.82 75.95 76.38 76 .38 ± 0.36 
+
+TAC-TP K=8 71.70 77.85 77.09 75 .55 ± 2.70 
+
+TAC-TP K=16 72.37 72.74 76.38 73 .83 ± 1.82 
+
+TCC 84.48 85.96 85.70 85 .38 ± 0.65 
+
+FTC (order 2) 79.64 77.81 81.17 79 .54 ± 1.37 
+
+IMC 83.83 84.36 83.36 83 .85 ± 0.41 
+
+Table 9: Per-seed best test accuracy on DVS128-Gesture ( 64 × 64 , 256 epochs with warm restarts). 
+
+Operator Seed 0 Seed 42 Seed 123 Mean ± Std Conv Calls Baseline 95.8 96.9 96.2 96 .30 ± 0.45 80 TAC-TP K=2 94.1 94.8 96.5 95 .13 ± 1.01 40 TAC-TP K=4 — 93.8 — 93 .8 20 TAC-TP K=8 — 92.0 — 92 .0 10 TAC K=2 — 91.3 — 91 .3 40 
+
+## E Detailed Experimental Configuration F DVS-Gesture Data Preprocessing 
+
+DVS128-Gesture recordings are stored in AEDAT 3.1 format. We parse events (x, y, t, p ) with spatial coordinates (x, y ) ∈ [0 , 127] 2, timestamps t in microseconds, and polarity p ∈ { 0, 1}. Events are 14 Table 10: Full hyperparameter configuration for all experiments. 
+
+Parameter MNIST / FMNIST DVS-Gesture Timesteps ( T ) 25 16 Batch size 128 16 Learning rate 10 −3 10 −3
+
+LR schedule Cosine annealing Cosine w/ warm restarts ( Tmax =64) Optimizer Adam Adam Epochs 15 256 
+
+β (LIF decay) 0.9 0.5 
+
+Vth (threshold) 1.0 1.0 Surrogate gradient Fast sigmoid ( α=25) Arctan ( α=2.0) Reset mechanism Subtract Subtract (detach reset) Loss function Cross-entropy on spike count MSE on firing rate vs. one-hot Seeds 0, 1, 2 0, 42, 123 
+
+Dataset-specific 
+
+Input size 28 × 28 × 1 64 × 64 × 2
+
+Spike encoding Rate (Poisson) Event binning (by time) Output layer LIF + spike count LIF + VotingLayer (10 voters) 
+
+downsampled to 64 × 64 by integer division of coordinates by 2. We bin events into T = 16 temporal frames by dividing the recording duration equally. Each frame accumulates event counts per spatial position and polarity channel, followed by log-normalization: fnorm = log(1 + f )/ log(1 + fmax ).15

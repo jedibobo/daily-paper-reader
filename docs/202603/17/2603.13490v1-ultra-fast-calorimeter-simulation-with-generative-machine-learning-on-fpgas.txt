@@ -1,0 +1,345 @@
+Title: Ultra Fast Calorimeter Simulation with Generative Machine Learning on FPGAs
+
+URL Source: https://arxiv.org/pdf/2603.13490v1
+
+Published Time: Tue, 17 Mar 2026 00:39:28 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+# Ultra Fast Calorimeter Simulation with Generative Machine Learning on FPGAs 
+
+P. Alex May a Qibin Liu b Julia Gonski b Benjamin Nachman b
+
+> a
+
+San Jose State University, 1 Washington Square, San Jose, CA 95192, USA 
+
+> b
+
+SLAC National Accelerator Laboratory, 2575 Sand Hill Rd, Menlo Park, CA 94025, USA 
+
+E-mail: alex.may@sjsu.edu 
+
+Abstract: Computationally expensive, high-accuracy detector simulations are a ma-jor bottleneck for many particle physics experiments such as those at the Large Hadron Collider (LHC) as well as those planned for future colliders. This challenge has moti-vated the development of fast generative machine learning based surrogates. We present a hardware-aware variational autoencoder model for fast calorimeter simulation that is de-signed specifically for field programmable gate array (FPGA) deployment, offering faster and lower power inference capability. Quantization aware training and other compression techniques are applied to respect the resource constraints of a single FPGA. The synthe-sized implementation of the VAE decoder achieves sub-millisecond latency, resulting in a substantial speed up compared to a traditional GPU implementation with only a small performance drop. This feasibility study demonstrates the potential of utilizing existing FPGA architecture at the LHC and other facilities for efficient offline computing using online resources. 
+
+> arXiv:2603.13490v1 [physics.ins-det] 13 Mar 2026
+
+Contents 
+
+1 Introduction 12 Methods 3
+
+2.1 Dataset 32.2 Preprocessing 32.3 Generative Model 52.4 Decoder Codesign and FPGA Implementation 7
+
+3 Results 8
+
+3.1 Fidelity 83.2 Resources & Latency 12 
+
+4 Conclusions 13 A Code Availability 15 B hls4ml Details 15 
+
+1 Introduction 
+
+The Monte Carlo (MC) simulation of physics processes is essential for all scientific programs in particle physics. High quality and high statistics simulations are necessary for nearly all aspects of data analysis and future planning, including event reconstruction, background estimation, and uncertainty quantification. As the number of recorded events increases, experiments require correspondingly larger simulated datasets in order to match the sta-tistical precision of recorded data. Full detector simulation based on Geant4 [1] provides high fidelity but is computationally expensive. For example, at the Large Hadron Collider (LHC), a majority of current computing resources are used for MC simulation, and this is projected to increase nearly exponentially in the High Luminosity LHC era [2, 3]. Other HEP experiments such as detection of internally reflected Cherenkov light (DIRC) detectors face a similar situation, where the computational cost grows with the increasing demands of high-granularity simulations and multi-dimensional design optimization [4, 5]. In par-ticular, calorimeter shower simulation dominates the cost, accounting for approximately 80% of total full-simulation time [6] This computational burden represents a significant bottleneck for producing the large simulated samples required for future LHC operations. Fast simulation techniques can mitigate these computational challenges by reducing the cost per simulated event while maintaining sufficient accuracy for physics analyses. One approach is the use of parameterized detector response, replacing the propagation of incident particles inside the calorimeter volume by directly generating energy deposits – 1 – based on a detector parametrization [6–9]. Another increasingly viable approach is the use of generative machine learning (ML) [10–14]. Such models learn the relationship between particle inputs and detector outputs from fully simulated data, enabling expensive per-particle propagation to be replaced by a single neural-network inference, thus significantly decreasing simulation latency while retaining essential detector features. Modern generative ML simulation techniques have become sufficiently performant to be deployed to model the ATLAS [6, 15], ALICE [16], CMS [17–20], LHCb [21] and EIC [22] detectors. Neural network-based surrogate models are naturally compatible with and accelerated by Graphical Processing Units (GPUs). However, GPUs are energy intensive and are typ-ically most efficient at large batch sizes, while event generation tends to operate in the batch-size-one regime, e.g. calorimeter showers are generated one at a time and not all at once across an event(s). Field-programmable gate arrays (FPGAs) offer a complementary option in heterogeneous computing environments, providing low-latency and power-efficient inference suited to real-time or high-throughput use cases. FPGAs are already incorporated into the trigger and data-acquisition systems of the ATLAS and CMS detectors, making them a readily available resource during shutdown periods [23, 24]. Existing studies have primarily considered FPGAs for online ML inference, benefiting from their deterministic latency and the reuse of signal-processing hardware. However, recent advances in mod-ern FPGA devices, particularly their increasing logic density, also make them attractive for offline inference. In this work, we propose fast simulation as a testbed for exploring FPGA-based offline applications and for evaluating FPGAs as an heterogeneous computing element. The ability to run generative simulation algorithms on FPGAs could lower latency and power of MC production while fully leveraging existing computational resources. A practical challenge is that state-of-the-art generative models, such as normalizing-flow-based approaches [25–27], diffusion-based methods [28, 29], and conditional-flow-matching models [30], 1 often require large networks together with complex architec-tures and operators to achieve the desired fidelity, making their deployment on resource-constrained hardware non-trivial. Recent studies [32] exploring methods for compressing these models show promising reductions in size, although the resulting models remain still significantly larger than what is practical for realistic hardware implementation. Further work on model compression techniques like pruning and quantization is therefore essential to minimize the algorithm’s computational footprint so that it can fit within realistic FPGA systems. These optimizations generally introduce some degradation in performance, but for many simulation use cases a modest loss in accuracy is an acceptable trade-off in exchange for substantially increased simulation throughput and reduced power consumption. In this paper, we demonstrate the utility of FPGAs for fast and efficient ML-based calorimeter simulation. We make use of prior work from the 2022 CaloChallenge [13], where a variety of generative models were implemented ranging from variational autoen-coders [33] to normalizing flows [34] and diffusion models [35]. Our demonstration uses a compressed variational autoencoder model that can generate simulations faster than a  
+
+> 1Hybrid classical-quantum generative models are also beginning to be explored for generative simulation tasks [31].
+
+– 2 – GPU deployment at small batch sizes for a modest compromise in fidelity. This opens the door to the full exploitation of available FPGA resources at the LHC experiments, by using them for fast simulation during data-taking downtime and enables heterogeneous computing through streaming-like data transfer interface. This work also serves as an ini-tial exploration of the use of FPGAs for offline tasks in high energy physics, showing that FPGA platforms can provide low and deterministic latency, high-throughput data synthesis and processing for specific applications, with potential future application for reconstruction and data compression. 
+
+2 Methods 
+
+2.1 Dataset 
+
+We use the Calorimeter Simulation Challenge (CaloChallenge) datasets [13] as the primary benchmark in this study. These datasets emulate key aspects of modern calorimeter systems and have become a standard testbed for R&D on fast, machine-learning–based simulation, with well-characterized features and established state-of-the-art baselines. Importantly, they provide one of the first widely adopted, public benchmarks that is sufficiently chal-lenging for a systematic evaluation of FPGA-oriented fast-simulation workflows. In this work we focus on the Photon Dataset 1 [36], which contains 368-dimensional inputs and is derived from a prototype configuration in Ref. [37] and studied in the context of the ATLAS experiment [6, 38]. Single photons are generated at the ATLAS calorimeter system surface and pointed toward the detector center, with 0 .2 < |η| < 0.25, correspond-ing to an oblique incidence on the calorimeter. The resulting detector response is simulated with the official ATLAS software chain based on Geant4 [1] using an idealized hit record-ing [37]. Energy deposits are recorded in a five-layer geometry with irregular voxelization granularity (8 /160 /190 /5/5). The incident photon energy spans 256 MeV to 4 TeV, sam-pled at 15 logarithmically spaced discrete values. A schematic of the geometry is shown in Fig. 1. The dataset is also referred to as “full-simulation,” in contrast to the ML-based fast simulation (“fast-simulation”) studied in this work, and is used as the reference for physics performance. 
+
+2.2 Preprocessing 
+
+The data is preprocessed before feeding into the model. First, the 368 voxel energies undergo layer-wise normalization by dividing each voxel energy by the total energy of its respective layer. The resulting normalized voxel energy ratios vi are given by the following equation, 
+
+vi = Ei/L l(i), (2.1) where i is the index of each voxel, Ei are the voxel energies, and Ll(i) = P 
+
+> l(j)= l(i)
+
+Ej is the total layer energy which is given by summing all of the voxel energies in layer l(i). In addition to providing the model with voxel energy ratios, the model also requires an energy response ratio and layer energy ratios to properly rescale the reconstructed voxel – 3 – Figure 1 : Demonstration of the dataset geometry. The variation of granularity along the radial direction for different layer is not reflected in the schematic for visualization reason. energy ratios. The energy response ratio is given by the following expression 
+
+r = 1
+
+ζEtot 
+
+Einc 
+
+, (2.2) where r is the energy response ratio, Etot = P 
+
+> i
+
+Ei and ζ is a normalization factor 2. The layer energy ratios are the energy in a given layer divided by the total energy. The layer energy ratios ℓl are normalized by definition and given by 
+
+ℓl = Ll/E tot , (2.3) where l is again the layer index. The concatenation of voxel energy, energy response, and layer energy ratios is the models input vector xk where the index k goes from 1 to 374. In summary, for each training event, the model receives a 374 dimension input vector xk consisting of 368 voxel energy ratios vi, 1 energy response ratio r, and 5 layer energy ratios ℓl.In addition, the model also receives a conditional input. The model’s conditional input is given by logarithmically scaling and then normalizing the incident energy. This transformation is represented by the following expression, 
+
+xcon = log 2(Einc )/ log 2(Emax inc ), (2.4) where xcon is the conditional input, Einc is the incident energy, and Emax inc is the maximum incident energy with a numerical value of 2 22 MeV. This rescaling of the incident energies results in the network making improved distinctions between lower energy events.   
+
+> 2This factor is manually chosen so that 99.9 % of the energy response ratios are between zero and one. A few high energy response events are intentionally left unnormalized so the distribution of energy responses has a mean of ∼0.5.
+
+– 4 – 2.3 Generative Model 
+
+We employ a conditional variational autoencoder (cVAE) model [39–41], implemented with fully connected (dense) layers and an architecture inspired by the reference DNNCaloSim 
+
+model [13] from the CaloChallenge developed for other datasets. The DNN-based model is readily scalable in both size and precision and is well suited for resource-constrained hard-ware. Its regular structure maps efficiently to FPGA implementations. It is comprised of an encoder network q(z|x; xcon ) that parametrizes the approximate posterior distribu-tion of the latent variable z given the input x, and a decoder network p(x|z; xcon ) that parametrizes the conditional likelihood of the data and reconstructs x from samples of z.The encoder and decoder networks are trained by maximizing the evidence lower bound (ELBO) on the conditional log-likelihood, log p(x|xcon ) ≥ Ez∼q(z|x;xcon )[log p(x|z; xcon )] − DKL (q(z|x; xcon )|| p(z)) . (2.5) The right-hand side defines the ELBO: the first term is the expected conditional reconstruc-tion log-likelihood under samples z ∼ q(z|x; xcon ), and the second term is the Kullback-Leibler (KL) divergence [42] which regularizes q(z|x; xcon ) toward the prior p(z). In prac-tice, we minimize the negative ELBO by implementing the reconstruction term with a weighted binary cross-entropy on the decoder outputs ˜ x, and evaluating the KL divergence in closed form for a diagonal-Gaussian posterior with an unconditional standard normal prior p(z) = N (0 , I ). The training loss becomes the following, 
+
+L = −wreco 374 X
+
+> k
+
+(xk log ˜ xk + (1 − xk) log(1 − ˜xk)) + 12
+
+> dz
+
+X
+
+> i
+
+ μ2 
+
+> i
+
++ σ2 
+
+> i
+
+− 1 − log σ2
+
+> i
+
+ , (2.6) where q(z|x, x con ) = N (z|μ, diag( σ2)) is a diagonal-covariance Gaussian with mean μ and variance σ2 predicted by the encoder, dz denotes the latent-space dimension, and wreco 3
+
+controls the relative weight of the reconstruction term. The target vector x ∈ R374 is composed of per-layer voxel energy ratios, layer energy fractions, and an overall energy response ratio. The conditional encoder network has an input dimension of 375 ( x and xcon ) and is followed by four dense layers with descending dimensionality. Each dense layer in the encoder is followed by a batch normalization layer and uses a leaky ReLU activation. The decoder network begins with four dense layers in increasing dimensionality, mirroring the encoder. These four dense layers are also followed by a batch normalization layer and use leaky ReLU activations. Following the fourth dense layer is another dense layer of dimension 374 which itself branches off into seven separate dense layers. Five of these branching layers correspond to the five layers of the detector, with output dimensions of (8, 160, 190, 5, 5) respectively, and use softmax activations to reconstruct the 368 voxel energy ratios ˜ vi and enforce normalization within each calorimeter layer. The two remaining layers reconstruct the 5 layer energy ratios ˜ℓl
+
+and energy response ratio ˜ r with softmax and sigmoid activations respectively. The outputs are then concatenated into the final reconstructed output vector ˜ x. 
+
+> 3wreco has a numerical value of 374.
+
+– 5 – training parameter 1 2 3 4 5 6 7 8batch size 100 50 100 25 100 50 25 100 learning rate 10 −2 10 −3 10 −3 10 −4 10 −5 10 −6 10 −7 10 −8
+
+Table 1 : Hyperparameters schedule for 8 stage training During generation we sample z ∼ p(z) = N (0 , I ) and pass it along with xcon into the decoder to output ˜ x. For posterior sampling (used during training and for reconstructions), latent samples are instead drawn from q(z|x, x con ) via the reparameterization z = μ+σ ⊙ϵ,with ϵ ∼ N (0 , I ) (where ⊙ represents element-wise multiplication). 18 
+
+Figure 2 : Visualization of the VAE model. Forward propagation runs from left to right starting with the preprocessed input vector x and condition xcon which feed into the encoder to output the vectors μ and σ. The condition xcon and the latent vector z pass through the decoder and output the reconstructed ratios which are concatenated into the output vector ˜ x.For training, we adopt an eight-stage schedule, based on the reference DNNCaloSim 
+
+model, where the learning rate is progressively decreased, and the batch size is adjusted, as summarized in Table 1. During each stage of training, 85% of the data is randomly selected for training while the remaining 15% is used for validation. The VAE is then optimized with the respective set of hyperparameters until the validation loss fails to improve for 10 epochs. After this early stopping, the model parameters are saved and used as the starting parameters of the next stage of training. The VAE was implemented in Keras 2.12 [43] and QKeras 0.9 [44] using TensorFlow 2.12 [45] as the backend, and trained with mini-batch gradient descent using the Adam optimizer [46]. Training was performed on an NVIDIA A100-SXM4-40GB GPU with 6,912 CUDA cores each clocked at 1410 MHz which resulted in a typical training time of 3 hours. – 6 – 2.4 Decoder Codesign and FPGA Implementation 
+
+The inference latency of the generative model is a primary consideration for fast calorime-ter simulation. In existing detector simulation stack, the conditioning information, such as the truth energy of the particle from upstream stages like tracker simulation, usually arrives sequentially. The calorimeter simulation operating in mini-batches, or in particular with batch-size-one generation, is essential for seamless integration into the existing sim-ulation chain, as it avoids the need for additional buffering or complex service scheduling. This requirement guides the design of the model and its implementation on the FPGA de-vice. It also benefits from the developed low-latency I/O interfaces designed for streaming packets [47], enabling heterogeneous computing architectures for the simulation task. Only the decoder part of the VAE architecture is required during generative infer-ence, which reduces the hardware resource requirements. However, implementing this decoder-only model on a low-latency platform such as an FPGA still requires substantial compression, including quantization, pruning, and dimensionality reduction, in order to fit within the available resources. To evaluate the effect of these compression techniques with respect to latency and fidelity we study two model versions: VAE-GPU and VAE-FPGA, which share exactly the same model architecture as described in the previous subsection, and but with different precision and compression applied. VAE-GPU uses floating point precision and targets GPU backend. It is used as a reference to contextualize the impact of the compression techniques. VAE-FPGA has the same dimensionality as VAE-GPU, but its decoder is constructed of quantized dense layers, and undergoes pruning so redundant neurons or synapses are removed effectively reducing the number of parameters (making the network “sparse”). Nearly all VAE-FPGA dense layers use use fixed point precision ap fixed <6,2 > for the weights and ap fixed <8,3 > for the bias. The exception is the dense layer preceding the softmax activation that approximates the layer energy ratios, and the dense layer that preceding the sigmoid activation that approximates the energy response ratio. The former dense layer uses a precision of ap fixed <8,3 > for the weights and ap fixed <10,3 > for the bias, while the latter is trained with full 32-bit FP precision. This specific increase in precision improves generation quality of the energy response ratio ˜ r. A quantitative sum-mary of each model version’s dimensionality and compression hyperparameters are shown in Table 2. The reference DNN model is also included for completeness; however, it was trained on a different dataset and is therefore provided only for indicative comparison. To further contextualize performance, we also report results from two other benchmarks. The first is the current fastest GPU-based model in the CaloChallenge community, CaloVQ [48], which serves as a well-tuned benchmark for GPU platforms. The second is the fastest model for a batch size of 1, namely CaloINN [26], which provides a GPU benchmark for small batch sizes where FPGA implementation is hypothesized to excel. The VAE-FPGA decoder is synthesized for FPGA implementation using hls4ml [49, 50]. For synthesis we utilize the “resource” strategy and io stream as the IO type. All quantized dense layers use a reuse factor equal their input dimension. This relatively – 7 – Model Latent Dimension Decoder Parameters Pruning Precision 
+
+DNNCaloSim 50 3,169,663 0% FP32 
+
+CaloINN 50 18,821,350 0% FP32 
+
+CaloVQ 242 2,152,637 0% FP32 VAE-GPU 30 234,884 0% FP32 VAE-FPGA 30 35,947 85% QINT16 
+
+Table 2 : Summary of VAE-GPU, VAE-FPGA, and reference models, comparing size and application of compression techniques. “FP32” denotes the model using 32-bit floating-point numbers (single precision). “QINT16” denotes a quantized 16-bit fixed-point repre-sentation. The detailed layer-wise precision settings are listed in Table 5. high reuse-factor scheme reduces resource utilization and simplifies HLS scheduling and operator binding. The default internal precision is ap fixed <16,6 > while each layer type uses a specific precision, as described in Table 5 of Appendix B. Notably, the dense layer and proceeding sigmoid activation (which approximate the energy response ratio) are given much higher internal and result precision, as the energy response ratio is crucial for producing faithful results. The target FPGA is an AMD Xilinx Virtex UltraScale+ (xcvu13p-flga2577-2-e). 
+
+3 Results 
+
+The viability of the FPGA-based simulation implementation as compared to traditional CPU or GPU-based platforms is gauged by two performance metrics: fidelity, i.e. proximity of generated simulations to a Geant4 reference, and FPGA resources including generation latency. These metrics are compared for the synthesized VAE-FPGA model to the other model versions presented in Table 2, along with state-of-the-art methods referenced from other works. 
+
+3.1 Fidelity 
+
+Figure 3 shows an example generated shower using the synthesized VAE-FPGA model. The incident particle passes through 5 layers and deposits energy in each layer. The shower pat-tern shows that the model captures the expected spatial morphology and energy-deposition profile, including realistic lateral and longitudinal development, without unusual features or hot spots. This indicates physically consistent, statistically representative generation. Figure 4 shows the resulting average per-layer energy deposition generation comparing the truth simulation from Geant4 and the VAE-FPGA model across all 5 layers. The uniform and smooth angular distributions observed in layers 1 and 2 indicate that the generative model successfully captures rotational symmetry without explicit architectural enforcement, while remaining consistent with the training truth. This behavior reflects the underlying geometry and supports the feasibility of learning relevant physical shower features. – 8 – Figure 3 : Example of generated shower at 2 12 MeV created by the VAE-FPGA model. 
+
+Figure 4 : Average per-layer energy deposition, comparing the Geant4 truth (top) and VAE-FPGA generated shower (bottom). – 9 – Figure 5 : Energy response (left) and voxel energy distribution (right) histograms, com-paring the Geant4 truth (gray) and VAE-FPGA generated shower (blue). The separation metric S is provided for each feature, indicating good agreement. Figure 5 provides histograms of the resulting calorimeter energy deposition and overall energy distribution per voxel, comparing Geant4 truth to the VAE-FPGA generated result. The separation power S , introduced in Eq. 3.1, is employed to quantify the discrepancy between the reference full-simulation histogram ( h) and the corresponding fast-simulation prediction ( h′) at same condition: S ≡
+
+> Nbin
+
+X
+
+> i=1
+
+(h′ 
+
+> i
+
+− hi)2
+
+2 ( h′ 
+
+> i
+
++ hi) . (3.1) With good qualitative agreement of key features such as peak location and distribution and tail shapes, along with S values below 0.1, these results further confirm good quality of VAE generated samples, even after compression for FPGA deployment. To further evaluate the fidelity of the fast simulation, a set of physics-motivated eval-uation metrics is defined using one-dimensional histograms of key observables, following a compatible definition in Ref. [13]. The set of evaluated observables comprises the energy deposited in individual calorimeter voxels ( Ei), the total reconstructed energy response, and several shower-shape variables that are essential for accurate object reconstruction. A detailed definition of these observables is given in Table 3. The true incident photon en-ergy, denoted by Einc , is used as a conditioning variable. The quantities ηi(K) and ∆ ηi(K)specify the position and size (in millimeters) of voxel i in the η direction for calorimeter layer K, with analogous definitions for ϕi(K) and ∆ ϕi(K) in the ϕ direction. Figure 7 shows the per-layer energy distributions comparing the Geant4 truth and the VAE-FPGA generated results. The energy distribution across layers along the z-direction captures the longitudinal development of the shower and serves as a key observable for benchmarking the generation accuracy, including the shower shape and voxel-energy cor-– 10 – Symbol Observable Definition 
+
+Ei Voxel energy (index i) Direct output of the fast simulation 
+
+Etot Total deposited energy P 
+
+> i
+
+Ei
+
+Etot /E inc Total energy response P 
+
+> i
+
+Ei/E inc 
+
+E(K) Layer energy (layer K) P 
+
+> i∈K
+
+Ei
+
+η(K) Energy centroid in η (layer K) P 
+
+> i∈K
+
+ηi Ei / E (K)
+
+ση(K) Shower width in η (layer K) P 
+
+> i∈K
+
+∆ηi Ei / E (K)
+
+ϕ(K) Energy centroid in ϕ (layer K) P 
+
+> i∈K
+
+ϕi Ei / E (K)
+
+σϕ(K) Shower width in ϕ (layer K) P 
+
+> i∈K
+
+∆ϕi Ei / E (K)
+
+Table 3 : Summary of physics observables used for the evaluation of simulation fidelity. 
+
+Figure 6 : Distributions of physics variables comparing the Geant4 truth (gray) and VAE-FPGA generated shower (blue). Layer 2 is selected for demonstration. Specific histograms show layer energy (top left), shower center (top center) and width (top right) in η, shower center (bottom left) and width (bottom right) in ϕ. The separation metric S is provided for each feature. relations. The observables and their correlations closely match the reference simulation, with no visible artifacts, indicating that the generative model reproduces calorimeter infor-– 11 – Figure 7 : Per layer energy distribution from Geant4 truth (gray) and VAE-FPGA gen-erated showers (blue). Layer 2 is selected for demonstration. The separation metric S is provided for each feature. mation at the level of detailed shower shapes, beyond the total energy response. Averaging over all physics variables gives an average separation of S = 0 .054 for the VAE-GPU and 
+
+S = 0 .066 for the VAE-FPGA model, corresponding to a degradation of approximately 23% after compression and hardware synthesis. While this loss is non-negligible, it indicates results of sufficiently high quality to consider partial offloading of generative simulation tasks to FPGAs, wherein tasks that require exceptionally high quality simulation can still rely on standard deployments. 
+
+3.2 Resources & Latency 
+
+Table 4 shows the results of the FPGA synthesis report of VAE-FPGA model obtained from 
+
+hls4ml . FPGA resources are provided in terms of look-up tables (LUTs), flip flops (FFs), and digital signal processors (DSPs). The combined resource usage is sufficiently minimal for the full decoder generative model to run on a single modern commercial FPGA. In terms of speed, the current FPGA model outperforms all GPU implementations documented in Ref. [13] by orders of magnitude, especially at batch = 1, where the FPGA’s low-latency, deterministic execution provides a clear advantage. Figure 8 provides a summary of these results by comparing the performance-latency trade-off for the VAE-FPGA model running on either a GPU or FPGA platform. Two ref-– 12 – Latency [ μs] LUTs FFs DSPs 
+
+12 .29 ± 4.56 1470513 437455 1936 
+
+Table 4 : FPGA resources (expressed in LUTs, DSPs, and FFs) and latency for the FPGA model. erence models from CaloChallenge, namely the CaloINN (at batch size of 1) and CaloVQ (at batch size of 10,000) are included to represent the fastest and peak achievable performance, but with the restriction that its size and complexity only affords GPU operation. As cur-rently shown, there remains a performance gap relative to larger GPU models in Ref. [13] which have over an order of magnitude more parameters than the model discussed here. However, the reduction in latency can provide a meaningful compensation to the simulation quality drop in the context of certain applications, where quantity of simulated showers may be more important than exact precision. Furthermore, FPGA deployed algorithms will require less overall power, providing a meaningful reduction of cost and environmental impact, both of which are key priorities for future scientific programs. Additional work will focus on further model compression and FPGA implementation strategies to preserve performance while maintaining the efficiency benefit. Altogether, these results demonstrate strong feasibility of FPGA-based assistance in processing large generative ML simulation loads for HEP applications. 
+
+4 Conclusions 
+
+This study demonstrates that a simple generative model, namely a hardware-aware com-pressed variational autoencoder, can perform fast calorimeter simulation on a single FPGA. It achieves a two orders of magnitude reduction in latency for small batch sizes with modest resource usage, while maintaining only minor performance degradation ( O(10)%) relative to GPU-based implementations. This work provides the first demonstration that exist-ing FPGA resources at LHC experiments can be used for simulation generation during non-data-taking periods. These findings indicate a practical path for more power-efficient simulation workflows scalable to future experimental needs, while supplementing conven-tional workflows by making use of available on-site computing capacity. This study also explores a practical workflow for deploying general ML models on low-latency devices such as FPGAs, enabling potential applications to a wider range of HEP offline tasks, including reconstruction and data processing, through heterogeneous computing architectures with FPGA acceleration and straightforward integration into existing software systems. – 13 – 10 3 10 2 10 1 10 0 10 1 10 2
+
+Time/Shower (Batchsize=1) [ms] 
+
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> 10 4
+> 10 5
+> 1/Separation (All Metrics)
+> Indistinguishable
+> VAE-FPGA
+> VAE-GPU
+> CaloINN
+> Calo-VQ(batchsize=10k)
+
+Figure 8 : Per shower generation speed vs. performance (inverse of average of all sepa-ration metrics), comparing the VAE-GPU and VAE-FPGA to two GPU models from the CaloChallenge representing state-of-the-art performance ( CaloINN for fastest GPU batch size 1 and CaloVQ fastest at batch size 10 4.). The error bars correspond to the minimum and maximum separation metrics obtained across all physics observables listed in Table 3. – 14 – Acknowledgments 
+
+PAM is supported by the U.S. Department of Energy under contract number DE-SC0024518. JG, QL, and BN are supported by the U.S. Department of Energy under contract number DE-AC02-76SF00515. 
+
+A Code Availability 
+
+The machine learning code used in this study is publicly available at CaloGen-VAE-FPGA. 
+
+B hls4ml Details References 
+
+[1] S. Agostinelli, J. Allison, K. Amako, J. Apostolakis, H. Araujo, P. Arce et al., Geant4—a simulation toolkit , Nuclear Instruments and Methods in Physics Research Section A: Accelerators, Spectrometers, Detectors and Associated Equipment 506 (2003) 250. [2] ATLAS collaboration, ATLAS Software and Computing HL-LHC Roadmap , Tech. Rep. CERN-LHCC-2022-005, LHCC-G-182, CERN, Geneva (2022). [3] C.O. Software and Computing, CMS Phase-2 Computing Model: Update Document , Tech. Rep. CMS-NOTE-2022-008, CERN-CMS-NOTE-2022-008, CERN, Geneva (2022). [4] J. Hardin and M. Williams, FastDIRC: a fast Monte Carlo and reconstruction algorithm for DIRC detectors , Journal of Instrumentation 11 (2016) P10007–P10007. [5] G. Kalicy, The high-performance DIRC for the ePIC detector at the EIC , Nuclear Instruments and Methods in Physics Research Section A: Accelerators, Spectrometers, Detectors and Associated Equipment 1062 (2024) 169168. [6] ATLAS Collaboration, Atlfast3: The next generation of fast simulation in atlas , Computing and Software for Big Science 6 (2022) . [7] ATLAS Collaboration, Software and computing for run 3 of the atlas experiment at the lhc ,
+
+The European Physical Journal C 85 (2025) . [8] S. Abdullin, P. Azzi, F. Beaudette, P. Janot, A. Perrotta and (on behalf ofthe CMS Collaboration), The fast simulation of the cms detector at lhc , Journal of Physics: Conference Series 331 (2011) 032049. [9] S. Sekmen, Recent developments in cms fast simulation , in Proceedings of the 38th International Conference on High Energy Physics (ICHEP 2016) , (Chicago, USA), Aug., 2016 [ 1701.03850 ]. [10] M. Paganini, L. de Oliveira and B. Nachman, Accelerating Science with Generative Adversarial Networks: An Application to 3D Particle Showers in Multilayer Calorimeters ,
+
+Phys. Rev. Lett. 120 (2018) 042003 [ 1705.02355 ]. [11] M. Paganini, L. de Oliveira and B. Nachman, Calogan: Simulating 3d high energy particle showers in multilayer electromagnetic calorimeters with generative adversarial networks ,
+
+Physical Review D 97 (2018) . [12] B. Hashemi and C. Krause, Deep generative models for detector signature simulation: A taxonomic review , Reviews in Physics 12 (2024) 100092. 
+
+– 15 – Layer / component type Precision settings (fixed-point) 
+
+Dense – hidden layers input/result: ap fixed <16,6 >
+
+weight: ap fixed <6,2 >
+
+bias: ap fixed <8,3 >
+
+mult: ap fixed <18,8 >
+
+accum: ap fixed <20,8 >
+
+Dense – feeding into layer en-ergy ratio activation input/result: ap fixed <16,6 >
+
+weight: ap fixed <8,3 >
+
+bias: ap fixed <10,3 >
+
+mult: ap fixed <20,8 >
+
+accum: ap fixed <28,12 >
+
+Dense – feeding into energy response ratio activation input/result: ap fixed <16,6 >
+
+weight: ap fixed <16,6 >
+
+bias: ap fixed <16,6 >
+
+accum: ap fixed <42,22 >
+
+result: ap fixed <42,22 >
+
+BatchNorm input/result: ap fixed <16,6 >
+
+mean: ap fixed <10,5 >
+
+var: ap fixed <12,7 >
+
+gamma: ap fixed <8,3 >
+
+beta: ap fixed <8,4 >
+
+mult t: ap fixed <18,8 >;scale t/bias t/mean t/var t: ap fixed <20,8 >
+
+LeakyReLU input/result: ap fixed <16,6 >
+
+slope t: ap fixed <12,6 >
+
+Softmax input/data/result: ap fixed <16,6 >
+
+table/exp table t/inv table t: ap fixed <18,8 >
+
+sum/accum: ap fixed <20,8 >
+
+Sigmoid input: ap fixed <42,22 >
+
+result: ap fixed <16,6 >
+
+table type: ap fixed <18,8 >
+
+Concatenate input/result: ap fixed <16,6 >
+
+Table 5 : Layer-type precision settings used in hls4ml. All fixed-point types use rounding mode AP RND CONV and saturation mode AP SAT . Reuse factors are layer-specific for dense layers and are omitted here for brevity. 
+
+[13] C. Krause, M. Faucci Giannelli, G. Kasieczka, B. Nachman, D. Salamani, D. Shih et al., 
+
+Calochallenge 2022: a community challenge for fast calorimeter simulation , Reports on Progress in Physics 88 (2025) 116201. [14] M. Feickert and B. Nachman, A Living Review of Machine Learning for Particle Physics ,
+
+2102.02770 .
+
+– 16 – [15] ATLAS collaboration, Deep Generative Models for Fast Photon Shower Simulation in ATLAS , Comput. Softw. Big Sci. 8 (2024) 7 [ 2210.06204 ]. [16] M. Wojnar, Applying generative neural networks for fast simulations of the alice (cern) experiment , 2024. [17] CMS collaboration, FlashSim prototype: an end-to-end fast simulation using Normalizing Flow , Tech. Rep. CERN-CMS-NOTE-2023-003, CERN, Geneva (2023). [18] CMS collaboration, It’s about time: a Point Cloud Generative Model for the CMS High Granularity Calorimeter , . [19] E. Dreyer, E. Gross, D. Kobylianskii, V. Mikuni, B. Nachman and N. Soybelman, Automated Approach to Accurate, Precise, and Fast Detector Simulation and Reconstruction , Phys. Rev. Lett. 133 (2024) 211902 [ 2406.01620 ]. [20] E. Dreyer, E. Gross, D. Kobylianskii, V. Mikuni and B. Nachman, Conditional deep generative models for simultaneous simulation and reconstruction of entire events , Phys. Rev. D 113 (2026) 032005 [ 2503.19981 ]. [21] M. Barbetti, Lamarr: Lhcb ultra-fast simulation based on machine learning models deployed within gauss , 2024. [22] J. Giroux, M. Martinez and C. Fanelli, Generative models for fast simulation of cherenkov detectors at the electron-ion collider , 2025. [23] ATLAS Collaboration, The atlas experiment at the cern large hadron collider: a description of the detector configuration for run 3 , Journal of Instrumentation 19 (2024) P05063. [24] Development of the cms detector for the cern lhc run 3 , Journal of Instrumentation 19 
+
+(2024) P05064. [25] M.R. Buckley, I. Pang, D. Shih and C. Krause, Inductive simulation of calorimeter showers with normalizing flows , Physical Review D 109 (2024) . [26] F. Ernst, L. Favaro, C. Krause, T. Plehn and D. Shih, Normalizing flows for high-dimensional detector simulations , SciPost Physics 18 (2025) . [27] T. Buss, F. Gaede, G. Kasieczka, C. Krause and D. Shih, Convolutional l2lflows: generating accurate showers in highly granular calorimeters using convolutional normalizing flows ,
+
+Journal of Instrumentation 19 (2024) P09003. [28] V. Mikuni and B. Nachman, Caloscore v2: single-shot calorimeter shower simulation with diffusion models , Journal of Instrumentation 19 (2024) P02001. [29] O. Amram and K. Pedro, Denoising diffusion models with geometry adaptation for high fidelity calorimeter simulation , 2023. [30] L. Favaro, A. Ore, S. Palacios Schweitzer and T. Plehn, Calodream – detector response emulation via attentive flow matching , SciPost Physics 18 (2025) . [31] S. Hoque, H. Jia, A. Abhishek, M. Fadaie, J.Q. Toledo-Mar´ ın, T. Vale et al., CaloQVAE : Simulating high-energy particle-calorimeter interactions using hybrid quantum-classical generative models , 2024. [32] C. Krause, D. Wang and R. Winterhalder, Bithep — the limits of low-precision ml in hep ,
+
+SciPost Physics 20 (2026) . [33] D.P. Kingma and M. Welling, Auto-encoding variational bayes , 2022. 
+
+– 17 – [34] D.J. Rezende and S. Mohamed, Variational inference with normalizing flows , 2016. [35] J. Ho, A. Jain and P. Abbeel, Denoising diffusion probabilistic models , 2020. [36] M.F. Giannelli, G. Kasieczka, C. Krause, B. Nachman, D. Salamani, D. Shih et al., Fast calorimeter simulation challenge 2022 - dataset 1 , June, 2023. 10.5281/zenodo.8099322. [37] “ATLAS Calorimeter Dataset ( η 0.2–0.25).” ATLAS Open Data. 10.7483/OPENDATA.ATLAS.UXKX.TXBN. [38] ATLAS, Fast simulation of the ATLAS calorimeter system with Generative Adversarial Networks , Tech. Rep. ATL-SOFT-PUB-2020-006, CERN, Geneva (2020). [39] D.P. Kingma and M. Welling, Auto-encoding variational bayes , 2022. [40] D.J. Rezende, S. Mohamed and D. Wierstra, Stochastic backpropagation and approximate inference in deep generative models , 2014. [41] K. Sohn, H. Lee and X. Yan, Learning structured output representation using deep conditional generative models , in Advances in Neural Information Processing Systems , C. Cortes, N. Lawrence, D. Lee, M. Sugiyama and R. Garnett, eds., vol. 28, Curran Associates, Inc., 2015, https://proceedings.neurips.cc/paper files/paper/2015/file/8d55a249e6baa5c06772297520da2051-Paper.pdf. [42] S. Kullback and R.A. Leibler, On information and sufficiency , The annals of mathematical statistics 22 (1951) 79. [43] F. Chollet et al., keras , 2015. [44] C.N. Coelho, A. Kuusela, S. Li, H. Zhuang, J. Ngadiuba, T.K. Aarrestad et al., Automatic heterogeneous quantization of deep neural networks for low-latency inference on the edge for particle detectors , Nature Machine Intelligence 3 (2021) 675–686. [45] M. Abadi, A. Agarwal, P. Barham, E. Brevdo, Z. Chen, C. Citro et al., Tensorflow: Large-scale machine learning on heterogeneous systems , 2015. [46] D.P. Kingma and J. Ba, Adam: A method for stochastic optimization , arXiv preprint arXiv:1412.6980 (2014) . [47] M. Martinelli, C. Chiarini, A. Biagioni, P. Cretaro, O. Frezza, F. Lo Cicero et al., Bridging fpga and gpu over pcie: A low-latency communication path using avx-512 , in Proceedings of the SC ’25 Workshops of the International Conference for High Performance Computing, Networking, Storage and Analysis , SC Workshops ’25, (New York, NY, USA), p. 2068–2076, Association for Computing Machinery, 2025, DOI. [48] Q. Liu, C. Shimmin, X. Liu, E. Shlizerman, S. Li and S.-C. Hsu, Calo-vq: Vector-quantized two-stage generative model in calorimeter simulation , 2024. [49] FastML Team, fastmachinelearning/hls4ml , 2024. 10.5281/zenodo.1201549. [50] J. Duarte et al., Fast inference of deep neural networks in FPGAs for particle physics ,
+
+JINST 13 (2018) P07027 [ 1804.06913 ]. 
+
+– 18 –

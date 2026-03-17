@@ -1,0 +1,244 @@
+Title: bitSMM: A bit-Serial Matrix Multiplication Accelerator
+
+URL Source: https://arxiv.org/pdf/2603.14988v1
+
+Published Time: Tue, 17 Mar 2026 05:07:57 GMT
+
+Number of Pages: 8
+
+Markdown Content:
+# bitSMM: A bit-Serial Matrix Multiplication Accelerator 
+
+1st Pedro Antunes 
+
+School of Electrical Engineering and Computer Science KTH Royal Institute of Technology 
+
+Stockholm, Sweden pedroa@kth.se 
+
+2nd Artur Podobas 
+
+School of Electrical Engineering and Computer Science KTH Royal Institute of Technology 
+
+Stockholm, Sweden podobas@kth.se 
+
+Abstract —Neural-network (NN) inference is increasingly present on-board spacecraft to reduce downlink bandwidth and enable timely decision making. However, the power and reliability constraints of space missions limit the applicability of many state-of-the-art NN accelerators. This paper presents bitSMM, a bit-serial matrix multiplication accelerator built around asystolic array of bit-serial multiply–accumulate (MAC) units. The design supports runtime-configurable operand precision from 1 to 16 bits and evaluates two MAC variants: a Booth-inspired architecture and a standard binary multiplication with correction architecture. We implement bitSMM in [System]Verilog and evaluate it on an AMD ZCU104 FPGA and through ASIC physical implementation using the asap7 and nangate45 process design kits. On the FPGA, bitSMM achieves up to 19.2 GOPS and 2.973 GOPS/W, and in asap7 it achieves up to 73.22 GOPS, 552 GOPS/mm 2, and 40.8 GOPS/W. 
+
+Index Terms —Neural Network, Systolic Array, Matrix Multi-plication, bit-Serial, Space Mission 
+
+I. I NTRODUCTION 
+
+Neural networks (NNs) are expected to play an increasingly important role in space exploration. Potential applications include in-situ data analysis [1], on-board data compression to reduce downlink bandwidth [2], and satellite or rover navigation [3]. As these workloads move on-board, future spacecraft are likely to incorporate dedicated hardware to accelerate NN inference. However, space missions impose strict constraints on com-puting platforms [4]. In particular, radiation can induce faults, motivating radiation-tolerant designs and, in SRAM-based FP-GAs, mitigation techniques such as triple modular redundancy (TMR) [5], [6]. In addition, limited heat dissipation and tight mass budgets require energy-efficient implementations. Conventional AI platforms, such as GPUs, are therefore often a poor fit due to their high power consumption and limited radiation tolerance. Existing space-oriented NN accelerators primarily rely on quantized bit-parallel computations [7]. While quantization can enable energy-efficient systems [8], current parallel archi-tectures often lack optimizations for the extreme constraints of space environments. To date, bit-serial NN accelerators specifically for space applications remain unexplored. While binarized NNs [9] offer an alternative, their rigid quantization often results in substantial accuracy degradation that may be unacceptable for mission-critical tasks [10]. In contrast, bit-serial architectures enable layer-specific bit-width scaling, offering a more flexible trade-off between precision and power. Furthermore, the sequential nature of bit-serial arithmetic provides a unique, yet unexamined, opportunity to integrate hardware redundancy and resiliency schemes, such as TMR, more efficiently than traditional parallel counterparts. In this work, we present bitSMM, a bit-serial matrix mul-tiplication accelerator designed to support space-oriented NN inference. bitSMM is built around a systolic array (SA), which is a natural fit for general matrix multiplication, the heart of most NN (e.g., CNN, MLP, and transformer) [11]. Our main contributions are:  
+
+> •
+
+We propose bitSMM, a bit-serial matrix multiplication accelerator.  
+
+> •
+
+We design and evaluate two multiply–accumulate (MAC) variants—one inspired by Booth’s algorithm and one based on standard binary multiplication with correction— that support runtime-configurable operand precision from 1 to 16 bits.  
+
+> •
+
+We implement a compile-time configurable SA with an output network that reads one MAC accumulator per cycle.  
+
+> •
+
+We implement the architecture on an AMD ZCU104 FPGA and map it to ASIC using the asap7 [12] and nangate45 [13] process design kits (PDKs). On the FPGA, bitSMM achieves up to 19.2 GOPS and 2.973 GOPS/W, and in asap7 it achieves up to 73.22 GOPS, 552 GOPS/mm 2, and 40.8 GOPS/W. The remainder of this paper is organized as follows. Sec-tion II provides background on binary multiplication, systolic arrays, and related work in bit-serial acceleration. Section III describes the proposed bitSMM architecture, including the bit-serial MAC variants and the SA integration and readout net-work. Section IV presents the experimental methodology and reports FPGA and ASIC implementation results, followed by a comparison against prior work. Finally, Section V concludes the paper and outlines directions for future work. II. B ACKGROUND 
+
+SAs are a common hardware architecture for accelerating matrix multiplication. Since matrix multiplication dominates 
+
+> arXiv:2603.14988v1 [cs.AR] 16 Mar 2026
+
+many NN workloads in both inference and training, it is a pri-mary target for specialized hardware. At the arithmetic level, it reduces to dot products over vectors of binary numbers. In this section, we review binary multiplication, the structure and operation of SAs, and their role in NN computation. We then summarize the state of the art (SOTA) in bit-serial and low-precision acceleration. 
+
+A. Binary multiplication 
+
+In standard binary multiplication, the operands are unsigned. The product is computed by ANDing each multiplier bit with the multiplicand and shifting the partial product according to the bit position (i.e., 20, 21, 22, ... ). Equation 1 shows an example. 
+
+0110 2
+
+× 1110 2
+
+0000 2 ≪ 00110 2 ≪ 10110 2 ≪ 2+0110 2 ≪ 301010100 2 = 84 10 
+
+(1) To multiply signed numbers represented in two’s comple-ment, one can use standard binary multiplication with correction (SBMwC) or Booth’s algorithm [14]. In SBMwC , the procedure follows the unsigned case. However, at the multiplier sign bit (i.e., the most significant bit (MSb)), it applies a correction to the result. If that sign bit is 1, the multiplicand is subtracted rather than added; this subtraction is equivalent to adding the two’s complement of the multiplicand. Equation 2 illustrates this concept with a 4-bit multiplier. Here, 0110 2 = 6 10 and 1110 2 = −210 , so the expected result is −12 10 .
+
+00000110 2
+
+× 1110 2
+
+00000110 2 ≪ 0+00000110 2 ≪ 1+00000110 2 ≪ 2(( −00000110 2) or (+11111010 2)) ≪ 311110100 2 = −12 10 
+
+(2) To explain Booth’s algorithm, it is useful to recall how a binary number maps to a value. The standard representation sums powers of two at positions where the bit is one. Equa-tion 3 shows an example for a 4-bit number. 
+
+0110 2 = 2 2 + 2 1 = 6 10 (3) An alternative (less intuitive) representation uses runs of ones: it subtracts a power of two when a 1 follows a 0 and adds a power of two when a 0 follows a 1. Equation 4 shows two examples for signed numbers in two’s complement. 
+
+0110 2 = 2 3 − 21 = 6 10 
+
+1110 2 = −21 = −210 
+
+(4) In Booth’s algorithm, we scan the multiplier from the least significant bit (LSb). When we encounter the first 1, we subtract the multiplicand from the most significant bits of an accumulator. As we move to the next bit, we perform an arithmetic right shift of the combined accumulator. Next, when we encounter the first 0, we add the multiplicand. This procedure can be expressed as 2-bit recoding: at each step, we consider a pair of multiplier bits and decide whether to add, subtract, or do nothing. Table I summarizes this control logic. TABLE I: Booth encoding control logic. Bit pairs are taken from the multiplier starting at the LSb; M denotes the multi-plicand; shifts are arithmetic.       
+
+> Bits Action
+> 00 Shift right
+> 01 +M, shift right
+> 10 −M, shift right
+> 11 Shift right
+
+Equation 5 illustrates an example of Booth’s algorithm. 
+
+0110 × 1110 (+0000) 0000 ≫ 1(−0110) 1010 0 ≫ 1(+0000) 1101 00 ≫ 1(+0000) 1110 100 ≫ 1
+
+Result 1111 0100 
+
+(5) For the first multiplier bit, we assume the previous bit is 0. Moreover, in this example, the multiplier never contains the pattern 01 ; therefore, the algorithm never adds the multipli-cand. 
+
+B. Systolic array 
+
+The origins of SA architectures date back to the 1970s [15]. Recently, SAs experienced a resurgence in interest driven by the growing demand for NN acceleration. Some examples of SOTA bit-parallel SA-based accelerators include Eyeriss, Da-DianNao, Google’s TPU, Samsung’s TPU, and CNN-focused SA designs [16]–[20]. SAs consist of multiple rows and columns of processing elements (PEs) connected in series. These PEs can be specialized to perform specific operations, such as MAC units that compute the dot product of two vectors. Figure 1 depicts a generic SA architecture, where intercon-nected MAC units perform parallel matrix–matrix multiplica-tion. This architecture maximizes data reuse and parallelism by streaming operands across multiple MAC units. Each MAC unit computes a specific value of the output matrix, making the SA highly efficient for the computational demands of matrix multiplication. 
+
+C. Neural Networks 
+
+The earliest implementations of NNs began with the single-layer perceptron [21]. In these models, computation consists primarily of a dot product between synaptic weights and the neuron’s input feature vector. Subsequent advances introduced additional layers, forming multilayer perceptrons (MLPs), whose computations can be expressed as matrix–vector mul-tiplications. Further developments incorporated input batching M0i M1i M...i N j1  Nj0 Nj... Fig. 1: Generic systolic array (SA). and more complex layer types, enabling efficient matrix– matrix multiplication [22]. A typical NN comprises multiple layer types, including fully connected, convolutional, pooling, and activation lay-ers. Among these, fully connected and convolutional lay-ers generally dominate the computational cost. For instance, MobileNet v2 [23] requires approximately 0.33 × 10 9 MAC operations, while the original Vision Transformer [24] requires about 0.11 ×10 12 MAC operations. 1 The majority of this com-putation arises from matrix multiplication. Consequently, NN accelerators commonly employ SAs to efficiently accelerate these operations. 
+
+D. Related Work 
+
+Prior work exploits bit-level parallelism in several forms. Some accelerators perform bitwise operations in parallel [27], while others adopt hybrid bit-parallel/bit-serial approaches. Fully bit-serial designs stream both the multiplier and mul-tiplicand one bit at a time into the MAC units. In many of these architectures, the MAC is integrated within a PE. 
+
+Stripes [28] investigates serial–parallel multiplication. In this design, the multiplier is streamed bit-serially, whereas the multiplicand is stored and supplied to the MAC units as 16-bit parallel values. In NN workloads, these operands correspond to activations and weights, respectively. Dynamic Stripes [29] extends this approach by adapting activations precision at runtime. 
+
+UNSU [30] supports bit-serial weights while providing activations in parallel. It groups bits at the same position across multiple weights to index look-up tables that store partial products as functions of the activation values. These partial results are then accumulated within the PEs. 
+
+Loom [31] adopts a fully bit-serial strategy. It exploits spatial parallelism by streaming one bit from 16 activations and one bit from 16 weights to each MAC concurrently. Capra et al. [32] later integrated a Loom-inspired design with the PULPissimo microcontroller and implemented it as an ASIC. 
+
+> 1These MAC counts were obtained using the ultralytics-thop [25] Python library with models imported from torchvision [26].
+
+BISMO [33], [34] emerged around the same time as Loom. Its underlying algorithm was previously introduced by Umuroglu and Jahre [35]. Although these designs are independent, their computation models are closely related. In BISMO, multiplication is decomposed into bitwise products between the multiplicand and multiplier. Each pair of bits is ANDed and then shifted according to its bit significance, which equals the sum of the bit indices. For example, for 2-bit operands the shifted bitwise products are 
+
+(mc [0] ∧ ml [0]) ≪ 0,
+
+(mc [0] ∧ ml [1]) ≪ 1,
+
+(mc [1] ∧ ml [0]) ≪ 1,
+
+(mc [1] ∧ ml [1]) ≪ 2
+
+, where mc denotes the multiplicand and ml denotes the multiplier. Without parallelism, this method requires the number of cycles given in equation 6 to compute a vector dot product: 
+
+bmc × bml × nvalues (6) Here, bmc and bml represent the bit-widths of the multiplicand and multiplier, respectively, and nvalues denotes the vector length. We use these definitions throughout the paper. Simi-larly to Loom, BISMO introduces intra-MAC parallelism by processing multiple operand pairs simultaneously within a MAC unit. It employs a population counter to accumulate the number of ones produced by the bitwise products of mc [i]
+
+and ml [j]. BISDU [36] extends this approach by integrating a BISMO-like accelerator with a RISC-V microcontroller. These architectures [28], [30], [31], [33] primarily target convolutional and fully connected NNs. More recent work shifts toward transformer-based models. FSSA [37] introduces a SA architecture for vision transformers. In this design, each PE multiplies one activation bit with one weight bit. The weights are preloaded onto the SA, while activation bits are streamed serially. An accumulation unit then reconstructs the final outputs. So far, these works [28], [30], [31], [33], [37] implement conventional binary multiplication using bit-serial techniques across different architectures. More recently, BitMoD [38] proposed an LLM accelerator that adapts Booth’s algorithm by employing 3-bit encoding instead of the traditional 2-bit scheme, reducing the number of partial products. III. H ARDWARE ARCHITECTURE 
+
+The proposed bit-serial matrix multiplication accelerator consists of a bit-serial MAC and a SA. The MAC computes vector dot products in a serial manner, and the SA instantiates a two-dimensional grid of these MACs interconnected through a configurable dataflow network. Its number of rows and columns is fixed at compile time. This section describes the architecture and operation of these components. We developed the accelerator and its associated testbenches in [System]Verilog. This choice provides fine-grained control over hardware structures compared to high-level synthesis approaches while remaining technology independent. A. bitSerialMAC 
+
+In conventional bit-parallel MAC implementations, multipli-cation relies on dedicated hardware multipliers, which incur significant logic overhead. In contrast, a bit-serial MAC re-places these multipliers with simple AND operations between the incoming multiplicand and multiplier bits. It accumulates the resulting partial products in a register until all vector elements have been processed and the dot product is complete. This approach substantially reduces logic complexity and area. This work explores two bit-serial MAC architectures. The first architecture implements SBMwC, while the second is inspired by Booth’s algorithm. Figure 2 shows the combina-tional logic of the Booth-based MAC. In this diagram, signals suffixed with _i denote inputs, those ending with _reg 
+
+originate from internal registers, _n denotes register inputs, and _r corresponds to reset signals. The signal v_t_i is a value toggle that changes whenever a new operand is received. This toggle replaces a cycle counter to reduce switching activity and improve power efficiency, since it changes state only when new values arrive. The inputs mc_i and ml_i 
+
+carry the bit-serial multiplicand and multiplier, respectively. Both MAC variants share a common multiplicand mask cir-cuit and a multiplication-enable circuit. The maximum operand bit width is fixed at compile time; in this work, all MACs are synthesized for up to 16-bit values, consistent with common bit-parallel accelerator designs [17], [39]. Nevertheless, their effective precision can be configured at runtime. Within the multiplicand mask circuit, the MAC generates a bit mask by appending a leading one to a registered signal each cycle between value toggles. When it detects a new operand by XORing the toggle signal with its registered version, it copies this mask into the shift mask ( s_m ). That shift mask isolates the active multiplicand bits that currently participate in the multiplication, allowing the next multiplicand to be loaded into the same register without corrupting the ongoing computation. The multiplication-enable circuit detects the arrival of the first multiplicand and its corresponding multiplier bits. In the Booth-based MAC , a dedicated Booth accumulator and enable circuit implement the encoding scheme described in Section II-A. Unlike the classical formulation, the multi-plicand is first sign-extended and then shifted left by one bit each cycle. The encoding itself remains unchanged: addition or subtraction is determined by examining the two most recent multiplier bits, and the Booth enable signal is asserted only when these bits differ. This design requires only a single adder. On the other hand, the SBMwC-based MAC requires two full adders because the MAC does not know in advance whether the current multiplier bit is the final one. If that final bit is 1, the multiplicand must be subtracted from the accumulator; otherwise, it is added. Consequently, it maintains two accumulator registers: one storing the sum and the other storing the difference with respect to the multiplicand. Figure 3 illustrates the circuit for this variant, where m_mc denotes the masked multiplicand produced by the multiplicand mask unit. In both architectures, multiplication begins by streaming the multiplicand bmax cycles ahead of the multiplier, where 
+
+bmax = max( bmc , b ml ). (7) During operation, each MAC receives the multiplier bits for the current multiplication concurrently with the multiplicand bits for the subsequent multiplication. Specifically, the multi-plier is streamed LSb first, while the multiplicand is streamed MSb first. Without parallelism, the number of cycles required to com-pute a vector dot product is 
+
+(nvalues + 1) × bmax , (8) where nvalues denotes the number of vector elements. Compared to prior bit-serial accelerators that support asym-metric operand bit widths, this design requires both operands to have identical widths or to be explicitly extended. Nev-ertheless, in terms of cycle count, it exhibits more favorable scaling behavior. Without parallelism, it achieves lower latency for all cases where bmc > 1 and bml > 1 and matches prior approaches only when bmc = bml = 2 , as shown by Equations 6 and 8. Moreover, the BISMO and Loom architectures expose par-allelism at the vector-value level; that is, they compute the same bit position for multiple multiplicand–multiplier pairs concurrently within a MAC. In contrast, the architecture proposed in this paper focuses on minimizing inference time while maintaining one bit stream per MAC. We anticipate that extending this design to exploit vector-level parallelism would incur greater hardware resource overhead than these prior works. Instead, it derives its parallelism advantage from executing distinct MAC operations concurrently and does not explore parallelism within a MAC. 
+
+B. bitSerialSA 
+
+The bit-serial SA ( bitSerialSA ) is built from the bitSerial-MAC units described above. Its dimensions are configurable at compile time, enabling architectural exploration through script-generated Verilog integration with VeriSnip [40]. Figure 4 depicts the overall SA structure. In addition to the MAC grid, it incorporates parallel-to-serial (P2S) units and pipeline registers that propagate data across the array. These P2S units convert parallel values fetched from memory into serial bit streams. Once the valid signal is asserted, each P2S stores a value internally and shifts it every cycle. The P2S units connected to the vertical inputs emit the MSb first, as these inputs correspond to the multiplicands. Accordingly, their internal registers shift left each cycle. In contrast, those connected to the horizontal inputs output the LSb first and shift right, reflecting their role as multiplier inputs. The SA accepts vertical and horizontal data streams with corresponding enable signals for each row and column, a configurable operand width, a global reset, and an output-read enable signal. Its single output exposes the MAC accumulator contents. Booth Enable +Cin Booth Accumulator 
+
+## acc_reg b_m_r rst_i s_m_n Mask Multiplicand 
+
+> Ext <<1
+> 1
+
+## m_s_n mc_i m_s_reg mc_n mc_reg 1s_m_reg b_m_n 1b_m_reg Multiplication Enable 
+
+## v_t_i v_t_reg m_e_reg m_e_n f_m_reg f_m_n acc_n / result_o ml_i ml_reg Fig. 2: Combinational logic of the Booth-based bit-serial MAC. +Cin 
+
+# +Cin 
+
+result_n / result_o acc_n acc_reg result_reg v_t_i v_t_reg m_e_n ml_i m_mc 
+
+Fig. 3: Combinational logic of the SBMwC-based bit-serial MAC. The read_output_enable signal is asserted for one cycle after a matrix multiplication completes to retrieve com-putation results. This signal propagates through the array in a snake-like traversal, sequentially enabling each MAC to forward its accumulator value. The traversal begins at MAC index (0 , 0) and terminates at (# rows −1, #columns −1) . The output data follow the same path in reverse order, as illustrated in Figure 5. The required number of pipeline registers is (# rows −
+
+1)(# columns − 1) + 1 . One register resides at the final output, while the others feed two-input multiplexers. In total, 
+
+(# rows × #columns ) − 1 multiplexers are used. Each mul-Vertical Inputs Control Signals Horizontal Inputs 
+
+Fig. 4: Overall architecture of the bit-serial SA, including parallel-to-serial (P2S) converters, MAC grid, and data prop-agation registers. tiplexer is controlled by the propagated enable signal of its corresponding MAC: when asserted, it forwards that MAC’s output; otherwise, it passes the previous value along the chain. Using this mechanism, one accumulator value is read per cycle, starting one cycle after asserting the enable signal. The total readout latency is therefore #rows × #columns cycles. The SA throughput is given in operations per second (OPS). All else equal, increasing the SA dimensions increases the maximum achievable OPS. Equation 9 defines the number of Output Fig. 5: Output readout network of the SA, showing the snake-like traversal of the read enable signal and multiplexed accumulator outputs. operations per cycle for a given SA size and vector length n:
+
+OP /cycle = n × M atrix A width × M atrix B height 
+
+(1 + n) × bitW idth + SA width × SA height 
+
+(9) The total number of MAC operations in a matrix multi-plication is n × M atrix A width × M atrix B height , where 
+
+n = M atrix A height = M atrix B width . The total cycle count equals the computation latency in Equation 8 plus the output-readout latency, which equals the number of MACs in the SA ( SA width × SA height ). This design reaches peak performance as n → ∞ and the input matrices match the SA dimensions. Equation 10 gives the corresponding peak throughput for any SA width , SA height , and bit width: 
+
+OP /cycle = SA width × SA height 
+
+bitW idth (10) After implementation, multiplying operations per cycle by the system frequency yields OPS. IV. E VALUATION 
+
+This section evaluates the bitSerialMAC and bitSerialSA .We first describe the experimental setup and then report results for FPGA and ASIC implementations. Finally, we compare bitSMM against prior work. 
+
+A. Experimental Setup 
+
+We developed cycle-accurate testbenches for each module to verify functional correctness. For the MAC, we exhaustively tested all multiplicand–multiplier pairs for bit widths up to 8 bits, and we tested 100 random operand pairs for bit widths be-tween 8 and 16 bits. We also tested random vector dot products for operand widths from 1 to 16 bits and vector lengths from 1 to 1000 values. For the SA, we generated multiple bitSerialSA 
+
+topologies and evaluated matrix multiplications with varying matrix sizes (up to the SA dimensions) and varying vector lengths. For all test cases, we verified that the captured outputs matched the expected results. We executed simulations using Icarus Verilog [41] version 12.0. We implemented three SA topologies on FPGA and ASIC. These topologies have rectangular dimensions of 16 × 4, 32 ×
+
+8, and 64 × 16 (#columns and #rows, respectively). Using Equation 10, Figure 6 plots the peak throughput (OP/cycle) as a function of operand bit width for these SA sizes. 
+
+Fig. 6: Peak throughput (OP/cycle) for the evaluated SA topologies ( 16 × 4, 32 × 8, and 64 × 16 ) as a function of operand bit width, computed using Equation 10. For FPGA , we target the AMD ZCU104 and use Vi-vado 2023.2 for synthesis and place-and-route. To integrate the design on the FPGA, we added a clock wizard to the top module and exposed all pins (except the clock pin) as external pins. We estimate total power consumption using Vivado and extract resource utilization from the corresponding utilization report. For ASIC , we use OpenROAD 2.0 [42] to synthesize and physically implement the design using the nangate45 (45 nm) and asap7 standard-cell libraries. From the OpenROAD reports, we obtain maximum frequency, area, and estimated power. By default, our implementations use Booth-based MAC units because we estimate that they consume fewer resources. Nevertheless, we also implement an SBMwC-based variant for a 16 × 4 SA to compare against the Booth-based design. 
+
+B. Results 
+
+Table II reports FPGA implementation results. bitSMM does not use Block RAMs or Digital Signal Processors (DSPs); instead, it relies only on lookup tables (LUTs) and flip-flops (FFs). As the SA dimensions increase, LUT and FF utilization increases accordingly. However, this scaling is not strictly linear: although a 64 × 16 SA contains 4 × more MACs than a 
+
+32 ×8 SA (and 32 ×8 contains 4 × more MACs than 16 ×4), the measured resource usage increases by more than 4 × between successive configurations. The power values in Table II correspond to total estimated on-chip power (dynamic plus static). We compute throughput (OPS) using the equations underlying Figure 6 at 300 MHz, which is the target clock frequency of the FPGA implemen-tation. We then compute throughput per watt (OPS/W) from the resulting OPS and the corresponding power. As expected, the SBMwC-based SA consumes more re-sources than the Booth-based design. The Booth-based SA also achieves higher throughput per watt (GOPS/W) than the SBMwC-based SA. Although power consumption increases with larger arrays, throughput increases faster, and the 64 × 16 
+
+SA provides the highest GOPS/W among the evaluated FPGA configurations. TABLE II: Implementation Results on AMD ZCU104 FPGA at 300 MHz.                                   
+
+> Design Version LUTs FFs Power GOPS GOPS/W
+> (W)
+> 16 ×45630 8762 1.13 1.2 1.062
+> 16 ×4SBMwC 11418 10807 1.657 1.2 0.724
+> 32 ×829355 35490 2.125 4.8 2.259
+> 64 ×16 117836 155586 6.459 19.2 2.973
+
+Table III reports results for ASIC physical implementation. We target 1 GHz for asap7 and 500 MHz for nangate45. The maximum achievable frequency is higher for smaller SAs; for those configurations, a higher target frequency would likely be feasible. Area and power scale proportionally with SA size. Notably, this results in a consistent throughput-per-watt across all implementations. We report both the peak throughput at the maximum frequency and the throughput at the target frequency. We compute GOPS/area and GOPS/W using the throughput at the target frequency. Table IV compares our accelerator with other SOTA archi-tectures. Since BISMO and FSSA operate at the bit level, these works report throughput in binary operations per second. A single 16-bit-by-16-bit multiplication requires 16 × 16 = 256 
+
+binary operations in these models; therefore, we convert the reported results to 16-bit throughput to enable comparison with our 16-bit numbers. While BISMO achieves higher performance than bitSMM on FPGAs, it necessitates data manipulation prior to execution. Additionally, although bitSMM exhibits a higher throughput than FSSA, the latter reports superior throughput per watt. In terms of area efficiency, FSSA achieves 40.86 GOPS/mm 2,while bitSMM achieves up to 552 GOPS/mm 2. Furthermore, while the FSSA design relies on a proprietary 28 nm standard-cell library, our design is implemented using entirely open-source libraries and tools. V. C ONCLUSION 
+
+This paper presents bitSMM, a bit-serial matrix multipli-cation accelerator composed of a bit-serial SA and bit-serial MAC units. We evaluate multiple SA sizes and compare them against SOTA designs. Similar to other bit-serial architectures, bitSMM supports runtime-configurable precision; therefore, different layers (or groups of parameters) can use different bit-widths. To the best of our knowledge, this capability has not been studied in the context of space-oriented NN accelerators. On an AMD ZCU104 FPGA, bitSMM achieves up to 19.2 GOPS and 2.973 GOPS/W. In asap7, it achieves up to 73.22 GOPS, 552 GOPS/mm 2, and 40.8 GOPS/W. Overall, these results are competitive with prior work: compared to FSSA, bitSMM achieves higher GOPS/mm 2, whereas FSSA achieves higher GOPS/W; on FPGA, optimized BISMO still provides higher throughput than bitSMM. In future work, bitSMM should be integrated into a com-plete NN accelerator to benchmark end-to-end workloads. A practical advantage of this architecture is that it does not require data manipulation in memory prior to multiplication. In particular, weights can be stored in memory in big-endian format, while activations (feature maps) can be streamed in little-endian format, which is commonly used by other system components. Finally, since some NN applications require higher precision than extreme quantization, it is important that the architecture scales linearly with operand bit width. ACKNOWLEDGMENT This work is supported by the European Commission, with Automatics in Space Exploration (ASAP), project no. 101082633. Generative AI was used for drafting and language editing of selected passages. The authors reviewed and verified all technical content, results, and citations. REFERENCES [1] J. Ekelund, R. Vinuesa, Y. Khotyaintsev, P. Henri, G. L. Delzanno, and S. Markidis, “Ai in space for scientific missions: Strategies for mini-mizing neural-network model upload,” in 2024 IEEE 20th International Conference on e-Science (e-Science) , pp. 1–10, 2024. [2] P. Antunes, M. I. Al Hafiz, J. Ekelund, E. Dineva, G. Miloshevich, P. Gonidakis, and A. Podobas, “Evaluating four fpga-accelerated space use cases based on neural network algorithms for on-board infer-ence,” in 2025 IEEE 18th International Symposium on Embedded Multicore/Many-core Systems-on-Chip (MCSoC) , pp. 804–812, 2025. [3] J. Song, D. Rondao, and N. Aouf, “Deep learning-based spacecraft relative navigation methods: A survey,” Acta Astronautica , vol. 191, pp. 22–40, 2022. [4] Y. Liu, Y. Han, H. Li, S. Gu, J. Qiu, and T. Li, “Computing over space: Status, challenges, and opportunities,” Engineering , vol. 54, pp. 20–25, 2025. [5] S. Sabogal, A. George, and G. Crum, “Reconfigurable framework for resilient semantic segmentation for space applications,” ACM Trans. Reconfigurable Technol. Syst. , vol. 14, Sept. 2021. [6] P. S. Graham, N. Rollins, M. J. Wirthlin, and M. P. Caffrey, “Evalu-ating TMR techniques in the presence of single event upsets,” Faculty Publications , no. 1048, 2003. BYU ScholarsArchive Citation. [7] P. Antunes and A. Podobas, “Fpga-based neural network accelerators for space applications: A survey,” 2025. [8] J. Yang, Z. Li, Z. Feng, and Y. Xie, “A survey on neural network quantization,” in Proceedings of the 2025 6th International Conference on Computer Information and Big Data Applications , pp. 384–394, 2025. [9] P. Reiter, P. Karagiannakis, M. Ireland, S. Greenland, and L. Crockett, “FPGA acceleration of a quantized neural network for remote-sensed cloud detection,” in 7th International Workshop on On-Board Payload Data Compression , (Virtual), Sept. 2020. [10] H. Qin, R. Gong, X. Liu, X. Bai, J. Song, and N. Sebe, “Binary neural networks: A survey,” Pattern Recognition , vol. 105, p. 107281, 2020. [11] R. Xu, S. Ma, Y. Guo, and D. Li, “A survey of design and optimization for systolic array-based dnn accelerators,” ACM Comput. Surv. , vol. 56, Aug. 2023. [12] L. T. Clark, V. Vashishtha, L. Shifren, A. Gujja, S. Sinha, B. Cline, C. Ramamurthy, and G. Yeric, “Asap7: A 7-nm finfet predictive process design kit,” Microelectronics Journal , vol. 53, pp. 105–115, 2016. TABLE III: Synthesis Results for bitSMM on ASIC Libraries. 
+
+Design Version Tech Library Max Freq. Area Power Peak GOPS GOPS GOPS/Area GOPS/W 
+
+(MHz) (mm 2) (W) (@ Max Freq.) (@ Target Freq.) (OPS/mm 2)
+
+16 × 4 asap7 (7nm) 1183 0.008 0.102 4.73 4 500 39.2 
+
+16 × 4 (SBMwC) asap7 (7nm) 1311 0.011 0.213 5.24 4 364 18.8 
+
+32 × 8 asap7 (7nm) 1124 0.029 0.403 17.98 16 552 39.7 
+
+64 × 16 asap7 (7nm) 1144 0.118 1.57 73.22 64 542 40.8 
+
+16 × 4 nangate45 (45nm) 748 0.094 0.214 2.99 2 21.28 9.35 
+
+16 × 4 (SBMwC) nangate45 (45nm) 730 0.131 0.305 2.92 2 15.27 6.56 
+
+32 × 8 nangate45 (45nm) 685 0.378 0.809 10.96 8 21.16 9.89 
+
+64 × 16 nangate45 (45nm) 643 1.484 3.28 41.15 32 21.56 9.76 
+
+TABLE IV: Comparison with SOTA 
+
+Design Imp. Platform GOPS GOPS/W 
+
+Opt. BISMO [34] ZU3EG on Ultra96 60 8.33 Ours ( 64 × 16 ) ZU7EV on ZCU104 19.20 2.97 FSSA [37] 28nm technology 25.75 258 Ours ( 64 × 16 ) asap7 (7nm) 73.22 40.8 [13] J. E. Stine, I. Castellanos, M. Wood, J. Henson, F. Love, W. R. Davis, P. D. Franzon, M. Bucher, S. Basavarajaiah, J. Oh, and R. Jenkal, “Freepdk: An open-source variation-aware design kit,” in 2007 IEEE International Conference on Microelectronic Systems Education (MSE’07) , pp. 173–174, 2007. [14] A. D. BOOTH, “A signed binary multiplication technique,” The Quar-terly Journal of Mechanics and Applied Mathematics , vol. 4, pp. 236– 240, 01 1951. [15] H. T. Kung and C. E. Leiserson, “Systolic arrays (for vlsi),” in Sparse Matrix Proceedings 1978 , vol. 1, pp. 256–282, Society for industrial and applied mathematics Philadelphia, PA, USA, 1979. [16] Y.-H. Chen, J. Emer, and V. Sze, “Eyeriss: A spatial architecture for energy-efficient dataflow for convolutional neural networks,” in 
+
+2016 ACM/IEEE 43rd Annual International Symposium on Computer Architecture (ISCA) , pp. 367–379, 2016. [17] Y. Chen, T. Luo, S. Liu, S. Zhang, L. He, J. Wang, L. Li, T. Chen, Z. Xu, N. Sun, and O. Temam, “Dadiannao: A machine-learning super-computer,” in 2014 47th Annual IEEE/ACM International Symposium on Microarchitecture , pp. 609–622, 2014. [18] N. P. Jouppi et al., “In-datacenter performance analysis of a tensor pro-cessing unit,” in 2017 ACM/IEEE 44th Annual International Symposium on Computer Architecture (ISCA) , pp. 1–12, 2017. [19] J. Song, Y. Cho, J.-S. Park, J.-W. Jang, S. Lee, J.-H. Song, J.-G. Lee, and I. Kang, “7.1 an 11.5tops/w 1024-mac butterfly structure dual-core sparsity-aware neural processing unit in 8nm flagship mobile soc,” in 
+
+2019 IEEE International Solid-State Circuits Conference - (ISSCC) ,pp. 130–132, 2019. [20] S. Das, A. Roy, K. K. Chandrasekharan, A. Deshwal, and S. Lee, “A systolic dataflow based accelerator for cnns,” in 2020 IEEE International Symposium on Circuits and Systems (ISCAS) , pp. 1–5, 2020. [21] F. Rosenblatt, “The perceptron: A probabilistic model for information storage and organization in the brain,” Psych. Rev. , vol. 65, pp. 386–407, 1958. (Reprinted in Neurocomputing (MIT Press, 1988).). [22] Y. LeCun, Y. Bengio, and G. Hinton, “Deep learning,” nature , vol. 521, no. 7553, pp. 436–444, 2015. [23] M. Sandler, A. Howard, M. Zhu, A. Zhmoginov, and L.-C. Chen, “Mobilenetv2: Inverted residuals and linear bottlenecks,” 2019. [24] A. Dosovitskiy, L. Beyer, A. Kolesnikov, D. Weissenborn, X. Zhai, T. Unterthiner, M. Dehghani, M. Minderer, G. Heigold, S. Gelly, J. Uszkoreit, and N. Houlsby, “An image is worth 16x16 words: Transformers for image recognition at scale,” 2021. [25] L. Zhu and Ultralytics, “Ultralytics thop: Flops and parameter profiling for pytorch models,” 2024. Accessed: 2026-02-24. [26] T. maintainers and contributors, “Torchvision: Pytorch’s computer vision library.” https://github.com/pytorch/vision, 2016. [27] S. Ryu, H. Kim, W. Yi, E. Kim, Y. Kim, T. Kim, and J.-J. Kim, “Bitblade: Energy-efficient variable bit-precision hardware accelerator for quantized neural networks,” IEEE Journal of Solid-State Circuits ,vol. 57, no. 6, pp. 1924–1935, 2022. [28] P. Judd, J. Albericio, T. Hetherington, T. M. Aamodt, and A. Moshovos, “Stripes: Bit-serial deep neural network computing,” in 2016 49th Annual IEEE/ACM International Symposium on Microarchitecture (MI-CRO) , pp. 1–12, 2016. [29] A. Delmas, P. Judd, S. Sharify, and A. Moshovos, “Dynamic stripes: Exploiting the dynamic precision requirements of activation values in neural networks,” 2017. [30] J. Lee, C. Kim, S. Kang, D. Shin, S. Kim, and H.-J. Yoo, “Unpu: An energy-efficient deep neural network accelerator with fully variable weight bit precision,” IEEE Journal of Solid-State Circuits , vol. 54, no. 1, pp. 173–185, 2019. [31] S. Sharify, A. D. Lascorz, K. Siu, P. Judd, and A. Moshovos, “Loom: Exploiting weight and activation precisions to accelerate convolutional neural networks,” in 2018 55th ACM/ESDA/IEEE Design Automation Conference (DAC) , pp. 1–6, 2018. [32] M. Capra, F. Conti, and M. Martina, “A multi-precision bit-serial hardware accelerator ip for deep learning enabled internet-of-things,” in 
+
+2021 IEEE International Midwest Symposium on Circuits and Systems (MWSCAS) , pp. 192–197, 2021. [33] Y. Umuroglu, L. Rasnayake, and M. Sjalander, “Bismo: A scalable bit-serial matrix multiplication overlay for reconfigurable computing,” in Field Programmable Logic and Applications (FPL), 2018 28th International Conference on , FPL ’18, 2018. [34] Y. Umuroglu, D. Conficconi, L. Rasnayake, T. Preusser, and M. Sja-lander, “Optimizing bit-serial matrix multiplication for reconfigurable computing,” ACM Transactions on Reconfigurable Technology and Sys-tems , 2019. [35] Y. Umuroglu and M. Jahre, “Towards efficient quantized neural network inference on mobile devices: work-in-progress,” in Proceedings of the 2017 International Conference on Compilers, Architectures and Synthe-sis for Embedded Systems Companion , CASES ’17, (New York, NY, USA), Association for Computing Machinery, 2017. [36] D. Metz, V. Kumar, and M. Sj¨ alander, “Bisdu: A bit-serial dot-product unit for microcontrollers,” ACM Trans. Embed. Comput. Syst. , vol. 22, Sept. 2023. [37] I. Moghaddasi and B.-G. Nam, “Fssa: A fully serial and mixed-precision systolic array for vision transformer acceleration on edge,” IEEE Access ,vol. 13, pp. 118490–118503, 2025. [38] Y. Chen, A. F. AbouElhamayed, X. Dai, Y. Wang, M. Andronic, G. A. Constantinides, and M. S. Abdelfattah, “Bitmod: Bit-serial mixture-of-datatype llm acceleration,” in 2025 IEEE International Symposium on High Performance Computer Architecture (HPCA) , pp. 1082–1097, 2025. [39] S. Sharify, A. D. Lascorz, M. Mahmoud, M. Nikolic, K. Siu, D. M. Stuart, Z. Poulos, and A. Moshovos, “Laconic deep learning inference acceleration,” in 2019 ACM/IEEE 46th Annual International Symposium on Computer Architecture (ISCA) , pp. 304–317, 2019. [40] P. N. de Melo Antunes, “VeriSnip-Tool,” Nov. 2025. [41] S. Williams and M. Baxter, “Icarus verilog: open-source verilog more than a year later,” Linux J. , vol. 2002, p. 3, July 2002. [42] T. Ajayi et al., “Toward an open-source digital flow: First learnings from the openroad project,” in Proceedings of the 56th Annual Design Automation Conference 2019 , DAC ’19, (New York, NY, USA), Asso-ciation for Computing Machinery, 2019.
