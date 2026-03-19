@@ -6,73 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-18
-- 运行时间：2026-03-18 19:53:46 UTC
+- 最新运行日期：2026-03-19
+- 运行时间：2026-03-19 19:56:54 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日精选 17 篇前沿论文，重点聚焦端侧大模型优化与高效扩散模型，MobileLLM-Flash 凭借工业级延迟导向设计斩获满分。
-研究证实了端侧 LLM 需深度结合硬件延迟进行架构定制，且 ConvNeXt 在提升扩散模型效率方面展现出强劲的复兴势头。
-建议优先研读 MobileLLM-Flash 的端侧部署策略，并关注多模型共享推理（SUN）等提升服务效率的新方案。
-- 详情：[/202603/18/README](/202603/18/README)
+今日聚焦边缘 AI 与机器人视觉，深度剖析 17 篇论文中关于异常检测与任务卸载的突破性进展。
+核心推荐多目标自编码器优化方案 MO-SAE 及移动机器人视觉加速框架 vAccSOL，显著提升端侧推理效能。
+建议关注端侧多模态量化控制与 Apple 芯片上的脉冲神经网络实践，把握低功耗智能硬件的落地趋势。
+- 详情：[/202603/19/README](/202603/19/README)
 
 ### 精读区论文标签
-1. [MobileLLM-Flash: Latency-Guided On-Device LLM Design for Industry Scale](/202603/18/2603.15954v1-mobilellm-flash-latency-guided-on-device-llm-design-for-industry-scale)  
-   标签：评分：10.0/10、query:hwnas
-   evidence：移动延迟约束下的硬件在环架构搜索
-2. [Reviving ConvNeXt for Efficient Convolutional Diffusion Models](/202603/18/2603.09408v1-reviving-convnext-for-efficient-convolutional-diffusion-models)  
+1. [MO-SAE:Multi-Objective Stacked Autoencoders Optimization for Edge Anomaly Detection](/202603/19/2603.13895v1-mo-saemulti-objective-stacked-autoencoders-optimization-for-edge-anomaly-detection)  
    标签：评分：9.0/10、query:hwnas
-   evidence：卷积扩散模型中的硬件友好性与参数效率
-3. [Exploiting temporal parallelism for LSTM Autoencoder acceleration on FPGA](/202603/18/2603.13982v1-exploiting-temporal-parallelism-for-lstm-autoencoder-acceleration-on-fpga)  
+   evidence：考虑功耗和存储的边缘设备多目标优化
+2. [vAccSOL: Efficient and Transparent AI Vision Offloading for Mobile Robots](/202603/19/2603.16685v1-vaccsol-efficient-and-transparent-ai-vision-offloading-for-mobile-robots)  
    标签：评分：9.0/10、query:hwnas
-   evidence：利用时间并行性实现计算最大化的FPGA加速器架构
-4. [SPARQ: Spiking Early-Exit Neural Networks for Energy-Efficient Edge AI](/202603/18/2603.14380v1-sparq-spiking-early-exit-neural-networks-for-energy-efficient-edge-ai)  
+   evidence：用于异构边缘平台优化推理的神经网络编译器
+3. [ZipServ: Fast and Memory-Efficient LLM Inference with Hardware-Aware Lossless Compression](/202603/19/2603.17435v1-zipserv-fast-and-memory-efficient-llm-inference-with-hardware-aware-lossless-compression)  
    标签：评分：9.0/10、query:hwnas
-   evidence：基于脉冲神经网络的节能边缘AI
-5. [GLANCE: Gaze-Led Attention Network for Compressed Edge-inference](/202603/18/2603.15717v1-glance-gaze-led-attention-network-for-compressed-edge-inference)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对AR/VR系统的压缩边缘推理
-6. [TinyGLASS: Real-Time Self-Supervised In-Sensor Anomaly Detection](/202603/18/2603.16451v1-tinyglass-real-time-self-supervised-in-sensor-anomaly-detection)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对边缘平台传感器内实时检测的轻量化适配
+   evidence：针对GPU架构协同设计的硬件感知无损压缩
+4. [Practical FP4 Training for Large-Scale MoE Models on Hopper GPUs](/202603/19/2603.02731v1-practical-fp4-training-for-large-scale-moe-models-on-hopper-gpus)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：针对无原生支持GPU的FP4训练软硬协同设计
+5. [Towards Cold-Start Drafting and Continual Refining: A Value-Driven Memory Approach with Application to NPU Kernel Synthesis](/202603/19/2603.10846v1-towards-cold-start-drafting-and-continual-refining-a-value-driven-memory-approach-with-application-to-npu-kernel-synthesis)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：NPU算子合成与特定领域架构编程
+6. [LongFlow: Efficient KV Cache Compression for Reasoning M](/202603/19/2603.11504v1-longflow-efficient-kv-cache-compression-for-reasoning-m)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：用于内存高效推理的KV缓存压缩
 
 ### 速读区论文标签
-1. [CuTe Layout Representation and Algebra](/202603/18/2603.02298v1-cute-layout-representation-and-algebra)  
+1. [Channel-Adaptive Edge AI: Maximizing Inference Throughput by Adapting Computational Complexity to Channel States](/202603/19/2603.03146v1-channel-adaptive-edge-ai-maximizing-inference-throughput-by-adapting-computational-complexity-to-channel-states)  
    标签：评分：8.0/10、query:hwnas
-   evidence：深度学习硬件优化数据布局
-2. [SUN: Shared Use of Next-token Prediction for Efficient Multi-LLM Disaggregated Serving](/202603/18/2603.02599v1-sun-shared-use-of-next-token-prediction-for-efficient-multi-llm-disaggregated-serving)  
+   evidence：针对边缘推理根据信道状态调整AI复杂度
+2. [LiteVLA-Edge: Quantized On-Device Multimodal Control for Embedded Robotics](/202603/19/2603.03380v1-litevla-edge-quantized-on-device-multimodal-control-for-embedded-robotics)  
    标签：评分：8.0/10、query:hwnas
-   evidence：在多大模型推理服务中最大化GPU利用率
-3. [Robust Heterogeneous Analog-Digital Computing for Mixture-of-Experts Models with Theoretical Generalization Guarantees](/202603/18/2603.02633v1-robust-heterogeneous-analog-digital-computing-for-mixture-of-experts-models-with-theoretical-generalization-guarantees)  
+   evidence：在Jetson Orin硬件上的端侧推理
+3. [mlx-snn: Spiking Neural Networks on Apple Silicon via MLX](/202603/19/2603.03529v1-mlx-snn-spiking-neural-networks-on-apple-silicon-via-mlx)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对模拟存内计算的软硬件协同设计
-4. [StitchCUDA: An Automated Multi-Agents End-to-End GPU Programing Framework with Rubric-based Agentic Reinforcement Learning](/202603/18/2603.02637v1-stitchcuda-an-automated-multi-agents-end-to-end-gpu-programing-framework-with-rubric-based-agentic-reinforcement-learning)  
+   evidence：针对Apple Silicon统一内存和硬件特性优化的SNN库
+4. [Large-Margin Hyperdimensional Computing: A Learning-Theoretical Perspective](/202603/19/2603.03830v1-large-margin-hyperdimensional-computing-a-learning-theoretical-perspective)  
    标签：评分：8.0/10、query:hwnas
-   evidence：考虑内核效率和主机设置的自动化GPU编程框架
-5. [Beyond Test-Time Training: Learning to Reason via Hardware-Efficient Optimal Control](/202603/18/2603.09221v1-beyond-test-time-training-learning-to-reason-via-hardware-efficient-optimal-control)  
+   evidence：训练和推理的硬件高效实现
+5. [COHORT: Hybrid RL for Collaborative Large DNN Inference on Multi-Robot Systems Under Real-Time Constraints](/202603/19/2603.10436v1-cohort-hybrid-rl-for-collaborative-large-dnn-inference-on-multi-robot-systems-under-real-time-constraints)  
    标签：评分：7.0/10、query:hwnas
-   evidence：神经网络架构的硬件高效LQR求解器
-6. [DendroNN: Dendrocentric Neural Networks for Energy-Efficient Classification of Event-Based Data](/202603/18/2603.09274v1-dendronn-dendrocentric-neural-networks-for-energy-efficient-classification-of-event-based-data)  
+   evidence：资源受限边缘平台上的协作式DNN推理
+6. [Double-Precision Matrix Multiplication Emulation via Ozaki-II Scheme with FP8 Quantization](/202603/19/2603.10634v1-double-precision-matrix-multiplication-emulation-via-ozaki-ii-scheme-with-fp8-quantization)  
    标签：评分：7.0/10、query:hwnas
-   evidence：旨在提高硬件效率的能效神经网络设计
-7. [RiO-DETR: DETR for Real-time Oriented Object Detection](/202603/18/2603.09411v1-rio-detr-detr-for-real-time-oriented-object-detection)  
+   evidence：利用高吞吐量低精度算术提升计算性能
+7. [An FPGA Implementation of Displacement Vector Search for Intra Pattern Copy in JPEG XS](/202603/19/2603.10671v1-an-fpga-implementation-of-displacement-vector-search-for-intra-pattern-copy-in-jpeg-xs)  
    标签：评分：7.0/10、query:hwnas
-   evidence：具有任务原生设计的高效实时定向目标检测
-8. [WVA: A Global Optimization Control Plane for llmd](/202603/18/2603.09730v1-wva-a-global-optimization-control-plane-for-llmd)  
+   evidence：针对计算密集型搜索模块的FPGA架构设计
+8. [UniCompress: Token Compression for Unified Vision-Language Understanding and Generation](/202603/19/2603.11320v1-unicompress-token-compression-for-unified-vision-language-understanding-and-generation)  
    标签：评分：7.0/10、query:hwnas
-   evidence：异构硬件上LLM推理的全局优化控制平面
-9. [Flash-KMeans: Fast and Memory-Efficient Exact K-Means](/202603/18/2603.09229v1-flash-kmeans-fast-and-memory-efficient-exact-k-means)  
+   evidence：针对资源受限部署的Token压缩算法
+9. [AsyncMDE: Real-Time Monocular Depth Estimation via Asynchronous Spatial Memory](/202603/19/2603.10438v1-asyncmde-real-time-monocular-depth-estimation-via-asynchronous-spatial-memory)  
    标签：评分：6.0/10、query:hwnas
-   evidence：GPU IO瓶颈与内存效率优化
-10. [Prune Redundancy, Preserve Essence: Vision Token Compression in VLMs via Synergistic Importance-Diversity](/202603/18/2603.09480v2-prune-redundancy-preserve-essence-vision-token-compression-in-vlms-via-synergistic-importance-diversity)  
+   evidence：摊销边缘平台部署的计算成本
+10. [DepthCache: Depth-Guided Training-Free Visual Token Merging for Vision-Language-Action Model Inference](/202603/19/2603.10469v1-depthcache-depth-guided-training-free-visual-token-merging-for-vision-language-action-model-inference)  
    标签：评分：6.0/10、query:hwnas
-   evidence：视觉令牌压缩以解决计算效率低下问题
-11. [Quantization Robustness of Monotone Operator Equilibrium Networks](/202603/18/2603.10562v1-quantization-robustness-of-monotone-operator-equilibrium-networks)  
+   evidence：通过视觉令牌压缩减少推理延迟
+11. [A PUF-Based Approach for Copy Protection of Intellectual Property in Neural Network Models](/202603/19/2603.10753v1-a-puf-based-approach-for-copy-protection-of-intellectual-property-in-neural-network-models)  
    标签：评分：6.0/10、query:hwnas
-   evidence：针对低精度硬件部署的权重量化分析
+   evidence：利用PUF将神经网络模型与底层硬件绑定
 
 
 <div class="dpr-home-promo-card">

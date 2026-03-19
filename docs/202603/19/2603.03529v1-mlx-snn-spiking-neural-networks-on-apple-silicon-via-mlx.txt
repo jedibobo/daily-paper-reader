@@ -1,0 +1,496 @@
+Title: mlx-snn: Spiking Neural Networks on Apple Silicon via MLX
+
+URL Source: https://arxiv.org/pdf/2603.03529v1
+
+Published Time: Thu, 05 Mar 2026 01:14:09 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# mlx-snn: Spiking Neural Networks on Apple Silicon via MLX 
+
+Jiahao Qin 
+
+Jiahao.qin19@gmail.com 
+
+Abstract 
+
+We introduce mlx-snn , the first spiking neural network (SNN) library built natively on Apple’s MLX framework. As SNN research grows rapidly, all major libraries — snnTorch, Norse, SpikingJelly, Lava — target PyTorch or custom backends, leaving Apple Silicon users without a native option. mlx-snn provides six neuron models (LIF, IF, Izhikevich, Adaptive LIF, Synaptic, Alpha), four surrogate gradient functions, four spike encoding methods (including an EEG-specific encoder), and a complete backpropagation-through-time training pipeline. The library leverages MLX’s unified memory architecture, lazy evaluation, and composable function transforms ( mx.grad , mx.compile ) to enable efficient SNN research on Apple Silicon hardware. We validate mlx-snn on MNIST digit classification across five hyperparameter configurations and three backends, achieving up to 97.28% accuracy with 2.0–2.5 × faster training and 3–10 ×
+
+lower GPU memory than snnTorch on the same M3 Max hardware. mlx-snn is open-source under the MIT license and available on PyPI. 
+
+Project: https://github.com/D-ST-Sword/mlx-snn 
+
+# 1 Introduction 
+
+Spiking neural networks (SNNs), often called the “third generation” of neural networks [Maass, 1997], process information through discrete spike events rather than continuous activations. This biologically inspired paradigm offers unique advantages: temporal coding of information, event-driven computation with potential energy savings, and natural compatibility with neuromorphic hardware [Davies et al., 2018]. Recent advances in surrogate gradient learning [Neftci et al., 2019] have made SNNs trainable with gradient descent, closing the accuracy gap with conventional deep learning on many tasks. Several software libraries have emerged to support SNN research. snnTorch [Eshraghian et al., 2023] provides a PyTorch-based framework with an intuitive API. Norse [Pehle and Pedersen, 2021] emphasizes functional programming and biological plausibility. SpikingJelly [Fang et al., 2023] offers high-performance CUDA kernels. Lava [Intel Labs, 2021] targets Intel’s Loihi neuromorphic processor. However, all these libraries are built on PyTorch [Paszke et al., 2019] or custom backends, leaving users of Apple Silicon hardware without a native SNN framework. Apple’s MLX [Hannun et al., 2023] is an array computation framework designed specifically for Apple Silicon. Its unified memory architecture eliminates CPU–GPU data transfers, and its lazy evaluation model enables efficient computation graph optimization. MLX provides composable function transforms — mx.grad for automatic differentiation and mx.compile for just-in-time com-pilation — that are well-suited to SNN workloads requiring custom gradient definitions and unrolled temporal loops. 1
+
+> arXiv:2603.03529v1 [cs.LG] 3 Mar 2026
+
+Table 1: Feature comparison of SNN software libraries. ✓ = supported, ◦ = partial, — = not supported.                                                        
+
+> Feature mlx-snn snnTorch Norse SpikingJelly Lava
+> Backend MLX PyTorch PyTorch PyTorch Custom Neuron models 66810+ 4Surrogate gradients 4534—Spike encoding 4423—Apple Silicon native ✓————CUDA acceleration —✓✓✓—Neuromorphic HW ———◦✓
+> Functional API ✓◦✓◦—Learnable dynamics ✓✓✓✓—Medical encoders ✓————
+
+In this paper, we present mlx-snn , the first SNN library built natively on MLX. Our contribu-tions are: 1. A comprehensive SNN library with 6 neuron models, 4 surrogate gradient functions, and 4 spike encoding methods, all implemented purely in MLX. 2. A novel straight-through estimator (STE) pattern for surrogate gradients that works around MLX’s current limitations with custom VJP definitions. 3. An snnTorch-compatible API that enables straightforward migration of existing SNN code to Apple Silicon. 4. Empirical validation on MNIST classification with comparison to snnTorch. 
+
+# 2 Related Work 
+
+SNN Libraries. Table 1 summarizes the major SNN software frameworks. snnTorch [Eshraghian et al., 2023] is the most widely used, providing neuron models as PyTorch modules with surro-gate gradient support. Norse [Pehle and Pedersen, 2021] takes a functional approach inspired by JAX [Bradbury et al., 2018], separating state from computation. SpikingJelly [Fang et al., 2023] focuses on performance, offering fused CUDA kernels for accelerated training. Lava [Intel Labs, 2021] provides a hardware-software co-design framework targeting Intel’s Loihi processor. All of these libraries depend on PyTorch for gradient computation and GPU acceleration via CUDA. 
+
+Apple MLX. MLX [Hannun et al., 2023] is a NumPy-like array framework optimized for Ap-ple Silicon’s unified memory architecture. Key features include lazy evaluation (computations are only executed when results are needed), composable function transforms ( mx.grad , mx.vmap ,
+
+mx.compile ), and automatic device management. The growing MLX ecosystem includes libraries for language models (mlx-lm), computer vision, and audio processing, but prior to mlx-snn, no SNN library existed for MLX. 
+
+# 3 Architecture and Design 
+
+3.1 Design Principles 
+
+mlx-snn follows four core design principles: 21. MLX-native : All tensor operations use mlx.core . NumPy is used only for data I/O. 2. Explicit state : Neuron state is passed as a Python dictionary, making the library compatible with MLX’s functional transforms and mx.compile .3. snnTorch-compatible API : Class names, constructor arguments, and forward-pass signa-tures mirror snnTorch wherever possible. 4. Research-first : Every component can be subclassed, overridden, or composed. Listing 1 illustrates the API similarity between snnTorch and mlx-snn.                                      
+
+> 1#---snnTorch ---#---mlx - snn ---
+> 2import snntorch as snn import mlxsnn
+> 3lif =snn . Leaky ( beta =0.9) lif =mlxsnn . Leaky ( beta =0.9)
+> 4mem =lif . init_leaky () state =lif . init_state (B , F )
+> 5spk , mem =lif (x , mem ) spk , state =lif (x , state )
+
+Listing 1: API comparison: snnTorch (left comments) vs. mlx-snn. 
+
+3.2 Neuron Models 
+
+All neuron models inherit from SpikingNeuron , an abstract mlx.nn.Module subclass that provides the fire() and reset() methods. The fire() method applies the surrogate gradient function to the difference between membrane potential and threshold. The reset() method supports three mechanisms: subtract (subtract threshold), zero (reset to zero), and none (no reset, used for output layers). 
+
+Leaky Integrate-and-Fire (LIF). The standard first-order LIF neuron [Gerstner and Kistler, 2002] with discrete-time update: 
+
+U [t + 1] = β · U [t] + X[t + 1] − S[t] · Vthr (1) where U is membrane potential, X is input current, S ∈ { 0, 1} is the output spike, β ∈ (0 , 1) is the decay factor, and Vthr is the threshold. The decay factor β can optionally be made learnable. 
+
+Integrate-and-Fire (IF). A non-leaky variant with β = 1 , providing perfect temporal integra-tion. 
+
+Izhikevich. The two-dimensional Izhikevich model [Izhikevich, 2003]: 
+
+dv dt = 0 .04 v2 + 5 v + 140 − u + I (2) 
+
+du dt = a(bv − u) (3) with reset rule: if v ≥ 30 mV, then v ← c and u ← u + d. Four parameter presets are provided: Regular Spiking (RS), Intrinsically Bursting (IB), Chattering (CH), and Fast Spiking (FS). 
+
+Adaptive LIF (ALIF). Extends LIF with a spike-frequency adaptation mechanism [Bellec et al., 2018]: 
+
+U [t + 1] = β · U [t] + X[t + 1] − S[t] · Vthr (4) 
+
+A[t + 1] = ρ · A[t] + S[t] (5) 
+
+Veff [t] = Vthr + b · A[t] (6) where A is the adaptation variable, ρ is its decay rate, and b scales the threshold increase. 3Synaptic. A two-state model with explicit synaptic current filtering: 
+
+Isyn [t + 1] = α · Isyn [t] + X[t + 1] (7) 
+
+U [t + 1] = β · U [t] + Isyn [t + 1] − S[t] · Vthr (8) 
+
+Alpha. A dual-exponential synapse model cascading two first-order filters for a rise-then-decay post-synaptic current profile: 
+
+Iexc [t + 1] = α · Iexc [t] + X[t + 1] (9) 
+
+Iinh [t + 1] = α · Iinh [t] + Iexc [t + 1] (10) 
+
+U [t + 1] = β · U [t] + Iinh [t + 1] − S[t] · Vthr (11) 
+
+3.3 Surrogate Gradients 
+
+Spike generation applies the Heaviside step function Θ( U − Vthr ), which has zero gradient almost everywhere. Surrogate gradient methods [Neftci et al., 2019, Zenke and Vogels, 2021] replace the backward pass with a smooth approximation ˜σ(x), enabling gradient-based optimization. 
+
+STE pattern. MLX’s current mx.custom_function API introduces shape inconsistencies when composed with matrix multiplication backward passes. We adopt a straight-through estimator (STE) pattern using mx.stop_gradient :output = stop_grad  Θ( x) − ˜σ(x)| {z }
+
+> zero gradient
+
++˜ σ(x) (12) In the forward pass, this evaluates to Θ( x) (exact Heaviside). In the backward pass, gradients flow through ˜σ(x) only. This pattern is numerically equivalent to a proper custom VJP but avoids the shape bug. 
+
+Supported functions. mlx-snn provides three built-in surrogate functions plus a custom surro-gate factory: 
+
+• Fast sigmoid : ˜σ(x) = kx  
+
+> 2(1+ k|x|)
+
++ 12 , gradient k
+
+> 2(1+ k|x|)2
+
+• Arctan : ˜σ(x) = 1 
+
+> π
+
+arctan( αx ) + 12
+
+• Straight-through : ˜σ(x) = clip (sx + 0 .5, 0, 1) 
+
+• Custom : User-defined smooth function wrapped in the STE pattern 
+
+3.4 Spike Encoding 
+
+mlx-snn provides four spike encoding methods: 
+
+• Rate coding : Poisson spike generation where each input value is interpreted as a firing probability per timestep. 
+
+• Latency coding : Time-to-first-spike encoding where larger values produce earlier spikes. Supports linear and exponential mappings. 
+
+• Delta modulation : Change-based encoding that generates spikes when |x[t] − x[t − 1] | > θ ,suitable for temporal signals. 
+
+• EEG encoder : A medical-signal-specific encoder supporting rate, delta, and threshold-crossing methods for multi-channel EEG data. All encoders produce time-first tensors of shape [T, B, . . . ], following neuroscience conventions. 43.5 Training Pipeline 
+
+mlx-snn integrates with MLX’s standard training patterns. The bptt_forward utility unrolls a model over T timesteps, collecting output spikes and membrane potentials. Three loss functions are provided: 
+
+• Rate coding loss : Cross-entropy on spike counts summed over time. 
+
+• Membrane loss : Cross-entropy on the final-timestep membrane potential (used in our ex-periments). 
+
+• MSE count loss : Mean squared error between spike counts and targets. Listing 2 shows a complete training loop.  
+
+> 1
+
+import mlx . core as mx  
+
+> 2
+
+import mlx . nn as nn  
+
+> 3
+
+import mlx . optimizers as optim  
+
+> 4
+
+import mlxsnn  
+
+> 56
+
+class SpikingMLP ( nn . Module ) :  
+
+> 7
+
+def __init__ ( self , num_steps =25 , beta =0.9) :  
+
+> 8
+
+super () . __init__ ()  
+
+> 9
+
+self . fc1 = nn . Linear (784 , 128)  
+
+> 10
+
+self . lif1 = mlxsnn . Leaky ( beta = beta )  
+
+> 11
+
+self . fc2 = nn . Linear (128 , 10)  
+
+> 12
+
+self . lif2 = mlxsnn . Leaky ( beta = beta ,  
+
+> 13
+
+reset_mechanism = " none " )  
+
+> 14
+
+self . num_steps = num_steps  
+
+> 15 16
+
+def __call__ ( self , spikes_in ) :  
+
+> 17
+
+s1 = self . lif1 . init_state (  
+
+> 18
+
+spikes_in . shape [1] , 128)  
+
+> 19
+
+s2 = self . lif2 . init_state (  
+
+> 20
+
+spikes_in . shape [1] , 10)  
+
+> 21
+
+for t in range ( self . num_steps ) :  
+
+> 22
+
+x = self . fc1 ( spikes_in [ t ])  
+
+> 23
+
+spk , s1 = self . lif1 (x , s1 )  
+
+> 24
+
+x = self . fc2 ( spk )  
+
+> 25
+
+_ , s2 = self . lif2 (x , s2 )  
+
+> 26
+
+return s2 [ " mem " ] # final membrane  
+
+> 27 28
+
+model = SpikingMLP ( num_steps =25 , beta =0.9)  
+
+> 29
+
+optimizer = optim . Adam ( learning_rate =1 e -3)  
+
+> 30 31
+
+def loss_fn ( model , spikes_in , targets ) :  
+
+> 32
+
+mem_out = model ( spikes_in ) # [ batch , 10]  
+
+> 33
+
+return mx . mean (  
+
+> 34
+
+nn . losses . cross_entropy ( mem_out , targets ) )  
+
+> 35 36
+
+loss_and_grad = nn . value_and_grad ( model , loss_fn )  
+
+> 37 38
+
+for x_batch , y_batch in get_batches ( x_train , y_train ) :  
+
+> 39
+
+spikes = mlxsnn . rate_encode ( x_batch , num_steps =25)  
+
+> 40
+
+loss , grads = loss_and_grad ( model , spikes , y_batch )  
+
+> 41
+
+optimizer . update ( model , grads )  
+
+> 42
+
+mx . eval ( model . parameters () , optimizer . state ) 
+
+5Listing 2: Simplified mlx-snn training loop for MNIST classification. SpikingMLP wraps two 
+
+nn.Linear layers and two mlxsnn.Leaky neurons in a 784–128–10 feedforward architecture. Hyperparameters shown are for illustration; see Table 2 for tuned configurations. 
+
+# 4 MLX-Specific Design Considerations 
+
+Unified memory. Apple Silicon’s unified memory architecture means that CPU and GPU share the same physical memory. Unlike PyTorch, where tensor.to(device) copies are needed, MLX tensors are accessible to both CPU and GPU without explicit transfers. For SNN workloads that mix data preprocessing (CPU) with neuron simulation (GPU), this eliminates a common bottleneck. 
+
+Lazy evaluation. MLX uses lazy evaluation: operations build a computation graph that is only executed when mx.eval() is called. This is advantageous for SNNs because the temporal unrolling loop can build the full computation graph for T timesteps before executing, allowing the MLX runtime to optimize memory allocation and kernel scheduling. 
+
+Composable transforms. MLX’s mx.grad transform computes gradients of arbitrary functions, enabling clean BPTT without framework-specific “retain graph” semantics. mx.compile can JIT-compile pure functions for additional performance. The explicit state-dict design of mlx-snn neurons ensures compatibility with these transforms — unlike hidden mutable state, dictionaries compose naturally with functional transformations. 
+
+Immutable arrays. MLX arrays do not support in-place operations. All neuron updates use the pattern mem = beta * mem + x rather than mem += x . While this requires minor adjustments for users coming from PyTorch, it aligns well with SNN dynamics where the update equations are naturally expressed as functional assignments. 
+
+# 5 Experiments 
+
+All experiments are run on an Apple M3 Max MacBook Pro (36 GB unified memory, macOS Se-quoia). Software versions: mlx-snn 0.2.1, MLX 0.29.3, snnTorch 0.9.4, PyTorch 2.8.0, Python 3.9.18. We benchmark snnTorch on both the PyTorch MPS backend (Apple Silicon GPU) and CPU to provide a comprehensive comparison. 
+
+5.1 MNIST Classification 
+
+Setup. We train a two-layer feedforward SNN on MNIST [LeCun et al., 1998]: 784 → h (LIF) 
+
+→ 10 (LIF, no reset). Input images are rate-encoded into Poisson spike trains over T = 25 timesteps. The output layer accumulates membrane potential without reset, and classification uses the argmax of the final membrane state. We sweep five hyperparameter configurations (Table 2) covering decay factors β ∈ { 0.85 , 0.9, 0.95 }, hidden sizes h ∈ { 128 , 256 }, learning rates {10 −3, 2×10 −3}, and batch sizes {128 , 256 }, and evaluate on three backends: mlx-snn (MLX GPU), snnTorch (PyTorch MPS GPU), and snnTorch (PyTorch CPU). All use the Adam optimizer and fast sigmoid surrogate gradient. 6Table 2: MNIST classification: 5 hyperparameter configurations × 3 backends. All use the same 
+
+784 –h–10 feedforward SNN with T =25 timesteps, fast sigmoid surrogate, and batch size 128 unless noted. C1–C4 train for 25 epochs; C5 trains for 15 epochs. Acc. = best test accuracy over all epochs; Time = average seconds per epoch; Mem. = peak GPU allocator memory (Metal for mlx-snn, MPS for snnTorch). 
+
+mlx-snn (MLX) snnTorch (MPS) snnTorch (CPU) Hyperparameters Acc. (%) Time (s) Acc. (%) Time (s) Acc. (%) Time (s) C1 β=0 .85 , h =256 , lr =10 −3 97.28 4.0 98.00 8.8 98.01 12.8 C2 β=0 .9, h =256 , lr =10 −3 97.02 4.3 98.03 8.9 97.97 13.5 C3 β=0 .9, h =256 , lr =10 −3, B =256 96.91 2.4 98.03 4.8 98.17 16.7 C4 β=0 .9, h =128 , lr =10 −3 96.90 4.3 97.84 9.0 97.74 10.9 C5 β=0 .95 , h =128 , lr =2 ×10 −3, 15 ep 94.98 4.4 97.09 9.0 97.00 11.1 
+
+Peak GPU memory 61–138 MB 241–1453 MB —2 4 6 8 10 12 14       
+
+> Epoch
+> 92
+> 93
+> 94
+> 95
+> 96
+> 97
+> Test Accuracy (%)
+> MNIST Classification Accuracy
+> mlx-snn (MLX GPU)
+> snnTorch (MPS GPU)
+> snnTorch (CPU)
+> 246810 12 14
+> Epoch
+> 4
+> 5
+> 6
+> 7
+> 8
+> 9
+> 10
+> 11
+> 12
+> Time (seconds)
+> Training Time per Epoch
+> mlx-snn (MLX GPU)
+> snnTorch (MPS GPU)
+> snnTorch (CPU)
+
+Figure 1: MNIST training curves for configuration C5 ( β=0 .95 , h=128 ). Left: test accuracy vs. epoch. Right: training time per epoch. 
+
+Results. Table 2 reports best test accuracy and average training time per epoch across all 15 runs. mlx-snn is consistently 2.0–2.5 × faster per epoch than snnTorch on both MPS and CPU backends, while using 3.3–10.5 × less GPU memory. The best mlx-snn configuration (C1: β=0 .85 , h=256 ,lr = 10 −3) achieves 97.28% accuracy, within 0.7 points of snnTorch’s best (98.03%). The accuracy gap is consistent across all configurations ( ∼1 percentage point) and is attributable to the STE-based surrogate gradient pattern (Eq. 12), which routes gradients through a smooth approximation rather than a native custom backward pass. Notably, snnTorch achieves similar accuracy on both MPS and CPU, confirming that the gap stems from the surrogate gradient formulation rather than the compute backend. We expect this gap to narrow as MLX’s mx.custom_function matures. Figure 1 shows the training curves for configuration C5. 
+
+5.2 Neuron Dynamics Validation 
+
+Figure 2 shows membrane potential traces for all six neuron models under constant input current. Each model exhibits its characteristic dynamics: LIF shows exponential rise to threshold and reset; 70 25 50 75 100 125 150 175 200                                         
+
+> Timestep
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> Membrane potential
+> LIF (Leaky)
+> 025 50 75 100 125 150 175 200
+> Timestep
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Membrane potential
+> IF
+> 025 50 75 100 125 150 175 200
+> Timestep
+> 60
+> 40
+> 20
+> 0
+> 20
+> Membrane potential
+> Izhikevich (RS)
+> 025 50 75 100 125 150 175 200
+> Timestep
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> 1.25
+> Membrane potential
+> ALIF
+> 025 50 75 100 125 150 175 200
+> Timestep
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Membrane potential
+> Synaptic
+> 025 50 75 100 125 150 175 200
+> Timestep
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Membrane potential
+> Alpha
+
+Figure 2: Membrane potential traces for all six neuron models with constant input current over 200 timesteps. Red vertical lines indicate spike events. IF accumulates linearly; Izhikevich displays the distinctive quadratic rise and recovery variable interaction; ALIF shows increasing inter-spike intervals due to threshold adaptation; Synaptic shows smoothed dynamics from the synaptic current filter; and Alpha exhibits the rise-then-decay current profile. 
+
+5.3 Surrogate Gradient Comparison 
+
+Table 3 compares three surrogate gradient functions on the MNIST task using the baseline configura-tion from C5 ( β=0 .95 , h=128 , lr = 2 ×10 −3, 10 epochs). Fast sigmoid and arctan achieve comparable accuracy (93.65% and 92.44%, respectively), consistent with findings by Zenke and Vogels [2021] that surrogate gradient learning is robust to the choice of surrogate function. The straight-through estimator (46.28%) underperforms due to its narrow gradient window at the default scale. Figure 3 visualizes the forward and backward passes for each surrogate. 8Table 3: Surrogate gradient comparison on MNIST using baseline configuration ( β=0 .95 , h=128 ,lr = 2 ×10 −3, 10 epochs). Note: this matches C5 in Table 2, not the best configuration C1. 
+
+Surrogate Function Test Accuracy (%) Training Time (s) 
+
+Fast Sigmoid ( k = 25 ) 93.65 44.7 Arctan ( α = 2 ) 92.44 43.8 Straight-Through ( s = 1 ) 46.28 46.3 2 1 0 1 2          
+
+> x
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> 12
+> Fast Sigmoid
+> Forward (Heaviside)
+> Backward (gradient)
+> 21012
+> x
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2 Arctan
+> Forward (Heaviside)
+> Backward (gradient)
+> 21012
+> x
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2 Straight-Through
+> Forward (Heaviside)
+> Backward (gradient)
+
+Figure 3: Surrogate gradient functions. Blue: forward pass (Heaviside step function). Red dashed: backward pass (smooth gradient used for BPTT). 
+
+# 6 Discussion and Future Work 
+
+Current limitations. mlx-snn is in active development (v0.2.1). Key limitations include: (1) 
+
+mx.compile is not yet applied to the training loop due to Python control flow in temporal unrolling; (2) neuromorphic dataset loaders (N-MNIST, DVS-Gesture, SHD) are not yet implemented; (3) the library has been validated only on MNIST — larger-scale benchmarks are needed. 
+
+MLX framework maturity. We encountered a shape inconsistency in MLX’s mx.custom_function 
+
+VJP mechanism when composing with matrix multiplication backward passes. Our STE workaround (Eq. 12) is functionally equivalent but represents a temporary solution. We expect this issue to be resolved as MLX matures, at which point native custom VJPs will provide cleaner surrogate gradient definitions. 
+
+Roadmap. Planned features for future versions include: 
+
+• v0.3.0 : Liquid State Machine (LSM) with configurable reservoir topology, excitatory/in-hibitory balance, and EEG classification examples. 
+
+• v0.4.0 : mx.compile -optimized forward passes, neuromorphic dataset loaders, visualization utilities, and comprehensive benchmarks. 
+
+• v1.0.0 : Full API documentation, numerical validation against snnTorch reference outputs, and PyPI stable release. 
+
+Broader impact. By bringing SNN research to Apple Silicon, mlx-snn enables researchers using MacBook Pro or Mac Studio hardware to run SNN experiments without requiring NVIDIA GPUs or cloud infrastructure. The unified memory architecture is particularly advantageous for SNN 9workloads that require frequent state updates across timesteps. We hope mlx-snn lowers the barrier to entry for SNN research in the Apple ecosystem. 
+
+# 7 Conclusion 
+
+We have presented mlx-snn, the first spiking neural network library built natively on Apple’s MLX framework. The library provides six neuron models, four surrogate gradient functions, and four spike encoding methods with an API designed for compatibility with snnTorch. Our experiments validate the library’s correctness on MNIST classification across five configurations and three backends, achieving up to 97.28% accuracy with 2.0–2.5 × faster training and 3–10 × lower GPU memory compared to snnTorch on the same M3 Max hardware. mlx-snn is open-source under the MIT license and available on PyPI ( pip install mlx-snn ). To cite this work: 
+
+@article{qin2026mlxsnn, title = {mlx-snn: Spiking Neural Networks on Apple Silicon via {MLX}}, author = {Qin, Jiahao}, journal = {arXiv preprint arXiv:XXXX.XXXXX}, year = {2026} }
+
+# References 
+
+Guillaume Bellec, Darjan Salaj, Anand Subramoney, Robert Legenstein, and Wolfgang Maass. Long short-term memory and learning-to-learn in networks of spiking neurons. In Advances in Neural Information Processing Systems , pages 787–797, 2018. James Bradbury, Roy Frostig, Peter Hawkins, Matthew James Johnson, Chris Leary, Dou-gal Maclaurin, George Necula, Adam Paszke, Jake VanderPlas, Skye Wanderman-Milne, and Qiao Zhang. JAX: Composable transformations of Python+NumPy programs, 2018. URL 
+
+https://github.com/google/jax .Mike Davies, Narayan Srinivasa, Tsung-Han Lin, Gautham Chinya, Yongqiang Cao, Sri Harsha Choday, Georgios Dimou, Prasad Joshi, Nabil Imam, Shweta Jain, et al. Loihi: A neuromorphic manycore processor with on-chip learning. IEEE Micro , 38(1):82–99, 2018. Jason K. Eshraghian, Max Ward, Emre O. Neftci, Xinxin Wang, Gregor Lenz, Girish Dwivedi, Mohammed Bennamoun, Doo Seok Jeong, and Wei D. Lu. Training spiking neural networks using lessons from deep learning. Proceedings of the IEEE , 111(9):1016–1054, 2023. Wei Fang, Yanqi Chen, Jianhao Ding, Zhaofei Yu, Timothée Masquelier, Ding Chen, Liwei Huang, Huihui Zhou, Guoqi Li, and Yonghong Tian. SpikingJelly: An open-source machine learning infrastructure platform for spike-based intelligence. Science Advances , 9(40):eadi1480, 2023. doi: 10.1126/sciadv.adi1480. Wulfram Gerstner and Werner M. Kistler. Spiking Neuron Models: Single Neurons, Populations, Plasticity . Cambridge University Press, 2002. Awni Hannun, Jagrit Digani, Angelos Katharopoulos, and Ronan Collobert. MLX: An array frame-work for apple silicon, 2023. URL https://github.com/ml-explore/mlx .10 Intel Labs. Lava: An open-source software framework for neuromorphic computing, 2021. URL 
+
+https://github.com/lava-nc/lava .Eugene M. Izhikevich. Simple model of spiking neurons. IEEE Transactions on Neural Networks ,14(6):1569–1572, 2003. Yann LeCun, Léon Bottou, Yoshua Bengio, and Patrick Haffner. Gradient-based learning applied to document recognition. Proceedings of the IEEE , 86(11):2278–2324, 1998. Wolfgang Maass. Networks of spiking neurons: The third generation of neural network models. 
+
+Neural Networks , 10(9):1659–1671, 1997. Emre O. Neftci, Hesham Mostafa, and Friedemann Zenke. Surrogate gradient learning in spiking neural networks: Bringing the power of gradient-based optimization to spiking neural networks. 
+
+IEEE Signal Processing Magazine , 36(6):51–63, 2019. Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory Chanan, Trevor Killeen, Zeming Lin, Natalia Gimelshein, Luca Antiga, et al. PyTorch: An imperative style, high-performance deep learning library. In Advances in Neural Information Processing Systems , pages 8024–8035, 2019. Christian Pehle and Jens Egholm Pedersen. Norse – a deep learning library for spiking neural networks, 2021. URL https://github.com/norse/norse .Friedemann Zenke and Tim P. Vogels. The remarkable robustness of surrogate gradient learning for instilling complex function in spiking neural networks. Neural Computation , 33(4):899–925, 2021. 11
