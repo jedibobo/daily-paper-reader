@@ -1,0 +1,924 @@
+Title: MCEL: Margin-Based Cross-Entropy Loss for Error-Tolerant Quantized Neural Networks
+
+URL Source: https://arxiv.org/pdf/2603.05048v1
+
+Published Time: Fri, 06 Mar 2026 01:51:38 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# MCEL: Margin-Based Cross-Entropy Loss for Error-Tolerant Quantized Neural Networks 
+
+Mikail Yayla and Akash Kumar 
+
+Ruhr-Universit¨ at Bochum, Germany 
+
+{mikail.yayla, akash.kumar }@rub.de 
+
+Abstract —Robustness to bit errors is a key requirement for the reliable use of neural networks (NNs) on emerging approximate computing platforms and error-prone memory technologies. A common approach to achieve bit error tolerance in NNs is injecting bit flips during training according to a predefined error model. While effective in certain scenarios, training-time bit flip injection introduces substantial computational overhead, often degrades inference accuracy at high error rates, and scales poorly for larger NN architectures. These limitations make error injection an increasingly impractical solution for ensuring robustness on future approximate computing platforms and error-prone memory technologies. In this work, we adopt a fundamentally different perspective and investigate the mechanisms that enable NNs to tolerate bit errors without relying on error-aware training. We establish a direct connection between bit error tolerance and classification margins at the output layer. Building on this insight, we propose a novel loss function, the Margin Cross-Entropy Loss (MCEL), which explicitly promotes logit-level margin separation while preserving the favorable optimization properties of the standard cross-entropy loss. Furthermore, MCEL introduces an inter-pretable margin parameter that allows robustness to be tuned in a principled manner. Extensive experimental evaluations across multiple datasets of varying complexity, diverse NN architectures, and a range of quantization schemes demonstrate that MCEL substantially improves bit error tolerance, up to 15% in accuracy for an error rate of 1%. Our proposed MCEL method is simple to implement, efficient, and can be integrated as a drop-in replacement for standard CEL. It provides a scalable and principled alternative to training-time bit flip injection, offering new insights into the origins of NN robustness and enabling more efficient deployment on approximate computing and memory systems. 
+
+I. I NTRODUCTION 
+
+Recent studies on efficient neural network (NN) inference systems have increasingly explored the use of approximate memory and approximate computing units to reduce energy consumption, latency, and hardware complexity. In approxi-mate memory systems, such approximations are commonly realized by lowering the supply voltage or tightening timing parameters, thereby enabling lower power consumption or faster memory access. When these techniques are pushed aggressively, however, they can lead to high bit error rates (BERs). This behavior has been observed in both volatile memories, such as SRAM [1], [2] and DRAM [3], [4], as well as emerging non-volatile memories, including STT-RAM [5], RRAM [6]–[8], and FeFET [9]. In all of these technologies, the BER increases steeply as the supply voltage is reduced and more aggressive timing constraints are imposed on the memories. Beyond memory, approximate computing units have also been proposed as an effective means to improve the efficiency of NN inference. A comprehensive overview of approxima-tion techniques across different abstraction layers is provided in [10]. For instance, multiply-accumulate (MAC) units can be tuned to trade computational accuracy for reduced resource usage, or selected computations can be skipped to improve efficiency [11]. Other approaches exploit HW/SW co-design to select circuits with suitable approximation levels that enable NN inference with minimal impact on accuracy [12]. Fur-thermore, analog-computing-based hardware, which has been shown to offer high energy efficiency [13], [14], naturally aligns with approximate computing, as signal representations and computations in the analog domain are inherently impre-cise. Without appropriate countermeasures, however, bit errors arising from approximate memory or approximate computa-tion can degrade NN accuracy to unacceptable levels. A common approach to improve bit error tolerance in NNs is to inject bit flips during training according to a predefined error model. While effective for achieving robustness under small error rates, training with bit flip injection exhibits several important drawbacks. First, recent studies have shown that injecting bit errors during training can significantly degrade inference accuracy, particularly as the bit error rate applied during training increases [3], [8], [15]. Second, bit flip injec-tion introduces substantial computational overhead [16]. Dur-ing training, a stochastic decision must be made for every bit of error-prone data to determine whether a bit flip occurs, result-ing in a large number of additional operations and increased training complexity. While the penalty varies with error model complexity, even simple models can increase simulation time considerably. For example, the approach in [17] requires replacing the native PyTorch MAC engine to facilitate error injection for custom XNOR-logic-in-memory circuits, thereby increasing simulation time by an order of magnitude. Finally, as NN models, including those targeting embedded and edge systems, continue to grow in size and complexity, training-time error injection becomes increasingly difficult to scale. This challenge is further exacerbated when bit flip injection is combined with techniques targeted for embedded NNs, such as quantization-aware training or knowledge distillation. As a result, training-time bit-flip injection is unlikely to represent a sustainable long-term solution for achieving robustness on 
+
+> arXiv:2603.05048v1 [cs.LG] 5 Mar 2026
+
+future approximate computing platforms and other reliability-constrained systems. Achieving bit error tolerance in NNs without relying on bit flip injection would eliminate these limitations and constitute a significant advancement for NN deployment on approximate hardware and error-prone memory. However, realizing this goal requires a deeper understanding of the fundamental mech-anisms that enable NNs to tolerate bit errors. To date, these mechanisms have not been systematically investigated. While initial insights have been reported for binarized neural net-works (BNNs) [18], [19], corresponding analyses for generic quantized neural networks (QNNs) remain largely unexplored. This gap is particularly relevant, as QNNs are widely adopted in practical applications and deployed across a broad range of real-world systems. Moreover, the multi-bit nature of QNNs fundamentally alters how bit errors propagate through the network, limiting the direct transferability of insights obtained. In this work, we close this gap and, to the best of our knowl-edge, present the first method to optimize QNNs for bit error tolerance without employing bit flip injection during training. We demonstrate that bit error tolerance can be achieved as a direct consequence of enforcing margin properties in the output of the classification layer, rather than through exposure to the error model during training. 
+
+Our contributions:  
+
+> •
+
+We establish a direct connection between bit error toler-ance in NNs and output-layer margins. In particular, we show that the difference between the largest and second-largest output logits governs the NN’s ability to tolerate parameter perturbations (see Figure 1).  
+
+> •
+
+Based on this insight, we derive a novel loss function, the Margin Cross-Entropy-Loss (MCEL), which explicitly incorporates margins into cross-entropy-based optimiza-tion. The formulation is interpretable and exposes a single design parameter that allows practitioners to directly control the targeted level of error tolerance.  
+
+> •
+
+We demonstrate that MCEL substantially improves bit error tolerance across a wide range of scenarios. Our evaluation spans datasets of various complexity (Fash-ionMNIST, SVHN, CIFAR10, and Imagenette), diverse network architectures (VGG3, VGG7, MobileNetV2, and ResNet18), and multiple quantization schemes (binary, 2-, 4-, and 8-bit). Our method is simple to imple-ment, efficient, and can be integrated as a drop-in replacement for standard CEL. The source code of our framework is available at https://github.com/myay/ BNN-QNN-ErrorEvaluation. II. R ELATED WORK 
+
+Prior work has investigated the robustness of NNs for de-ployment on approximate memory or approximate computing units. Across these studies, robustness is typically achieved in one of two ways: Either the NN exhibits an inherent tolerance to hardware-induced errors, or error-aware training techniques Logit Class index 
+
+×
+
+×
+
+× × ×
+
+0 1 2 3 4
+
+m
+
+Fig. 1: Illustration of output-layer logits with a margin m. Five classes are shown as an example. Class 0 is the prediction and the extent of the margin to the second highest logit determines the error tolerance of the NN. are employed such that the NN maintains high inference accuracy even in the presence of errors. 
+
+a) Error-tolerant NNs on approximate memory: For ap-proximate DRAM-based systems, the study in [3] provides a comprehensive overview of NN inference using different DRAM technologies and propose a framework for eval-uating NN accuracy under approximate DRAM operation across various system configurations. Their study demonstrates that DRAM parameters, such as supply voltage and timing margins, can be tuned to significantly improve energy effi-ciency and performance, while the resulting accuracy degra-dation remains negligible when retraining is applied. Beyond DRAM, emerging non-volatile memories (NVMs), such as STT-RAM [20], RRAM [8], and FeFET [9] have also been in-vestigated in the context of approximate NN inference. In these technologies, approximation techniques such as low-voltage reads or writes are employed to reduce energy consumption or extend device endurance. While effective, these approaches typically rely on retraining or error-aware optimization to compensate for the increased bit error rates introduced by approximate memory operation. 
+
+b) Error-tolerant NNs for approximate computing units: 
+
+Error tolerance has also been studied extensively for approxi-mate computing units [10]. Approximate arithmetic units, such as multiply–accumulate (MAC) units with reduced precision or relaxed timing, trade computational accuracy for reduced resource usage and improved efficiency [11]. Several studies demonstrate that NNs can tolerate such approximations when trained accordingly. In many cases, retraining or architecture-specific adaptations are required to preserve inference accuracy under approximate computation [12]. 
+
+c) Fault- and error-tolerant NNs: A broader perspective on fault- and error-tolerant NNs is provided by the survey in [21], which reviews both early and more recent approaches to improving NN robustness. Representative examples include the work in [22], which introduces penalty terms to encourage an optimal distribution of computation across neurons to enhance fault tolerance, and the study in [23], which proposes distributing weight magnitudes evenly across neurons to re-duce sensitivity to errors. These approaches primarily focus on architectural or regularization-based robustness rather than explicitly analyzing the role of output-layer decision margins. 
+
+d) Margin-based optimization: In parallel, margin-based concepts have been explored extensively in the context of improving class separability and discriminative power. In par-ticular, studies in face recognition [24]–[27] propose incorpo-rating margins into softmax-based loss functions to maximize inter-class variance while minimizing intra-class variance. These methods typically enforce margins in an angular or embedding space by penalizing the target logit relative to others, thereby improving recognition performance. While these approaches inspire our work, their primary objective is improved discrimination rather than robustness to hardware-induced perturbations. In contrast, our work focuses on the explicit margin between output-layer logits themselves. We argue that this logit-level separation directly governs the classifier’s robustness to perturbations caused by bit errors and quantization noise. Rather than operating on angles or feature embeddings, we directly control the margin that determines the stability of the final classification decision under hardware-induced errors. 
+
+e) Relation to prior work on low-precision networks: 
+
+Margin-based robustness has previously been studied for bi-narized neural networks (BNNs) [18], [19]. However, cor-responding analyses for quantized neural networks (QNNs), where the parameters are represented as n-bit fixed point values, remain largely unexplored. This gap is particularly significant, as QNNs are widely adopted in practical systems and deployed across a broad range of real-world applica-tions. Moreover, the multi-bit nature of QNNs fundamentally changes how bit errors propagate through the NNs, limiting the direct transferability of insights obtained for BNNs. Our work addresses this gap by investigating margin-based robustness in QNNs without relying on training-time error injection. III. D EFINITIONS AND NOTATIONS 
+
+In this work, we consider NNs that perform multiclass classification, where the predicted class is given by the index of the maximum output score. Let X ⊆ Rd denote the input space and let Y = {1, . . . , K } denote the set of K class labels. A NN with parameters θ defines a function 
+
+Fθ : X → RK .
+
+For an input x ∈ X , the NN output Fθ (x) =(fθ (x)1, . . . , f θ (x)K ) consists of K class scores from an NN’s output layer, where fθ (x)k denotes the score associated with class k ∈ Y . For all scores we assume it holds that fθ (x)k ≥ 0.This is without loss of generality as all scores can be shifted by a constant. The predicted class label, i.e. the index with the highest logit, is given by 
+
+ˆy(x) = arg max  
+
+> k∈Y
+
+fθ (x)k.
+
+To reason about the robustness of NNs, we define the following terms. A bit flip is an inversion of a single bit in the binary representation of a weight or input value, i.e., a transition from 0 to 1 or from 1 to 0. An error is defined as a transient fault manifesting as one or more bit flips in the digital representation of parameters or other data of the NN. An error-induced misclassification occurs when the prediction produced by the NN after the occurrence of an error differs from the prediction obtained in the error-free case. The error tolerance of an NN is defined as its ability to preserve its prediction under perturbations to its parameters or other data. A more formal description is given in the following section. IV. R ELATING ERROR TOLERANCE TO OUTPUT -L AYER 
+
+MARGINS 
+
+We propose that the ability of a NN to maintain correct predictions under parameter perturbations can be characterized by the classification margin for each input. We define the classification margin for an input x ∈ X as: 
+
+m(x, θ ) = fθ (x)ˆy(x) − max  
+
+> k∈Y\{ ˆy(x)}
+
+fθ (x)k. (1) This means that the difference m(x, θ ) between the largest and second-largest output values defines the classification margin, which quantifies the robustness of the classification decision. The intuition for the margin and its connection to robustness is illustrated in Figure 1. In the case of m(x, θ ) > 0, the NN is defined to be error tolerant with margin m(x, θ ), for the input 
+
+x. If m(x, θ ) = 0 , there exists more than one class attaining the maximum score. In this case, we assume that the predicted label ˆy(x) is chosen arbitrarily from this set of classes. Any perturbation of the parameters can lead to a pertur-bation of the margin. Let δθ denote perturbations of the NN parameters. With a perturbation δθ , the resulting perturbed margin is 
+
+m(x, θ + δθ ).
+
+If a perturbation δθ causes the classification margin to become zero or negative, i.e., 
+
+m(x, θ + δθ ) ≤ 0,
+
+then the perturbed parameters cause a misclassification, i.e., the predicted label differs from the original prediction. Note that other sources of perturbation can also affect the classifi-cation margin. These include erroneous computations, which may be intentional (e.g. in approximate computing) or uninten-tional (e.g. due to errors in computations or input perturbations due to sensor noise). Therefore, the perturbations considered here are representative and do not limit the generality of the margin-based analysis. Ideally, to maximize the tolerance of NNs to perturbations, the classification margin m(x, θ ) should be as large as possi-ble. Consequently, during training, the NN parameters θ should be optimized so that the margin m(x, θ ) is maximized for each sample in the data set. While this ensures that the NN separates the predicted class from its nearest competitor, it does not account for the distances to other classes, which may also be relatively close in score. Consequently, the network may still be sensitive to perturbations in the parameters that reduce the separation to one of the other classes, leading to misclassifications. To enhance robustness, we therefore consider the margin between the predicted class and all other classes for every sample in the dataset. Formally, for each sample xj ∈ X of the dataset with N samples and each non-predicted class k ∈Y \ { ˆy(xj )}, we define the class-specific and sample-specific margin 
+
+mk(xj , θ ) = fθ (xj )ˆy(xj ) − fθ (xj )k.
+
+This leads us to the central problem definition of this work :Given a set of labelled input data, the objective is to train a NN for high accuracy and high bit error tolerance by finding the NN parameters θ∗ such that 
+
+θ∗ = arg max  
+
+> θ
+
+mk(xj , θ ),
+
+∀j ∈ { 1, . . . , N }, ∀k ∈ Y \ { ˆy(xj )}. (2) Maximizing all such margins simultaneously ensures that the predicted class is well-separated from every other class, thereby improving tolerance to perturbations and achieving high accuracy. This per-class, per-sample maximization gen-eralizes the standard top-two margin objective. V. L OSS FUNCTIONS AND ERROR TOLERANCE 
+
+OPTIMIZATION 
+
+In the following we review two popular loss functions, the hinge loss and the cross-entropy loss, and the role of the classification margin in the optimization. 
+
+A. Hinge Loss 
+
+For error tolerance maximization, the score of the predicted class fθ (xi)ˆy(xi) needs to be as large as possible, while the other fθ (xi)k need to be as small as possible. In the literature, the hinge loss for maximum margin classification, typically used for support vector machines (SVMs), represents a loss function that aims to achieve this objective for two classes. The hinge loss (see [28]), for maximum margin classifica-tion with two classes is defined as 
+
+ℓ(y, f θ ) = max(0 , 1 − y · fθ ), (3) with the ground truth prediction y = ±1 and the prediction of the model fθ ∈ R. This loss becomes small if the predictions have the same sign as the predicted class and are close to 1 in magnitude. For predicted values larger than 1, the loss becomes 0. The 1 in the loss forces the classifier to maximize the margin between two class predictions. The hinge loss is a convex function. Therefore, to solve optimizations problems with it, many of the common optimizers or algorithms in NNs can be used. In NNs, stochastic gradient descent (SGD) strat-egy [29] is typically used, and combined with backpropagation it is currently the standard algorithm to train NNs. Note that the work in [18] applies a modified hinge loss (MHL) to binarized neural networks (BNNs) and demon-strates a significant improvement in bit error tolerance. How-ever, when MHL is transferred to quantized neural networks (QNNs), we observe a substantial degradation in classification accuracy compared to standard cross-entropy loss (CEL), and in many cases the training process fails to converge altogether. We attribute this behavior to fundamental structural differences between BNNs and QNNs, most notably the use of binary activations and the restriction to two discrete weight levels in BNNs, as opposed to ReLU activations and multi-level weight representations in QNNs. These differences alter both the optimization landscape and the propagation of bit errors through the network. Consequently, rather than adapting hinge-loss-based formulations, we take cross-entropy loss (CEL), which consistently yields high accuracy for QNNs, as our starting point and extend it to promote bit error tolerance. 
+
+B. Cross-Entropy Loss 
+
+In the existing literature, a widely adopted approach to improve error tolerance in NNs is to combine the standard cross-entropy loss (CEL) with explicit bit flip injection during training. In these works, CEL is typically used as a default choice due to its proven effectiveness for supervised classifi-cation, rather than as the result of a systematic analysis of its suitability for error-tolerant learning. As a consequence, the role of the loss function itself in achieving robustness to bit errors has not received sufficient attention. Instead, robustness is predominantly attributed to the presence of errors during training, while the changes that error-aware training induces in NNs remain unknown. Motivated by this observation, we focus in this subsection on developing a principled understanding of how loss function design affects error tolerance in NNs. To understand the CEL, we first need to cover cross-entropy. Intuitively, cross-entropy measures how many bits would be needed, on average, to encode events drawn from the true distribution p if we used a coding scheme optimized for a different distribution q. Minimizing the cross-entropy can therefore be interpreted as minimizing the additional encoding inefficiency between p and q. For discrete distributions p and 
+
+q, the cross-entropy is defined as 
+
+H(p, q ) = − X
+
+> x∈X
+
+p(x) log q(x).
+
+Minimizing the cross-entropy between p and q corresponds to making the predicted distribution q as close as possible to the true distribution p. More background on the cross entropy is in [30]. In the context of NNs performing classification, the true distribution p is typically represented as a one-hot vector (in the same format that also Fθ returns), where the entry corresponding to the correct class is equal to one and all other entries are zero. Substituting this into the cross-entropy definition simplifies the loss. Specifically, the summation over all classes reduces to a single term, corresponding to the ground-truth class i, yielding 
+
+H(p, q ) = −
+
+> K
+
+X
+
+> k=1
+
+p(k) log q( ˆ yk) = − log q( ˆ yi).where 
+
+p(k) = 
+
+(
+
+1, if k = i, 
+
+0, otherwise ,
+
+and q( ˆ yi) is the probability the model assigns to class i.To be able to incorporate the concept of margin into the cross-entropy formulation, the softmax function, which is ap-plied before cross-entropy calculation, needs to be considered. For simplicity of presentation, we from now on refer to the NN logit of class k as ˆyk, which correspond to the values 
+
+fθ (x)k as described in Sec. III, and ˆy is the vector of all 
+
+ˆyk. The softmax function converts the logits into a probability distribution over K classes with: 
+
+sof tmax (ˆy)i = exp( ˆ yi)
+
+PKj=1 exp( ˆ yj ) , i = 1 , . . . , K. 
+
+Each softmax output, which is in (0 , 1) , represents the pre-dicted probability of class i. With the ground truth class i and softmax as input, the standard CEL is defined as 
+
+ℓCEL (ˆ y, i ) = − log exp( ˆ yi)
+
+P 
+
+> j
+
+exp ( ˆ yj )
+
+!
+
+, (4) which measures the performance of the NN prediction. This formulation is used in the NN training procedure to compute error backpropagation and based on the results of that, update the model such that the error between the ground truth and the NN prediction is reduced. The CEL in Equation 4 can also be written as 
+
+log X
+
+> j
+
+exp ( ˆ yj ) − ˆyi.
+
+With large differences among ˆyj , the term P 
+
+> j
+
+exp ( ˆ yj ) be-comes approximately the highest value ˆyj ∗ due to the ex-ponential, so the term ˆyj ∗ − ˆyi influences the optimization most (smaller logits still contribute, but less). In case of good predictions, this term will be close to zero (because both ˆyj ∗
+
+and ˆyi will be close to 1). In case of bad predictions, i.e. large 
+
+ˆyj ∗ (or large log P 
+
+> j
+
+exp ( ˆ yj ) in general) and small ˆyi, the 
+
+ˆyj ∗ will be decreased and ˆyi increased, to minimize the loss. Thus, the CEL also leads to an increase of the margins, as the output of the neuron with the correct class is attempted to be maximized, and the output of the neurons of the incorrect classes are pushed to become small. Note however, that the softmax for normalization, using the exponential function, may distort the margins, making larger logits exponentially larger than smaller ones. Unlike a hard margin maximization (e.g., in SVMs), CEL uses softer margins, since all logits influence the loss. Overall, with this intuitive understanding, we conclude that the CEL does not directly maximize the margins as in SVMs with the hinge loss. The CEL primarily ensures that the correct logit is larger than the incorrect ones. All other logits still influence the loss, but their influence is decreased exponentially. VI. O UR NOVEL METHOD : MCEL FOR OPTIMIZING 
+
+ERROR TOLERANCE 
+
+When modifying the cross-entropy loss (CEL), it is de-sirable to preserve its favorable optimization properties and proven effectiveness. Since the loss function directly de-termines how prediction errors are measured and how NN parameters are updated, we deliberately focus on a minimal and principled modification of CEL. In particular, we aim to explicitly encourage a larger separation between the logit of the correct class and those of competing classes. Related work has explored margin-based extensions of cross-entropy to improve class separability, primarily in the context of feature learning and face recognition. These approaches typically operate in angular or embedding spaces rather than directly on output logits [24]–[27]. Let ˆy ∈ RK denote the vector of logits produced by the NN for an input x, and let i be the index of the ground-truth class. A margin-boosted variant of the cross-entropy loss can be defined as 
+
+ℓCELm (ˆ y, i ) = − log exp(ˆ yi − m)exp(ˆ yi − m) + P  
+
+> j̸=i
+
+exp(ˆ yj ) , (5) where m > 0 is a fixed margin applied to the ground-truth logit. Here, we subtract m from the logit of the correct class. The idea is to thereby force the NN to produce a logit larger in magnitude than without applying m. Although the predicted class may be correct and there may be a separation between the correct class logit and the other logits, we still demand a larger separation. A fundamental issue with directly introducing such a shift m
+
+into the CEL is its inherent shift invariance. For any constant 
+
+m ∈ R, the softmax function satisfies 
+
+softmax( ˆy) = softmax( ˆy − m), (6) where ˆy denotes a vector of logits. As a consequence, the NN can cheat by decreasing all logits simultaneously, instead of increasing the logit of the correct class relative to others. This yields identical softmax probabilities to the case without shifts and a low loss value. More generally, absolute logit magni-tudes have no intrinsic meaning in softmax-based classifiers. Only relative differences between logits affect the predicted class probabilities. One possible countermeasure is to explicitly bound the range of admissible logit values. By clipping logits to a fixed interval [−L, L ], a margin can then be enforced by subtracting a constant from the logit of the correct class. While this approach prevents numerical overflow and limits global logit shifts, hard clipping introduces non-smooth boundaries with zero gradients outside the clipping interval. Moreover, it relies on a fixed absolute bound and therefore lacks scale awareness. To address the issues of unconstrained logit shifts, the absence of a meaningful reference scale for margins, and the optimization difficulties introduced by hard clipping, we propose a smooth logit clamping mechanism based on the hyperbolic tangent function. For each logit ˆyk, we define the clamped logit as 
+
+˜yk = L · tanh 
+
+ ˆyk
+
+L
+
+
+
+, k = 1 , . . . , K, (7) where L > 0 is a fixed saturation bound. This transformation behaves approximately linearly for small |ˆyk|, i.e. it keeps the notion of margins with L ·
+
+tanh( zL ) ≈ z, such that ˜yk ≈ ˆyk, thereby preserving relative logit differences and classification margins for typical logit magnitudes. By scaling the argument of the tanh function by 1/L , the transformation closely approximates the identity function in this regime, provided that L is chosen sufficiently large relative to the expected logit magnitudes. For large |ˆyk|
+
+compared to L, the output smoothly saturates to ±L, pre-venting uncontrolled logit growth while maintaining continuity and differentiability everywhere. Multiplying the output of the 
+
+tanh by L restores the original logit scale, allowing margins to be defined directly in the logit domain. As a result, the transformation effectively acts as a bounded, scale-preserving squashing function that leaves moderate logits unchanged and only intervenes when logits become excessively large. With tanh-based clamping, all logits are confined to the interval [−L, L ], yielding a fixed dynamic range of width 2L.With the confined logit interval, the margin m from Equation 5 can now be reintroduced in a reasonably way. The margin m
+
+can then be applied to enforce a minimum logit separation corresponding to a fraction 
+
+RLS = m
+
+2L , (8) which we refer to as the Relative Logit Separation. For example, choosing L = 100 and m = 32 corresponds to a required separation of approximately 16% of the available logit range. This interpretation provides a clear geometric meaning for the margin and enables intuitive control over its strength. The intuition behind this concept is shown in Figure 2. To explicitly enforce a classification margin, we modify the clamped logit corresponding to the ground-truth class. Let 
+
+i ∈ { 1, . . . , K } denote the correct class index. The margin-modified logits are defined as 
+
+˜y(m) 
+
+> i
+
+= ˜ yi − m, ˜y(m) 
+
+> j
+
+= ˜ yj ∀j̸ = i, (9) where m > 0 is the margin parameter. The resulting tanh-clipped margin cross-entropy loss (MCEL) is then given by 
+
+ℓMCEL (ˆ y, i ) = − log exp(˜ yi − m)exp(˜ yi − m) + P  
+
+> j̸=i
+
+exp(˜ yj ) . (10) This formulation simultaneously ensures bounded logits, preventing degenerate solutions based on global logit shifts, explicitly enforces a margin between the correct and com-peting classes, and preserves meaningful logit differences for moderate values due to the approximately linear behavior of the clamping function around zero. In contrast to hard clipping, the proposed tanh-based clamping introduces no discontinuities and maintains smooth gradients throughout 
+
+> m
+> 2L
+
++L
+
+−L
+
+z
+
+score Fig. 2: Intuition behind the tanh-clipped Margin Cross-Entropy (MCEL) Loss. Raw logits are first passed through a scaled tanh function, bounding class scores to a finite interval [−L, L ]
+
+and preventing unbounded growth of logit magnitudes. Dotted lines: Saturation limits imposed by tanh. Solid curve: tanh function. Horizontal violet line: Competing (non-target) class score. The enforced margin m requires the target class score to exceed competing class scores by a fixed fraction of the available dynamic range, i.e. m 
+
+> 2L
+
+.training. Moreover, by constraining logits to a predefined range, the margin parameter m becomes directly interpretable through the ratio RLS = m/ (2 L), making the loss particularly well suited for scenarios in which bit error tolerance must be both tunable and interpretable. VII. T HE EFFECT OF PERTURBATIONS IN QNN S/BNN S
+
+Up to this point, we considered NN parameters under perturbations to be in R. This is convenient for theoretical analyses, however, for efficient computations, these values need to be quantized. NNs with quantized parameters, i.e. Quantized NNs (QNNs), are commonly used in everyday-life applications across various fields, where resource efficiency is an important factor. Before we explore the effectiveness of MCEL under bit errors, we first discuss the impact that bit flips have on the quantized NN parameters. We first cover QNNs, and then also consider BNNs, as an example of an NN architecture with a bounded (binary) activation function. Here we assume quantization schemes R → Q, where Q is a set with a finite number of levels, which we denote here as ordered Q = {q1, . . . , q L}, where qv < q v+1 for 1 ≤ v ≤ L.If an arbitrary quantization scheme is applied to w, then we describe the quantized value as Q(w) = qv .
+
+A. Effects of Perturbations in n-bit QNNs 
+
+In n-bit QNNs, weights and activations are represented using a finite set of discrete levels. Let a real-valued quantity 
+
+v be uniformly quantized using n bits, resulting in 
+
+ql = Q(v) ∈ Q , |Q| = 2 n,
+
+where the set of possible quantization values has 2n elements. Uniform quantization of a real-valued scalar v ∈
+
+[vmin , v max ] to an n-bit integer representation can be defined as 
+
+q = round 
+
+
+
+(v − vmin ) 2n − 1
+
+vmax − vmin 
+
+
+
+. (11) Here, vmin and vmax denote the minimum and maximum values of the quantization range. The scaling factor 2n−1
+
+> vmax −vmin
+
+maps the continuous value range [vmin , v max ] to the discrete integer interval {0, . . . , 2n − 1}. Subtracting vmin shifts the input range such that vmin is mapped to zero, and the rounding operation yields the nearest representable integer value. Recall that the set of quantized values is Q = {q1, . . . , q L}.A bit flip in the encoding leads q to become a value in Q
+
+with a different index, here ql becomes ql∗, where l̸ = l∗. The induced absolute error is therefore given by 
+
+|ql − ql±k| = k · ∆,
+
+where ∆ is the step size in the encoding, i.e. any two subsequent elements ql and ql+1 (or ql−1) have the difference 
+
+∆. The value k is the number of quantization level that are crossed due to the bit flip. Therefore, the error scales linearly with the quantization step size. Note that the index for the value in Q is 1 ≤ l ≤ L. Due to bit flips, values can only assume levels inside the quantization set, which prevents errors from uncontrollably propagating through the NN. Therefore, the impact of a bit flip is bounded within the quantization set. The value of the induced value change k · ∆ depends on the position of the flipped bit in the binary encoding. Errors in more significant bits result in larger perturbations, while errors in less significant bits induce smaller deviations. Consider the quantized value to be an unsigned integer of the form 
+
+Bb−1 . . . B 1B0, where Bi can be 1 or 0. The bit flip with the largest impact is at the position of the most significant bit, here it is Bb−1. This means the impact of one bit flip can be bounded by 
+
+k · ∆ ≤ 2b−1.
+
+The position with the second most impact is at b − 2, which follows for all bit positions until b − b = 0 .In NN computations, the effects of such perturbations propagate through linear operations and nonlinear activations (e.g. ReLU). For a neuron with perturbations in the quantized weights, the error accumulates, shifting the pre-activation value and thus the result of the activation function. Overall, the robustness of n-bit QNNs to perturbations is determined by the interplay between quantization resolution and classification margins. While higher bit widths reduce the magnitude of individual perturbations, low-bit quantiza-tions have larger relative step sizes and therefore changes in magnitudes in case of perturbations. It is important to note that reducing the number of bits in uniform quantization does not necessarily improve the NN’s tolerance to errors. We provide empirical evidence of this phenomenon in our evaluation section. 
+
+B. Effects of Perturbations in Binarized Neural Networks 
+
+In Binarized Neural Networks (BNNs), the weights and ac-tivations are quantized to {± 1}. Due to this, the multiplication, summation, and activation can be computed with 
+
+2 · popcount (XNOR (W, A)) − #bits > T, (12) where XNOR (W, A) computes the XNOR of the rows in W
+
+with the columns in A (analogue to matrix multiplication), popcount counts the number of set bits in the XNOR result, 
+
+#bits is the number of bits of the XNOR operands, and T
+
+is a vector of learnable threshold parameters, with one entry for each neuron. Note that the result of popcount is multiplied by two and then #bits is subtracted, by which the result of popcount is transformed into a value that would have resulted if the computations were performed using the binarization 
+
+{± 1}. Finally, the comparisons against the thresholds produce again binary values. To reason about the effects of perturbations, we consider single bit flips. One bit flip in one weight manifests itself in an increase (0 to 1 flip) or decrease (1 to 0 flip) of the XNOR result by 1. As long as the weights or input flips do not cause the pre-activation value to pass the threshold, the activation will not flip, in which case the neuron is bit error tolerant. Therefore, the bit error tolerance of an hidden layer neuron 
+
+j depends on the margin 
+
+Mx,j = |sx,j − tj | (13) between the pre-activation value ( sx,j ) and the threshold ( tj ). With each bit flip sx,j may get closer to tj and may finally flip the output of the activation if tj is passed. A detailed proof for the exact number of bit flips is given in [18]. An analysis of neuron-based bit error tolerance has been conducted in [15], showing the relation of the metric in 13 to the bit error tolerance of BNNs. Using this metric for optimiz-ing bit error tolerance has been reported to be unsuccessful. In short, based on the evaluations, the reason given for the negative result is that bit flips of neuron outputs can only affect the BNN prediction if the effect of bit flips reach the output layer and lead to a change of the predicted class. Focusing on applying the notion of margin to the output layer lead to favorable results [18], as is also the focus of this work. In summary, in BNNs, the position of the bit flip does not matter. For one bit flip in the weight, the XNOR result always is increased or decreased by 1. Furthermore, due to the fact that weights and activations are binarized, the effect of bit flips is bounded. If the binary output of the neurons do not flip, then the bit flips may not have any impact in the BNN at all. VIII. E VALUATIONS 
+
+The experimental evaluation is structured as follows: First, the overall experimental setup is described in Section VIII-A. Next, the experimental results obtained using the margin-based cross-entropy loss (MCEL) are presented in Section VIII-B. This is followed by an analysis of the margin evolution during training in Section VIII-C. 
+
+A. Experiment Setup 
+
+The aim in this Section is to explore and evaluate the MCEL across multiple models, datasets, and quantization settings commonly applied in the embedded systems domain, and compare it to the state of the art methods. TABLE I: Datasets used for experiments.                     
+
+> Name # Train # Test # Dim # classes FashionMNIST (VGG3) 60000 10000 (1,28,28) 10 SVHN (VGG7) 73257 26032 (3,32,32) 10 CIFAR10 (MobileNetV2) 50000 10000 (3,32,32) 10 Imagenette (ResNet18) 9470 3925 (3,64,64) 10
+
+To assess the error tolerance of the NNs in a general way, we inject bit flips into the weights, with varying probability, de-pending on the NN’s error tolerance capability, with different bit error rates (BERs). This matches the assumptions in recent studies about approximate memories and serves as a model for approximate computing. We assume that the probability for 0 to flip to 1 is the same as the probability for 1 to flip to 0. For efficient bit flip injection, we use the frame-work in https://github.com/myay/BNN-QNN-ErrorEvaluation, which uses highly optimized GPU-kernels for efficient bit-level manipulations. We adopt quantization-aware training (QAT) throughout this work, which is also implemented in the framework above. QAT is performed for all quantization schemes. As the goal is to isolate and study the mechanisms underlying bit error tolerance in QNNs and find out the effects on the number of encoding bits, we also apply QAT for 8-bit NNs, for which Post-Training-Quantization (PTQ) is typically applied. QAT ensures that the network is trained and evaluated under identical quantization constraints for all quantization schemes, avoiding any confounding effects. We therefore consider QAT a more suitable experimental setting for analyzing robustness and margin-based behavior under bit errors. To compare our method MCEL to a state-of-the-art baseline, we employ the standard cross-entropy loss as implemented in the official PyTorch framework. For our proposed MCEL method, we augment the loss computation with a tanh-based logit clipping operation (Equation 7) and apply an explicit margin by subtracting a fixed value m from the logit corre-sponding to the ground-truth class (Equation 9). Importantly, the margin modification is applied only within the loss com-putation and does not alter the NN outputs during inference or training forward passes. As a result, the NN does not observe the margin directly and cannot satisfy the margin constraint through logit shifting or rescaling. In our evaluations, we use moderately difficult prediction tasks, with a small VGG3 model and relatively large VGG7, MobileNetV2, and ResNet18 models. The NNs are up-to-date, suitably sized (not overparametrized) and capable models tailored for resource-constrained inference on the edge. We use the datasets Fashion, SVHN, CIFAR10, and Imagenette (a subset of ImageNet, scaled to 64 × 64 in our work), see Table I, inspired by the experiment setups in [18], [31]. Our models (Table II) are quantized architectures of VGG [32], MobileNetV2 [33], and ResNet [34] models, adapted for the above datasets. In the case of 2-,4-, and 8-bit QNNs, we use the ReLU activation function. In the case of BNNs, we use the weakest variant, with binarized weights and binarized activations, which are the hardest to train. We use Adam for optimization in all cases. We use quantization-aware training and quantize the weights, i.e. we quantize the weights during inference and training according to Equation 11. Note that we emphasize robustness analysis rather than focusing on fine-tuning for peak accuracy. Note that preserving the notion of meaningful margins requires the network logits to remain within the approximately linear region of the tanh function, where L · tanh   zL
+
+ ≈ z. To satisfy this condition, the raw output logits of the neural net-work are scaled by a constant factor such that their magnitudes are close to unity. With this scaling, dividing the logits by 
+
+L = 100 ensures that they lie well within the linear regime of the tanh function, thereby preserving relative logit differences and enabling effective margin enforcement. 
+
+B. Experiment Results 
+
+Figure 3 summarizes the experimental results for QNNs and BNNs across datasets of varying difficulty, multiple archi-tectures, and different quantization schemes. Overall, models trained with the proposed MCEL consistently achieve higher robustness to bit errors, measured as classification accuracy under increasing bit error rates, compared to models trained with the standard cross-entropy loss. In the figure, the blue curves correspond to MCEL-trained models. For example for FashionMNIST with 4b, the accruacy achieved by MCEL is 15.32% higher than for CEL for a bit error rate of 1%. Other similar potential operating points can be identified in the plots. For all experiments, we evaluate margin values in powers of two up to 128 and m = 192 , which corresponds to the near maximum relative logit separation achievable with m
+
+> 2L
+
+for L = 100 , as used throughout this study. This bounded and interpretable parameterization makes the selection of suitable margin values straightforward. The highest bit error tolerance is achieved with the margin values reported in the figure legends. Increasing the margin beyond these values does not yield additional robustness gains and often degrades nominal accuracy. For margin values exceeding m > 200 ,no measurable difference compared to 192 or m = 200 is observed, except for BNNs with FashionMNIST. The most challenging experimental configuration for MCEL is Imagenette evaluated with a ResNet18 architecture using 2-bit quantized weights. In this case, multiple limiting factors coincide. First, Imagenette images are downscaled to a re-duced spatial resolution, significantly reducing the available visual information. Second, the use of 2-bit weights severely constrains the representational capacity of the network. Finally, MCEL enforces an explicit margin in the output logits, further restricting the feasible solution space. As a result, the net-work is constrained from multiple directions simultaneously, limiting its ability to achieve both high classification accuracy and large confidence margins. Empirically, this manifests as slow or unstable convergence, with accuracy saturating at approximately 60% , even when trained using the standard cross-entropy loss. The impact of MCEL further depends on the employed quantization scheme. For 2- and 4-bit quantized neural net-TABLE II: QNNs with fully connected (FC), convolutional (C), and maxpool (MP) layers. SCB: Skip-connection block. IRB: Inverted residual block. AAP: Adaptive average pool. Convolutional layers are followed by batch normalization layers, except output layers. EP: epochs, BS: batch size, LR: learning rate, SS: step size, Gamma: decay factor (multiplied with LR every SS epochs). In brackets are the hyperparameters for the BNN models.                                                                                         
+
+> Name Architecture EP BS LR SS Gamma VGG3 In →C64 →MP2 →C64 →MP2 →FC2048 →FC10 100 256 10 −310 0.5 VGG7 In →C64 →C64 →MP2 →C128 →C128 →MP2 50 (100) 256 10 −35 (10) 0.25 (0.5)
+> →C256 →C256 →MP2 →FC512 →FC10 MobileNetV2 In →C32 →IRB(t1,c32) 100 128 10 −310 0.5
+> →IRB(t6,c64,s2) →IRB(t6,c96)
+> →C256 →AAP →FC10 ResNet18 In →C64 →SCB64 →SCB128 →SCB256 100 128 10 −310 0.5
+> →SCB512 →AAP →FC10
+
+works, MCEL consistently provides substantial robustness improvements. In contrast, the performance gap between MCEL and standard cross-entropy loss is smaller for 8-bit quantization. For Imagenette with 8-bit weights, MCEL strug-gles to achieve high levels of bit error tolerance, indicating that the effectiveness of margin-based robustness mechanisms diminishes as quantization noise becomes less dominant. As shown in Figure 3 (last row), MCEL is also effective for BNNs. For FashionMNIST with VGG3, MHL (modified hinge loss from [18]) slightly outperforms MCEL, although the performance difference is small. In this case, MCEL with 
+
+m = 256 leads to higher error tolerance than m = 192 ,indicating high potential for error tolerance with this NN and dataset combination. In contrast, for SVHN with VGG7, MCEL outperforms MHL, demonstrating that margin-based optimization at the logit level generalizes beyond quantized multi-bit NNs. For the BNNs models, we adopt the VGG3 and VGG7 architectures from [18] to enable a direct com-parison between the modified hinge loss (MHL) and MCEL. Constructing competitive BNN variants of more complex architectures such as ResNet or MobileNetV2 remains an open research problem and typically requires additional techniques, including application-specific architectural modifications, neu-ral architecture search, or ensemble methods [35], [36]. Re-stricting the comparison to established BNN models ensures comparability. Taken together, the results on QNNs and BNNs empirically confirm the theoretical predictions underlying MCEL and demonstrate that the method behaves as intended across a wide range of datasets, architectures, and quantization levels. 
+
+C. Margin Evolution 
+
+The evolution of the margin between the highest and second-highest logits produced by the NNs, referred to as the Mean Logit Margin (MLM) , is shown in Figure 4. As representative examples, we consider the NN models trained with 4-bit weight quantization. For each training epoch, the MLM is computed by averaging the top-2 logit margins over all training samples processed during that epoch. The top-2 margin for an individual sample is defined in Equation 1 and an intuitive illustration is in Figure 1. For 4-bit QNNs with FashionMNIST and SVHN, the MCEL exhibits an MLM that is approximately twenty times larger than that obtained with the standard cross-entropy loss. For CI-FAR10 and Imagenette, the MCEL exhibits an approximately 3 times higher MLM than CEL. We also observed in Figure 3 that in these two cases, the achieved error tolerance is lower compared to the cases of Fashion or SVHN. For the BNNs, the MLM difference between MCEL and CEL is the largest, the factor is approximately 30 for Fashion and 60 for SVHN. These observations confirm that MCEL effectively enforces larger output-layer margins, as intended. In contrast, classical CEL primarily ensures that the logit corresponding to the correct class exceeds competing logits, but does not explicitly encourage a substantial separation between them. IX. D ISCUSSION 
+
+A natural point of comparison for our approach is the modified hinge loss (MHL) proposed in [18], which was shown to increase bit error tolerance in BNNs without requir-ing error injection during training. We investigated whether a similar effect could be achieved for quantized neural net-works (QNNs) by applying the MHL in our experimental setup. However, despite extensive hyperparameter tuning, we consistently observed that training QNNs with the MHL re-sulted in significantly lower classification accuracy compared to standard cross-entropy loss, while error tolerance did not improve in a meaningful way. The underlying reasons for this discrepancy between BNNs and QNNs remain unclear and warrant further investigation. We hypothesize that structural differences between BNNs and QNNs, such as the use of ReLU activations and multi-level weight representations in QNNs, fundamentally alter the optimization dynamics and error propagation behavior, limiting the effectiveness of hinge-based objectives. In contrast, our proposed MCEL formulation provides an interpretable margin parameter through the rela-tive logit separation RLS = m 
+
+> 2L
+
+, enabling principled tuning of robustness targets without costly hyperparameter search. Moreover, unlike the hard clipping behavior inherent to MHL, the smooth tanh-based clamping used in MCEL preserves gradient continuity and leads to more stable optimization, particularly in low-precision regimes where training dynamics are already fragile. While the proposed margin-based framework proves effec-tive for classification tasks with explicit logits, it is subject to 0 1 2 3 4
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+60 
+
+70 
+
+80 
+
+90 
+
+Bit error rate (%) 
+
+FASHION (2b VGG3) 
+
+> CEL (Sota)
+> MCEL-8 (Ours)
+> MCEL-32 (Ours)
+
+0 1 2 3 4
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+60 
+
+70 
+
+80 
+
+90 
+
+Bit error rate (%) 
+
+FASHION (4b VGG3) 
+
+> CEL (Sota)
+> MCEL-32 (Ours)
+> MCEL-128 (Ours)
+
+0 1 2 3 4
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+60 
+
+70 
+
+80 
+
+90 
+
+Bit error rate (%) 
+
+FASHION (8b VGG3) 
+
+> CEL (Sota)
+> MCEL-16 (Ours)
+> MCEL-32 (Ours)
+
+0 0.1 0.2 0.3 0.4 0.5 
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+60 
+
+70 
+
+80 
+
+90 
+
+Bit error rate (%) 
+
+SVHN (2b VGG7) 
+
+> CEL (Sota)
+> MCEL-1.5 (Ours)
+> MCEL-2 (Ours)
+
+0 0.5 1 1.5 2
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+60 
+
+70 
+
+80 
+
+90 
+
+Bit error rate (%) 
+
+SVHN (4b VGG7) 
+
+> CEL (Sota)
+> MCEL-32 (Ours)
+> MCEL-64 (Ours)
+
+0 0.5 1 1.5 2
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+60 
+
+70 
+
+80 
+
+90 
+
+Bit error rate (%) 
+
+SVHN (8b VGG7) 
+
+> CEL (Sota)
+> MCEL-64 (Ours)
+> MCEL-128 (Ours)
+
+0 0.1 0.2 0.3 0.4
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+60 
+
+70 
+
+80 
+
+90 
+
+Bit error rate (%) 
+
+CIFAR10 (2b MobileNetV2) 
+
+> CEL (Sota)
+> MCEL-1 (Ours)
+
+0 0.2 0.4 0.6 0.8
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+60 
+
+70 
+
+80 
+
+90 
+
+Bit error rate (%) 
+
+CIFAR10 (4b MobileNetV2) 
+
+> CEL (Sota)
+> MCEL-4 (Ours)
+
+0 0.2 0.4 0.6 0.8
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+60 
+
+70 
+
+80 
+
+90 
+
+Bit error rate (%) 
+
+CIFAR10 (8b MobileNetV2) 
+
+> CEL (Sota)
+> MCEL-8 (Ours)
+
+0 0.2 0.4
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+60 
+
+70 
+
+80 
+
+90 
+
+Bit error rate (%) 
+
+Imagenette (2b ResNet18) 
+
+> CEL (Sota)
+> MCEL-4 (Ours)
+
+0 0.5 1 1.5 2
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+60 
+
+70 
+
+80 
+
+90 
+
+Bit error rate (%) 
+
+Imagenette (4b ResNet18) 
+
+> CEL (Sota)
+> MCEL-8 (Ours)
+
+0 0.5 1 1.5 2
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+60 
+
+70 
+
+80 
+
+90 
+
+Bit error rate (%) 
+
+Imagenette (8b ResNet18) 
+
+> CEL (Sota)
+> MCEL-32 (Ours)
+
+0 5 10 15 20 
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+60 
+
+70 
+
+80 
+
+90 
+
+Bit error rate (%) 
+
+FASHION (VGG3 BNN) 
+
+> CEL
+> MCEL-192 (Ours)
+> MHL-128 (Sota)
+> MCEL-256 (Ours)
+
+0 2 4 6 8 10 12 
+
+60 
+
+70 
+
+80 
+
+90 
+
+Bit error rate (%) 
+
+SVHN (BNN VGG7) 
+
+> CEL
+> MHL-128
+> MCEL-192 (Ours)
+
+Fig. 3: Accuracy over bit error rate for 2-, 4-, and 8-bit QNNs, as well as BNNs. The error rate is specified under a given bit flip injection rate on the x-axes. CEL is the state of the art (SOTA), MCEL is our proposed method. We do not perform any bit flip injection during training, we only inject errors during inference to assess error tolerance. 0 50 100 
+
+10 
+
+20 
+
+30 
+
+40 
+
+Epoch 
+
+> MLM CEL
+
+FASHION (4b VGG3) 0 50 100 
+
+200 
+
+400 
+
+600 
+
+800 
+
+Epoch 
+
+> MLM MCEL
+
+FASHION (4b VGG3) 0 20 40 
+
+4
+
+6
+
+8
+
+Epoch 
+
+> MLM CEL
+
+SVHN (4b VGG7) 0 20 40 
+
+100 
+
+200 
+
+Epoch 
+
+> MLM MCEL
+
+SVHN (4b VGG7) 0 50 100 
+
+1
+
+2
+
+3
+
+4
+
+Epoch 
+
+> MLM CEL
+
+CIFAR10 (4b MobileNetV2) 0 50 100 
+
+5
+
+10 
+
+Epoch 
+
+> MLM MCEL
+
+CIFAR10 (4b MobileNetV2) 0 50 100 
+
+0
+
+2
+
+4
+
+6
+
+8
+
+Epoch 
+
+> MLM CEL
+
+Imagenette (4b ResNet18) 0 50 100 
+
+0
+
+10 
+
+20 
+
+30 
+
+Epoch 
+
+> MLM MCEL
+
+Imagenette (4b ResNet18) 0 50 100 
+
+5
+
+10 
+
+15 
+
+Epoch 
+
+> MLM CEL
+
+FASHION (BNN VGG3) 0 50 100 
+
+200 
+
+400 
+
+600 
+
+Epoch 
+
+> MLM MCEL
+
+FASHION (BNN VGG3) 0 50 100 
+
+5
+
+10 
+
+15 
+
+Epoch 
+
+> MLM CEL
+
+SVHN (BNN VGG7) 0 50 100 
+
+0
+
+500 
+
+1,000 
+
+Epoch 
+
+> MLM MCEL
+
+SVHN (BNN VGG7) Fig. 4: Evolution of the margins between the highest and the second highest logit the NN returns (i.e. MLM for Mean Logit Margin) during training. Left column: CEL. Right column: MCEL. QNNs with 4-bit quantization and BNNs shown as examples. Y-axis: Average of top2 margins (see Equation 1 for one margin and Figure 1 for an illustration) over all per-training-sample top2 margins of one epoch. certain limitations. Our analysis assumes a discrete class set-ting in which prediction confidence can be expressed through a linear ordering of output logits and where classification margins are well defined. As a result, the proposed robustness mechanism does not directly extend to non-logit-based models, such as generative architectures, in which class-wise logits are absent or lack a clear semantic interpretation. Similarly, models with structured outputs, such as sequences, or graphs, present additional challenges, as outputs are no longer discrete classes and the notion of a margin depends on the geometry of the output space and the encoding of target structures. Extending margin-based robustness concepts to these settings, and identifying suitable analogues of logit separation for non-classification tasks, is an important direction for future research. X. C ONCLUSION 
+
+We establish a direct link between robustness and NN output-layer margins and exploit this insight to derive our proposed margin-cross-entropy loss (MCEL). Extensive exper-iments across multiple datasets, architectures, and quantization schemes demonstrate that MCEL substantially improves ro-bustness to bit errors while maintaining prediction accuracy. Moreover, the method is simple to implement, computationally efficient, and can be integrated into existing training pipelines as a drop-in replacement for standard cross-entropy loss. Beyond its empirical effectiveness, MCEL highlights abroader shift in how error tolerance in NNs can be addressed. Rather than relying on costly and increasingly unscalable training-time error injection, our results show that focusing on the underlying mechanisms of robustness leads to inter-pretable, explainable, and tunable optimization methods. We view this work as a first step toward generally robust NNs trained with minimal modifications to the training procedure, paving the way for scalable robustness on future approximate computing platforms. REFERENCES [1] B. Reagen, P. Whatmough, R. Adolf, S. Rama, H. Lee, S. K. Lee, J. M. Hern´ andez-Lobato, G. Wei, and D. Brooks, “Minerva: Enabling low-power, highly-accurate deep neural network accelerators,” in Interna-tional Symposium on Computer Architecture (ISCA) , 2016. [2] L. Yang and B. Murmann, “Sram voltage scaling for energy-efficient convolutional neural networks,” in International Symposium on Quality Electronic Design (ISQED) , 2017. [3] S. Koppula, L. Orosa, A. G. Ya˘ glikc ¸i, R. Azizi, T. Shahroodi, K. Kanellopoulos, and O. Mutlu, “Eden: Enabling energy-efficient, high-performance deep neural network inference using approximate dram,” in International Symposium on Microarchitecture (MICRO) , 2019. [4] Z. Wan, N. Chandramoorthy, K. Swaminathan, P.-Y. Chen, K. Bhardwaj, V. J. Reddi, and A. Raychowdhury, “Mulberry: Enabling bit-error robust-ness for energy-efficient multi-agent autonomous systems,” in 29th ACM International Conference on Architectural Support for Programming Languages and Operating Systems , ASPLOS ’24, 2024. [5] T.-N. Pham, Q.-K. Trinh, I.-J. Chang, and M. Alioto, “Stt-bnn: A novel stt-mram in-memory computing macro for binary neural networks,”                     
+
+> IEEE Journal on Emerging and Selected Topics in Circuits and Systems ,2022. [6] H. Aziza, C. Zambelli, S. Hamdioui, S. Diware, R. Bishnoi, and A. Gebregiorgis, “On the reliability of rram-based neural networks,” in IFIP/IEEE 31st International Conference on Very Large Scale Inte-gration (VLSI-SoC) , 2023. [7] Y. Zhang, Z. Zhou, P. Huang, M. Fan, R. Han, W. Shen, L. Liu, X. Liu, B. Gao, H. Wu, H. Qian, and J. Kang, “An improved rram-based binarized neural network with high variation-tolerated forward/backward propagation module,” IEEE Transactions on Electron Devices , 2020. [8] T. Hirtzlin, M. Bocquet, J. Klein, E. Nowak, E. Vianello, J. M. Portal, and D. Querlioz, “Outstanding bit error tolerance of resistive ram-based binarized networks,” in International Conference on Artificial Intelligence Circuits and Systems (AICAS) , 2019. [9] M. Yayla, S. Buschj¨ ager, A. Gupta, J.-J. Chen, J. Henkel, K. Morik, K.-H. Chen, and H. Amrouch, “Fefet-based binarized neural networks under temperature-dependent bit errors,” IEEE Transactions on Computers ,2022. [10] S. Mittal, “A survey of techniques for approximate computing,” ACM Comput. Surv. , 2016.
+
+[11] G. Armeniakos, G. Zervakis, D. Soudris, and J. Henkel, “Hardware approximate techniques for deep neural network accelerators: A survey,” 
+
+arXiv:2203.08737 , 2022. [12] S. S. Sahoo, S. Ullah, and A. Kumar, “Axosyn: An open-source framework for synthesizing novel approximate arithmetic operators,” in 
+
+arXiv:2507.20007 , 2025. [13] P. Chi, S. Li, C. Xu, T. Zhang, J. Zhao, Y. Liu, Y. Wang, and Y. Xie, “Prime: A novel processing-in-memory architecture for neural network computation in reram-based main memory,” in International Symposium on Computer Architecture (ISCA) , 2016. [14] A. Shafiee, A. Nag, N. Muralimanohar, R. Balasubramonian, J. P. Stra-chan, M. Hu, R. S. Williams, and V. Srikumar, “Isaac: A convolutional neural network accelerator with in-situ analog arithmetic in crossbars,” in International Symposium on Computer Architecture (ISCA) , 2016. [15] S. Buschj¨ ager, J. Chen, K. Chen, M. G¨ unzel, C. Hakert, K. Morik, R. Novkin, L. Pfahler, and M. Yayla, “Towards explainable bit error tolerance of resistive ram-based binarized neural networks,” 
+
+arXiv:2002.00909 , 2020. [16] V. Mrazek, Z. Vasicek, L. Sekanina, M. A. Hanif, and M. Shafique, “Alwann: Automatic layer-wise approximation of deep neural net-work accelerators without retraining,” in International Conference on Computer-Aided Design (ICCAD) , 2019. [17] M. Yayla, S. Thomann, S. Buschj¨ ager, K. Morik, J.-J. Chen, and H. Amrouch, “Reliable binarized neural networks on unreliable beyond von-neumann architecture,” IEEE Transactions on Circuits and Systems I: Regular Papers , 2022. [18] S. Buschj¨ ager, J.-J. Chen, K.-H. Chen, M. G¨ unzel, C. Hakert, K. Morik, R. Novkin, L. Pfahler, and M. Yayla, “Margin-maximization in binarized neural networks for optimizing bit error tolerance,” in Design, Automa-tion and Test in Europe Conference and Exhibition (DATE) , 2021. [19] S. Buschj¨ ager, J.-J. Chen, K.-H. Chen, M. G¨ unzel, K. Morik, R. Novkin, L. Pfahler, and M. Yayla, “Bit error tolerance metrics for binarized neural networks,” arXiv:2102.01344 , 2021. [20] T. Hirtzlin, B. Penkovsky, J. Klein, N. Locatelli, A. F. Vincent, M. Bocquet, J. M. Portal, and D. Querlioz, “Implementing binarized neural networks with magnetoresistive RAM without error correction,” 
+
+arXiv:1908.04085 , 2019. [21] C. Torres-Huitzil and B. Girau, “Fault and error tolerance in neural networks: A review,” IEEE Access , 2017. [22] P. J. Edwards and A. F. Murray, “Penalty terms for fault toler-ance,” in Proceedings of International Conference on Neural Networks (ICNN’97) , 1997. [23] S. Cavalieri and O. Mirabella, “A novel learning algorithm which improves the partial fault tolerance of multilayer neural networks,” 
+
+Neural Netw. , vol. 12, p. 91–106, Jan. 1999. [24] W. Liu, Y. Wen, B. Raj, R. Singh, and A. Weller, “Sphereface revived: Unifying hyperspherical face recognition,” IEEE Transactions on Pattern Analysis and Machine Intelligence , vol. 45, no. 2, pp. 2458–2474, 2023. [25] J. Deng, J. Guo, J. Yang, N. Xue, I. Kotsia, and S. Zafeiriou, “Arcface: Additive angular margin loss for deep face recognition,” IEEE Transac-tions on Pattern Analysis and Machine Intelligence , 2022. [26] H. Wang, Y. Wang, Z. Zhou, X. Ji, D. Gong, J. Zhou, Z. Li, and W. Liu, “Cosface: Large margin cosine loss for deep face recognition,” in IEEE/CVF Conference on Computer Vision and Pattern Recognition ,2018. [27] Y. Wang, Z. Zhan, J. Li, J. Tang, B. Yuan, L. Zhao, W. Wen, S. Wang, and X. Lin, “Universal Approximation Property and Equivalence of Stochastic Computing-based Neural Networks and Binary Neural Net-works,” arXiv:1803.05391 , 2018. [28] L. Rosasco, E. De, V. A. Caponnetto, M. Piana, and A. Verri, “Are loss functions all the same,” Neural Computation , 2003. [29] T. Zhang, “Solving large scale linear prediction problems using stochas-tic gradient descent algorithms,” in International Conference on Machine Learning (ICML) , 2004. [30] I. Goodfellow, Y. Bengio, and A. Courville, Deep Learning . 2016. http: //www.deeplearningbook.org. [31] V. Mohaghaddas, H. Kattan, T. Buecher, M. Yayla, J.-J. Chen, and H. Amrouch, “Temperature-aware memory mapping and active cooling of neural processing units,” in International Symposium on Low Power Electronics and Design (ISLPED) , 2023. [32] K. Simonyan and A. Zisserman, “Very deep convolutional networks for large-scale image recognition,” in International Conference on Learning Representations (ICLR) , 2014. [33] M. Sandler, A. Howard, M. Zhu, A. Zhmoginov, and L.-C. Chen, “Mobilenetv2: Inverted residuals and linear bottlenecks,” in IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2018. [34] K. He, X. Zhang, S. Ren, and J. Sun, “Deep residual learning for image recognition,” in Computer Vision and Pattern Recognition Conference (CVPR) , 2016. [35] N. P. Shankar, D. Sadhukhan, N. Nayak, T. Tholeti, and S. Kalyani, “Binarized resnet: Enabling robust automatic modulation classification at the resource-constrained edge,” IEEE Transactions on Cognitive Communications and Networking , 2024. [36] H. Phan, D. Huynh, Y. He, M. Savvides, and Z. Shen, “Mobinet: A mobile binary network for image classification,” in 2020 IEEE Winter Conference on Applications of Computer Vision (WACV) , pp. 3442– 3451, 2020.
