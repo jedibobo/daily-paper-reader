@@ -1,0 +1,939 @@
+Title: SpiderCam: Low-Power Snapshot Depth from Differential Defocus
+
+URL Source: https://arxiv.org/pdf/2603.17910v1
+
+Published Time: Thu, 19 Mar 2026 01:39:52 GMT
+
+Number of Pages: 25
+
+Markdown Content:
+# SpiderCam: Low-Power Snapshot Depth from Differential Defocus 
+
+## Marcos A. Ferreira ∗,1 Tianao Li ∗,1 John Mamish ∗,2
+
+## Josiah Hester 2 Yaman Sangar 2 Qi Guo 3 Emma Alexander 11Northwestern University 2Georgia Institute of Technology 3Purdue University 
+
+> ∗
+
+## Equal contributions, https://nubivlab.github.io/SpiderCam 
+
+## Abstract 
+
+We introduce SpiderCam, an FPGA-based snapshot depth-from-defocus camera which produces 480 ×400 sparse depth maps in real-time at 32.5 FPS over a working range of 52 cm while consuming 624 mW of power in total. Spi-derCam comprises a custom camera that simultaneously captures two differently focused images of the same scene, processed with a SystemVerilog implementation of depth from differential defocus (DfDD) on a low-power FPGA. To achieve state-of-the-art power consumption, we present al-gorithmic improvements to DfDD that overcome challenges caused by low-power sensors, and design a memory-local implementation for streaming depth computation on a de-vice that is too small to store even a single image pair. We report the first sub-Watt total power measurement for pas-sive FPGA-based 3D cameras in the literature. 
+
+## 1. Introduction 
+
+Jumping spiders accurately estimate distances using a brain the size of a poppy seed. Their behavior suggests that they use depth from defocus [49], aided by an eye that captures pairs of differently-defocused images simultaneously across layered retinas [33]. Inspired by their example, depth from differential defocus (DfDD) is a computationally efficient class of depth from defocus (DfD) algorithms that leverages small changes in defocus [1]. While DfDD has been shown to be more efficient than other DfD approaches in terms of floating point operations (FLOPs) [41], it has not previously been demonstrated in a real-world ultra-low-power system. Low power depth sensing has instead been dominated by stereo, with the most efficient FPGA-based prototypes demonstrating 2-3 W of overall power consumption [45, 55, 65, 66]. Significantly, many existing works don’t mea-sure real-world power consumption or report quantitative real-world depth results (see Tab. 1). Instead, they bench-mark on high-quality datasets like KITTI [11–13, 46] and Middlebury [25, 59–62], and estimate the “core power” of their algorithm alone. This ignores the power already ex-pended through high-quality image sensors, I/O, and image alignment. It also likely overestimates depth accuracy for highly constrained systems, which may suffer from effects like sensor noise, miscalibration, and small baselines. We show, for the first time, a complete FPGA-based 3D camera system operating under 1 Watt, and demonstrate a working range of over half a meter on real scenes measured on-device. Our camera captures simultaneous image pairs through a beam splitter with sensors at different offsets, like the eye of the jumping spider. In real time, our device outputs sparse depth maps, filtered by measurement con-fidence. Importantly, we demonstrate both the real-world total system power (including both sensors) and the real-world working range, on data with nonidealities from a compact, snapshot, low-power camera. The algorithmic challenges presented by our tight power budget are threefold. First, the total operations are lim-ited, even compared to previous DfDD methods, and we can no longer ignore the relative cost of different floating point operations (e.g., division can be 10 × more expen-sive than multiplication). Second, low-power FPGAs im-pose tight resource constraints, requiring a memory-local streaming approach with a limited spatial footprint. Third, low-power sensors are small and noisy, requiring us to de-velop an algorithm with improved robustness to both optical aberrations and numerical errors. By combining a spider-like camera design for compact simultaneous image cap-ture, with a novel algorithm tailored to our low-power elec-tronics, SpiderCam demonstrates the promise of defocus for real-world low-power depth sensing. 
+
+## 2. Related Work 
+
+Depth imaging has been a major area of imaging research for decades, with solutions spanning the accuracy, speed, and SWaP-C (size, weight, power, and cost) tradeoff space. Broadly speaking, depth imaging can be separated into two categories: active and passive. Active techniques use a con-trolled light source to improve signal quality [18, 26], like LiDAR [7, 14] and structured light [14, 48, 51]. Reducing the SWaP-C of active techniques is challenging due to their 1                                                                                         
+
+> arXiv:2603.17910v1 [cs.CV] 18 Mar 2026 Name Type FPGA Resolution Core Power (W) Real-World Quantitative Results
+> Min Max On-Device Working Range Full System Power Jin, 2014 [29] Stereo Kintex-6 640 ×480 1.93 2.67 none none Raj, 2014 [30] DfD Virtex-4 †400 ×400 0.46 0.58 0.77–0.80 m ( 0.5 %err )2 W + camera Mattoccia, 2015 [45] Stereo Spartan-7 640 ×480 0.44 0.68 qualitative 2.5 W Ttofis, 2015 [65] Stereo Kintex-7 1280 ×720 0.92 1.53 qualitative 2.8 W Puglia, 2017 [55] Stereo Zynq Artix 1024 ×768 0.43 0.68 none 2 W Zhang, 2018 [69] Stereo Kintex-7 1920 ×1080 0.89 1.23 none none Lu, 2021 [40] Stereo Kintex-7 1024 ×480 1.39 2.30 none none Wang, 2022 [66] Stereo Zynq US+ 1920 ×1080 2.03 2.20 none 2.8 W + camera Ours, normalized DfD Kintex-7 512 ×480 0.42 0.55 --Ours, actual DfD ECP5 480 ×400 0.24 0.31 0.45–0.97 m ( 10% err) 0.6 W
+> Luo, 2025 [42] DfD N/A 480 ×360 N/A N/A 0.40–1.20 m (10% err) 4.9 W
+
+Table 1. Power consumption for passive FPGA-based depth imaging systems. “Core Power” numbers reflect only power consumed by logic for depth computation on aligned images; I/O and sensor power are ignored. Power estimates are derived using vendor tools and data from the corresponding works, normalized to a processing rate of 30 Mpix/sec across methods, see Sec. S8 for details. In addition to SOTA power efficiency in core power estimates, we are one of the very few systems to report full system power consumption and real-world depth performance (from noisy sensor captures rather than on existing datasets collected with large-baseline, high-power, pre-aligned image pairs). Note that we report two estimates for our method: a “normalized” estimate that handles more pixels per second on a less efficient FPGA for fairer comparisons with the literature, and a lower estimate reflecting the true parameters of our system. Additionally, we include Focal Split (Luo, 2025) [42], which reports a similar method on a Raspberry Pi 5 with real-world depth and power performance.  
+
+> †
+
+This work uses an Xilinx Virtex-2 FPGA, but due to vendor tool unavailability, we estimate power for the more efficient Virtex-4. 
+
+need for illumination sources [18, 28, 37, 57]. Passive depth imaging systems, on the other hand, calculate depth images without using special hardware to illuminate the scene, and are the focus of this paper. 
+
+2.1. Monocular Depth Imaging 
+
+Estimating depth from a single monocular image is an ill-posed problem and cannot be solved without extensive re-liance on priors [8, 47]. In spite of this, dense, high-accuracy results that run in real-time have been achieved by using deep learning to leverage large datasets. Al-though successful, these methods are ill-suited to space-constrained mobile computing: they rely on deep neural networks whose size [47] leads to computation and mem-ory access energy costs which prevent the miniaturization of systems that use them, even with state-of-the-art edge TPUs [16, 50, 64]. If motion is introduced and a sequence of frames is used for the monocular depth imaging problem, it is no longer ill-posed and a broader class of both classical and deep learning algorithms is admitted [44, 52]. Although these methods yield high-quality results, their adoption in mobile computing systems is limited due to their compute and memory requirements [58, 63]. 
+
+2.2. Depth from Stereo 
+
+Stereo vision is a passive depth imaging technique which uses two simultaneously captured images of the same scene with two different cameras spaced some distance apart [6]. By identifying translational differences in scene features be-tween the two images. Stereo depth imaging systems are primarily concerned with identifying stereo matches [21]. Stereo matching is extensively researched, with both classi-cal and deep-learning methods attracting significant atten-tion [21, 32, 54]. Although deep-learning based stereo vi-sion systems have achieved good results [54, 71], their sig-nificant compute and memory requirements rule out their appropriateness for space and power constrained systems. [71] compares 12 deep learning stereo vision methods, all of which run on Nvidia graphics cards (consuming upwards of 100 Watts [39]) and most of which run at only a few frames per second. 
+
+Hardware accelerators for stereo matching. Classi-cal methods for stereo matching involve evaluating the cost of different pixel matches - a patch of pixels associated with a region is compared with patches in other regions and a minimal-cost matching is determined for each pixel in the image. While searching the entire image typically gives the best stereo matching results, to be computation-ally tractable, most methods only perform a restricted local search [21]. To make stereo depth cameras as compact and low-power as possible, significant work has been done in designing digital hardware to accelerate local stereo match-ing using FPGAs or ASICs. Most hardware stereo matching accelerators work off of the same fundamental principle - two images are streamed in at the same time from two image sensors. Part of the im-age is stored on-chip in the FPGA and a census transform is used to implement semi-global matching [24, 40]. Ttofis et al . pre-filters images using edge filters to make the match-ing task easier [65]. Zhang et al . reduces hardware overhead by using alternate transformations for cost calculation [69]. Puglia et al . uses a dynamic programming inspired algo-2Figure 1. Method overview. Our camera uses a beam splitter and a pair of differentially-defocused low power sensors to observe the same scene with an offset depth of field. Our algorithm processes these images to produce depth maps thresholded by confidence. 
+
+rithm to adapt the problem to a systolic array, allowing for an efficient solution [55]. While most of these works evalu-ate their implementations entirely in simulation on existing datasets, Mattoccia et al . demonstrated the real-world effi-cacy of these techniques by implementing a working, com-pact stereo depth camera [45]. Example depth maps from their device appear dense and accurate, but no quantitative metrics are reported so the working range cannot be evalu-ated. 
+
+2.3. Depth from Defocus 
+
+Depth from defocus (DfD) estimates scene depth by analyz-ing image defocus [53]. Traditional DfD approaches rely on computationally intensive convolution and deconvolu-tion operations, resulting in high computational complex-ity [38, 67, 70]. Raj & Staunton [30] implement an effi-cient rational-filter-based DfD algorithm [56] on an FPGA, reporting high real-world depth accuracy (0.5% error) but over a very small working range (77-80 cm from the cam-era). Their system power is reported as 2 W, but this does not include sensor power or account for sequential rather than snapshot capture. Our method falls into the DfDD class of algorithms [2– 4, 19, 20, 41, 42]. Although DfDD has been shown to re-quire dramatically fewer FLOPs than rational filter meth-ods [41], its potential for low-power hardware implementa-tion remains unexplored. To date, the lowest reported power consumption for a real-time DfDD sensor is still approxi-mately 5 W [42]. 
+
+## 3. Method 
+
+Our camera uses a beam splitter and two low-power sensors to create a differential defocus signal that is processed into a depth map on a low-power FPGA. Similar to the optical design of Focal Split [42], one sensor is placed slightly far-ther from the beam splitter (see Fig. 1), resulting in an off-set depth of field. Typical of differential defocus methods [1–4, 19, 20, 42], comparisons I∆ of brightness at corre-sponding pixels can be compared to spatial variations ∇2I
+
+to cheaply reveal scene depth Z at each pixel. Here, we si-multaneously collect differentially defocused images I1 and 
+
+I2, which are subtracted for I∆ and averaged before the spa-tial derivatives in ∇2I. Then, 
+
+Z(x, y ) = V (x, y )/W (x, y ),V (x, y ) = a∇2 ˜I(x, y ),W (x, y ) = bV (x, y ) − ˜I∆(x, y ),
+
+(1) where a and b are calibrated camera parameters discussed in Sec. 3.6 and ˜I can refer to the original image, its spatial derivatives, or downsampled versions of the same [19]. In natural scenes, depth cues are sparse but their presence and quality are visible in image data, allowing us to compute confidence for each depth estimate. In practice, several ˜I
+
+variations are used to densify and robustify the output depth 3map, with a joint depth estimate thresholded by a joint con-fidence metric for the final depth map. We introduce novel improvements to the camera and al-gorithm design before describing an efficient hardware im-plementation that enables 1.8 × power savings over SOTA for the computation alone and 3.3 × power savings over SOTA when measuring power consumed by the entire sys-tem operating on real hardware. 
+
+3.1. Camera design 
+
+Our overall camera design follows Focal Split [42], with a few changes to accommodate the smaller size of the low-power sensors (HM0360 [23], which have a 12 × power re-duction vs. sensors in [42]). As shown in the system pho-tograph in Fig. 1, a 3D-printed enclosure connects each low power sensor to a lens on the beam splitter. In contrast to [42], each sensor has its own lens, resulting in a FoV of 9.4 ◦ horizontal × 7.9 ◦ vertical (vs. 5.8 ◦ × 4.3◦ for [41]). A 10 mm achromatic lens was selected to strike a balance between a decent FoV and tolerable optical aberration. We provide a detailed parts list and DIY guide for assembling and calibrating our prototype in the supplement. 
+
+3.2. Algorithm 
+
+Our algorithm, outlined in Fig. 1 and Algorithm 1, pro-cesses the images in several stages. First, a preprocessor applies a subpixel-accurate homography to correct for slight misalignments expected in camera assembly, followed by optional denoising by spatial filtering. The images are summed for the average image Iave and differenced for the change image I∆. For each of two image scales, V and W
+
+of Eq. (1) are computed for ˜I ∈ { I, I x, I y }. Each ˜I con-tributes a separate hypothesis (Vi, W i) in parallel, which are partially summed before the latency buffer aligns the pixel streams across scales. The joint depth and confidence computation solves for depth and confidence from all 6 es-timates at each pixel with a novel method described below. Finally, a novel spatially-varying confidence threshold is applied, producing the output depth map. 
+
+3.3. Joint Depth Estimation 
+
+Previous DfDD methods [19, 20] have combined multiple per-pixel depth estimates {Zi(x, y )} with softmax weighted by a per-pixel, per-estimate, dynamically computed confi-dence {Ci(x, y )}:
+
+Z(x, y ) = 
+
+P 
+
+> i
+
+eCi(x,y )Zi(x, y )
+
+P 
+
+> i
+
+eCi(x,y ) . (2) While successful in densifying and robustifying output depth, this expression is impossible to compute under our resource constraints. Efficient softmax hardware implemen-tation is an active area of research; without cutting-edge 
+
+Algorithm 1 The SpiderCam Algorithm. This DfDD al-gorithm achieves SOTA power efficiency with memory lo-cality, effective use of efficient kernels, and robustness to the elevated noise levels of low-power sensors.  
+
+> 1:
+
+Input: images I1, I2, calibrated parameters 
+
+({a0, ..., a N −1}, {b0, ..., b N −1}, {ω0, ..., ω (3 N −1) },
+
+Cthresh , Z min , Z max ) 
+
+> 2:
+
+Output: depth map Z(x, y ) 
+
+> 3:
+
+Iave ← denoise (I1 + homography (I2)) /2 
+
+> 4:
+
+I∆ ← denoise (I1 − homography (I2)) /2 
+
+> 5:
+
+V, W, V W, W W ← [ ]  
+
+> 6:
+
+V W +, W W + ← [ ]  
+
+> 7:
+
+for scale in {0, 1, ..., N − 1} do  
+
+> 8:
+
+Ilap ← laplacian (Iave ) 
+
+> 9:
+
+for d in {none , ∂x, ∂y } do  
+
+> 10:
+
+V .push (ascale × deriv (Ilap , d ))  
+
+> 11:
+
+W .push (bscale × V [−1] − deriv (I∆, d ))  
+
+> 12:
+
+end for  
+
+> 13:
+
+for i in {scale × 3, scale × 3 + 2 } do  
+
+> 14:
+
+V W .push (ωi × V [i] × W [i])  
+
+> 15:
+
+W W .push (ωi × W [i] × W [i])  
+
+> 16:
+
+V W [i] ← upsample (V W [i], scale ) 
+
+> 17:
+
+W W [i] ← upsample (W W [i], scale ) 
+
+> 18:
+
+end for  
+
+> 19:
+
+Iave ← downsample (Iave , 1)  
+
+> 20:
+
+I∆ ← downsample (I∆, 1)  
+
+> 21:
+
+V W +.push( sum (V W [scale × 3 : scale × 3 + 2]) ) 
+
+> 22:
+
+W W +.push( sum (W W [scale × 3 : scale × 3 + 2]) ) 
+
+> 23:
+
+end for  
+
+> 24:
+
+C ← sum (V W +) 
+
+> 25:
+
+Z ← divide (C, sum (W W +))  
+
+> 26:
+
+Z[C < C thresh or not Zmin < Z < Z max ] ← null 
+
+optimizations, the softmax operation would consume more FPGA resources than the entirety of some configurations of our system [15, 27]. Instead, we compute a joint depth es-timate from 6 estimates i (based on 2 scales × 3 derivative orders) using calibrated weights ωi as 
+
+Z(x, y ) = 
+
+P 
+
+> i
+
+ωiVi(x, y )Wi(x, y )
+
+P 
+
+> i
+
+ωiWi(x, y )2 . (3) Note that Eq. (3) requires only a single division, which is important because division costs as much as 10 additions in our setting. Improvements to the working range due to this joint estimation can be seen by comparing to the green curve in Fig. 3a and the small blue icons in Fig. 4. 
+
+3.4. Confidence Estimation 
+
+Because triangulation cues are sparse in natural scenes, a per-pixel confidence score is needed to exclude non-informative image regions where Eq. (1) will provide in-correct output. Previous DfDD methods have used more 4expensive [19, 20] or less accurate [41, 42] confidence met-rics. We show that a cheap and effective confidence com-bining across estimates i at each pixel is: 
+
+Ci(x, y ) = Vi(x, y )Wi(x, y ), (4) 
+
+C(x, y ) = X
+
+> i
+
+ωiCi(x, y ). (5) This simple sum enables us to robustify and densify our measurements across estimates as in [19, 20] without the added expense of their more complex per-pixel estimates or the softmax-based combination previously used. In com-parison to the estimator used in [41, 42], we report an in-crease in working range of 5cm (See Fig. S6). We note that as the numerator of our depth estimation, calculating C re-quires no additional computation. Low confidence regions will occur when texture is unavailable (so V ∝ ∇ 2I is close to zero) and unstable divisions (when W and therefore the denominator W 2 is close to zero). 
+
+3.5. Calibration 
+
+Our depth computation requires a handful of calibrated pa-rameters, specifically a and b from Eq. (1), {ωi} in Eq. (3) and Eq. (5), and thresholds Cthresh , Z min , Z max applied to the output. Each depth estimate uses a and b, which physi-cally correspond to 
+
+a = −A2, b = ( ρ − 1/s ) , (6) for aperture diameter A, lens optical power ρ, and lens-to-sensor distance s [42]. While these parameters could be derived directly camera measurements, we instead optimize them for depth performance. Calibration of {ωi} is also data-driven. We collect a real-world calibration dataset by placing a plane with printed texture at 56 known depths, evenly spaced from 0.24m to 1.36m, and optimize the pa-rameters using mean absolute depth error as the loss func-tion. To improve accuracy, we only compute the loss on the 10% most confident pixels in each radial region for each im-age pair to prevent overfitting to noise. Finally, we establish confidence thresholds for each radial zone to maximize the working range, see Sec. S10 for details. 
+
+3.6. Spatial Variation 
+
+The optics available for the compact size of our low-power sensors create noticeable spatial variation in defocus due to Petzval field curvature [22] and other nonidealities. Be-cause of this, performance suffers if we hold our a, b,and thresholds to constant values across the image sensor. We improve performance by allowing calibrated parame-ters to vary for 16 separate radial zones of equal width. Since the pixels arrive in order in the pixel stream, we are able to track the radial locations of each pixel without hav-ing to actually buffer the (x,y) information alongside each pixel value. By comparing a streaming value to thresholds on squared radial distances (to avoid the expensive square root operation), we can dynamically update the values of ({a0, ..., a N −1}, {b0, ..., b N −1}, C thresh , Z min , Z max ),see in detail Sec. S1.5. Note that ωi values do not vary spatially. Accounting for spatial variation results in a larger working range (Fig. 3a) and better calibrated depth for each radial region (Fig. S4) with only a small increase in core power (Fig. 4). 
+
+3.7. Efficient Hardware Implementation 
+
+FPGA size and resource utilization strongly affects sys-tem power consumption - larger FPGAs have higher static power dissipation. In order to make our system as efficient as possible, we designed our hardware to fit inside the Lat-tice ECP5 LFE5U-85F FPGA. By using a smaller FPGA, the benefits of our efficient algorithm implementation are realized in power savings. We also had to restrict our memory use to achieve low-power operation. Low-power FPGAs have extremely lim-ited memory budgets. Due to the high energy cost of data movement, extending their memory by using off-chip DRAM incurs a prohibitively high energy cost [17]. The LFE5U-85F does not have enough on-chip memory to hold both frames at once. Adding enough storage to buffer both frames without moving to a larger, more power-hungry FPGA would require the use of external DRAM, raising power consumption and incurring depth map latency. This means that we must process our depth maps with a data streaming model, where the data locality of the DfDD algo-rithm enables significant power savings. Additionally, we developed a hybrid fixed and floating point architecture that supports the high dynamic range of natural scenes while minimizing per-pixel memory cost. 
+
+3.7.1. Multiscale compute within fixed memory budget 
+
+Our robust depth algorithm requires upsampling in two of its computations: estimating ∇2 ˜I with a Laplacian pyra-mid, and merging downsampled estimates into our multi-scale joint estimation. Downsampling a streaming image is straightforward, but naive upsampling requires buffering a prohibitive amount of the image. We develop a specialized streaming upsam-pler using zero-interleaved kernels that reach a larger effec-tive receptive field without increasing arithmetic operations. This both decreases the number of lines buffered and fixes the memory use to be independent of image height. See Sec. S4 for details. 
+
+3.7.2. Efficient Kernels 
+
+We minimize FPGA power and memory costs by using ker-nels that are small, have integer coefficients that are powers of two, and are linearly separable. This, respectively, mini-mizes the number of lines buffered, converts multiplication 5Figure 2. Captured images and depth maps computed on-device. Note the handling of continuous depths (vs. disparity levels), reflective textures, and transparent objects that active sensing would struggle with, as well as objects in motion due to snapshot capture. 
+
+to bit-shifting, and reduces convolution costs by a factor of kernel width. We use box, Gaussian, and derivative ker-nels in the preprocessing and per-scale computations, with our largest kernel being a 5-tap Burt-Adelson Gaussian fil-ter [9]. See Sec. S2.1 for details. 
+
+3.7.3. Hybrid Fixed Point with Efficient Floating Point 
+
+Fixed point arithmetic is cheap in hardware, but limits the dynamic range of values that can be represented accurately. Most vision applications require floating point, which is sig-nificantly more expensive. We reduce this cost by identify-ing preprocessing steps that can be computed in fixed point without loss of accuracy, then switching to an efficient float-ing point implementation that maximizes accuracy within a constrained memory footprint. Specifically, the homography and preprocessing stages are implemented in fixed point. The homography only re-quires a small number of lines to be buffered since the affine transformation is small. In the preprocessing step, our care-fully selected filters do not require bit trimming, avoiding quantization issues. Due to the high dynamic range of our images, after these stages, the results are converted to float-ing point before computing Iave and I∆.On the floating-point side, we save FPGA resources by dropping subnormal number support and using FP16 in-stead of FP32. Removing subnormal number support makes multipliers and dividers nearly as inexpensive as fixed-point arithmetic, with only a small additional cost for exponent handling. Our adders still require the variable shifters and priority encoders associated with floating-point arithmetic, but some of the surrounding logic is simplified by remov-ing subnormal handling. The primary reduction in resource usage for our floating-point adders comes from using half-precision (FP16) representation. See Sec. S3 for details. 
+
+3.7.4. Data Readout 
+
+Our system outputs 8-bit depth maps over a parallel port, similar to how an image sensor outputs its data. To read the results of the depth computation from the camera, we use an FTDI FT232H parallel-to-USB interface chip. Our com-munication speed is limited to 8MB/s by the design of the ECP5 development board that our prototype system uses, meaning that in-situ our system can output depth maps at a maximum of 32.5 FPS. Alternatively, for data collection and demonstration, we can read out image pairs or one im-age with its respective depth map at a slower rate. Without these I/O limitations, our core computation could run up to 140 FPS on ECP5 and up to 300 FPS on Kintex-7. 
+
+## 4. Results 
+
+Depth maps of real scenes computed on-device are shown in Fig. 2, along with corresponding sensor images. Our com-puted confidence excludes low-signal regions, returning ac-curate depth estimates around scene texture. Note that our method can gracefully handle scenes with multiple depths, including continuous (a), discontinuous (b), and reflected (c) depths. Our sparse depth maps gracefully handle over-lapping transparent objects (d), our passive method easily handles bubble wrap (e) even though it is transparent, re-flective, and non-rigidly deformed, and our snapshot cam-era returns accurate depth even in the presence of significant motion blur (f). Additional scenes and videos are provided in the supplement. We characterize the performance of the system us-ing front-parallel textured planes across densely-sampled depths, and define the working range (WR) as the set of depths for which |Zest − Ztrue | < 0.1 Ztrue , with our de-vice achieving a working range of 0.45-0.97 m. Accuracy of on-device computation (purple dots) shows good agreement with off-device computation (purple and all other lines) in Fig. 3a. Off-device computation is slightly more accurate because it is performed fully in 32-bit floating point for con-venience and fairness in comparing across algorithms. In comparison to our method (offline) with a working 6Figure 3. Quantitative analysis on images from device. (a) Mean absolute error (MAE) of depth as a function of true depth, with working range bounds. Our method robustly outperforms the Focal Split algorithm [42] in the low power hardware setting, and accounting for spatial variation in our compact optics is vital. Purple dots show errors from depth maps computed on-device and demonstrate good agreement with off-line depth computations (rest of figure), which were performed in 32-bit floating point. (b) The MAE vs. depth curve of our method with dynamic sparsity values set by per-image confidence percentiles (grays) and the MAE (solid purple) and output pixel density (100-sparsity, dashed purple) resulting from the fixed confidence thresholds used in our method. (c) Working range increases as data is sparsified by per-image confidence percentiles.  
+
+> Figure 4. Power/accuracy trade-offs for alternate algorithms.
+> We estimate max core power on the ECP5 with manufacturer’s tools and evaluate working range and MAE from 0.4m to 1.0m of-fline on images collected by our hardware prototype. Adding com-putational components improves accuracy while increasing power cost. Our algorithm is shown with the purple star.
+
+range (pale purple highlight) of 0.43-0.99 m, the Focal Split algorithm [42] (green) has a working range of only 0.60-0.83 m on the challenging low-power camera data. Spatial variation is a major contributor to this improvement, as re-moving it (blue) drops our working range to 0.51-0.82 m. Next, to explore the effect of confidence on sparsity and accuracy, Fig. 3b shows the MAE and WR for depth-and scene-varying confidence thresholds set to enforce a fixed sparsity across each depth map (gray levels). Our method, repeated in purple for reference, takes a fixed con-fidence threshold that naturally loses density (100% - spar-sity, dashed purple) at the edge of the WR. Note that fixed thresholds result in different error/density trade-offs than enforced sparsities, highlighting the need for computation-ally inexpensive, well-calibrated confidence estimation as an area for future research. Fig. 3c shows the size of the working range across enforced sparsities. 
+
+4.1. Resource Utilization and Power Consumption 
+
+DfDD core power and size. To evaluate the efficiency of the SystemVerilog DfDD implementation itself, we synthe-sized multiple configurations of the DfDD core depth com-putation. Even though our physical system is implemented with a Lattice ECP5 FPGA, for the sake of this specific re-source usage comparison, we synthesized our design for the more widely-used Xilinx 7-Series FPGA architecture, which is widely compatible across the literature. Resource utilization results can be seen in Fig. 5, details in Sec. S8. Each FPGA has a limited number of lookup tables (LUT), registers (REG), and block RAM (BRAM) with which a circuit design can be implemented. A smaller design con-sumes less resources and can fit on smaller FPGAs, allow-ing for lower power consumption and better system minia-turization. We also took these utilization numbers and used vendor tools to estimate power consumption, comparing our system’s power consumption with similar work Tab. 1. 7Wang, 2022 Ttofis,      
+
+> 2015
+> Jin, 2014 Wang, 2021 Zhang,
+> 2018
+> Puglia,
+> 2017
+> Mattoccia,
+> 2015
+> Raj, 2014 Ours, DS,
+> dx/dy
+> Ours, DS,
+> no dx/dy
+> Ours, SS,
+> dx/dy
+> Ours, SS,
+> no dx/dy
+> 0
+> 70000
+> 140000
+> 210000
+> 280000
+> 350000
+> Logic Utilization
+> (LUT + REG)
+> LUTs REGs BRAM
+> 0
+> 70
+> 140
+> 210
+> 280
+> 350
+> Block RAM Utilization
+> (36kb Blocks)
+
+Figure 5. Resource Usage Across Methods. We compare the resource utilization of several configurations of our system as well as systems in the literature. “DS” and “SS” denote evaluation at 2 and 1 scales, respectively. 
+
+Power consumption of hardware camera. Critical to our work is the construction of an actual hardware camera capable of producing depth images in real-time at over 30 FPS. Our hardware camera consisted of two HM0360 low-power image sensors in a custom optical setup (as described in Sec. 3.1) connected via a custom interposer PCB to a commercially available Lattice ECP5 evaluation board [35] equipped with a LFE5UM5G-85F FPGA [36]. In order to reduce power consumption, some modifications were made to the evaluation board. A summary of these modifications can be found in Sec. S9.1. To measure power consump-tion, we powered the camera entirely by an Otii Arc power profiler and operated it under normal conditions, record-ing natural scenes, integrating average power consumption over 5 seconds. Our results are shown across configurations in Tab. S6. Significantly, our full algorithm consumes only 624 mW at 32.5 FPS and 399 mW at 9 FPS, 3.3 - 5 × less power than the lowest full system power reported in the lit-erature [55], which runs at 30 FPS. Total system power measurements in Tab. S6 are higher than core power estimates in Tab. 1 and Fig. S5 because the physical hardware system also includes: two image sen-sors and image homography and cropping logic, I/O cir-cuitry, and the evaluation board which contains several un-used components and introduces inefficiencies in, e.g., volt-age converters. 
+
+4.2. Accuracy Across Restricted Power Budgets 
+
+We analyze ablations of several subcomponents in terms of both depth performance, evaluated by working range and depth MAE over 0.4 m to 1.0 m (computed off-device), and core power consumption (estimated for the ECP5 from manufacturer’s tools). Fig. 4 provides an overview of these trade-offs. Adding spatial variation in calibrated parame-ters improves working range and reduces MAE (see corre-sponding square-circle pairs). As expected, the accuracy among well-calibrated (i.e. spatially varying) methods goes according to the number of separate estimates used in the depth map: the best has 6 (purple star: 2 scales, 3 deriva-tives), the next best has 3 (small purple circle: 1 scale, 3 derivatives), the next best has 2 (large blur circle: 2 scales, 1 derivative), and the worst has only 1 (small blue circle: 1 scale, 1 derivative). Adding derivatives is cheaper in terms of power consumption than adding image scales, though we note that the relative cost appears more extreme in estimates of core power than the true relative difference in the over-all system, since peripheral power costs dominate and will be constant across methods. Specifically, in comparing our method with the next best option (single scale, multideriva-tive, shown by the purple circle), we estimate a core power difference of 311 vs. 214 mW for a roughly 32% differ-ence, but when running the hardware prototype at 32.5 FPS we measure the full systems’ wall power at 624 vs. 489 mW – only a 20% difference (dropping to an 11% difference at 9 FPS, see Tab. S6). At a high level, this study indicates the potential of our method to provide depth estimates for a range of power constraints through appropriate computa-tional trade-offs. 
+
+## 5. Conclusion 
+
+We present SpiderCam, the first sub-Watt FPGA-based pas-sive 3D camera. Featuring snapshot capture with compact off-the-shelf optics, low-power sensors, a robust and effi-cient new DfDD algorithm, and a SystemVerilog implemen-tation on a low-power FPGA, we demonstrate a working range of 52 cm at 32.5 FPS in real time on real data with a full-system wall power of 624 mW. We have character-ized the power/accuracy trade-offs of several variations of our system, and identified improvements in optics and con-fidence estimation as immediate future directions for sys-tem improvement. Significant gains in power consumption could be pursued by moving from an FPGA to an ASIC, which typically results in 5-20 × power savings depend-ing on design details [31, 43]. Our sparse and somewhat noisy depth estimates offer exciting possibilities as control signals for embedded/edge applications like wearables and robotics, which will require further research and develop-ment. An immediate direction for future work is the integra-tion of our outputs with efficient depth-completion pipelines like [72] and increasing the FoV of our system. 8Acknowledgments 
+
+This research was partially supported by the National Sci-ence Foundation under awards numbers CNS-2430327 and CCF-2431505. Any opinions, findings, conclusions, or rec-ommendations expressed in this material are those of the au-thors and do not necessarily reflect the views of the National Science Foundation or other supporters. We would also like to thank Junjie Luo and Alan Fu for helpful discussions. 
+
+## References 
+
+[1] Emma Alexander. A theory of depth from differential defo-cus . Harvard University, 2019. 1, 3 [2] Emma Alexander, Qi Guo, Sanjeev Koppal, Steven Gortler, and Todd Zickler. Focal flow: Measuring distance and veloc-ity with defocus and differential motion. In European con-ference on computer vision , pages 667–682. Springer, 2016. 3[3] Emma Alexander, Qi Guo, Sanjeev Koppal, Steven J Gortler, and Todd Zickler. Focal flow: Velocity and depth from dif-ferential defocus through motion. International Journal of Computer Vision , 126(10):1062–1083, 2018. [4] Emma Alexander, Leyla A Kabuli, Oliver S Cossairt, and Laura Waller. Depth from defocus as a special case of the transport of intensity equation. In 2021 IEEE International Conference on Computational Photography (ICCP) , pages 1–13. IEEE, 2021. 3 [5] Jason Helge Anderson and Farid N Najm. Power estimation techniques for fpgas. IEEE Transactions on Very Large Scale Integration (VLSI) Systems , 12(10):1015–1027, 2004. 6 [6] Stephen T Barnard and Martin A Fischler. Computational stereo. ACM Computing Surveys (CSUR) , 14(4):553–572, 1982. 2 [7] Behnam Behroozpour, Phillip AM Sandborn, Ming C Wu, and Bernhard E Boser. Lidar system architectures and cir-cuits. IEEE Communications Magazine , 55(10):135–142, 2017. 1 [8] Amlaan Bhoi. Monocular depth estimation: A survey. arXiv preprint arXiv:1901.09402 , 2019. 2 [9] Peter J Burt and Edward H Adelson. The laplacian pyramid as a compact image code. In Readings in computer vision ,pages 671–679. Elsevier, 1987. 6, 2 [10] Vijay Degalahal and Tim Tuan. Methodology for high level estimation of fpga power consumption. In Proceedings of the 2005 Asia and South Pacific Design Automation Conference ,pages 657–660, 2005. 6 [11] Jannik Fritsch, Tobias Kuehnl, and Andreas Geiger. A new performance measure and evaluation benchmark for road de-tection algorithms. In International Conference on Intelli-gent Transportation Systems (ITSC) , 2013. 1 [12] Andreas Geiger, Philip Lenz, and Raquel Urtasun. Are we ready for autonomous driving? the kitti vision benchmark suite. In Conference on Computer Vision and Pattern Recog-nition (CVPR) , 2012. [13] Andreas Geiger, Philip Lenz, Christoph Stiller, and Raquel Urtasun. Vision meets robotics: The kitti dataset. Interna-tional Journal of Robotics Research (IJRR) , 2013. 1 [14] Jason Geng. Structured-light 3d surface imaging: a tutorial. 
+
+Advances in optics and photonics , 3(2):128–160, 2011. 1 [15] Xue Geng, Jie Lin, Bin Zhao, Anmin Kong, Mohamed M Sabry Aly, and Vijay Chandrasekhar. Hardware-aware softmax approximation for deep neural networks. In Asian Conference on Computer Vision , pages 107–122. Springer, 2018. 4 [16] Amir Gholami, Zhewei Yao, Sehoon Kim, Coleman Hooper, Michael W Mahoney, and Kurt Keutzer. Ai and memory wall. IEEE Micro , 44(3):33–39, 2024. 2 [17] Saugata Ghose, Abdullah Giray Yaglikc ¸i, Raghav Gupta, Donghyuk Lee, Kais Kudrolli, William X Liu, Hasan Has-san, Kevin K Chang, Niladrish Chatterjee, Aditya Agrawal, et al. What your dram power models are not telling you: Lessons from a detailed experimental study. Proceedings of the ACM on Measurement and Analysis of Computing Sys-tems , 2(3):1–41, 2018. 5 [18] Silvio Giancola, Matteo Valenti, and Remo Sala. A sur-vey on 3D cameras: Metrological comparison of time-of-flight, structured-light and active stereoscopy technologies .Springer, 2018. 1, 2 [19] Qi Guo, Emma Alexander, and Todd Zickler. Focal track: Depth and accommodation with oscillating lens deformation. In Proceedings of the IEEE international conference on com-puter vision , pages 966–974, 2017. 3, 4, 5 [20] Qi Guo, Zhujun Shi, Yao-Wei Huang, Emma Alexander, Cheng-Wei Qiu, Federico Capasso, and Todd Zickler. Com-pact single-shot metalens depth sensors inspired by eyes of jumping spiders. Proceedings of the National Academy of Sciences , 116(46):22959–22965, 2019. 3, 4, 5 [21] Rostam Affendi Hamzah and Haidi Ibrahim. Literature sur-vey on stereo vision disparity map algorithms. Journal of Sensors , 2016(1):8742920, 2016. 2 [22] Eugene Hecht. Optics . 2017. 5, 10 [23] Datasheet 1/6” 640 x 480 VGA 60FPS CMOS Image Sensor .Himax Technologies, 2020. 4 [24] Heiko Hirschmuller. Stereo processing by semiglobal match-ing and mutual information. IEEE Transactions on pattern analysis and machine intelligence , 30(2):328–341, 2007. 2 [25] Heiko Hirschmuller and Daniel Scharstein. Evaluation of cost functions for stereo matching. In 2007 IEEE confer-ence on computer vision and pattern recognition , pages 1–8. IEEE, 2007. 1 [26] Radu Horaud, Miles Hansard, Georgios Evangelidis, and Cl´ ement M´ enier. An overview of depth cameras and range scanners based on time-of-flight technologies. Machine vi-sion and applications , 27(7):1005–1020, 2016. 1 [27] Ruofei Hu, Binren Tian, Shouyi Yin, and Shaojun Wei. Ef-ficient hardware architecture of softmax layer in deep neural network. In 2018 IEEE 23rd International Conference on Digital Signal Processing (DSP) , pages 1–5. IEEE, 2018. 4 [28] Intel RealSense D400 Series Product Family Datasheet . In-tel, 2019. 2 [29] Minxi Jin and Tsutomu Maruyama. Fast and accurate stereo vision system on fpga. ACM Transactions on Reconfigurable Technology and Systems (TRETS) , 7(1):1–24, 2014. 2, 8 
+
+9[30] Alex Noel Joseph Raj and Richard C Staunton. Video-rate calculation of depth from defocus on a fpga. Journal of Real-Time Image Processing , 14(2):469–480, 2014. 2, 3, 8 [31] Ian Kuon and Jonathan Rose. Measuring the gap between fpgas and asics. In Proceedings of the 2006 ACM/SIGDA 14th international symposium on Field programmable gate arrays , pages 21–30, 2006. 8 [32] Hamid Laga, Laurent Valentin Jospin, Farid Boussaid, and Mohammed Bennamoun. A survey on deep learning tech-niques for stereo-based depth estimation. IEEE transactions on pattern analysis and machine intelligence , 44(4):1738– 1764, 2020. 2 [33] MF Land. Structure of the retinae of the principal eyes of jumping spiders (salticidae: Dendryphantinae) in relation to visual optics. Journal of experimental biology , 51(2):443– 470, 1969. 1 [34] Power Consumption and Management for ECP5 and ECP5-5G Devices . Lattice. 6 [35] ECP5 Evaluation Board User Guide . Lattice Semiconductor, 2018. 8 [36] ECP5 and ECP5-5G Family Data Sheet . Lattice Semicon-ductor, 2025. 8 [37] Sanghoon Lee, Dongkyu Lee, Pyung Choi, and Daejin Park. Accuracy–power controllable lidar sensor system with 3d object recognition for autonomous vehicle. Sensors , 20(19): 5706, 2020. 2 [38] Anat Levin, Rob Fergus, Fr´ edo Durand, and William T Free-man. Image and depth from a conventional camera with a coded aperture. ACM transactions on graphics (TOG) , 26 (3):70–es, 2007. 3 [39] MultiMedia LLC. Product info - geforce gtx titan x, 2025. 2 [40] Zhimin Lu, Jue Wang, Zhiwei Li, Song Chen, and Feng Wu. A resource-efficient pipelined architecture for real-time semi-global stereo matching. IEEE Transactions on Circuits and Systems for Video Technology , 32(2):660–673, 2021. 2, 8[41] Junjie Luo, Yuxuan Liu, Emma Alexander, and Qi Guo. Depth from coupled optical differentiation: J. luo et al. In-ternational Journal of Computer Vision , pages 1–18, 2025. 1, 3, 4, 5, 10 [42] Junjie Luo, John Mamish, Alan Fu, Thomas Concannon, Josiah Hester, Emma Alexander, and Qi Guo. Focal split: Untethered snapshot depth from differential defocus. In Pro-ceedings of the Computer Vision and Pattern Recognition Conference , pages 26965–26974, 2025. 2, 3, 4, 5, 7, 9, 10, 11 [43] John Mamish, Rawan Alharbi, Sougata Sen, Shashank Holla, Panchami Kamath, Yaman Sangar, Nabil Alshurafa, and Josiah Hester. Nir-sighted: A programmable streaming ar-chitecture for low-energy human-centric vision applications. 
+
+ACM Transactions on Embedded Computing Systems , 23(6): 1–26, 2024. 8 [44] Armin Masoumian, Hatem A Rashwan, Juli´ an Cristiano, M Salman Asif, and Domenec Puig. Monocular depth es-timation using deep learning: A review. Sensors , 22(14): 5353, 2022. 2 [45] Stefano Mattoccia and Matteo Poggi. A passive rgbd sensor for accurate and real-time depth sensing self-contained into an fpga. In Proceedings of the 9th International Conference on Distributed Smart Cameras , pages 146–151, 2015. 1, 2, 3, 7, 8, 11 [46] Moritz Menze and Andreas Geiger. Object scene flow for autonomous vehicles. In Conference on Computer Vision and Pattern Recognition (CVPR) , 2015. 1 [47] Yue Ming, Xuyang Meng, Chunxiao Fan, and Hui Yu. Deep learning for monocular depth estimation: A review. Neuro-computing , 438:14–33, 2021. 2 [48] Parsa Mirdehghan, Wenzheng Chen, and Kiriakos N Kutu-lakos. Optimal structured light a la carte. In Proceedings of the IEEE conference on computer vision and pattern recog-nition , pages 6248–6257, 2018. 1 [49] Takashi Nagata, Mitsumasa Koyanagi, Hisao Tsukamoto, Shinjiro Saeki, Kunio Isono, Yoshinori Shichida, Fumio Tokunaga, Michiyo Kinoshita, Kentaro Arikawa, and Aki-hisa Terakita. Depth perception from image defocus in a jumping spider. Science , 335(6067):469–471, 2012. 1 [50] Dat Ngo, Hyun-Cheol Park, and Bongsoon Kang. Edge in-telligence: A review of deep neural network inference in resource-limited environments. Electronics , 14(12):2495, 2025. 2 [51] Matthew O’Toole, John Mather, and Kiriakos N Kutulakos. 3d shape and indirect appearance by structured light trans-port. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition , pages 3246–3253, 2014. 1 [52] Onur ¨ Ozyes ¸il, Vladislav Voroninski, Ronen Basri, and Amit Singer. A survey of structure from motion*. Acta Numerica ,26:305–364, 2017. 2 [53] Alex Paul Pentland. A new sense for depth of field. IEEE transactions on pattern analysis and machine intelligence ,(4):523–531, 1987. 3 [54] Matteo Poggi, Fabio Tosi, Konstantinos Batsos, Philippos Mordohai, and Stefano Mattoccia. On the synergies between machine learning and binocular stereo for depth estimation from images: A survey. IEEE Transactions on Pattern Anal-ysis and Machine Intelligence , 44(9):5314–5334, 2021. 2 [55] Luca Puglia, Mario Vigliar, and Giancarlo Raiconi. Real-time low-power fpga architecture for stereo vision. IEEE Transactions on Circuits and Systems II: Express Briefs , 64 (11):1307–1311, 2017. 1, 2, 3, 8, 7, 11 [56] Alex Noel Joseph Raj and Richard C Staunton. Rational filter design for depth from defocus. Pattern Recognition , 45(1): 198–207, 2012. 3 [57] Thinal Raj, Fazida Hanim Hashim, Aqilah Baseri Huddin, Mohd Faisal Ibrahim, and Aini Hussain. A survey on lidar scanning mechanisms. Electronics , 9(5):741, 2020. 2 [58] Muhamad Risqi U Saputra, Andrew Markham, and Niki Trigoni. Visual slam and structure from motion in dynamic environments: A survey. ACM Computing Surveys (CSUR) ,51(2):1–36, 2018. 2 [59] Daniel Scharstein and Chris Pal. Learning conditional ran-dom fields for stereo. In 2007 IEEE conference on computer vision and pattern recognition , pages 1–8. IEEE, 2007. 1 
+
+10 [60] Daniel Scharstein and Richard Szeliski. A taxonomy and evaluation of dense two-frame stereo correspondence algo-rithms. International journal of computer vision , 47(1):7– 42, 2002. [61] Daniel Scharstein and Richard Szeliski. High-accuracy stereo depth maps using structured light. In 2003 IEEE Com-puter Society Conference on Computer Vision and Pattern Recognition, 2003. Proceedings. , pages I–I. IEEE, 2003. [62] Daniel Scharstein, Heiko Hirschm¨ uller, York Kitajima, Greg Krathwohl, Nera Neˇ si´ c, Xi Wang, and Porter West-ling. High-resolution stereo datasets with subpixel-accurate ground truth. In German conference on pattern recognition ,pages 31–42. Springer, 2014. 1 [63] Johannes L Schonberger and Jan-Michael Frahm. Structure-from-motion revisited. In Proceedings of the IEEE con-ference on computer vision and pattern recognition , pages 4104–4113, 2016. 2 [64] Md Maruf Hossain Shuvo, Syed Kamrul Islam, Jianlin Cheng, and Bashir I Morshed. Efficient acceleration of deep learning inference on resource-constrained edge devices: A review. Proceedings of the IEEE , 111(1):42–91, 2022. 2 [65] Christos Ttofis, Christos Kyrkou, and Theocharis Theocharides. A low-cost real-time embedded stereo vision system for accurate disparity estimation based on guided image filtering. IEEE Transactions on Computers ,65(9):2678–2693, 2015. 1, 2, 8 [66] Hongyu Wang, Wei Zhou, Xiangyu Zhang, and Xin Lou. A block patchmatch-based energy-resource efficient stereo matching processor on fpga. IEEE Transactions on Circuits and Systems I: Regular Papers , 69(7):2893–2905, 2022. 1, 2, 8 [67] Masahiro Watanabe and Shree K Nayar. Rational filters for passive depth from defocus. International Journal of Com-puter Vision , 27(3):203–225, 1998. 3 [68] Xilinx Power Estimator User Guide . Xilinx. 6 [69] Xuchong Zhang, Hongbin Sun, Shiqiang Chen, Lin Song, and Nanning Zheng. Nipm-swmf: Toward efficient fpga design for high-definition large-disparity stereo matching. 
+
+IEEE Transactions on Circuits and Systems for Video Tech-nology , 29(5):1530–1543, 2018. 2, 8 [70] Changyin Zhou, Stephen Lin, and Shree K Nayar. Coded aperture pairs for depth from defocus and defocus deblur-ring. International journal of computer vision , 93(1):53–72, 2011. 3 [71] Kun Zhou, Xiangxi Meng, and Bo Cheng. Review of stereo matching algorithms based on deep learning. Computational intelligence and neuroscience , 2020(1):8562323, 2020. 2 [72] Yiming Zuo, Willow Yang, Zeyu Ma, and Jia Deng. Omni-dc: Highly robust depth completion with multiresolution depth integration. In Proceedings of the IEEE/CVF Inter-national Conference on Computer Vision , pages 9287–9297, 2025. 8 
+
+11 SpiderCam: Low-Power Snapshot Depth from Differential Defocus 
+
+# Supplementary Material 
+
+## S1. Implementation Details 
+
+In this section, we provide implementation details of the five steps to the SpiderCam algorithm. 
+
+Figure S1. General overview of the algorithm. 
+
+S1.1. Homography 
+
+We apply an affine transformation homography using bilin-ear interpolation to the images to ensure sub-pixel align-ment. A purely mechanical solution to align the images would be expensive and difficult to do due to the high de-gree of precision required. The closer focal plane image is known as I1, and the further focal plane image as I2.
+
+S1.2. Preprocessing 
+
+Figure S2. Preprocessing module. 
+
+In the preprocessing step, to denoise the image, we apply a box filter followed by subtraction and then a Gaussian fil-ter. This step only applies if PREPROCESSING ENABLE 
+
+is set to one. Otherwise, we skip directly to calculating Iave 
+
+and I∆, which are simply the sum and difference of I1 and 
+
+I2:
+
+Iave = I1 + I2, I∆ = I1 − I2
+
+S1.3. N th Scale 
+
+For a particular scale N , we define: 
+
+VN = an × laplacian (Iave )
+
+WN = bn × VN − I∆
+
+Then, without additional spatial derivatives: 
+
+V W N = wn0 × VN × WN
+
+W W N = wn0 × WN × WN
+
+With additional spatial derivatives enabled (as indi-cated by DX DY ENABLE ), we sum the derivatives to pro-duce V W N and W W n:
+
+V W N = wn0 × VN × WN
+
++ wn1 × VN dx · WN dx 
+
++ wn2 × VN dy × WN dy W W N = wn0 × WN × WN
+
++ wn1 × WN dx · WN dx 
+
++ wn2 × WN dy × WN dy 
+
+S1.4. Summation and Division 
+
+The final step is to sum the respective V W s and W W s from each scale and divide, to give the depth and confidence val-ues: 
+
+Z′ = 
+
+> N−1
+
+X
+
+> i=0
+
+V W NN −1X
+
+> i=0
+
+W W N
+
+, C = 
+
+> N−1
+
+X
+
+> i=0
+
+W W N
+
+The resulting Z′ in then filtered using the confidence value and working range values to produce the final depth map Z.1Figure S3. Computation for the  N th  scale. 
+
+S1.5. Radial Zone Adaptation 
+
+When RADIAL ENABLE is active, the logic for per-zone parameter selection operates as follows: 
+
+Algorithm 2 Spatial variation. Zone-based parameter evaluation uses squared distance to avoid hardware square-root operations and tracks pixel streaming to save memory.  
+
+> 1:
+
+Input: pixel’s distance from center, 
+
+streaming distance square ,per zone and/or per scale values, 
+
+r2
+
+> zones
+
+[ ] , a ′
+
+> scales
+
+[ ] , b ′
+
+> scales
+
+[ ] , C ′
+
+> thresh
+
+[ ] , Z ′
+
+> min
+
+[ ] , Z ′
+
+> max
+
+[ ]  
+
+> 2:
+
+Output: parameters ({a0, ..., a N −1}, {b0, ..., b N −1},
+
+{ω0, ..., ω (3 N −1) }, Cthresh , Z min , Z max ) 
+
+> 3:
+
+for z in {zones − 1, zones − 2, ..., 0} do  
+
+> 4:
+
+if streaming distance squared < r 2
+
+> zone
+
+[z] then  
+
+> 5:
+
+for scale in {0,1,.., N − 1} do  
+
+> 6:
+
+ascale ← a′
+
+> scales
+
+[z] 
+
+> 7:
+
+bscale ← b′
+
+> scales
+
+[z] 
+
+> 8:
+
+end for  
+
+> 9:
+
+Cthresh ← C′
+
+> thresh
+
+[z] 
+
+> 10:
+
+Zmin ← Z′
+
+> min
+
+[z] 
+
+> 11:
+
+Zmax ← Z′
+
+> max
+
+[z] 
+
+> 12:
+
+end if  
+
+> 13:
+
+end for 
+
+A single confidence minimum value can be used to filter the depth map but due to the Petzval field curva-ture, exacerbated by using a small focal length and a very small image sensor, our working range becomes quite lim-ited. To handle this, we assign a set of parameters not only for each scale, but also for each radial zone that the pixel belongs to. Using the pixel’s (x, y ) coordinate, the 
+
+streaming distance squared can be computed, which is simply the distance squared of the pixel from the optical center of the image. 
+
+## S2. Image Stream Processing in Hardware 
+
+In hardware, to process images efficiently, we adopt a data streaming model . This is a standard approach for max-imizing data locality and works well with our algorithm since the computations apply only to local pixels. Instead of buffering an entire image frame, each convolution filter requires the kernel’s height minus one lines to be buffered. 
+
+S2.1. Use of Efficient Gaussian Kernel 
+
+Our Gaussian kernel is the 5 × 5 Anderson–Burt Gaussian kernel [9]: 21256 
+
+
+
+1 4 6 4 14 16 24 16 46 24 36 24 64 16 24 16 41 4 6 4 1
+
+
+
+which can also be expressed in its linearly separable form as: 
+
+116 
+
+1 4 6 4 1 ⊗ 116 
+
+
+
+14641
+
+
+
+This kernel is both compact—using small integer coeffi-cients that are powers of two—and linearly separable, mak-ing it highly efficient for implementation in hardware. 
+
+## S3. Hybrid Fixed Point to Efficient Floating Point Model 
+
+To minimize resource usage, the homography and pre-processing stages are implemented using fixed-point arith-metic . In particular, both the box filter and Gaussian filter are executed without trimming bits, thereby avoiding quan-tization issues. After these stages, the results are converted to floating point before computing Iave and I∆.On the floating-point side, two main strategies make the design feasible: • Use of half precision (FP16) instead of full precision (FP32) • Dropping subnormal number support 
+
+Performing floating-point arithmetic with subnormal number support makes multipliers and dividers nearly as expensive as fixed-point arithmetic, with only a small ad-ditional cost for exponent handling. With subnormal sup-port disabled, we can assume that the most significant bit (MSB) of both operands is always one. This guarantees that the MSB of the result will appear in either the highest or second-highest bit position, eliminating the need for an expensive variable shifter during multiplication or division. Our adders still require the variable shifters and priority encoders associated with floating-point arithmetic, but some of the surrounding logic is simplified by removing subnor-mal handling. The primary reduction in resource usage for our floating-point adders comes from using half-precision (FP16) representation. 
+
+## S4. The General Upsampling Problem 
+
+Our algorithm requires the generation of a Laplacian Pyra-mid in the N th Scale Pipeline. Downsampling an image is straightforward; however, a na¨ ıve implementation of up-sampling using bilinear interpolation would require buffer-ing the downsampled image, which corresponds to one-quarter the number of lines of the original image. This oc-curs because pixels that are reverse-mapped from the up-sampled image are far apart but refer to the same neighbor-ing pixels in the downsampled image. This can be described as: 
+
+f (x, y ) = g(x// 2, x// 2 + 1 , y// 2, y// 2 + 1) 
+
+A more efficient solution leverages the fact that the downsampled image dimensions are halved. We can there-fore push out a pixel from the downsampled image every four clock cycles for each clock cycle in the upsampled im-age. This reduces the number of lines that must be buffered to one-half of the downsampled image, which corresponds to one-eighth the number of lines of the original image. Some buffering is still required, since every other line in the upsampled image uses the same neighboring pixels from the downsampled image. Although buffering one-eighth is an improvement, it remains unfeasible (for example, one-eighth of a 480-line image is 60 lines) and scales undesir-ably with the image height. 
+
+S4.1. Proposed Solution 
+
+First, a clarification on how the convolutions are performed. For odd-sized kernels, which are the majority of our ker-nels, we crop evenly from all sides of the image to retain the original image dimension. For even-sized kernels, due to ambiguity of cropping, we specify which border we crop from to get back to the original image dimension. In hardware, we don’t actually do cropping but instead adjust the ’center’ of the kernel to achieve the same behavior. We define ’br’ as the bottom and right crop, and ’tl’ as the top and left crop. We solve the problem generally by avoiding the need to buffer half an image. Instead, we double the kernel sizes and interleave their coefficients with zeros in conjunction with inserting zeros into the image itself. This can be sum-marized using the following formulations. 
+
+Na¨ ıve approach: 
+
+1. Image is convolved with a 2 × 2 box filter, known as our ’Downsampler Filter’. 2. Skip every odd row and column. 3. The resulting downsampled image is then upsampled us-ing buffering and a bilinear interpolation. 
+
+Buffering requirement: one-quarter of the image lines. 
+
+Our approach: 
+
+1. Image is convolved with a 2 × 2 box filter, known as our ’Downsampler Filter’ 32. Insert zero at the pixels with odd row and column coor-dinates (zero insertion). 3. The zero-inserted image is convolved with a bilinear in-terpolation kernel, known as our ’Upsampler Filter’. With the bilinear interpolation kernel specified, the up-sampling process can be expressed as: Image ∗
+
+ 14141414
+
+
+
+> tl
+
+→ zero insert 
+
+→ ∗ 
+
+ 
+
+> 14121412
+
+1 12141214
+
+ → upsampled image Because the box filter is even-sized, it introduces a half-pixel shift with respect to the coordinate space of I∆. We correct this shift by convolving further with a half-pixel-shifted kernel using the opposite cropping side :Image ∗
+
+ 14141414
+
+
+
+> tl
+
+→ zero insert 
+
+→ ∗ 
+
+ 
+
+> 14121412
+
+1 12141214
+
+
+
+→ ∗ 
+
+ 14141414
+
+
+
+> br
+
+→ upsampled image The convolution of the two kernels, 
+
+ 
+
+> 14121412
+
+1 12141214
+
+ ∗
+
+ 14141414
+
+
+
+,
+
+produces: 
+
+
+
+1 3 3 13 9 9 33 9 9 31 3 3 1
+
+
+
+> br
+
+× 116 
+
+which is linearly separable into: 
+
+1 3 3 1 
+
+> br
+
+× 14 ×
+
+
+
+1331
+
+
+
+> br
+
+× 14 .
+
+Buffering requirement: three lines of the image. Now with this solution, at the 0th scale, it is simple: we downsample, then upsample, and proceed as normal. But for the 1st scale, where ↓1 Iave and ↓1 I∆ are used, we must interleave the kernels with zeros to match the appropriate dimensions. For example, the N th Anderson–Burt Gaussian kernel across scales is given below. 
+
+0th scale 
+
+116 
+
+1 4 6 4 1
+
+1st scale 
+
+116 
+
+1 0 4 0 6 0 4 0 1
+
+2nd scale                 
+
+> 116
+> 10004000600040001
+
+The N th zero-inserter follows: 
+
+f (x, y ) = 
+
+
+
+keep original pixel, if x mod 2 (N th +1) = 0 
+
+and y mod 2 (N th +1) = 0 
+
+,
+
+0, otherwise. The power-of-two modulus makes this operation straightforward to implement in hardware. To then reconstruct the full-resolution image, chain zero-inserters and upsamplers from each scale back to the origi-nal size, as shown in Fig. S3. 
+
+## S5. FLOPs per Pixel 
+
+All the N th filters are equivalent besides the interleaved ze-ros, which make them sparse kernels to match their scale dimension. This means that the adder tree sizes and number of multipliers between scales are the same, since all the zero values can simply be optimized away. As discussed previously, the majority of the kernels are linearly separable and consist of coefficients that are powers of two. Therefore, in the following calculations: • A multiply by a power of two is denoted as an easy mul-tiply .• A multiply requiring a full multiplier is denoted as a true multiply .Here, although N refers to the total number of scales, it can also refer to a particular scale if noted within the con-text of a scale and “ N th ” always refers to a particular scale (starting from 0). Please refer to Fig. S3 for visual refer-ence and tables Tab. S1 to see FLOPs per Filter/Operation and Tab. S2 Aggregate costs for N Scales. 
+
+Computation Breakdown per Scale 
+
+An N th scale requires: • 2× Gaussian Filter • 2× Downsampler Filter • 1 + 2 × Upsampler Filter • VN & WN
+
+4Filter / Operation Adders True Mult. Easy Mult. Dividers Total FLOPs 
+
+Gaussian 5 × 5 Filter 8 2 8 0 18 Downsampler Filter 2 0 4 0 6Upsampler Filter 6 4 4 0 14 
+
+VN & WN 2 2 0 0 4Cross Mult. w/ Weights (DX DY ENABLE = 1) 8 12 10 0 30 Cross Mult. w/ Weights (DX DY ENABLE = 0) 0 4 0 0 4Add and Divide 2 × (N − 1) 0 0 1 2 × (N − 1) + 1 
+
+Table S1. FLOP counts and arithmetic breakdown per operation. N refers to the number of scales. Total FLOPs is the sum of all arithmetic operations per filter or stage. 
+
+• 1× Cross Multiplication with Weights (depending on DX DY ENABLE) 
+
+## S6. Memory Usage 
+
+The number of image lines that must be buffered depends on the kernel height and the amount of zero interleaving at each scale. Here are the line-buffer equations for each buffer type at an N th scale (where N th = 0, 1, 2, . . . N-1). Gh, Dh, Uh, and Ph denote the base kernel heights of the Gaussian, Downsampler, Upsampler, and Pass/DX/DY filters, respectively. 
+
+N th Scale Buffer Equations 
+
+N th Gaussian (5 × 5) : (Gh − 1) 2 N th 
+
+= 2 N th +2 
+
+N th Downsampler (2 × 2) : 2N th 
+
+N th Upsampler (4 × 4) : 3 × 2N th 
+
+N th Pass/DX/DY (3 × 3) : 2N th +1 
+
+N th Scale Buffers, B(N th )
+
+An N th scale requires these many buffers: • 4× N th Gaussian buffers • 4× N th Downsampler buffers • 3× N th Upsampler buffers • 2× N th Pass/DX/DY buffers (only if DX DY ENABLE = 1) • 2 × 
+
+> N−1
+
+X
+
+> i=0
+
+ min( i, 1) × (i − 1) th Upsampler buffer 
+
+Which simplifies to: • 33 × 2N th 
+
++2 × PN −1 
+
+> i=0
+
+[min( i, 1) × (i − 1) th Upsampler buffer ]
+
+(DX DY ENABLE = 1) • 29 × 2N th 
+
++2 × PN −1 
+
+> i=0
+
+[min( i, 1) × (i − 1) th Upsampler buffer ]
+
+(DX DY ENABLE = 0) Since each scale has a different number of buffers, and higher scales begin processing only after receiving their downsampled Iave and I∆, they reach the latency buffer at different times. Thus, the latency buffer must store data equal to the longest latency path (largest scale) minus the shortest latency path (lowest scale), multiplied by (N − 1) 
+
+scales. 
+
+N th Scale Latency, L(N th )
+
+An N th scale latency amounts to these number of buffers: • 1× Gaussian buffer • 1× Downsampler buffer • 1× Upsampler buffer • 1× Pass/DX/DY buffer (if DX DY ENABLE = 1) • 
+
+> N−1
+
+X
+
+> i=0
+
+ min( i, 1) × (i − 1) th 
+
+Upsampler & Downsampler Buffer 
+
+Which simplifies to, • 10 × 2N th 
+
++PN −1 
+
+> i=0
+
+[min( i, 1) × (i − 1) th 
+
+Upsampler & Downsampler buffer ]
+
+(DX DY ENABLE = 1) • 8 × 2N th 
+
++PN −1 
+
+> i=0
+
+[min( i, 1) × (i − 1) th 
+
+Upsampler & Downsampler buffer ]
+
+(DX DY ENABLE = 0) The latency buffer therefore needs to buffer: 
+
+(N − 1) ×  L(N − 1) − L(0) 
+
+lines. See Tab. S3 for the aggregate number of buffered lines across scales. 
+
+## S7. Sensor Selection 
+
+To maintain low power usage, we selected the Himax HM0360 Ultra Low Power sensor. It is quite small, mea-suring at 2.88 mm across its diagonal and with a pixel pitch 5N (Scales) DX DY ENABLE Adders True Mult. Easy Mult. Dividers Total FLOPs 
+
+1 0 28 14 28 1 71 
+
+1 1 36 22 38 1 97 
+
+2 0 70 36 64 1 171 
+
+2 1 86 52 84 1 223 
+
+3 0 124 66 108 1 299 
+
+3 1 148 90 138 1 377           
+
+> Table S2. Aggregate per-pixel operation counts across Nscales using the per-operation table and the updated per-scale rule (2× Gaussian, 2× Downsampler, (1 + 2 ×Nth )Upsamplers per scale, and 1× Cross Mult. with Weights per scale), VN&WNplus one final Add and Divide.
+
+N (Scales) DX DY ENABLE Scale Buffers Latency Buffers Total Buffers 
+
+1 0 29 0 29 1 1 33 0 33 2 0 93 12 105 2 1 105 14 119 3 0 227 36 263 3 1 255 42 297    
+
+> Table S3. Aggregate buffered line requirements for N= 1 –3scales, including buffers used in scales, buffers consumed by Latency Buffer, and Total buffers used. Each buffer is the size of one line of the image in FP16. For both DX DY ENABLE modes.
+
+of 3.6 μm. We calculated that running at 32.5 FPS, the sen-sor only draws between 10-20 mW. The tradeoffs are the increased amount of noise in the image and using a smaller focal length to maintain a similar FoV. Using a shorter focal length creates a stronger field curvature, which we fix with our spatially varying parameters discussed earlier. 
+
+## S8. FPGA power consumption and resource utilization estimation 
+
+Estimating power consumption for a previous work with-out access to its source code is difficult: the only way to achieve a precise estimate of the power consumed by an FPGA design is to simulate the design on real data and record net switching information, using these figures for calculation [5]. Although this is not feasible for many exist-ing works as designs and data are not readily available, we can use vendor tools [34, 68] to attain a reasonably accurate power estimate if we are provided with circuit operating fre-quency, resource utilization, fanout, and activity factor [10]. While frequency and resource utilization are readily avail-able from the papers themselves, fanout (the average num-ber of loads driven by a driver, e.g. the average number of LUTs driven by a flip-flop) cannot be known without the actual design and activity factor (number of wire toggles between ’0’ and ’1’ per clock cycle) requires the design to be simulated on actual data. Therefore, to get a power estimate, we choose low and high reasonable values for fanout and activity factor. For fanout, we simply choose values of 3 and 6 for low- and high- power estimates, respectively [68]. ”Activity factor” (AF) refers to the number of times a logic signal toggles from ’0’ to ’1’ and back to ’0’ dur-ing a single clock cycle. A system’s power consumption is very strongly affected by its AF; power dissipation in dig-ital circuits largely comes from charging and discharging internal nodes. AF strongly depends on input data: if in-put data doesn’t change from cycle to cycle, then there is no change in internal logic signals and the AF is 0%. Ne-glecting glitching, the worst-case AF is 50%. For random signals, the AF will be 25%. [68] recommends using an AF of 12.5% for conservatively estimating power on real-world data. In our table, we use an AF of 12.5% for our low-end power estimate and an AF of 50% for our high-end power estimate. Furthermore, we normalize all circuits to oper-ate at 30 Mpix/s, roughly the number of pixels per second needed to process an HD video frame at 30 FPS, scaling the AF by the fraction of clock cycles that the system has to be active for to achieve 30 Mpix/s. For instance, if a work is capable of processing 100 Mpix/s, we scale the activity factor by 30 / 100, modeling reduced power consumption during inter-frame idle time due to an AF of 0%. A more detailed version of Tab. 1 can be seen in Tab. S4. 6The “Estimated Core Power” column shows power esti-mates reported in the original papers, where available. In the original works, these estimates were produced not by measuring the power consumption of a running system, but by feeding their design into a vendor-provided tool as de-scribed above. Because of differences in frame-rate and estimation methodology, the reported power numbers can-not be equitably compared, so we re-did the estimates as described above. Our estimates are very conservative and under-estimate the power for all except for [55]. 
+
+## S9. DIY Guide 
+
+Except for a few custom PCBs and 3D printed optomechan-ical parts, SpiderCam is entirely made up of commercial off-the-shelf components. The custom components can be cheaply and readily manufactured using PCB designs and 3D CAD files provided by us. Consult Tab. S5 for a list of all parts and how they can be acquired. 
+
+S9.1. Electrical components 
+
+Our system uses a Lattice ECP5 FPGA for its processing. We deploy our FPGA Gateware on a Lattice ECP5 Evalua-tion Board, part number LFE5UM5G-85F-EVN. This board carries a Lattice LFE5UM5G-85F FPGA as well as a large amount of support circuitry and peripherals. Because this evaluation board is not tailored to our specific application, we slightly modified it to reduce power consumption. We removed an unused oscillator (refdes X2), a number of un-used LEDs (refdes D22-26, D31), and removed inefficient linear regulators (refdes U5-6) supplying power to unused transceivers. We used a manually soldered wire to power the transceivers from the 1.2V switching regulator (refdes U8). While these modifications save some power, they don’t alter the fundamental low-power contributions: more time and a larger budget would permit the construction of a project-specific PCB (as in [45]) instead of using a modified off-the-shelf board. An entirely custom PCB would admit even greater power savings. Furthermore, to make our sys-tem work, we had to remove R99 and add a 0-Ω resistor to footprint R104 to change VCCIO6 from 3.3 V to 2.5 V. Although the low-power image sensor that we chose for this project can be readily purchased, at the time of writ-ing, no PCBs carrying this image sensor without integrated optics are available. To this end, we constructed a carrier board for the HM0360 image sensor which we integrated into our optomechanical assembly. The HM0360 carrier board connects to the FPGA evaluation board through a 30-pin flat-flex cable and a custom-fabricated adapter board which connects two image sensors to the FPGA evaluation board through some of its header pins. Finally, data read-out is achieved via another adapter board which connects an FT232H USB-to-Parallel transceiver to header pins on the FPGA board. Construction of all of these PCBs costs only a few hundred dollars, and copies can be ordered fully assem-bled from many PCB fabrication providers. KiCAD de-sign files, which can be used to order copies, can be found at https://github.com/NUBIVlab/SpiderCam/ tree/main/pcb .
+
+Assembling the system Two image sensor boards af-fixed to the optical setup, as described in Sec. S9.2, need to be connected to the image sensor adapter board via flat-flex cables. The image sensor adapter board should be plugged into the FPGA development board via headers J39 and J40. An FT232H breakout board should be connected to the FPGA development board via headers J5 and J8 with the FT232H breakout adapter. A photograph of a fully as-sembled system can be seen in Fig. 1. The FPGA board must be programmed with the Gate-ware that we developed for this project. openocd can be used to program the board with the appropriate Gate-ware images; prebuilt Gateware images can be found at 
+
+https://github.com/NUBIVlab/SpiderCam/ tree/main/fpga/synth/dual_scale along with programming instructions. Once the FPGA has been programmed, Python scripts at https : / / github . com/NUBIVlab/SpiderCam/tree/main/fpga/ tools/serialcam_ft232h can be used to read data from the board using the FT232H USB-to-Parallel adapter. Explanation of the directory structure of different variants of the bit files and usage of the Python GUI is detailed at https://github.com/NUBIVlab/SpiderCam/ blob/main/fpga/README.md .
+
+S9.2. Optomechanical assembly 
+
+As described in Sec. 3.1, our system relies on taking 2 pic-tures of the same scene with different levels of focus. To achieve this, we use a Thorlabs CCM5-BS016 beamsplit-ter with a 10mm AC050-008-A-ML lens attached to each output port. Each of the HM0360 image sensor boards is aligned with the optics using a 3D printed mount; the HM0360 image sensor boards are affixed to the mounts with M1.6 bolts, and the mounts are bolted onto the beamsplitter, aligning the two image sensors with their respective lenses. One side of a partially assembled image sensor mount can be seen in Fig. S7. 
+
+Optomechanical assembly calibration In order to achieve the defocus effect, the focal distance of the two sensors must vary. We used precision shims to offset the image sensors in the direction of the lenses optical axes and screwed the lenses in by different amounts to achieve a more precise offset. A homography calibration was also needed. The pixel pitch on our image sensors is 3.6 micrometers, but the 3D printed optical mounts are manufactured with a tol-erance of about 200 micrometers. Because of this, the 7Name Type FPGA Resolution Stereo Disparity Levels Mpix/sec Estimated Core Power (W) Measured Full-System Power Resource Utilization                                                                                                                                         
+
+> Reported Min Max LUTs REGs BRAMs DSPs Jin, 2014 [29] Stereo Kintex-6 640 ×480 60 15.6 10.6 1.93 2.67 none 61000 61000 165 0Raj, 2014 [30] DfD Virtex-4 400 ×400 n/a 48.0 none 0.46 0.58 2W + camera 10028 7609 29 50 Mattoccia, 2015 [45] Stereo Spartan-7 640 ×480 32 9.2 none 0.44 0.68 2.5W 23749 9030 67 0Ttofis, 2015 [65] Stereo Kintex-7 1280 ×720 64 55.3 2.8 0.92 1.53 none 57492 71192 302 458 Puglia, 2017 [55] Stereo Zynq Artix 1024 ×768 64 23.6 0.17 0.43 0.68 2W 29057 15208 80 0Zhang, 2018 [69] Stereo Kintex-7 1920 ×1080 128 124.4 none 0.89 1.23 none 53190 40980 151 0Lu, 2021 [40] Stereo Kintex-7 1024 ×480 128 57.0 none 1.39 2.30 none 50465 48046 125.5 8Wang, 2022 [66] Stereo Zynq US+ 1920 ×1080 256 344.2 3.35 2.03 2.20 2.8W + camera 92300 59300 332.5 0Ours, on Kintex-7 DfD Kintex-7 512 ×480 n/a 59.9 -0.42 0.55 -24173 21947 58 58 Ours, actual, on ECP5 DfD ECP5 480 ×400 n/a 30.5 -0.24 0.31 0.6W 47339 †35107 †95 †67 †
+
+Table S4. Extended version of Tab. 1. This table includes the reported power from other works. We re-did calculations from other works to account for differing pixel processing rates - our analysis favors methods that process pixels above 30 Mpix/s and penalize works below 30 Mpix/s. We under-estimate power for all works except [55].  
+
+> †
+
+The internal design of the Lattice ECP5 means that its resource utilization values can’t be directly compared to those of other FPGAs. Each LUT, BRAM, and DSP module on the ECP5 is smaller than on the 7-Series, so a design on the ECP5 will typically take more of these smaller resources. 
+
+Figure S4. Heatmap comparison of our method with and without field curvature correction. We decompose an image in 16 radial regions (row 1) and show the predicted depth vs. true depth heatmaps (filtered with a 90% sparsity) for every radial regions and their combined region. We show that compared to using constant optical parameters (row 2), applying spatial variation (row 3) yields better depth predictions that are much more aligned with the diagonal, indicating better accuracy, in all radial zones. We also observe with the confidence filtering, radial zones in the center tend to perform better at longer depth ranges than the peripheral zones, which is well aligned with the observation of Petzval field curvature, where the focal planes are curved towards the lens. 
+
+8Figure S5. Ablation studies. (a) Heatmaps of Focal Split [42] and different variations of our method. (b) Predicted depth maps on the calibration dataset at three different depths from our front-parallel calibration dataset. We show that incorporating spatial variation, multiscale, and multi-derivative in our algorithm helps improve depth estimation in our lower power setting.                                  
+
+> Component Description Commercial off-the-shelf Part number / path to design files on GitHub Qty
+> FPGA development board yes LFE5UM5G-85F-EVN 1Image sensor cables yes 900-0150180325-ND 2FT232H breakout board yes 2264 (Adafruit) 116mm beamsplitter yes CCM5-BS016 1M09 mounted lens yes AC050-008-A-ML 2Lens adapter yes S05TM09 2Image sensor boards no pcb/ecp5-fpc-adapter 2Image sensor adapter no pcb/hm0360-carrier 1FT232H adapter board no pcb/ft232h-breakout 13D printed optics fixture no 3d_printed_parts/dual_sensor_enclosure 2
+
+Table S5. A list of all of the significant parts making up our system. Commercial off-the-shelf components can be purchased at a store, while non-commercial off-the-shelf parts are those which we designed for this project and can be found in our GitHub repository (https://github.com/NUBIVlab/SpiderCam ) using the path names. To replicate our work, our design files must be used to order these from manufacturers. 
+
+images in the 2 image sensors are offset. After as-sembling the system, we manually calculate a homog-raphy; at runtime, we apply it to both images to align them before processing as described in Sec. 3.2. To cal-culate the homography, we capture several photographs of a checkerboard pattern and manually align them us-ing a custom tool found at https://github.com/ johnMamish/manual-homography-gui . To cap-ture the photographs for homography, the FPGA board must be reprogrammed with the Gateware image at https: 
+
+9Figure S6. Comparison of different confidence. We show the mean depth error vs. true depth curves at 90% sparsity on the cal-ibration data using different confidence metrics. We observed an increase in the working range with V W (numerator in Eq. (3)) as confidence compared with W 2 or |W |, which were used in previ-ous work [41, 42].    
+
+> Figure S7. Optical assembly. This photograph shows the 3D printed mount that affixes the image sensor to the beamsplitter and aligns it to the lens. The image sensor, lens, and flat-flex cable connecting the optical assembly to the FPGA development board are visible.
+
+/ / github . com / NUBIVlab / SpiderCam / tree / main/fpga/synth/camera_previewer .
+
+## S10. Depth Calibration 
+
+We calibrate our prototype with experimentally collected front parallel texture plans at known depths. We collect 56 pairs of images of the textured plane at a depth range of 0.24m to 1.36m, with a step size of 0.02 m. We calculate the mean absolute error (MAE) between the depth predictions of all image pairs and the true depth as the loss function for calibration. We only calculate the MAE loss on the 10% most confident pixels in each radial zone (see Sec. 3.6). We observed that by doing so, we prevent the optical constants from being biased by the noisy pixels and yield better depth predictions. We use the AdamW optimizer with a learning rate of 0.05 and optimize for 100 iterations. More details about our optimization parameters can be found in the con-figuration files within our GitHub repository. We save our optimized optical constants a, b, ω in Eqs. (1) and (3) in the supplementary numpy files. During inference, we set constant confidence thresholds for each radial zone to ensure reliable depth predictions. We use a log uniform confidence threshold from 1 ×10 −7 (ra-dial zone 1) to 2 ×10 −5 (radial zone 16). The peripheral ra-dial zones have larger thresholds because they are more af-fected by field curvature and aberrations. The starting point and ending point of the thresholds are tuned to maximize the working range while maintaining a density of 5% within the working range. In Fig. S4, we show heatmaps (with enforced 90% over-all sparsity) in the 16 radial zones with and without spatial variation. We observe that when the optical constants are universal (row 2), the central and peripheral radial zones exhibit strong biases in the depth prediction, with the depth prediction being smaller in the central zones and larger in the periphery. This agrees with the fact that the focal plane is curved towards the lens at the periphery of the field of view due to Petzval field curvature [22]. When spatially-varying optical constants are used, depth predictions are concentrated on the diagonals and the bias is no longer visible, which indicates much higher accuracy. We also compare several design choices in our method with Focal Split [42] as an ablation study (all results are shown with an enforced 90% sparsity in all depth maps). In the heat map comparison in Fig. S5a, we show our depth predictions are much more concentrated on the diagonal compared to Fo-cal Split, ours without spatial variation, ours with a single scale, and ours without derivatives. In Fig. S5b, we com-pare predicted depth maps on three image pairs at three different depths in our calibration dataset. We show that our method robustly outperforms others with better accu-racy, especially in the challenging peripheral areas. These are strong evidences that the incorporation of spatial varia-tion, dual-scale, and spatial derivatives is improving depth predictions. In Fig. S6, we compare three confidence met-rics: |W | used in previous DfDD methods, and W 2 and 
+
+V W , which are available without extra computation due to the depth computation. We show that using V W (numera-tor in Eq. (3)) yields the widest working range with a fixed 90% sparsity (45.1 cm for |W |, 45.7 cm for W 2, 50.3 cm for V W ). 
+
+## S11. Additional scenes and video 
+
+See full display of the depth maps produced on device us-ing the front-parallel textures and their respective MAE at 10 Table S6. Full system power consumption including image sen-sors, I/O, and FPGA, as reported in the literature and measured for several configurations of our method.                                                    
+
+> Work Scales Compute Ix, I yFPS Overall power (mW)
+> [42] --2.1 4900 [55] --30 2000 [45] -->30 <2500
+> ours 2yes 32.5 624 ours 2no 32.5 562 ours 1yes 32.5 489 ours 1no 32.5 468 ours 2yes 9399 ours 2no 9387 ours 1yes 9356 ours 1no 9347
+
+Fig. S8. This is the data that is concisely plotted as purple dots on Fig. 3. Furthermore, to show that the MAE from the font-parallel textures generalizes well, view Fig. S9 to see the MAE across additional real scenes. Generating the ref-erence maps was done by placing object planes at known distances, then manually tracing the outlines and filling them in with appropriate values (or a gradient of values). Finally, we have the demo video titled ’demo.mp4’ in the supplementary material, demonstrating real-time 32.5 FPS performance of our algorithm in action. 
+
+## S12. Full System Power Evaluation 
+
+We measured the power consumption of our system in sev-eral configurations, shown in Tab. S6. To perform the power measurement, we used a Qoitech Otii Arc Pro DC energy analyzer. The Otii Arc Pro supplied our system with 4.2 V of power and recorded current consumption at 4 ksps. We used Otii’s software to calculate average power consump-tion over a 5-second window. A representative power trace can be seen in figure Fig. S10. During power measurements, the system calculated depth for real scenes similar to those in Fig. 2. To verify system functionality during measurement, we read data off as normal using a USB-to-Parallel converter and monitored data output. We designed the USB adapter board so that it cannot supply power to our system, but to rule out parasitic power supply via GPIO pins, we took power measurements with and without the USB adapter board attached and found that there was no noticeable difference. 
+
+## S13. Power / Accuracy Trade-Off Details 
+
+In this section, we provide details on the power-accuracy tradeoff comparisons in Fig. 4 (see summary of working range, MAE, and core power in Tab. S7). We tested the power consumption and accuracy of several configurations of our system - by reducing the size of some computations,                                               
+
+> Table S7. Power-accuracy tradeoff for alternate algorithms.
+> We report the working range, MAE, and core power in Tab. S7.
+> Scales Ix, I ySV WR (m) MAE (m) Core power (mW)
+> 2yes yes 0.551 0.044 312 2yes no 0.311 0.058 280 2no yes 0.282 0.075 276 2no no 0.259 0.071 257 1yes yes 0.423 0.069 214 1yes no 0.210 0.076 195 1no yes 0.175 0.089 202 1no no 0.074 0.098 184
+
+we can save power and reduce circuit size, but accuracy suf-fers, as can be seen in Tab. S7. For all methods that use spatial variation (circles and stars), we start with the same log-uniform confidence threshold described in Sec. S10, and scale the thresholds to-gether for the widest working range. For the other methods using a universal threshold (squares), we tune the thresh-old value for the widest working range. This is necessary because the number of estimates changes the overall range of possible confidence estimates. We calculate the working range and depth MAE over 0.4 m to 1.0 m using the pix-els whose confidence is above the confidence threshold. In our code base, we provide an interface for users to change these options (spatial variation, number of scales, and spa-tial derivatives) in our method through a configuration file. We characterized the power consumption of each config-uration we tested as described in Sec. S8. We synthesized the SystemVerilog design for each different configuration and used vendor tools for the ECP5 to estimate the power consumption. 11 Figure S8. Depth maps computed on-device for front-parallel textured plane. This data was used to generate purple dots in Fig. 3. Note that density naturally falls off away from the center of the working range. Our confidence estimate captures edge textures with sufficient focus, and field curvature shifts the effective working range across the image. Edge effects dominate error in sparse images. 
+
+12 Figure S9. Depth maps computed on-device with their references for real scenes. Note MAE from top to bottom of 0.057 m, 0.058 m, and 0.063 m, consistent with data in Fig. S8 
+
+13 Figure S10. Screenshot of representative power consumption trace. We demonstrate how we used the Otii Arc Pro to measure power consumption for Tab. S6 by measuring power over time. This screenshot shows power for our system measured in a dual-scale configuration with dx and dy filters at 32.5 FPS. Notably, the frame rate is evident from the frequency of fluctuations in power consumption as seen in this graph - during active processing of a frame, power consumption is 650 mW; in-between frames, it drops to 420 mW. Our average power is 611 mW, which is slightly lower than our demonstrated 624 mW due to having captured this trace when the FPGA was cold compared to an extended period of usage during the recording of our demonstration that allowed the chip to warm up to its stable temperature. At the higher warm temperature, resistive losses in the device rise as well, resulting in slightly higher overall power draw. 
+
+14
