@@ -1,0 +1,431 @@
+Title: LightBeam: An Accurate and Memory-Efficient CTC Decoder for Speech Neuroprostheses
+
+URL Source: https://arxiv.org/pdf/2603.14002v1
+
+Published Time: Tue, 17 Mar 2026 01:17:11 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# LightBeam: An Accurate and Memory-Efficient CTC Decoder for Speech Neuroprostheses 
+
+## Ebrahim Feghhi ID 1,2,∗,∗∗ , Junlin Hu ID 2,∗, Nima Hadidi ID 1,2, Jonathan C. Kao ID 1,2,31 Neuroscience Interdepartmental Program 
+
+2 Department of Electrical & Computer Engineering 
+
+3 Department of Computer Science University of California Los Angeles 
+
+efeghhi@gmail.com 
+
+## Abstract 
+
+A promising pathway for restoring communication in patients with dysarthria and anarthria is speech neuroprostheses, which directly decode speech from cortical neural activity. Two benchmarks, Brain-to-Text ’24 and ’25, released intracranial recordings from patients with dysarthria along with a baseline algorithm trained with Connectionist Temporal Classification (CTC). Despite significant innovation on these benchmarks, all leading published prior work relies on a WFST-based CTC de-coder that requires ∼320 GB of RAM. These memory require-ments limit accessibility for both patients and researchers. Here, we propose LightBeam , a non-WFST based CTC decoder that requires only ∼10 GB of RAM and achieves state-of-the-art performance on both benchmarks. LightBeam achieves this by integrating an LLM into the beam-search process via delayed fusion, obviating the prior need for using a large N-gram LM. 
+
+LightBeam is implemented in Python and is open-source. 
+
+Index Terms : Brain-Computer Interface, Speech Neuropros-theses, CTC, Delayed Fusion 
+
+## 1. Introduction 
+
+Conditions such as amyotrophic lateral sclerosis (ALS), cere-bral palsy, or brainstem stroke can lead to dysarthria and anarthria. Dysarthria and anarthria are speech production disor-ders in which the neural activity generating speech plans in the motor cortex remains intact, yet the transmission of these mo-tor plans to the vocal tract or the vocal tract musculature itself is impaired [1]. These impairments manifest as slow or slurred speech in dysarthria, and a complete loss of the ability to speak in anarthria. Speech neuroprostheses offer a promising path to-ward restoring communication for patients with these disorders, bypassing the vocal tract by decoding speech directly from neu-ral activity [2, 3, 4, 5]. Two benchmarks, Brain-to-Text ’24 (B2T ’24; [6]) and ’25 (B2T ’25; [7]), have accelerated the development of speech neu-roprostheses. Each competition provided intracranial electrode recordings from the speech motor cortex of a distinct participant with ALS while they attempted to repeat text prompts. Along with the neural dataset, the organizers released a baseline algo-rithm consisting of two components. The first component, the CTC encoder, converts neural activity into phoneme-level logits using a Gated Recurrent Unit (GRU) architecture trained with CTC loss [8]. The second component, the CTC decoder, con-verts logits into words by running beam search on a weighted 
+
+> *
+
+These authors contributed equally. 
+
+> **
+
+indicates the corresponding author. 
+
+finite-state transducer (WFST) graph integrated with a large 5-gram LM. Since LLMs cannot be represented as WFST graphs, an LLM (OPT 6.7B; [9]) rescores beams at the end of the trial. This CTC decoder requires ∼320 GB of RAM. While significant progress has been made on these bench-marks, existing top-performing published algorithms rely on the memory-intensive baseline WFST-based CTC decoder [10, 11, 12]. These memory requirements present a bottleneck for de-ployment on local, resource-constrained devices. Local deploy-ment is ideal as it preserves user privacy, minimizes transmis-sion latency, and maximizes accessibility for patients and the broader research community. In this study, we present LightBeam , an accurate and memory-efficient CTC decoder for speech neuroprostheses. The core insight behind LightBeam is that rather than only us-ing an LLM for second-pass rescoring, we integrate it within the beam search process (i.e. first-pass decoding) at fixed time intervals via delayed fusion [13]. By doing so, we reduce the computational burden of preserving likely beam hypotheses on the N-gram LM, and replace the large 5-gram LM with a rela-tively small 4-gram LM. LightBeam reduces memory require-ments from ∼320 GB to ∼10 GB of RAM. Furthermore, it performs significantly better than the baseline WFST-based de-coder on both benchmarks when paired with either the baseline GRU or the time-masked Transformer encoder introduced by Feghhi et al. [11]. When applying generative error correction, 
+
+LightBeam achieves state-of-the-art (SOTA) performance com-pared to published results by Zhang et al. [12] (that also use generative error correction) on both benchmarks. While Light-Beam requires making more frequent calls to an LLM, real-time factor (RTF) values are well below 1, so it remains viable for clinical use. Furthermore, LightBeam is open-source and imple-mented in Python, making it easily modifiable and deployable in modern research environments, with code provided here. 
+
+## 2. Related Works 
+
+Prior work attempted to entirely bypass the WFST-based de-coder by projecting neural activity into the embedding space of an LLM, and fine-tuning the LLM to directly generate text [14, 12]. While this multi-modal LLM approach has been successful in automatic speech recognition (ASR) [10], it per-forms substantially worse than the WFST decoder in this con-text, likely due to small neural dataset sizes [12]. One reason researchers prioritized building multi-modal LLMs over inte-grating them into the beam-search process may be that the ma-jority of open-source CTC toolkits only support N-gram LM integration [15, 16, 17]. While the Flashlight decoder on Py-
+
+> arXiv:2603.14002v1 [cs.HC] 14 Mar 2026
+
+Torch does support neural network integration, it is CPU-based and thus cannot support LLM inference [18]. Hori et al. [13] were the first to demonstrate that LLMs could be effectively used in first-pass decoding without additional projection layers; however, they released no open-source implementation. Fur-thermore, their results are shown in the context of ASR with encoders that output sub-word tokens and are already accurate without external LM integration. By contrast, CTC encoders for neural speech decoding typically output phonemes and heavily rely on external LM guidance due to small dataset sizes. 
+
+## 3. Methods 
+
+3.1. Dataset 
+
+Our analyses utilize the neural datasets from the Brain-to-Text ’24 (B2T ’24) and ’25 (B2T ’25) benchmarks [2, 4]. The B2T ’24 dataset consists of 12,100 sentences recorded from par-ticipant T12 over 25 sessions spanning 4 months, using 128-electrode Utah arrays implanted in the ventral motor cortex. The B2T ’25 dataset includes 10,948 sentences from partici-pant T15 across 45 sessions over 20 months, recorded with 256 electrodes in the ventral motor cortex. Across both datasets, neural features consist of thresholded spike counts and spiking-band power [19]. These signals were binned in 20 ms windows and z-scored within blocks. Additional details regarding these datasets, including train, val, and test split construction are in-cluded in Supplementary Section A as well as the original stud-ies. 
+
+3.2. Encoder models 
+
+We trained the baseline GRU encoders using the hyperparam-eters and codebases provided by the B2T ’24 and ’25 bench-mark organizers. The B2T ’24 GRU was bidirectional (non-streaming), while the B2T ’25 GRU was unidirectional. Addi-tionally, we evaluated LightBeam using the time-masked Trans-former, which outperforms the baseline GRU on B2T ’24 [11] and achieves state-of-the-art published results when combined with self-supervised pretraining [12]. For B2T ’24, we log-transformed the neural data following Feghhi et al. [11]; for B2T ’25, we utilized the z-scored data provided by the orga-nizers without further transformation. To address the challenge of the unbounded KV-cache in self-attention—which compli-cates clinical deployment—we trained a causal Transformer with limited left context (see Supplementary Section C). For all architectures, a final linear layer produced 41 token classes: 39 phonemes, a CTC blank token, and a space token indicating word boundaries. All encoders were trained using CTC loss. 
+
+3.3. WFST decoder 
+
+We evaluated LightBeam against the baseline WFST-based de-coder described by Willett et al. [2]. This approach represents the logit-to-token mapping ( T ), the phoneme-to-word mapping (lexicon, L), and the N-gram LM (grammar, G) as individual WFSTs, which are pre-compiled into a single, unified graph (T ◦ L ◦ G ). During inference, beam search is performed on this graph with a pruned 5-gram LM to generate a word lat-tice, which is then subsequently rescored using an un-pruned version of the same 5-gram LM. In a final rescoring stage, the top 100 candidate beams are extracted and scored using OPT 6.7B [9]. These LLM scores are combined with the un-pruned 5-gram LM scores and scaled CTC encoder log-probabilities to determine the final output. We used the exact decoding hyper-
+
+Algorithm 1: LightBeam                                                                        
+
+> Scaled log-probs ∈RT×k
+> D=α·Log Softmax(encoder logits) ;
+> Beams =InitBeams (k,o,|V| );
+> VecLex =InitVectorizedLexicon (k,|V| ,L,T); Maintain state within word prefix for each beam, ∈Rk
+> prefix state =VecLex.Init State() ;
+> for t←0to T−1do
+> Extend kbeams with D[t]to form current scores ∈Rk×|V|
+> scores =Fan Out Beams(Beams.scores, D[t]) ;
+> scores =Add Token Word Insertion Bonus(scores) ;Lexicon mask ∈Rk×|V| is true for valid extensions. Repeated and blank tokens are always valid.
+> lex mask =VecLex.Get Mask(prefix state, Beams );
+> scores[ ¬lex mask] =−∞ ;Apply top-k selection and threshold pruning.
+> scores, indices =select top k(scores) ;
+> scores[scores <max(scores) -θ]=−∞ ;Update beam states after pruning.
+> Beams.update(scores, indices) ;Update prefix states for beams extending with non-blank, non-repeating tokens.
+> prefix state =VecLex.Update(prefix state, Beams) ;Apply shallow fusion w/ N-gram LM, beam scores update in place.
+> ApplyNGram(Beams, N-gram LM, λ); See Section 3.4.1 Apply delayed fusion with LLM at specified intervals
+> if (tmod llm rescore interval == 0) ∧(t > 0) then
+> ApplyLLM(Beams, LLM) ; See Section 3.4.2
+> ApplyFinalLLM(Beams, LLM) ;
+
+parameters specified by Willett et al. [2] and Card et al. [4] for the B2T ’24 and ’25 benchmarks, respectively (Supplementary Section D). 
+
+3.4. LightBeam 
+
+LightBeam is adapted from the GPU-accelerated FlexCTC de-coder [17]. Its operational flow is detailed in Algorithm 1, with all variables for the algorithm defined in this section or Section 3.3. Hyperparameter values as well as additional technical de-tails are specified in Supplementary Section E. First, the logits from the CTC encoder are transformed into a log-probability and multiplied by an acoustic scale. At each encoder frame t,the k beams are expanded by adding the scaled CTC encoder log-probabilities to generate k × |V| candidates. We apply a token extension bonus β to non-repeating phoneme tokens and a word insertion bonus γ to space tokens. To enable GPU par-allelization across beams, we represent the lexicon as a state transition table T rather than a trie. Each row in T represents a valid word prefix state, and entry Ti,j stores the resulting pre-fix state when observing token j at prefix state i, with a desig-nated “sink state” for out-of-vocabulary transitions. Candidates are pruned if they violate lexical constraints (i.e. enter the sink state) or fall below a threshold θ from the score of the top beam. 
+
+3.4.1. Shallow fusion and homophone trackng with N-gram LM 
+
+Phoneme sequences can map onto multiple words, known as homophones. Selecting the most likely homophone fails to ac-count for future context; for instance, because “ There ” is more likely than its homophone “ They’re ”, the sentence “ They’re happy. ” is not possible to produce under a greedy approach. We Table 1: Combined performance and computational efficiency on B2T ’24 and ’25 benchmark test sets when using the baseline GRU encoder. Peak RAM and VRAM are reported in GB. Processing speed is measured in RTF using an GeForce RTX 5090 GPU. Lower is better for all metrics. Mean ± SEM across n = 10 seeds. WFST-based (Orig.) is a single seed result provided by original authors, and re-implementation (re-impl) values are generated in this study. ( ∗ sig. better than Orig., † sig. better than Re-impl.) 
+
+Method B2T ’24 B2T ’25 WER RAM VRAM RTF Pub. WER Priv. WER RAM VRAM RTF 
+
+WFST-Based (Orig.) 9.76 - - - 6.67 7.00 - - -WFST-Based (Re-impl.) 9.71 ± 0.08 322.9 9.0 0.05 6.31 ± 0.12 6.72 ± 0.05 317.8 18.1 0.01 LightBeam (Ours) 9.37 ∗† ± 0.08 9.4 5.6 0.14 5.77 ∗† ± 0.12 6.47 ∗† ± 0.05 11.6 5.8 0.06 therefore implement a nested beam search such that each beam maintains its own top o orthographic (i.e., word-level) beams. Upon detecting a word boundary, the o orthographic beams are expanded with the candidate homophones, scored with the N-gram LM on CPU, followed by top-o selection. Orthographic beams whose scores are below a threshold, λ, from the top-scoring beam are further pruned. The current score for beam i,
+
+Si, is updated as: 
+
+Si ← Si + ω · [log Pngram (onew ) − log Pngram (oprev )] (1) where ω is the LM weight, oprev is the previous most likely orthographic beam, and onew is the most likely ortho-graphic beam after integrating the incoming homophones. We use the 4.9 GB version of the 4-gram LM trained on 8.6 bil-lion words with a 100,000 word vocabulary provided by Imag-ineVille project [20]. 
+
+3.4.2. Delayed Fusion with LLM 
+
+At fixed time intervals ( 1 s and for B2T ’24, 1.25 s for B2T ’25), an LLM (Llama 3.2 1B Base; [21], denoted as N ) rescores all (up to k×o) unique orthographic beams in batches using a GPU. We then replace the N-gram scores with the LLM scores: 
+
+Si ← Si + ϕ · log PLLM (o′ 
+
+> new
+
+) − ω · log Pngram (onew ) (2) where ϕ is the LLM weight and o′ 
+
+> new
+
+is the LLM-preferred hy-pothesis. At the end of the trial, the score of each beam is up-dated with its most likely end-of-sentence punctuation accord-ing to the LLM. Prior to delayed fusion, Llama is fine-tuned on a next-word prediction task using the combined training and validation sentences across both datasets to adapt it to the par-ticipant’s text distribution (Supplementary Section F). 
+
+3.5. Generative error correction 
+
+Following prior work [22, 10, 11, 12], we apply generative error correction by producing 10 candidate sentences using 10 ran-dom seeds of the same encoder model, and fine-tuning an LLM to produce the ground-truth sentence given these 10 candidates. We follow the same procedure as Feghhi et al. [11], with Llama 3.1 8B Instruct used for generative error correction. Refer to Supplementary Section G for more details. 
+
+## 4. Results 
+
+4.1. Evaluation using baseline GRU encoder 
+
+We first utilized the baseline GRU encoder (Section 3.2) to eval-uate the WFST decoder (Section 3.3) and LightBeam (Section 3.4). The GRU encoder serves as a rigorous test-bed, as the WFST decoder hyperparameters were previously tuned for its specific logit distribution. As shown in Table 1, LightBeam con-sistently improves Word Error Rate (WER) across both bench-marks (notably, B2T ’25 reports both public and private WER). To rigorously assess these gains, we conducted a two-sided one-sample t-test comparing LightBeam ’s performance across 10 encoder seeds against the official baseline (WFST-Based Orig.). All statistical tests in this study are two-sided. 
+
+LightBeam achieved statistically significant improvements ( p < 
+
+0.05 ) on both datasets. Furthermore, we reproduced results us-ing the WFST decoder across the same 10 seeds; a paired t-test confirmed that LightBeam significantly outperformed this re-implementation (WFST-Based Re-impl., p < 0.05 ). Regarding resource efficiency (Table 1), LightBeam 
+
+achieved a dramatic reduction in peak RAM consumption from 
+
+∼320 GB to ∼10 GB, while reducing peak VRAM require-ments by 1.6 × and 3.1 × for the B2T ’24 and ’25 benchmarks, respectively. Finally, although LightBeam ’s mean RTF is higher than the WFST baseline due to more frequent application of the LLM, the average RTF remains well below 1. Critically, the maximum RTF observed across all test trials remained strictly under 1 on a GeForce RTX 5090 GPU, ensuring suitability for real-time decoding (Supplementary Section H). 
+
+4.2. Generalization to time-masked Transformer encoder 
+
+To evaluate whether LightBeam is effective with other en-coders, we evaluated its performance using a causal time-masked Transformer encoder with a bounded KV cache (Sec-tion 3.2). No additional hyperparameter tuning was done for the WFST decoder or LightBeam using the Transformer encoder. As shown in Table 2, LightBeam also consistently outperforms the WFST decoder when applied to the Transformer on both benchmarks ( p < 0.05 ; paired t-test across n = 10 seeds). Furthermore, RTF values are lower for both decoders with the Transformer (Table 2). We next compared the performance of applying genera-tive error (GEC) correction with the time-masked Transformer Table 2: Word Error Rate (%) comparison on the B2T ’24 (WER) and B2T ’25 (Pub. and Priv. WER) benchmarks when using the causal time-masked Transformer with bounded KV cache. Mean ± SEM over n = 10 seeds. ( † sig. better than WFST decoder).                    
+
+> Method B2T ’24 B2T ’25 WER RTF Pub. WER Priv. WER RTF
+> WFST-Based 8.36 ±.12 0.02 4.95 ±.26 4.81 ±.13 0.01
+> LightBeam 8.08 †±.12 0.10 4.44 †±.21 4.59 †±.14 0.05 B2T '24 B2T '25 Private B2T '25 Public
+> 2.0
+> 3.0
+> 4.0
+> 5.0
+> 6.0
+> 7.0
+> Word Error Rate (WER) %  **
+> *
+> *
+> WFST-Based - Causal
+> WFST-Based - Noncausal
+> LightBeam - Causal
+> LightBeam - Noncausal
+
+Figure 1: LightBeam continues to match or outperform base-line WFST decoder across all benchmarks when both meth-ods are paired with generative error correction. Results are shown with time-masked Transformer. Asterisks indicate signif-icant improvement when performing paired t-test across n = 10 
+
+seeds. 
+
+when using either the WFST decoder or LightBeam (Section 3.5). We used Llama 3.1 8B for GEC. We include GEC results with both a causal and non-causal time-masked Transformer, because Zhang et al. [12] achieved SOTA results ( 5.10% on B2T ’24, 2.21% on B2T ’25 public) by pretraining a noncausal Transformer on 367 hours of intracranial data and using GPT 3.5 or GPT 4 for GEC. For both versions of the Transformer, GEC with LightBeam performed significantly better than with the WFST decoder on B2T ’24 and B2T ’25 public ( p < 0.05 ;paired t-test across n = 10 seeds) and there was no signif-icant difference on B2T ’25 private (Figure 1). The mean WER across seeds with the noncausal Transformer was 5.01% ,
+
+2.36% , and 2.08% on B2T ’24 and B2T ’25 private and pub-lic, respectively (Figure 1). These results are significantly bet-ter than those of Zhang et al. (p < 0.05 ; one-sample t-test), establishing a new SOTA relative to published results. Notably, 
+
+LightBeam does not rely on extensive pretraining or large close-sourced LLMs. Importantly, LightBeam innovates on the de-coder while the performance gains from Zhang et al. stem from changes to the encoder, and so these research directions are or-thogonal and complementary. 
+
+4.3. Ablations and hyperparameter sweeps 
+
+To isolate the impact of LightBeam ’s core components, we con-ducted an ablation study on the B2T ’24 and ’25 validation sets using the baseline GRU (Table 3). First, we evaluated the ne-cessity of delayed fusion by reverting to a traditional pipeline where the LLM is applied only once at the end of the trial. Re-moving the continuous LLM rescoring—which occurs at 1 s and 1.2 s intervals for B2T ’24 and ’25—resulted in significant performance degradation across both datasets (Table 3), under-Table 3: Ablation study on B2T ’24 and B2T ’25 validation sets with baseline GRU. Values are Mean WER (%) ± SEM ( n = 10 
+
+seeds). † denotes significant degradation relative to Full model. 
+
+Configuration B2T ’24 WER B2T ’25 WER LightBeam (Full) 14.17 ± 0.08 6.36 ± 0.05 
+
+No LLM first-pass rescore 17.17 † ± 0.05 8.31 † ± 0.07 
+
+No NWP Fine-tuning 15.89 † ± 0.09 7.26 † ± 0.04 
+
+No Phoneme Variants 14.05 ± 0.07 6.36 ± 0.05 1 5 10 15 20     
+
+> 13.9
+> 14.4
+> 14.9
+> Word Error Rate (WER) %
+> B2T '24
+> 1510 15 20
+> 6.0
+> 6.5
+> 7.0
+> B2T '25
+> 0.1
+> 0.4
+> 0.7
+> 0.0
+> 0.2
+> 0.4
+> Real-Time Factor (RTF)
+> LLM Rescore Interval (Encoder Frames)
+
+Figure 2: Impact of LLM rescore interval on validation WER and RTF across both datasets. An encoder frame is output ev-ery 100 ms in B2T ’24, and every 80 ms in B2T ’25. Shaded regions indicate SEM across n = 10 seeds. LLM rescore inter-val was set to 10 and 15 throughout the study for B2T ’24 and ’25, respectively. 
+
+scoring the advantage of integrating the LLM directly into the first-pass beam search. Next, we ablated the LLM next-word prediction (NWP) fine-tuning; removing this adaptation also caused significant degradation, highlighting the importance of tailoring the LLM to the participant’s specific text distribution. Finally, we assessed whether permitting multiple phonetic pro-nunciations per word (Supplementary Section I) improved per-formance; we found that using only default pronunciations did not result in significant degradation. We further analyzed the impact of the LLM rescore interval (Figure 2); increasing the in-terval generally increased WER while decreasing RTF, demon-strating a tunable tradeoff between accuracy and latency. 
+
+## 5. Discussion 
+
+In this study, we present LightBeam , a memory-efficient CTC decoder for speech neuroprostheses that establishes a new SOTA on the B2T ’24 and ’25 benchmarks with real-time de-coding speeds. LightBeam achieves these holistic gains by in-tegrating an LLM into first-pass decoding, reducing reliance on a large N-gram LM. We identify three primary limitations. First, while LightBeam exhibits higher latency than the WFST baseline, its processing speed on remains within the constraints required for real-time decoding (RTF < 1). Second, because LLM scores are integrated at fixed intervals, significant diver-gence between the LLM and N-gram LM scores may cause a degree of “jitter” in the decoded output. Third, the reliance on next-word prediction fine-tuning implies that LightBeam may require an initial calibration phase to adapt to the idiosyncratic text distributions of new participants. Future research could explore several promising directions. First, it would be valuable to observe if continuous next-word prediction fine-tuning allows LightBeam to adapt to a patient’s evolving linguistic nuances over long-term use. Second, given that LLMs excel at processing long-range dependencies, Light-Beam may provide even greater performance gains in long-context conversational trials. Finally, the modular nature of delayed fusion allows for the integration of other LLMs, po-tentially improving accuracy further as open-source models im-prove (we report limited results with Llama 3.2 3B Base in Supplementary Section J). By providing an open-source Python implementation, we hope to enable the research community to build upon LightBeam to make speech neuroprostheses more accessible and accurate for patients. 6. Acknowledgements 
+
+This work was supported by the following awards. To : NSF CAREER 1943467, NIH DP2NS122037, NIH R01NS121097. To EF: NIH T32NS115753. 
+
+## 7. Generative AI Use Disclosure 
+
+We used Claude to assist with the implementation of LightBeam 
+
+and all AI-assisted edits were verified by the researchers. We used Gemini to assist with writing this manuscript to improve grammar and diction. 
+
+## 8. Author Contributions 
+
+E.F. : Conceptualized the Lightbeam decoder framework, devel-oped the core software implementation, and authored the ini-tial manuscript draft. J.H. : Implemented the Transformer train-ing pipeline with limited left-context constraints, helped author supplementary materials, generated the Figures, and provided revisions to the manuscript. N.H. : Contributed to the conceptu-alization of the Lightbeam architecture and provided revisions to the manuscript. J.C.K. : Supervised the research, acquired the necessary funding, and provided revisions to the manuscript. 
+
+## 9. References 
+
+[1] A. B. Silva, K. T. Littlejohn, J. R. Liu, D. A. Moses, and E. F. Chang, “The speech neuroprosthesis,” Nat. Rev. Neurosci. ,vol. 25, no. 7, pp. 473–492, Jul. 2024. [2] F. R. Willett, E. M. Kunz, C. Fan, D. T. Avansino, G. H. Wilson, E. Y. Choi, F. Kamdar, M. F. Glasser, L. R. Hochberg, S. Druck-mann, K. V. Shenoy, and J. M. Henderson, “A high-performance speech neuroprosthesis,” Nature , vol. 620, no. 7976, pp. 1031– 1036, Aug. 2023. [3] X. Chen, R. Wang, A. Khalilian-Gourtani, L. Yu, P. Dugan, D. Friedman, W. Doyle, O. Devinsky, Y. Wang, and A. Flinker, “A neural speech decoding framework leveraging deep learning and speech synthesis,” Nat. Mach. Intell. , vol. 6, no. 4, pp. 467– 480, Apr. 2024. [4] N. S. Card, M. Wairagkar, C. Iacobacci, X. Hou, T. Singer-Clark, F. R. Willett, E. M. Kunz, C. Fan, M. Vahdati Nia, D. R. Deo, A. Srinivasan, E. Y. Choi, M. F. Glasser, L. R. Hochberg, J. M. Henderson, K. Shahlaie, S. D. Stavisky, and D. M. Brand-man, “An accurate and rapidly calibrating speech neuroprosthe-sis,” New England Journal of Medicine , vol. 391, no. 7, pp. 609– 618, Aug. 2024. [5] K. T. Littlejohn, C. J. Cho, J. R. Liu, A. B. Silva, B. Yu, V. R. An-derson, C. M. Kurtz-Miott, S. Brosler, A. P. Kashyap, I. P. Halli-nan, A. Shah, A. Tu-Chan, K. Ganguly, D. A. Moses, E. F. Chang, and G. K. Anumanchipalli, “A streaming brain-to-voice neuro-prosthesis to restore naturalistic communication,” Nat. Neurosci. ,vol. 28, no. 4, pp. 902–912, Apr. 2025. [6] F. R. Willett, J. Li, T. Le, C. Fan, M. Chen, E. Shlizer-man, Y. Chen, X. Zheng, T. S. Okubo, T. Benster, H. D. Lee, M. Kounga, E. K. Buchanan, D. Zoltowski, S. W. Linderman, and J. M. Henderson, “Brain-to-text benchmark ’24: Lessons learned,” arXiv [cs.CL] , Dec. 2024. [7] N. Card, M. Wairagkar, C. Iacobacci, X. Hou, T. Singer-Clark, F. R. Willett, E. M. Kunz, C. Fan, M. V. Nia, D. R. Deo, A. Srini-vasan, E. Y. Choi, M. F. Glasser, L. R. Hochberg, J. M. Hender-son, K. Shahlaie, S. D. Stavisky, and D. M. Brandman, “Brain-to-text ’25,” https://www.kaggle.com/competitions/brain-to-text-25, 2025, kaggle. [8] A. Graves, S. Fern ´andez, F. J. Gomez, and J. Schmidhuber, “Connectionist temporal classification: Labelling unsegmented sequence data with recurrent neural networks,” International Con-ference on Machine Learning , 2006. [9] S. Zhang, S. Roller, N. Goyal, M. Artetxe, M. Chen, S. Chen, C. Dewan, M. Diab, X. Li, X. V. Lin, T. Mihaylov, M. Ott, S. Shleifer, K. Shuster, D. Simig, P. S. Koura, A. Sridhar, T. Wang, and L. Zettlemoyer, “OPT: Open pre-trained transformer lan-guage models,” arXiv [cs.CL] , May 2022. [10] J. Jia, G. Keren, W. Zhou, E. Lakomkin, X. Zhang, C. Wu, F. Seide, J. Mahadeokar, and O. Kalinli, “Efficient streaming LLM for speech recognition,” in ICASSP 2025 - 2025 IEEE Interna-tional Conference on Acoustics, Speech and Signal Processing (ICASSP) . IEEE, Apr. 2025, pp. 1–5. [11] E. Feghhi, S. Kaasyap, N. Hadidi, and J. Kao, “Time-Masked Transformers with Lightweight Test-Time Adaptation for Neural Speech Decoding,” in Proc. Neural Information Processing Sys-tems (NeurIPS) , 2025, p. to appear. [12] Y. Zhang, L. He, C. Fan, T. Liu, H. Yu, T. Le, J. Li, S. Linder-man, L. Duncker, F. R. Willett, N. Mesgarani, and L. Paninski, “Decoding Inner Speech with an End-to-End Brain-to-Text Neu-ral Interface,” in Proc. International Conference on Learning Rep-resentations (ICLR) , 2026. [13] T. Hori, M. Kocour, A. Haider, E. McDermott, and X. Zhuang, “Delayed fusion: Integrating large language models into first-pass decoding in end-to-end speech recognition,” arXiv [cs.CL] , Jan. 2025. [14] S. Feng, H. Liu, Y. Wang, and Y. Wang, “Towards an end-to-end framework for invasive brain signal decoding with large language models,” in Interspeech 2024 . ISCA: ISCA, Sep. 2024, pp. 1495– 1499. [15] Kensho Technologies, “pyctcdecode,” https://github.com/ kensho-technologies/pyctcdecode, 2021. [16] D. Galvez and T. Kaldewey, “Gpu-accelerated WFST beam search decoder for CTC-based speech recognition,” in 2023 IEEE Auto-matic Speech Recognition and Understanding Workshop (ASRU) .IEEE, 2023. [17] L. Grigoryan, V. Bataev, N. Karpov, A. Andrusenko, V. Lavrukhin, and B. Ginsburg, “FlexCTC: GPU-powered CTC beam decoding with advanced contextual abilities,” arXiv [eess.AS] , Aug. 2025. [18] J. Kahn, V. Pratap, T. Likhomanenko, Q. Xu, A. Hannun, J. Cai, P. Tomasello, A. Lee, E. Grave, G. Avidov, B. Steiner, V. Liptchinsky, G. Synnaeve, and R. Collobert, “Flashlight: Enabling innovation in tools for machine learning,” in Pro-ceedings of the 39th International Conference on Machine Learning , ser. Proceedings of Machine Learning Research, vol. 162. PMLR, 2022, pp. 10 557–10 574. [Online]. Available: https://proceedings.mlr.press/v162/kahn22a.html [19] S. R. Nason, A. K. Vaskov, M. S. Willsey, E. J. Welle, H. An, P. P. Vu, A. J. Bullard, C. S. Nu, J. C. Kao, K. V. Shenoy, T. Jang, H.-S. Kim, D. Blaauw, P. G. Patil, and C. A. Chestek, “A low-power band of neuronal spiking activity dominated by local single units improves the performance of brain-machine interfaces,” Nat. Biomed. Eng. , vol. 4, no. 10, pp. 973–983, Oct. 2020. [20] K. Vertanen, “Imagineville language modeling software (dec19),” https://imagineville.org/software/lm/dec19/, 2019, accessed: 2024-05-22. [21] A. Grattafiori, A. Dubey, A. Jauhri, A. Pandey, A. Kadian et al. ,“The llama 3 herd of models,” arXiv [cs.AI] , Jul. 2024. [22] T. Benster, G. Wilson, R. Elisha, F. R. Willett, and S. Druckmann, “A cross-modal approach to silent speech with LLM-enhanced recognition,” arXiv [cs.HC] , Mar. 2024. A Additional benchmark details 
+
+## A.1 Brain-to-Text 2024 
+
+B2T ’24 is partitioned into a training set of 8,800 trials, a validation set of 880 trials, and a test set of 1,200 trials (for which ground-truth sentence labels are withheld). Trials are organized into blocks, with each block containing 20–50 sentences. Specifically, the validation split consists of the final block from 22 out of the 24 total recording days. The test split comprises the first two blocks from 15 of the 24 recording days. The training split contains all remaining blocks across the full 24-day recording period. All sentences in this benchmark are sourced exclusively from the Switchboard corpus. All data is publicly available on dryad, with preprocessing details provided in Willett et al. [7]. 
+
+## A.2 Brain-to-Text 2025 
+
+B2T ’25 is partitioned into a training set of 8,072 trials, a validation set of 1,426 trials, and a test set of 1,450 trials (for which ground-truth sentence labels are withheld). Trials are grouped into blocks of 5–50 sentences. The validation and test sets combined comprise 67 blocks collected across 41 of the 45 recording days, while the training set comprises 198 blocks spanning all 45 days. The distribution of corpus sources across these splits is detailed in Table A1. The linguistic material is sourced from a diverse set of corpora, including Switchboard, OpenWebText2, Harvard Sentences, a custom high-frequency word list, and random word sequences. All data is publicly available on dryad, with preprocessing details provided in Card et al. [1] Table A1: Distribution of data sources across training and evaluation splits.                      
+
+> Source Blocks Sentences Split
+> Switchboard 182 7,672 Train, Val/Test Freq. Words 48 2,050 Train, Val/Test 50-word Vocab 25 1,091 Train Only Openwebtext 5172 Val/Test only Harvard 398 Val/Test only Random 279 Val/Test only
+
+# B CTC encoder hyperparameters 
+
+For the GRU encoders, we follow the exact same implementation of Willett et al. [7] for B2T ’24 and Card et al. [1] for B2T ’25. For the Transformer encoders, we adopted the parameters from Feghhi et al. [4] for B2T ’24. The hyperparameters for the B2T ’25 time-masked Transformer are listed in Table A2. 
+
+# C Bounded KV Cache 
+
+While GRU architectures compress the input into a fixed hidden state, Transformers require access to all previous input, resulting in an unbounded Key-Value (KV) cache. This is problematic when deploying the speech neuroprostheses in an unstructured, conversational setting where the context is not reset after each sentence. Inspired by Zheng et al.[8], we limit the left context of the causal Time-Masked Transformer to guarantee a constant Key-Value (KV) cache, making the Transformer suitable for real-world, clinical applications. 1Table A2: Transformer architecture and training hyperparameters for B2T ’25. Feed-forward network (FFN) multiplier indicates the increase in dimensionality in the FFN module. 
+
+Hyperparameter Value 
+
+Patch Length 4 (0.08 ms) Patch Width 512 Transformer Dimension 384 Layers 5Heads 6Head Dimension 64 FFN Multiplier 4Learning Rate 0.002 White Noise 0.2 Baseline Shift 0.05 Number of Time-Masks 20 Max Mask Length 5Epochs 500 Dropout 0.35 Input Dropout 0.2 L2 Decay 1 × 10 −5
+
+Gaussian Smooth Kernel Size 20 Gaussian Smooth Width 2.0 Gradient Norm Clipping 100 
+
+## C.1 Dynamic left temporal context constraint 
+
+We define the input sequence as 𝑋 = {𝑥 1, 𝑥 2, . . . , 𝑥 𝑇 }, where 𝑇 is the total sequence length. In a standard causal Transformer, the attention at time step 𝑡 is computed over all 𝑥 𝑖 where 𝑖 ≤ 𝑡 . Our model modifies the attention mask 𝑀 ∈ { 0, 1}𝑇 ×𝑇 such that: 
+
+𝑀 𝑡 ,𝑖 =
+
+(
+
+1, if max (0, 𝑡 − 𝜏 ) ≤ 𝑖 ≤ 𝑡 
+
+0, otherwise where 𝜏 represents the temporal lookback window. During training, 𝜏 is sampled stochastically from a uniform distribution 𝜏 ∼ U ( 𝜏 𝑚𝑖𝑛 , 𝜏 𝑚𝑎𝑥 ), where 𝜏 𝑚𝑖𝑛 = 1s and 𝜏 𝑚𝑎𝑥 = 20s. By dynamically sampling 𝜏 during training, the Transformer can operate with a variety of left context sizes during inference. 
+
+## C.2 KV cache space complexity 
+
+Let 𝑑 be the model dimension and 𝐿 the number of layers. In a standard causal Transformer, the memory requirement 𝑆 at time 𝑡 grows linearly with respect to time for self-attention layers: 
+
+𝑆 𝑠𝑡 𝑎𝑛𝑑𝑎𝑟 𝑑 (𝑡 ) = 𝑡 · 𝑑 · 𝐿 · 2When restricting left context, the memory requirement is bounded by the maximum context window 
+
+𝜏 𝑚𝑎𝑥 . Let 𝑓 𝑠 be the sampling frequency of the encoder (which is the inverse of the encoder frame length). The maximum number of frames stored, 𝑁 𝑚𝑎𝑥 , is defined as 𝑁 𝑚𝑎𝑥 = 𝜏 𝑚𝑎𝑥 · 𝑓 𝑠 . The space complexity per inference step is: 
+
+𝑆 𝑐𝑜𝑛𝑠𝑡𝑟 𝑎𝑖𝑛𝑒𝑑 (𝑡 ) = min (𝑡, 𝑁 𝑚𝑎𝑥 ) · 𝑑 · 𝐿 · 2As 𝑡 → ∞ (streaming scenarios), the memory footprint remains 𝑂 (1) relative to the total sequence length 𝑇 , whereas the standard self-attention computation remains 𝑂 (𝑇 ).2C.3 Computational efficiency and stability 
+
+Beyond memory, this constraint also ensures constant-time inference per token. In global atten-tion, the 𝑡 -th token requires 𝑂 (𝑡 ) FLOPs for the attention dot-product, leading to a total quadratic complexity of 𝑂 (𝑇 2). By enforcing the left-context limit, the per-step complexity is capped: Attention FLOPs per step ≈ 𝑂 (𝑁 𝑚𝑎𝑥 · 𝑑 )
+
+This results in a total complexity of 𝑂 (𝑇 · 𝑁 𝑚𝑎𝑥 ), which is strictly linear with respect to the input duration. 
+
+## C.4 Performance 
+
+In our experiment, we examined choices of different left context size and their impact on encoder performance measured in Phoneme Error Rate (PER). We show in Figure A1 that encoder perfor-5.0 7.5 10.0 12.5 15.0 17.5 20.0       
+
+> Left Context Size (seconds)
+> 15.4
+> 15.6
+> 15.8
+> 16.0
+> 16.2
+> 16.4
+> Phoneme Error Rate (PER %)
+> B2T '24
+> 5.0 7.5 10.0 12.5 15.0 17.5 20.0
+> Left Context Size (seconds)
+> 7.6
+> 7.8
+> 8.0
+> 8.2
+> 8.4
+> 8.6
+> 8.8
+> Phoneme Error Rate (PER %)
+> B2T '25
+
+Figure A1: Phoneme Error Rate (PER) as a function of left-context window size for B2T’24 and B2T ’25 on validation set. mance across left-context window sizes remains stable. We used a left context size of 7.5 seconds for B2T ’24 and 20 seconds for B2T ’25 throughout the paper. 
+
+# D WFST decoder hyperparameters and additional details 
+
+Hyperparameters for the WFST decoder are listed in Table A3 and A4. For additional details on these hyperparameters and additional implementational detail refer to Willett et al. [7]. Table A3: WFST decoding hyperparameters for B2T ’24 and ’25 benchmarks during first-pass rescoring. These hyperparameters were tuned by the original authors using the baseline GRU encoder, and the same set of hyperparmeters were used for analyses with the time-masked Transformer. Variable notation is copied from original authors ([7, 1]). 
+
+Hyperparameter B2T’ 24 B2T’ 25 
+
+Blank Penalty log(7) log(90) Acoustic Scale ( 𝛼 ) 0.5 0.325 Beam 18 17 Max Active States 7000 7000 Min Active States 200 200 
+
+3Table A4: WFST decoding hyperparameters for B2T’24 and ’25 benchmarks during second-pass rescoring. These hyperparameters were tuned by the original authors using the baseline GRU encoder, and the same set of hyperparmeters were used for analyses with the time-masked Transformer.Variable notation is copied from original authors ([7, 1]).             
+
+> Hyperparameter B2T’ 24 B2T’ 25
+> Acoustic Scale ( 𝛼 )0.5 0.325 N-gram LM weight ( 𝛽 )0.5 0.45 LLM weight 0.5 0.55 N-best beam size 100 100 Used quantized LLM Yes No
+
+# E LightBeam hyperparameters and additional details 
+
+The full list of hyperparameters for LightBeam are listed in Table A5. Additional technical details are provided below. Table A5: LightBeam decoding hyperparameters for B2T ’24 and B2T ’25. These hyperparameters were tuned using the GRU encoder, and the same set of hyperparmeters were used for analyses with the time-masked Transformer.                         
+
+> Hyperparameter B2T’ 24 B2T’ 25
+> LLM rescore interval (Encoder Frames) 10 15 LLM Weight ( 𝜙 )1.2 1.2 N-gram LM Weight ( 𝜔 )0.8 1.0 Acoustic Scale ( 𝛼 )0.6 0.4 Beam Size ( k)1000 900 Beam Prune Threshold ( 𝜃 )22.0 18.0 Homophone Beam Number ( h)33Homophone Prune Threshold ( 𝜆 )4.0 4.0 Token Insertion Bonus ( 𝛽 )1.5 1.5 Word Boundary Bonus ( 𝛾 )1.0 1.0 LLM Scoring Chunk Size 256 256
+
+## E.1 Beams object 
+
+The beam search state is encapsulated in a Beams object whose tensors are pre-allocated on the GPU before decoding begins. The object maintains, for each of the 𝐾 active hypotheses, a cumulative log-probability score s ∈ R𝐾 , the most recently emitted non-blank token ℓlast ∈ Z𝐾 , and a rolling hash h ∈ Z𝐾 of the decoded token sequence. Rather than storing 𝐾 independent token sequences of length up to 𝑇 , hypotheses are stored as an implicit tree: a label buffer W ∈ Z𝐾 ×𝑇 records the token emitted at each step, and a companion pointer buffer P ∈ Z𝐾 ×𝑇 records which parent beam each hypothesis branched from, allowing the full sequence of any hypothesis to be reconstructed by following pointers in reverse. After each decoding step, hypothesis recombination merges beams that have converged to the same decoded text — detected in O( 𝐾 ) time via hash comparison rather than O( 𝐾 2) pairwise string equality — with duplicate scores consolidated via a max reduction. Because all buffers are pre-allocated and reused across frames, no dynamic GPU memory allocation occurs during the decoding loop. While the current work decodes single utterances ( 𝐾 beams), the data structure natively supports larger batch sizes by extending all tensors along a batch dimension, enabling straightforward scaling to higher-throughput settings. 4E.2 Vectorized Lexicon 
+
+Enforcing a lexicon constraint during CTC beam search requires, at each decoding step, determining the set of valid next tokens for every active beam hypothesis. A natural implementation represents the lexicon as a prefix tree (trie), where each node encodes the valid continuations of a phoneme prefix. Given a beam of 𝑘 hypotheses, the trie-based approach must traverse each hypothesis path independently on the CPU, performing O( 𝑙 ) pointer-chasing dictionary lookups per hypothesis for a prefix of length 𝑙 , yielding a total cost of O( 𝑘𝑙 ) sequential operations per decoding step. Beyond raw complexity, this approach introduces a critical synchronization bottleneck: the constraint mask must be assembled on the CPU and transferred to the GPU before each log-probability masking step, stalling the GPU pipeline. To eliminate this bottleneck, we flatten the trie into a dense transition table T ∈ Z𝑆 ×𝑉 , where 𝑆 
+
+is the number of trie nodes and 𝑉 is the vocabulary size. The entry T[𝑠, 𝑣 ] stores the successor state reached from prefix state 𝑠 upon observing token 𝑣 , or a designated sink state 𝑠 ∅ for invalid transitions. The prefix state is represented as a single integer tensor s ∈ Z𝐾 residing on the GPU. At each step, computing the constraint mask reduces to a single gather operation, M = (T[s] ≠ 𝑠 ∅) ∈ 0, 1𝐾 ×𝑉 ,which executes across all 𝐾 hypotheses simultaneously. Two special cases follow directly from CTC semantics: the blank token is always unmasked, and the most recently emitted non-blank token is always permitted as a repeat. In both cases the prefix state s is left unchanged, since neither blanks nor repeated tokens advance the decoded prefix. Advancing the prefix state is therefore guarded by 
+
+ℓ ≠ blank and ℓ ≠ ℓprev , after which the update reduces to a single vectorized lookup s′ = T[s, , ℓ].By keeping all constraint state and computation resident on the GPU, the vectorized lexicon constraint removes the CPU–GPU synchronization overhead entirely and scales gracefully with larger beam widths. 
+
+## E.3 Homophone tracking and shallow fusion with N-gram LM 
+
+Because phoneme-based CTC decoding is agnostic to orthography, a single acoustic beam hypothesis may correspond to multiple valid word spellings (homophones, e.g., aunt / ant ). To handle this, each of the 𝐾 acoustic beams maintains 𝑜 orthographic sub-beams — candidate word-level text hypotheses that share the same underlying phoneme path. Each orthographic sub-beam tracks a cumulative N-gram LM score, an integer state ID into the N-Gram LM state registry, and a backpointer into a shared WordHistory trie that reconstructs full word sequences without redundant string allocation. Word-level scoring is triggered precisely when a beam emits the word boundary token: the vectorized lexicon state is queried to retrieve all lexicon words that complete at the current prefix, and the N-gram LM is evaluated for each (orthographic context, candidate word) pair. Transition scores are cached by (state ID, word) key so that each unique context–word pair calls the N-gram LM at most once across the entire beam and across utterances. The weighted LM score 𝜔 · log 𝑃 G (𝑤 | context )
+
+is accumulated into each orthographic sub-beam’s running total, and the acoustic beam score is updated by the delta between the new best orthographic score and the previous best. After scoring, orthographic sub-beams are ranked and the top 𝑜 candidates are retained. Any candidate whose cumulative LM score falls more than 𝜆 log-probability points below the best surviving candidate is discarded, preventing low-probability homophones from inflating memory and compute. The acoustic beam score therefore always reflects the best available word-level interpretation, while the full ranked list of orthographic sub-beams is preserved for subsequent neural LM rescoring. The N-gram LM is loaded and queried via Ken-LM [5]. 
+
+## E.4 Delayed fusion with LLM 
+
+While the N-gram LM provides efficient word-boundary scoring during the decoding loop, an LLM is additionally used to rescore the 𝑜 orthographic sub-beams of each acoustic hypothesis at regular intervals during decoding and once more at end-of-sentence. The two models play complementary roles: the N-gram LM is well-suited to the word-boundary expansion step, where the number of orthographic candidates is variable and potentially large due to homophones — its O( 1) cached 5state transitions make it cheap to score every candidate word in every context. The LLM, by contrast, requires a full forward pass per hypothesis and is therefore best applied when the number of orthographic sub-beams is fixed at 𝑜 , amortizing its cost over a known, bounded set of candidates. At each rescoring event, the full word sequences of all orthographic sub-beams across all 𝑘 acoustic beams are collected and deduplicated, so that identical hypotheses appearing in multiple beams are scored only once. Each unique text is scored by computing Í𝑡 log 𝑝 LLM (𝑤 𝑡 | 𝑤 <𝑡 ), and the resulting score replaces the N-gram score for each orthographic sub-beam. The beam score is then updated by the delta between the new best and old best orthographic sub-beam score. At the end of decoding, an end-of-sentence scoring pass appends each of the candidate punctuation tokens ., ?, ! to every orthographic sub-beam, scores each variant through the LLM, and selects the punctuation that maximizes log 𝑝 LLM . This allows the system to jointly infer sentence-final punctuation and refine hypothesis ranking based on full-sequence LLM probability, rather than committing to punctuation as a post-processing step. The result is broadcast back to all requesting sub-beams, ensuring the number of LLM forward passes scales with the number of unique hypotheses rather than 𝑘 × 𝑜 .
+
+# F Next-word prediction finetuning 
+
+Next-word prediction finetuning is performed using the training sentences across both datasets. Each sentence is converted to sentence-case because the N-gram LM is not cased. LoRA adapters are applied to all attention projection layers ( 𝑊 𝑞 , 𝑊 𝑘 , 𝑊 𝑣 , 𝑊 𝑜 ) and MLP layers with rank 𝑟 = 16 and 
+
+𝛼 = 32 [6]. The model is trained for 1 epoch using the AdamW optimizer with learning rate 2 × 10 −4
+
+and weight decay 10 −3, with a batch size of 16 in BFloat16 precision. Hyperparameters were tuned using the validation sentences from both datasets, and are listed in Table A6. Table A6: Fine-tuning hyperparameters for the next-word prediction task                 
+
+> Hyperparameter Value
+> Base Precision BFloat16 Optimizer AdamW Learning Rate 2×10 −4
+> Weight Decay 10 −3
+> Batch Size 16 Epochs 3Eval. Frequency 0.25 Epoch
+> LoRA Configuration
+> Rank ( 𝑟 )16 Alpha ( 𝛼 )32 Target Modules 𝑊 𝑞 , 𝑊 𝑘 , 𝑊 𝑣 , 𝑊 𝑜
+
+# G Generative error correction 
+
+We adapt the procedure from Feghhi et al. [4] for generative error correction. To perform LLM fine-tuning, we first generated decoded transcripts using 10 seeds of the time-masked Transformer using the WFST decoder and Lightbeam separately. Decoded transcripts were generated by taking the top-scoring beam from each seed across the training, validation, and testing sets. We then fine-tuned Llama 3.1 8B to predict the ground-truth transcript given the 10 decoded sentences for each trial. Fine-tuning was performed by “masking” the ground-truth transcript and training the LLM to predict the masked tokens with cross-entropy loss. The LLM was fine-tuned with QLoRA [3] via the Unsloth package [2]. We used the default hyperparameters provided by Unsloth for Llama 3.1 8B, which are listed in Table A7. A prompt, also provided below, was used to guide the LLM for 6each trial. As no hyperparameter tuning was performed, our procedure consisted of fine-tuning the LLM first on the validation set, then on the training set, and finally once more on the validation set. The validation and training sets were combined across B2T ’24 and ’25. We report results across 10 seeds of fine-tuning. Table A7: Fine-tuning hyperparameters for the generative error correction 
+
+Hyperparameter Value 
+
+Quantization 4-bit NF4 (bitsandbytes) Optimizer AdamW-8bit Learning Rate 2 × 10 −4
+
+Batch Size 16 Epochs 1Data Scheduling [val, train, val] 
+
+Acceleration Framework Unsloth 
+
+LoRA Configuration 
+
+Rank ( 𝑟 ) 16 Alpha ( 𝛼 ) 16 Target Modules 𝑊 𝑞 , 𝑊 𝑘 , 𝑊 𝑣 , 𝑊 𝑜 , MLP 
+
+Your task is to perform automatic speech recognition error correction. Below are multiple candidate transcriptions of the same utterance. These candidates were decoded from neural activity and may contain errors. Based on the candidates, produce the single most accurate, coherent, and grammatical transcription of the original utterance. Focus on key differences between candidates that change meaning or correctness, and avoid repetitive or nonsensical phrases. Respond with only the final corrected transcription--no explanations or extra text. 
+
+# H Real-Time Factor (RTF) 
+
+Real-Time Factor (RTF) is a common metric for measuring the latency of sequence processing systems. Given a system which takes time 𝑓 (𝑙 ) to process an input sequence of duration 𝑙 , the RTF is defined as: RTF = 𝑓 (𝑙 )/ 𝑙 
+
+Decoding with LightBeam achieves RTF < 1.00 regardless of encoder model choice on the test set, which makes the decoding pipeline ideal for clinical application (Figure A2). 
+
+# I Multiple pronunciation variants 
+
+We constructed a pronunciation lexicon from the 100k-word vocabulary of the 4-gram language model provided by ImagineVille. Each word was paired with its default CMU pronouncing dictionary phoneme sequence, and words with multiple CMU pronunciations received additional entries in the lexicon (denoted word(2), word(3), etc.) for each distinct variant. Trailing numbers were stripped from words before applying the N-gram LM for scoring. We found that allowing for alternative pronunciations of the same word did not significantly improve performance over just using the default pronunciation for each word. 70.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.1                                    
+
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> Number of Trials
+> Transformer B2T '24
+> RTF = 1.00
+> 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.1
+> 10 0
+> 10 1
+> 10 2
+> 10 3GRU B2T '24
+> RTF = 1.00
+> 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.1
+> RTF
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> Number of Trials
+> Transformer B2T '25
+> RTF = 1.00
+> 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.1
+> RTF
+> 10 0
+> 10 1
+> 10 2
+> 10 3GRU B2T '25
+> RTF = 1.00
+
+Figure A2: RTF Distributions of LightBeam across all trials on the test set of B2T ’24 and B2T ’25. The scale of the y-axis is logarithmic. 
+
+# J Llama 3.2 3B Base for delayed fusion 
+
+We experimented using a finetuned Llama-3.2-3B in place of the finetuned Llama-3.2-1B for delayed fusion on the validation set for the baseline GRU. We observed statistically significant improvement in performance on B2T ’24, but no significant improvement for B2T ’25, at the cost of higher RTF and VRAM usage (Table A8). Table A8: Word Error Rate (%) comparison on the B2T ’24 and B2T ’25 Validation set when using GRU encoder and different LLMs for Delayed Fusion. Mean ± SEM over 𝑛 = 10 seeds. († sig. better than 1B Model). 
+
+LLM B2T ’24 B2T ’25 WER RTF VRAM WER RTF VRAM 
+
+llama-3.2-1B 14.17 ±.22 0.18 6.14 6.36 ±.14 0.06 5.60 llama-3.2-3B 13.82 †±.13 0.26 9.82 6.24 ±.16 0.08 9.64 
+
+# K Hyperparameter tuning 
+
+All hyperparameter tuning was done using the validation sets. For the time-masked Transformer Transformer on B2T ’25, we performed tuning by starting with the hyperparameters of the B2T ’24 model and modifying them manually based on validation phoneme error rate. For LightBeam , we performed all hyperparameter tuning manually using the baseline GRU. 8References 
+
+[1] Nicholas S Card, Maitreyee Wairagkar, Carrina Iacobacci, Xianda Hou, Tyler Singer-Clark, Francis R Willett, Erin M Kunz, Chaofei Fan, Maryam Vahdati Nia, Darrel R Deo, Aparna Srinivasan, Eun Young Choi, Matthew F Glasser, Leigh R Hochberg, Jaimie M Henderson, Kiarash Shahlaie, Sergey D Stavisky, and David M Brandman. An accurate and rapidly cal-ibrating speech neuroprosthesis. New England Journal of Medicine , 391(7):609–618, August 2024. [2] Michael Han Daniel Han and Unsloth team. Unsloth, 2023. [3] Tim Dettmers, Artidoro Pagnoni, Ari Holtzman, and Luke Zettlemoyer. QLoRA: Efficient finetuning of quantized LLMs. arXiv [cs.LG] , May 2023. [4] Ebrahim Feghhi, Shreyas Kaasyap, Nima Hadidi, and Jonathan Kao. Time-Masked Transformers with Lightweight Test-Time Adaptation for Neural Speech Decoding. In Proc. Neural Information Processing Systems (NeurIPS) , page to appear, 2025. [5] Kenneth Heafield. KenLM: Faster and smaller language model queries. In Proceedings of the Sixth Workshop on Statistical Machine Translation , pages 187–197. Association for Computa-tional Linguistics, 2011. [6] Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen. LoRA: Low-rank adaptation of large language models. In In-ternational Conference on Learning Representations (ICLR) , 2022. [7] Francis R Willett, Erin M Kunz, Chaofei Fan, Donald T Avansino, Guy H Wilson, Eun Young Choi, Foram Kamdar, Matthew F Glasser, Leigh R Hochberg, Shaul Druckmann, Krishna V Shenoy, and Jaimie M Henderson. A high-performance speech neuroprosthesis. Nature ,620(7976):1031–1036, August 2023. [8] Kun Zheng, Omer Cengiz, Navdeep Singh, Yuan Shangguan, Jialiang Pan, Xiang Liu, Jayant Kalasapur, Christian Fuegen, Kaustubh Kalgaonkar, and Michael L Seltzer. Dynamic chunk convolution for unified streaming and non-streaming conformer asr. arXiv preprint arXiv:2304.09325 , April 2023. 2023 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP). 9
