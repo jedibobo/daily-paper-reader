@@ -1,0 +1,840 @@
+Title: MXNorm: Reusing MXFP block scales for efficient tensor normalisation
+
+URL Source: https://arxiv.org/pdf/2603.13180v1
+
+Published Time: Mon, 16 Mar 2026 01:24:49 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# MXNORM: REUSING MXFP BLOCK SCALES FOR EFFICIENT TENSOR NORMALISATION 
+
+Callum McLean ⋆, Luke Y. Prince ⋆, Alexandre Payot, Paul Balança, and Carlo Luschi 
+
+Graphcore 
+
+Abstract 
+
+Matrix multiplication performance has long been the major bottleneck to scaling deep learning workloads, which has stimulated the design of new accelerators that use increas-ingly low-precision number formats. However, improve-ments in matrix multiplication performance have far out-stripped improvements in performance on reductions and el-ementwise computations, which are still being performed in higher precision. In this work, we propose MXNorm, a drop-in replacement for RMSNorm that estimates the RMS using only the block scales calculated as part of the MXFP8 cast and enables a 32x decrease in the size of reduction needed for normalization. We validate our approximation method on pre-training of Llama 3 models of 125M, 1B and 8B parame-ters, finding minimal loss of training accuracy compared to a baseline using RMSNorm with MXFP8 matmuls. We also show practical kernel speedups using only torch.compile 
+
+of up to 2.4x for MXNorm over RMSNorm, corresponding to a 1.3% speedup in Llama 3 8B transformer layers in MXFP8 and a 2.6% speedup in NVFP4. 
+
+Keywords — effiency, pretraining, quantization, mxfp, nor-malization, llm 
+
+1. Introduction 
+
+The success of deep learning in natural language processing, computer vision, and scientific fields such as molecular biol-ogy has been enabled by leaps in AI accelerator capabilities. In particular, an 80x improvement in the GPU acceleration of low-precision matrix multiplications over the past eight years [20], [26] (Table 1) has allowed researchers and practition-ers to scale pre-training of transformer-style neural networks and learn from vast pools of unlabelled data. However, as ma-trix multiplication becomes less of a bottleneck to through-put, other components of model architectures emerge as new bottlenecks. Indeed, other aspects of AI accelerators have not kept pace with improvements in matrix multiplication throughput. For example, elementwise operations and re-ductions are limited by memory bandwidth and CUDA core throughput in GPUs; however, these have only improved by factors of 8.9x and 5.1x, respectively, over the past 8 years. Furthermore, this gap is set to widen with upcoming GPU ar-chitecture releases [37]. In some cases these operations can be hidden by overlapping them with matrix multiplications [23], but others require too much memory to pipeline in practice. As such, we assert that the community needs to consider new building blocks that contribute a smaller overhead. One such building block ripe for consideration is normal-ization. Normalization layers are essential for ensuring pre-training stability. Various normalization schemes have been favoured over the past several years, such as BatchNorm [3] for convolutional neural networks, LayerNorm [4] for se-
+
+Table 1. Comparison of GPU performance and memory bandwidth. Improvement relative to V100 shown in square brackets. dtype: Lowest supported precision of floating point format for matrix multi-plication. *Anticipated specification of Rubin generation GPUs that have yet to be released commercially. 
+
+GPU dtype Tensor Core CUDA Core Mem. BW 
+
+(TFLOPS) (TFLOPS) (TB/s) V100 FP16 125 15.7 0.9 
+
+A100 FP16 312 [2.5x] 19.5 [1.2x] 2.0 [2.2x] H100 FP8 1979 [15.8x] 67.0 [4.3x] 3.4 [3.7x] GB200 FP4 10 000 [80.0x] 80.0 [5.1x] 8.0 [8.9x] Rubin* FP4 35 000 [280x] 130.0 [8.3x] 22.0 [24.4x] 
+
+quence models, and more recently RMSNorm [5] for large language models such as the Llama series [16], [17], [19]. In the case of RMSNorm, each token’s hidden state is normal-ized using its root mean square. The placement of norms is also key to pre-training performance, with frontier mod-els typically placing norms at the beginning of each residual branch (which we refer to as Pre-Norm transformers follow-ing [8]). We propose a design for a drop-in replacement for RM-SNorm which fuses normalization with conversion to mi-croscaling (MX) formats [12]. MX formats are a family of recently proposed block-quantization formats used to accel-erate matrix multiplications in the latest generation of AI ac-celerators by quantizing tensors to fewer than 16 bits per ele-ment while preserving the range of higher-precision formats such as BF16 and FP32 (see Appendix C and Section 3.2 for relevant background). Unlike standard low precision formats (e.g., FP8), this range-preserving property of MX formats can enable practitioners to use direct casting, thereby simplifying training and inference recipes and supporting wider adoption [32]. In Pre-Norm transformers (e.g. Llama [16], [17], [19], gpt-oss [33], Deepseek-V3 [27]) RMSNorm is executed just be-fore MX quantization. We observe that both MX quantiza-tion and RMSNorm gather statistics along the hidden dimen-sion of the tensor to rescale elements. We also note that when a probability distribution is scaled linearly, the expected ab-smax of the distribution is scaled accordingly. From these observations we propose approximating the RMS using the block scales calculated during MX quantization, thereby en-abling us to fuse RMSNorm with MX quantization for activa-tions and requiring only a single pass of statistics gathering over the whole tensor. We call this new scheme MXNorm ,and demonstrate its effectiveness and stability in pre-training of language models of up to 8B parameters and that it pro-vides practical speedups on commercially available hardware        
+
+> Graphcore March 16, 2026 Correspondence: lukep@graphcore.ai 1–15
+> arXiv:2603.13180v1 [cs.LG] 13 Mar 2026 McLean et al. MXNorm: Reusing MXFP block scales for efficient tensor normalisation Activations
+> RMSNorm
+> RMSNorm Weight
+> QKV/FFN Weight
+> Matmul
+> Activations
+> RMSNorm
+> RMSNorm Weight
+> QKV/FFN Weight
+> MX Matmul
+> MXCast MXCast
+> Activations
+> MXNorm
+> RMSNorm Weight
+> QKV/FFN Weight
+> Multiply
+> MXCast
+> Compute RMS
+> Divide
+> Multiply
+> RMSNorm Weight
+> Block absmax
+> Divide by RMS Estimate
+> Rescale and round to E8M0
+> Estimate RMS Divide by RMS Estimate
+> Divide by MX Scales
+> Cast to E4M3
+> Block absmax
+> Rescale and round to E8M0
+> Divide by MX Scales
+> Cast to E4M3
+> (Same applies to weights and gradients)
+> MXNorm MXCast RMSNorm
+> MX Matmul
+> MX Scales
+> MX Scales MX Values
+> MX Values
+> Activations Activations Activations
+
+Figure 1. Computational graphs for RMSNorm, MXCast, and MXNorm in the context of Norm + Linear layer pattern. Top left: RMSNorm + Linear graph for high precision training. Top middle: RMSNorm + Linear graph with linear inputs cast to MX (MXLinear). Top right: RMSNorm approximated with MXNorm and RMSNorm weight fused with Linear weight. Bottom left: RMSNorm graph. Bottom middle: MXCast graph for MXFP8 activations. Note that MXCast is applied to weights (E4M3 values) and gradients (E4M3 or E5M2 values) as well. Bottom right: MXNorm graph. 
+
+at inference time. 
+
+2. Related Work 
+
+A few efforts have been made to train transformers without normalizing intermediate tensors. One approach has been to instead constrain weights to lie on a hypersphere, which in-curs costs during optimizer steps [31], [35]. More recently, [36] demonstrated the possibility of replacing normalization layers with a saturating non-linearity, at the cost of using slow elementwise special operations. At time of writing, we are aware of two attempts to acceler-ate normalization, (1) by computing the RMS asynchronously and normalizing after multiplying the raw input by the weight [28], which runs the risk of swamping accumulators during matrix multiplication and harming output accuracy, and (2) by computing the RMS with the first 𝑘 vector elements [5], which has a high probability of missing outlier values that dominate the RMS. 
+
+3. Methods 
+
+Here we will briefly describe RMSNorm, conversion to MXFP, and our main contribution: MXNorm. The differ-ences between each of these schemes and their use in a Norm + Linear layer is summarized in Figure 1. We also provide a diff-like pseudocode comparison between RMSNorm fol-lowed by an MX cast in Algorithm 1 and MXNorm in Algo-rithm 2. 
+
+3.1. RMSNorm 
+
+Given a tensor 𝑋 ∈ ℝ 𝑇×𝐷 , RMSNorm normalizes each row of the tensor 𝑋 using the inverse RMS 𝜌 , given by: 
+
+𝜌 𝑡 = ⎛⎜⎝1𝐷 
+
+> 𝐷
+
+∑
+
+> 𝑑=1
+
+𝑋 2𝑡𝑑 
+
+⎞⎟⎠
+
+> −1/2
+
+(1) The normalized input ̄ 𝑋 𝑡𝑑 = 𝜌 𝑡 𝑋 𝑡𝑑 is rescaled by the learn-able gain parameter 𝛾 ∈ ℝ 𝐷 along the hidden dimension to give output 𝑌 as follows: 
+
+𝑌 𝑡𝑑 = 𝜌 𝑡 ⋅ 𝑋 𝑡𝑑 ⋅ 𝛾 𝑑 (2) In Pre-Norm architectures [8], there is an RMSNorm layer immediately prior to the QKV projection in each attention layer and immediately prior to the input and gate projections of the FFN (which can be fused into a single matrix multi-plication). This leads to the “RMSNorm → Linear” pattern shown in the top-left of Figure 1.  
+
+> 2MXNorm: Reusing MXFP block scales for efficient tensor normalisation McLean et al.
+
+Algorithm 1 RMSNorm + MXCast 
+
+Input: 𝑋 ∈ 𝔽 ⋆[𝑇 × 𝐾 × 𝐵] 
+
+Output: 𝑆 ∈ 𝔽 𝐸8𝑀0 [𝑇 × 𝐾], 𝑉 ∈ 𝔽 𝐸4𝑀3 [𝑇 × 𝐾 × 𝐵] 𝜌 𝑡 ← ( 1𝐾𝐵 ∑𝑘𝑏 𝑋 2𝑡𝑘𝑏 )−1/2 
+
+# 𝜌 𝑡 = 1/𝑅𝑀𝑆̄ 𝑋 𝑡 ← 𝑋 𝑡 ⋅ 𝜌 𝑡 
+
+𝑚 𝑡𝑘 ← max 𝑏 |̄𝑋 𝑡𝑘𝑏 |̃ 𝜌 𝑡 ← (∑ 𝑘𝑏 𝑋 𝑝 𝑡𝑘𝑏 )−1/𝑝 ⋅ 𝑐 𝑆 𝑡𝑘 ← cast (𝑚 𝑡𝑘 /256; 𝐸8𝑀0) 𝑉 𝑡𝑘𝑏 ← cast (̄𝑋 𝑡𝑘𝑏 /𝑆 𝑡𝑘 ; 𝐸4𝑀3) 
+
+Algorithm 2 MXNorm 
+
+Input: 𝑋 ∈ 𝔽 ⋆[𝑇 × 𝐾 × 𝐵]; 𝑐, 𝑝 
+
+Output: ̃ 𝑆 ∈ 𝔽 𝐸8𝑀0 [𝑇 × 𝐾],̃ 𝑉 ∈ 𝔽 𝐸4𝑀3 [𝑇 × 𝐾 × 𝐵] 𝜌 𝑡 ← (∑ 𝑘𝑏 𝑋 2𝑡𝑘𝑏 )−1/2 ̄𝑋 𝑡 ← 𝑋 𝑡 ⋅ 𝜌 𝑡 ̃𝑚 𝑡𝑘 ← max 𝑏 |𝑋 𝑡𝑘𝑏 |̃ 𝜌 𝑡 ← ( 1𝐾 ∑𝑘 ̃ 𝑚 𝑝 𝑡𝑘 )−1/𝑝 
+
+⋅ 𝑐 # choose 𝑐, 𝑝 so ̃ 𝜌 𝑡 ≈ 𝜌 𝑡 ̃𝑆 𝑡𝑘 ← cast (̃𝑚 𝑡𝑘 ⋅̃ 𝜌 𝑡 /256; 𝐸8𝑀0)̃ 𝑉 𝑡𝑘𝑏 ← cast (𝑋 𝑡𝑘𝑏 ⋅̃ 𝜌 𝑡 /𝑆 ̃𝑋 𝑡𝑘 ; 𝐸4𝑀3) 
+
+Side by side diff-like comparison of RMSNorm + MXCast against MXNorm without norm gain parameters. Input 𝑋 with shape [𝑇 × 𝐾 × 𝐵] is received in blocked format where it originally had 𝐷 columns that have been partitioned in 𝐾 blocks of size 𝐵 . We omit the use of a normalization stability constant 𝜖 for brevity. Block absmaxes are divided by 256 (the largest representable power of 2 in E4M3) to ensure maximal use of range. 
+
+𝑝 is a scalar norm exponent, used with p=1 for the arithmetic mean and p=2 for the RMS (quadratic mean) of absmaxes. 𝑐 is a scalar correction factor dependent on block size 𝐵 and 𝑝 to ensure ̃ 𝜌 ≈ 𝜌 when 𝑋 𝑡 are i.i.d. samples from a Gaussian distribution. cast (⋅; 𝐸𝑎𝑀𝑏) represents a cast to floating point format 𝔽 𝐸𝑎𝑀𝑏 with 𝑎 exponent and 𝑏 mantissa bits. E8M0 casting uses an implementation defined power-of-2 rounding function 2⌊log 2 ⋅⌉ [34]. 𝔽 ⋆ corresponds to a higher-precision floating point format. 
+
+3.2. Conversion to MXFP8 (MXCast) 
+
+For conversion to MX we first partition the 𝐷 elements of each row of tensor 𝑋 into 𝐾 blocks of size 𝐵 . We need to compute a per block 8-bit quantized scale 𝑆 ∈ 𝔽 𝑇×𝐾 𝐸8𝑀0 that is used in turn to compute 8-bit quantized values 𝑉 ∈ 𝔽 𝑇×𝐾×𝐵 𝐸4𝑀3 ,where 𝔽 𝐸𝑎𝑀𝑏 denotes the set of values that can be represented in the floating point format 𝐸𝑎𝑀𝑏 .To compute block scales 𝑆 𝑡𝑘 we first compute block abs-maxes 𝑚 𝑡𝑘 = max 𝑏 |𝑌 𝑡𝑘𝑏 |, rescale by the largest power of 2 representable by 𝑉 to maximize usage of the range (e.g., 256 for E4M3), then round to a power of 2. 
+
+𝑆 𝑡𝑘 = cast (𝑚 𝑡𝑘 /256; 𝐸8𝑀0) (3) Power-of-two rounding is implementation-defined, with possible options given by (for example) [12], [21], [32]. For our experiments we use the method defined in [32], enumer-ated as ScaleCalculationMode.RCEIL in TorchAO [34]. We can then quantize block values by rescaling elements using block scales and casting to the target 8-bit floating point format. 
+
+𝑉 𝑡𝑘𝑏 = cast (𝑌 𝑡𝑘𝑏 /𝑆 𝑡𝑘 ; 𝐸4𝑀3). (4) Where cast (⋅; 𝐸𝑎𝑀𝑏) represents a cast to a (signed) floating-point format with 𝑎 exponent bits and 𝑏 mantissa bits. 
+
+3.3. Approximation of RMS using block absmaxes 
+
+To motivate the design of MXNorm, we consider how we can approximate the inverse RMS as a function of the block abs-maxes ̃ 𝜌 = 𝑓 (𝑚) .We first note that a generalized power mean of block ab-smaxes can be rescaled linearly to estimate the RMS. Intu-itively, if a vector is scaled by a scalar factor 𝜎 then both the RMS and the generalized power mean of the elements are scaled by 𝜎 , and so the ratio between them should be con-stant. Indeed, we can prove the following: 
+
+Theorem 1. Fix a block size 𝐵 . Let (𝑋 𝑖 )𝐷 𝑖=1 be 𝐷 = 𝐾𝐵 i.i.d. samples from a scale family distribution such that 𝑋 = 𝜎𝑍 ,where 𝜎 > 0 and 𝑍 satisfies 𝔼[𝑍 2] = 1 and ℙ(𝑍 = 0) = 0 .Partition the indices {1, … , 𝐷} into 𝐾 disjoint blocks of size 𝐵 ,and define the block absolute maxima 
+
+𝑚 𝑘 ≔ max  
+
+> 1≤𝑏≤𝐵
+
+|𝑋 𝑘𝑏 |, 𝑘 = 1, … , 𝐾. 
+
+For 𝑝 > 0 , define the generalized 𝑝 -mean of these block max-ima by 
+
+𝐺 (𝑝) 𝐾 ≔ ⎛⎜⎝1𝐾 
+
+> 𝐾
+
+∑
+
+> 𝑘=1
+
+𝑚 𝑝 𝑘 
+
+⎞⎟⎠
+
+> 1/𝑝
+
+. (5) 
+
+Then, as 𝐾 → ∞ ,
+
+𝐺 (𝑝) 𝐾 
+
+RMS (𝑋) 
+
+> a.s.
+
+−−→ 𝑐 (𝑝,𝐵) 
+
+where 
+
+𝑐 (𝑝,𝐵) ≔ (𝔼 𝑘 [max  
+
+> 𝑏
+
+|𝑍 𝑘𝑏 |𝑝 ]) 
+
+> 1/𝑝
+
+(6) 
+
+and (𝑍 𝑖 ) are i.i.d. copies of 𝑍 , provided that 
+
+𝔼 𝑘 [max 𝑏 |𝑍 𝑘𝑏 |𝑝 ] < ∞. Thus the generalized 𝑝 -mean of block absolute maxima converges to the RMS up to a multiplicative constant depending only on 𝑝 , 𝐵 , and the standardized distribution of 𝑍 .Proof. Observe that 
+
+RMS (𝑋) 2 = 1𝐷 
+
+> 𝐷
+
+∑
+
+> 𝑑=1
+
+𝑋 2𝑖 
+
+> a.s.
+
+−−→ 𝔼[𝑋 2]
+
+by the strong law of large numbers, and that 
+
+𝔼[𝑋 2] = 𝜎 2𝔼[𝑍 2] = 𝜎 2
+
+Hence RMS (𝑋) a.s.
+
+−−→ 𝜎 by the continuous-mapping theo-rem. For each block, homogeneity (meaning 𝑓 (𝑎⋅𝑈) = 𝑎⋅𝑓 (𝑈) ) 
+
+> 3McLean et al. MXNorm: Reusing MXFP block scales for efficient tensor normalisation
+
+of the absmax yields 
+
+𝑚 𝑘 = max  
+
+> 𝑏
+
+|𝜎𝑍 𝑘𝑏 | = 𝜎 max  
+
+> 𝑏
+
+|𝑍 𝑘𝑏 |. 
+
+Define 𝜇 𝑘 ≔ max  
+
+> 𝑏
+
+|𝑍 𝑘𝑏 |. 
+
+The variables 𝜇 𝑘 are i.i.d. and depend only on 𝐵 and the dis-tribution of 𝑍 .Substituting 𝑚 𝑘 = 𝜎𝜇 𝑘 into the definition of 𝐺 (𝑝) 𝑘 in (5), 
+
+𝐺 (𝑝) 𝐾 = 𝜎 ⎛⎜⎝1𝐾 
+
+> 𝐾
+
+∑
+
+> 𝑘=1
+
+𝜇 𝑝 𝑘 
+
+⎞⎟⎠
+
+> 1/𝑝
+
+.𝔼 𝑘 [𝜇 𝑝 𝑘 ] < ∞ , so by the strong law of large numbers we have 
+
+1𝐾 
+
+> 𝐾
+
+∑
+
+> 𝑘=1
+
+𝜇 𝑝 𝑘 
+
+> a.s.
+
+−−→ 𝔼 𝑘 [𝜇 𝑝 𝑘 ] = 𝔼 𝑘 [max  
+
+> 𝑏
+
+|𝑍 𝑘𝑏 |𝑝 ] . 
+
+Applying the continuous-mapping theorem with 𝑓 (𝑥) = 𝑥 1/𝑝 
+
+and using (6) gives 
+
+𝐺 (𝑝) 𝐾 
+
+> a.s.
+
+−−→ 𝜎 𝑐 (𝑝,𝐵) .ℙ(𝑍 = 0) = 0 , so ℙ( RMS (𝑋) > 0) = 1 and so applying the continuous-mapping theorem with 𝑓 (𝑎, 𝑏) = 𝑎/𝑏 (which is continuous on 𝐶 = ℝ × ℝ +) gives the desired result. We state the continuous-mapping theorem and discuss the premise that ℙ(𝑍 = 0) = 0 in Appendix D. 
+
+3.4. MXNorm 
+
+From the insight in Section 3.3, we can build a normalization function using the generalized 𝑝 -mean over block absmaxes to replace 𝜌 with ̃ 𝜌 in Equation 1 for an activation tensor 𝑋 ∈ ℝ𝑇×𝐾×𝐵 reshaped into blocks, ̃𝑚 𝑡𝑘 = max  
+
+> 𝑏
+
+𝑋 𝑡𝑘𝑏 (7) ̃𝜌 𝑡 =̃ 𝑐 (𝑝,𝐵) ⋅ ⎛⎜⎝1𝐾 
+
+> 𝐾
+
+∑
+
+> 𝑘=1
+
+̃𝑚 𝑝 𝑡𝑘 
+
+⎞⎟⎠
+
+> −1/𝑝
+
++ 𝜖 (8) where ̃ 𝑐 (𝑝,𝐵) is an estimate of 𝑐 (𝑝,𝐵) calculated using Monte Carlo samples from a Gaussian distribution and the addition of 𝜖 << 1 prevents division by zero. We can then modify Equations 3 and 4 to incorporate our approximated inverse RMS ̃ 𝜌 for fusing quantization and nor-malization of 𝑋 to (̃𝑆,̃ 𝑉) ,̃𝑆 𝑡𝑘 = cast (̃𝑚 𝑡𝑘 ⋅̃ 𝜌 𝑡 /256; 𝐸8𝑀0) (9) ̃𝑉 𝑡𝑘𝑏 = cast (𝑋 𝑡𝑘𝑏 ⋅̃ 𝜌 𝑡 /̃𝑆 𝑡𝑘 ; 𝐸4𝑀3). (10) In this paper we experiment with MXNorm variants us-ing generalized 𝑝 -mean for p=1 and p=2. As an ablation of our design, we also consider a scheme in which we estimate the RMS using power-of-2 rounded block absmaxes (i.e. the E8M0 scale factors). The details and results of this ablation can be found in Appendix K. 
+
+3.5. Bounds on output of RMSNorm and MXNorm 
+
+The most well-known property of RMSNorm is that it normal-izes a tensor to have an RMS of 1. An often-overlooked prop-erty is that the maximum value of the output of RMSNorm is bounded. This was also observed by [36] where they demon-strate that RMSNorm can be replaced by a saturating non-linearity like tanh .Here we compare the bounds of RMSNorm and MXNorm and show how they are related. 
+
+Lemma 1 (Upper bound for RMS normalization) . For any nonzero 𝑥 ∈ ℝ 𝑁 , the RMS-normalized vector ̂𝑥 = 𝑥 
+
+RMS (𝑥) 
+
+satisfies 
+
+‖̂𝑥‖ ∞ ≤ √𝑁. 
+
+Proof. Using ∑𝑁 𝑖=1 𝑥 2𝑖 ≥ max 𝑖 𝑥 2𝑖 we can obtain 
+
+RMS (𝑥) = √√√⎷1𝑁 
+
+> 𝑁
+
+∑
+
+> 𝑖=1
+
+𝑥 2𝑖 ≥ 1√𝑁 
+
+max  
+
+> 𝑖
+
+|𝑥 𝑖 |, 
+
+we have max 𝑖 |𝑥 𝑖 | ≤ √𝑁 RMS (𝑥) . Dividing by RMS (𝑥) 
+
+yields ‖̂𝑥‖ ∞ ≤ √𝑁 .A similar argument can be made with MXNorm using a generalized 𝑝 -mean over the block absmaxes. 
+
+Lemma 2 (Upper bound for MXNorm normalization) . Let 
+
+𝑥 ∈ ℝ 𝑁 be partitioned into 𝐾 blocks of size 𝐵 and let 𝐺 (𝑝) (𝑥) 
+
+be defined as in (5) . Then the MXNorm-normalized vector ̃𝑥 = 𝑥 𝐺 (𝑝) (𝑥) 
+
+satisfies 
+
+‖̃𝑥‖ ∞ ≤ 𝐾 1/𝑝 
+
+𝑐 (𝑝,𝐵) .
+
+Proof. Let 𝐴 = (𝐴 1, … , 𝐴 𝐾 ) be the vector of block absmaxes. Then 
+
+𝐺 (𝑝) (𝑥) = 𝑐 (𝑝,𝐵) ⋅ ⎛⎜⎝1𝐾 
+
+> 𝐾
+
+∑
+
+> 𝑘=1
+
+𝐴 𝑝 𝑘 
+
+⎞⎟⎠
+
+> 1/𝑝
+
+≥ 𝑐 (𝑝,𝐵) 
+
+𝐾 1/𝑝 max  
+
+> 𝑖
+
+|𝑥 𝑖 |
+
+since max 𝑏 𝐴 𝑏 = max 𝑖 |𝑥 𝑖 |. As such we have max 𝑖 |𝑥 𝑖 | ≤  
+
+> 𝐾 1/𝑝 𝐺 (𝑝) (𝑥) 𝑐 (𝑝,𝐵)
+
+. Dividing by 𝐺 (𝑝) (𝑥) yields ‖̃𝑥‖ ∞ ≤ 𝐾 1/𝑝 
+
+> 𝑐 (𝑝,𝐵)
+
+3.6. Approximation quality of MXNorm 
+
+We demonstrate the fidelity of our approximation by compar-ing the distributions of scales and value tensors produced by MXNorm against those produced by RMSNorm followed by MXCast. Inputs are generated from centred Gaussian distri-butions with different standard deviations. We provide the scale and value tensor distributions of an unnormalized in-put as a reference. The left two panels of Figure 2 shows that  
+
+> 4MXNorm: Reusing MXFP block scales for efficient tensor normalisation McLean et al.
+
+the distributions of scales and values are almost identical. We also demonstrate that the approximation quality of dequan-tized MX tensors as measured by 𝑟 2 improves asymptotically towards 1 as the number of blocks increases (see Figure 2, right), with excellent approximation quality for as few as 1024 elements (32 blocks of 32).    
+
+> Figure 2. MXNorm as an approximation of RMSNorm. Left: MX scale distribution of normalized tensors. Middle: MX value distri-bution of normalized tensors. Right: MXNorm 𝑟 2goodness-of-fit approaches 1 with more blocks.
+> 3.7. MXNormLinear
+
+Up until this point, we have yet to define how to parameter-ize MXNorm with an affine gain parameter 𝛾 as is commonly done with RMSNorm and other normalization layers. This poses a difficulty for MXNorm in that it is not trivial to define a broadcasted elementwise multiplication on a tensor repre-sented in an MX format (that is, as a tuple of block scales and values). However, we can exploit the associativity of linear opera-tions and the fact that normalization layers are typically fol-lowed by linear layers, and therefore apply the norm gains to the following weight matrices instead. As such we can define the quantized matrix multiplication to compute output 𝐻 at the core of a MXNormLinear layer as 
+
+𝐻 = MXNorm (𝑋) MXCast (𝑊𝛾) ⊤ (11) where 𝐻 is accumulated in higher precision. To train models using MXNorm, we must also be able to compute its gradients. To ensure smoothness of gradi-ents we re-use the gradient calculation of RMSNorm as a straight-through estimator. We provide a full definition of our straight-through estimator in Appendix E. A standard autograd package of RMSNorm used in con-junction with MX quantization would calculate weight gradi-ents as 
+
+∇𝑊 = MXCast (∇𝐻 ⊤) MXCast (̄𝑋𝛾) (12) In this case we must requantize ̄ 𝑋𝛾 as it will be block-quantized along rows in the forward pass, but must be block-quantized along columns for the backward pass. Similarly, we cannot use the output of MXNorm as it will be block-quantized along rows. Instead, we cache the input 𝑋 and the inverse RMS estimate ̃𝜌 to compute a high precision ̃ 𝑋 =̃ 𝜌𝑋 when needed. As such the new gradient calculation for a linear layer using MXNorm will be 
+
+∇𝑊 = MXCast (∇𝐻 ⊤) MXCast (̃𝜌 ⋅ 𝑋) ⋅ 𝛾 (13) Note that we move the application of the norm gain param-eter 𝛾 outside quantization, as would be performed by stan-dard autograd packages for Equation 11. Since RMSNorm used in conjunction with MXCast would require caching a high-precision input to a matmul, our ap-proach incurs no further memory overheads. Furthermore, in cases where weight matrices are larger than activation ten-sors, we can amortize any overhead caused by moving the multiplication of norm gains by (i) performing multiplication on sharded weights during training, (ii) performing the mul-tiplication before gradient accumulation, and/or (iii) combin-ing the trained norm gain and weight matrix parameters for inference. We provide a PyTorch implementation of the MXNorm-Linear forward and backward pass in Appendix F. 
+
+4. Experiments and Results    
+
+> 4.1. Pre-training
+> Figure 3. Learning rate sensitivity of MXNorm compared to RM-SNorm. Left: 125M parameter model (depth=8, width=1024). Right: 1B parameter model (depth=16, width=2048).
+
+We validate MXNorm on pre-training of Llama 3 models [19] of different sizes on the SlimPajama dataset [13], com-paring against a baseline of RMSNorm followed by MXLinear layers. For all experiments we use the TorchTitan distributed pre-training library [30] with FSDP in conjunction with Tor-chAO [34] for MX quantization. For learning rate sweeps we increment in powers of 2 from 2−14 to 2−3 . In all other cases we reuse the default hyperparameters used for Llama 3 pre-training in TorchTitan using FSDP and BFloat16. See Appendix G for more details of the hyperparameters used for our experiments. We examine pre-training stability at small scale by running a learning rate sweep on 125M parameter and 1B parameter models. The effect of quantization is often felt on training sta-bility and can be seen at smaller scales by examining learning rate sensitivity [18]. In Figure 3, we demonstrate that around the optimal learning rate there is little difference in the training loss between RMSNorm (125M: 3.090±0.004, 1B: 2.692±0.011) for MXNorm using either p=1 (125M: 3.113±0.012, 1B: 2.684±0.009) or the p=2 scheme (125M: 3.116±0.010, 1B: 2.691±0.007). For larger learning rates, MXNorm degrades more quickly than RMSNorm but not catastrophically. This   
+
+> 5McLean et al. MXNorm: Reusing MXFP block scales for efficient tensor normalisation
+> Table 2. Zero-shot performance on OLMES natural language tasks for 8B parameter models
+
+Norm Type ARC-C ARC-E BoolQ CSQA HellaSwag MMLU OBQA PIQA SIQA WinoGr RMSNorm 45.3 75.9 73.2 68.5 70.4 37.9 50.4 74.8 56.5 66.8 
+
+MXNorm (p=1) 39.1 73.7 56.6 62.4 68.1 37.2 49.8 74.5 52.5 64.4 MXNorm (p=2) 45.8 74.1 72.6 67.1 71.5 38.0 54.2 76.2 55.5 65.2 indicates that MXNorm is broadly stable regardless of power mean at small scale. We show loss curves for the optimum learning rate of 1B models in Appendix I.  
+
+> Figure 4. Training loss convergence of 8B parameter models trained on 300B tokens with MXNorm and RMSNorm
+
+We test each scheme on 8B parameter models trained on 300B tokens and show loss curves in Figure 4. Despite little difference at smaller scale, here we demonstrate that MXNorm(p=1) attains a significantly worse final loss (2.175) compared to RMSNorm (2.132). In contrast, MXNorm(p=2) matches the training loss of RMSNorm (2.126). Compara-ble training loss also translates to comparable zero-shot per-formance on OLMES natural language processing tasks [29], with MXNorm(p=2) and RMSNorm both leading in 5/10 benchmarks (Table 2). 
+
+4.2. Activation statistics and loss spike analysis 
+
+To understand why MXNorm(p=1) failed and MXNorm(p=2) succeeded in scaling to 8B parameters we first examine the events leading up to the first spike in MXNorm(p=1). Before the spike, the loss curves are largely the same. Afterwards, the loss for MXNorm(p=1) lags behind that of RMSNorm, suggesting that optimization during a critical early phase of training was missed during the events of the spike. We point to the sudden appearance of outlier features as a proximal cause of the loss spike, as demonstrated in Figure 5. In this example, the value across all tokens of a single hidden feature explodes in the step where a loss spike starts. Outlier features are a well-known phenomenon in LLM pre-training [11], [24] and are typi-cally mitigated by stabilization mechanisms such as tensor normalization [6], score capping [22], regularization [10], or attention sinks [24], [25].     
+
+> Figure 5. Example outlier feature that appears at the same step as the first loss spike in a 8B parameter training run with MXNorm using mean over block absmax to estimate RMS.
+> Figure 6. RMS of MXNorm outputs tracked throughout training across all 16 layers of small-scale proxy used to reproduce loss spikes. Envelope of loss spike is visible as a deflection below 1.0 just be-fore 10 9tokens. Prior to the loss spike, normalization by MXNorm closely matches behaviour of RMSNorm.
+
+To understand why MXNorm(p=1) fails to stabilize pre-training, we investigate activation statistics of a 250M pa-rameter proxy model with 16 layers and a hidden dimension of 1024 trained on 5B tokens. We also reduce MX block size to 16 in order to have the same block count as a 1B parameter model. In this setting we set the learning rate to 2−9 , AdamW 𝛽 2 to 0.98, and global batch size to 128 to push training dynamics into a more unstable regime. In this setting, MXNorm(p=1) reliably has more loss spikes than MXNorm(p=2) and RMSNorm (Figure A.3). Two possible causes are that (1) MXNorm(p=1) provides a bad estimate of the RMS close to loss spike causing val-ues to explode, or (2) the larger bounds on the output of MXNorm(p=1) lead to more unstable training dynamics. To investigate the possibility of (1) we track the RMS of the output across all layers (see Figure 6). The envelope of the loss spike can be seen as a downward deflection of the RMS below 1.0 just before 10 9 tokens. Before the loss spike, MXNorm(p=1) provides a highly accurate estimate of the RMS since the output RMS is close to 1.0. This suggests that providing an accurate estimate of the RMS is insufficient for stabilizing pre-training. To explore the possibility of (2) we examine histograms of input and output tensor elements dequantized to BF16 for each norm type at the end of training (Figure 7). As ex-  
+
+> 6MXNorm: Reusing MXFP block scales for efficient tensor normalisation McLean et al.
+> Figure 7. Histograms of input and output tensor elements for RM-SNorm and MXNorm using mean or RMS over block absmaxes to compute normalization scale.
+
+pected the bounds on output tensors are determined by the block count 𝐾 for MXNorm and by the hidden dimension 𝐷 
+
+for RMSNorm. The bounds are 𝑂(√𝐾) for MXNorm(p=2) (√𝐾/𝑐 = √64 /0.4688 = 17.06) and RMSNorm ( √𝐷 = 32), but 𝑂(𝐾) for MXNorm(p=1) ( 𝐾/𝑐 = 64/0.4814 = 132.95). However, we also note the much larger range on the in-put to MXNorm(p=1). Larger values in norm output will contribute to larger weight updates, and we see this com-pounding throughout training. From this we conclude that the tighter bound on the output provided by RMSNorm and MXNorm(p=2) provides a beneficial stabilizing effect on training. We note that the bounds of norm outputs being reached appears common, particularly in early layers. This indicates that worst-case input behaviour is common during training. Indeed, if one element in a token’s hidden representation is much larger than all other elements (i.e. an outlier feature), then this closely approximates the worst case.    
+
+> 4.3. Performance Analysis
+> Figure 8. Relative speedup of isolated MXNorm over RMSNorm-MXCast. Normalization and casting have been fused together into a single kernel in both cases. 𝐵 denotes the block size.
+
+We examine the performance of an MXNorm(p=2) ker-nel compared with RMSNorm fused with an MXCast (Figure 8). Since MXNorm has the same gradient calculation as RM-SNorm, we analyse only the forward pass. Additionally, we analyse in an inference-optimized setting in which the norm gain parameters have been fused with weights. In all cases, kernels were automatically generated with torch.compile 
+
+on GB200 systems. For our kernel benchmarks (Figure 8), we examine the speedup over different sizes of hidden dimension, token counts, MXFP block sizes and MXFP value datatypes. In al-most all cases there is a speedup, with a maximum speedup of 2.4x. We find that the speedup generally increases with an increasing number of tokens, but converges towards a steady value with increasing hidden dimension. When taking the geometric mean to estimate the average case speedup across hidden dimension and token count (see [1] for why this is best practice) we found a 41.7% speedup for the MXFP8 ker-nel ( 𝐵 =32, dtype=E4M3) and a 31.2% speedup for the NVFP4 kernel ( 𝐵 =16, dtype=E2M1) on average. We examined these cases as they have dedicated support for accelerated matrix multiplication on current hardware. Furthermore, we find that these translate to geometric mean speedups of 1.3% for transformer blocks of Llama 3 8B (hidden dimension 4096) in MXFP8 and 2.6% in NVFP4, which is consistent with our claim that there is a greater need to optimize non-matmul op-erations as we move to lower-precision datatypes. Full details of these benchmarks can be found in Appendix H. 
+
+5. Conclusion 
+
+We demonstrate that RMSNorm can be replaced with MXNorm: a normalization scheme that reuses block abs-maxes calculated during MXFP quantization. We show how to make minimal modifications with no extra hyperparam-eters to standard LLM architectures to use MXNorm in sit-uations where normalization precedes linear layers. We find that pre-training stability correlates with the bound placed on extreme values by the normalization layer, and that MXNorm can provide similar bounding as RMSNorm as model size in-creases. We show that this approach preserves pre-training performance and zero-shot capability on downstream tasks for models of up to 8B parameters. We also show speedups on commercially available hardware with minimal software engineering effort. We note that MXNorm can be used with even narrower value formats (e.g. INT2, ternary) where its advantage may be even greater and generalizes to other forms of quantization where the block absmaxes of activations are computed (e.g. VS-Quant [9]). We also note that normalization is just one of many neural network components that are not accelerated by improvements to matrix multiplication throughput in AI accelerators, such as the application of rotary positional en-codings in attenton layers [14] and gated linear units in feed-forward layers [7]. We leave the directions suggested by these observations to future work.  
+
+> 7McLean et al. MXNorm: Reusing MXFP block scales for efficient tensor normalisation
+
+References 
+
+[1] P. J. Fleming and J. J. Wallace, “How not to lie with statistics: The correct way to summarize benchmark re-sults”, Commun. ACM , vol. 29, no. 3, pp. 218–221, Mar. 1986, issn: 0001-0782. doi: 10.1145/5666.5673 [On-line]. Available: https://doi.org/10.1145/5666.5673 [2] A. van der Vaart, Asymptotic Statistics (Asymptotic Statistics). Cambridge University Press, 2000, isbn: 9780521784504. [Online]. Available: https : / / books . google.co.uk/books?id=UEuQEM5RjWgC [3] S. Ioffe and C. Szegedy, Batch normalization: Acceler-ating deep network training by reducing internal covari-ate shift , 2015. arXiv: 1502.03167 [cs.LG] . [Online]. Available: https://arxiv.org/abs/1502.03167 [4] J. L. Ba, J. R. Kiros, and G. E. Hinton, Layer normal-ization , 2016. arXiv: 1607.06450 [stat.ML] . [Online]. Available: https://arxiv.org/abs/1607.06450 [5] B. Zhang and R. Sennrich, Root mean square layer nor-malization , 2019. arXiv: 1910 . 07467 [cs.LG] . [On-line]. Available: https://arxiv.org/abs/1910.07467 [6] A. Henry, P. R. Dachapally, S. Pawar, and Y. Chen, 
+
+Query-key normalization for transformers , 2020. arXiv: 2010 . 04245 [cs.CL] . [Online]. Available: https : / / arxiv.org/abs/2010.04245 [7] N. Shazeer, Glu variants improve transformer , 2020. arXiv: 2002.05202 [cs.LG] . [Online]. Available: https: //arxiv.org/abs/2002.05202 [8] R. Xiong et al., On layer normalization in the trans-former architecture , 2020. arXiv: 2002.04745 [cs.LG] .[Online]. Available: https://arxiv.org/abs/2002.04745 [9] S. Dai, R. Venkatesan, H. Ren, B. Zimmer, W. J. Dally, and B. Khailany, Vs-quant: Per-vector scaled quantiza-tion for accurate low-precision neural network inference ,2021. arXiv: 2102.04503 [cs.LG] . [Online]. Available: https://arxiv.org/abs/2102.04503 [10] A. Chowdhery et al., Palm: Scaling language modeling with pathways , 2022. arXiv: 2204.02311 [cs.CL] . [On-line]. Available: https://arxiv.org/abs/2204.02311 [11] T. Dettmers, M. Lewis, Y. Belkada, and L. Zettlemoyer, 
+
+Llm.int8(): 8-bit matrix multiplication for transformers at scale , 2022. arXiv: 2208 . 07339 [cs.LG] . [Online]. Available: https://arxiv.org/abs/2208.07339 [12] B. D. Rouhani et al., Microscaling data formats for deep learning , 2023. arXiv: 2310.10537 [cs.LG] . [Online]. Available: https://arxiv.org/abs/2310.10537 [13] D. Soboleva, F. Al-Khateeb, R. Myers, J. R. Steeves, J. Hestness, and N. Dey, SlimPajama: A 627B token cleaned and deduplicated version of RedPajama , https: //www.cerebras.net/blog/slimpajama-a-627b-token-cleaned - and - deduplicated - version - of - redpajama, 2023. [Online]. Available: https : / / huggingface . co / datasets/cerebras/SlimPajama-627B [14] J. Su, Y. Lu, S. Pan, A. Murtadha, B. Wen, and Y. Liu, 
+
+Roformer: Enhanced transformer with rotary position embedding , 2023. arXiv: 2104 . 09864 [cs.CL] . [On-line]. Available: https://arxiv.org/abs/2104.09864 [15] V. Thakkar et al., CUTLASS , version 3.0.0, Jan. 2023. [Online]. Available: https : / / github . com / NVIDIA / cutlass [16] H. Touvron et al., Llama 2: Open foundation and fine-tuned chat models , 2023. arXiv: 2307.09288 [cs.CL] .[Online]. Available: https://arxiv.org/abs/2307.09288 [17] H. Touvron et al., Llama: Open and efficient foundation language models , 2023. arXiv: 2302 . 13971 [cs.CL] .[Online]. Available: https://arxiv.org/abs/2302.13971 [18] M. Wortsman et al., Small-scale proxies for large-scale transformer training instabilities , 2023. arXiv: 2309 . 14322 [cs.LG] . [Online]. Available: https://arxiv.org/ abs/2309.14322 [19] A. Grattafiori et al., The llama 3 herd of models , 2024. arXiv: 2407.21783 [cs.AI] . [Online]. Available: https: //arxiv.org/abs/2407.21783 [20] NVIDIA, “Nvidia blackwell architecture technical overview”, NVIDIA, Technical Overview, 2024, Ac-cessed: 2025-08-19. [Online]. Available: https : / / resources.nvidia.com/en-us-blackwell-architecture [21] PyTorch AO Team, Scalecalculationmode.even ,GitHub repository, Lines 69-72 in tor-chao/prototype/mx_formats/config.py, com-mit e6b38bb, 2024. [Online]. Available: https : / / github . com / pytorch / ao / blame / e6b38bb0e1477ae6aaca0a3d30de70598be43290 /torchao/prototype/mx_formats/config.py#L69-L72 [22] M. Riviere et al., Gemma 2: Improving open language models at a practical size , 2024. arXiv: 2408 . 00118 
+
+[cs.CL] . [Online]. Available: https://arxiv.org/abs/ 2408.00118 [23] J. Shah, G. Bikshandi, Y. Zhang, V. Thakkar, P. Ramani, and T. Dao, Flashattention-3: Fast and accurate atten-tion with asynchrony and low-precision , 2024. arXiv: 2407 . 08608 [cs.LG] . [Online]. Available: https : / / arxiv.org/abs/2407.08608 [24] M. Sun, X. Chen, J. Z. Kolter, and Z. Liu, Massive ac-tivations in large language models , 2024. arXiv: 2402 . 17762 [cs.CL] . [Online]. Available: https://arxiv.org/ abs/2402.17762 [25] G. Xiao, Y. Tian, B. Chen, S. Han, and M. Lewis, Ef-ficient streaming language models with attention sinks ,2024. arXiv: 2309.17453 [cs.CL] . [Online]. Available: https://arxiv.org/abs/2309.17453 [26] J. Austin et al., “How to scale your model”, 2025, Retrieved from https://jax-ml.github.io/scaling-book/. [Online]. Available: https://jax-ml.github.io/scaling-book/tpus/ [27] DeepSeek-AI et al., Deepseek-v3 technical report , 2025. arXiv: 2412.19437 [cs.CL] . [Online]. Available: https: //arxiv.org/abs/2412.19437  
+
+> 8MXNorm: Reusing MXFP block scales for efficient tensor normalisation McLean et al.
+
+[28] N. Graef, A. Wasielewski, and M. Clapp, Flashnorm: Fast normalization for llms , 2025. arXiv: 2407 . 09577 
+
+[cs.LG] . [Online]. Available: https://arxiv.org/abs/ 2407.09577 [29] Y. Gu, O. Tafjord, B. Kuehl, D. Haddad, J. Dodge, and H. Hajishirzi, Olmes: A standard for language model evaluations , 2025. arXiv: 2406 . 08446 [cs.CL] . [On-line]. Available: https://arxiv.org/abs/2406.08446 [30] W. Liang et al., Torchtitan: One-stop pytorch native solu-tion for production ready llm pre-training , 2025. arXiv: 2410 . 06511 [cs.CL] . [Online]. Available: https : / / arxiv.org/abs/2410.06511 [31] I. Loshchilov, C.-P. Hsieh, S. Sun, and B. Gins-burg, Ngpt: Normalized transformer with representa-tion learning on the hypersphere , 2025. arXiv: 2410 . 01131 [cs.LG] . [Online]. Available: https://arxiv.org/ abs/2410.01131 [32] A. Mishra, D. Stosic, and S. Layton, Recipes for pre-training llms with mxfp8 , 2025. arXiv: 2506 . 08027 
+
+[cs.LG] . [Online]. Available: https://arxiv.org/abs/ 2506.08027 [33] OpenAI et al., Gpt-oss-120b & gpt-oss-20b model card ,2025. arXiv: 2508.10925 [cs.CL] . [Online]. Available: https://arxiv.org/abs/2508.10925 [34] A. Or et al., Torchao: Pytorch-native training-to-serving model optimization , 2025. arXiv: 2507.16099 [cs.LG] .[Online]. Available: https://arxiv.org/abs/2507.16099 [35] T. Pethick, W. Xie, K. Antonakopoulos, Z. Zhu, A. Silveti-Falls, and V. Cevher, Training deep learning models with norm-constrained lmos , 2025. arXiv: 2502. 07529 [cs.LG] . [Online]. Available: https://arxiv.org/ abs/2502.07529 [36] J. Zhu, X. Chen, K. He, Y. LeCun, and Z. Liu, Trans-formers without normalization , 2025. arXiv: 2503 . 10622 [cs.LG] . [Online]. Available: https://arxiv.org/ abs/2503.10622 [37] NVIDIA, Inside the nvidia rubin platform: Six new chips, one ai supercomputer , NVIDIA Technical Blog, Accessed: 2025-01-21, 2026. [Online]. Available: https: / / developer . nvidia . com / blog / inside - the -nvidia - rubin - platform - six - new - chips - one - ai -supercomputer/  
+
+> 9McLean et al. MXNorm: Reusing MXFP block scales for efficient tensor normalisation
+
+Contents 
+
+1 Introduction 12 Related Work 23 Methods 2
+
+3.1 RMSNorm . . . . . . . . . . . . . . . . . . . . . . . . . . 2 3.2 Conversion to MXFP8 (MXCast) . . . . . . . . . . . . 33.3 Approximation of RMS using block absmaxes . . . 33.4 MXNorm . . . . . . . . . . . . . . . . . . . . . . . . . . . 4 3.5 Bounds on output of RMSNorm and MXNorm . . . . 4 3.6 Approximation quality of MXNorm . . . . . . . . . . . 4 3.7 MXNormLinear . . . . . . . . . . . . . . . . . . . . . . . 5 
+
+4 Experiments and Results 5
+
+4.1 Pre-training . . . . . . . . . . . . . . . . . . . . . . . . . 5 4.2 Activation statistics and loss spike analysis . . . . . 64.3 Performance Analysis . . . . . . . . . . . . . . . . . . . 7 
+
+5 Conclusion 7A Contribution and Acknowledgements 11 B Compute resources 11 C MXFP Primer 11 D Additional information for Theorem 1 11 
+
+D.1 The continuous-mapping theorem . . . . . . . . . . 11 D.2 Note on the assumption that ℙ(𝑍 = 0) = 0 . . . . 11 
+
+E RMSNorm gradients 11 F Implementation of MXNormLinear 12 G Training Experiment Details 13 H Performance Benchmark Details 13 
+
+H.1 Kernel Benchmarks . . . . . . . . . . . . . . . . . . . 13 H.2 Full Layer Benchmarks . . . . . . . . . . . . . . . . . 13 
+
+I Convergence of Llama 3 1B with MXNorm 13 J Spike score 13 K Post-round MXNorm 14 
+
+K.1 Approximating the average of the rounded scale fac-tors . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14 K.2 Approximating the RMS from the MX tensor . . . . 15 K.3 Post-Round MXNorm Results . . . . . . . . . . . . . 15  
+
+> 10 MXNorm: Reusing MXFP block scales for efficient tensor normalisation McLean et al.
+
+A. Contribution and Acknowledgements 
+
+Paul Balança (PB) initially proposed the project. Callum McLean (CM) and Luke Y. Prince (LYP) developed the final MXNorm scheme. Alexandre Payot (AP) developed the ma-jority of pre-training and evaluation infrastructure necessary for the project. CM and LYP ran experiments. CM and LYP wrote the paper. PB and Carlo Luschi supervised the project. We thank Douglas Orr, Tom Cashman, and Andrew Fitzgibbon for useful discussions throughout the project and feedback on initial drafts of the paper. We thank Charlie Blake for insights leading to the start of the project. 
+
+B. Compute resources 
+
+Our 125M models are trained in 60 minutes on a single node with 8 NVIDIA H100s connected by NVLink. Our 1B mod-els are trained in 6 hours on 4 nodes comprising 32 NVIDIA H100s connected by NVLink. Our 8B models are trained over 8 days on 8 nodes comprising 64 NVIDIA H100s con-nected by NVLink. We thank LambdaLabs for providing the compute for this project. 
+
+C. MXFP Primer 
+
+MX quantization chunks a tensor into contiguous blocks of a fixed size and computes a scale factor for each block, which is used to rescale the elements of the block to the range of a low-precision format. An MX tensor can therefore be thought of as a tuple of an MX scale tensor comprised of block scales and an MX values tensor of rescaled, quantized elements. Using the E8M0 format (which only represents integer powers of 2) for the scales preserves the range of BF16 while adding the minimal number of bits to the representation. The scale for each block is thus chosen to be the block’s absmax rescaled to use the full range of the MX values tensor datatype (e.g., E4M3), then rounded to a power of 2 [12]. The implemen-tation of this rounding is not fully standardized and several schemes have been proposed [21], [32], [34]. We illustrate the design for an example MXFP8 format in Figure A.1.         
+
+> Figure A.1. Representation of a block of 32 elements stored in MXFP8. E 𝑥 M𝑦 denotes the 𝑥 bits allocated to Exponent and 𝑦 bits allocated to Mantissa. Each contiguous block of 32 elements in an MXFP8 tensor is represented by a tuple of 32 E4M3 values along with an unsigned E8M0 scale shared among the 32 elements. During dequantization, each value is multiplied by its corresponding shared scale.
+
+D. Additional information for Theorem 1 
+
+D.1. The continuous-mapping theorem 
+
+Theorem 2. If (𝐴 𝑛 ) ∈ ℝ ℓ is a sequence of random variables such that 𝐴 𝑛 
+
+> a.s.
+
+−−→ 𝐴 and 𝑓 ∶ ℝ ℓ → ℝ is continuous every-where in some 𝐶 ⊆ ℝ ℓ such that ℙ(𝐴 𝑛 ∈ 𝐶) = 1 , then 
+
+𝑓 (𝐴 𝑛 ) a.s.
+
+−−→ 𝑓 (𝐴) .Proof. See e.g. page 7 of [2]. 
+
+D.2. Note on the assumption that ℙ(𝑍 = 0) = 0 
+
+The assumption that ℙ(𝑍 = 0) = 0 is justified if 𝑍 is drawn from a continuous distribution such as a Gaussian or uniform distribution. If this distribution is quantized to floating point, this assumption may no longer hold. However, if the RMS of a vector is 0 then all of the elements must be 0, and so the generalized power norm of the block absmaxes is also 0 and hence our estimate will be accurate. We do not expect this to matter often in practical neural network training. 
+
+E. RMSNorm gradients 
+
+Given an activation tensor 𝑋 ∈ ℝ𝑁×𝐷 , RMSNorm nor-malises each token of the tensor 𝑋 using the calculated RMS 
+
+𝑆 , given by: 
+
+𝑆 𝑖 =√√√⎷1𝐷 
+
+> 𝐷
+
+∑
+
+> 𝑘=1
+
+𝑋 2𝑖𝑘 (14) The learnable gain parameter 𝛾 ∈ ℝ𝐷 rescales the nor-malised 𝑋 along the hidden dimension to give output 𝑍 as follows: 
+
+𝑍 𝑖𝑗 = (𝑋 𝑖𝑗 /𝑆 𝑖 )𝛾 𝑗 (15) As mentioned in Section 3.7, we use the gradient cal-culation of RMSNorm as a straight-through estimator for MXNorm. For reference, here we provide a definition of our gradient calculation. Given the gradient of the loss with re-spect to the linear layer output ∇𝑌 , the backwards pass for RMSNorm followed by a linear layer is given by: 
+
+(∇𝑍) = (∇𝑌)𝑊 (16) 
+
+(∇𝑊) = (∇𝑌) ⊤𝑍 (17) 
+
+(∇𝛾) 𝑗 = ∑ 
+
+> 𝑘
+
+(̄𝑋 𝑘𝑗 ⋅ (∇𝑍) 𝑘𝑗 ) (18) 
+
+(∇̄𝑋) = (∇𝑍)𝛾 (19) 
+
+𝑈 𝑖𝑗 = ( ∑ 
+
+> 𝑘
+
+(∇̄𝑋) 𝑖𝑘 𝑋 𝑖𝑘 )𝑋 𝑖𝑗 (20) 
+
+(∇𝑋) = (𝑆 −1 )⊤∇̄𝑋 − 1𝐷 (𝑆 −3 )⊤𝑈 (21) where we define ̄ 𝑋 such that ̄ 𝑋 𝑖𝑗 = 𝑋 𝑖𝑗 /𝑆 𝑖 , and define 𝑆 𝑘 
+
+by (𝑆 𝑘 )𝑖 = (𝑆 𝑖 )𝑘 . 
+
+> 11 McLean et al. MXNorm: Reusing MXFP block scales for efficient tensor normalisation
+
+F. Implementation of MXNormLinear 
+
+We provide a PyTorch implementation for the forward and backward pass of MXNormLinear using the Pre-Norm scheme. We omit the details of pow2_round since there is no standardized implementation [34]. In our experiments we use the implementation defined by [32]. 
+
+import torch 
+
+from torchao.prototype.mx_formats.mx_tensor import 
+
+↪ MXTensor 
+
+from math import log2, floor 
+
+from mx_norm_utils import pow 2_round 
+
+def absmax_scale_factor(block_size, p): """ Estimated RMS(X)/G(max(abs(X))) using Monte Carlo sampling from Gaussian distribution """ ABSMAX_SCALE_FACTOR = { (16, 1): 0.4814, (16, 2): 0.4688, (32, 1): 0.4261, (32, 2): 0.4185, (64, 1): 0.3852, (64, 2): 0.3803 }
+
+return ABSMAX_SCALE_FACTOR[(block_size, p)] 
+
+def get_largest_pow2(dtype): 
+
+return 2 ** floor(log2(torch.finfo(dtype). max )) 
+
+def mx_quantise(x, mx_data_dtype, block_size): x_blocked = x.reshape(*x.shape[:-1], -1, 
+
+↪ block_size) block_absmax = x_blocked. abs ().amax(dim=-1, 
+
+↪ keepdim=True) largest_pow2 = get_largest_pow2(mx_data_dtype) mx_scales = pow 2_round(block_absmax / largest_pow 
+
+↪ 2) mx_data = x_blocked / mx_scales.unsqueeze(-1) mx_data = mx_data.reshape(x.shape) mx_data = mx_data.to(mx_data_dtype) mx_scales = mx_scales.to(torch. float 8_e8m0fnu) 
+
+return MXTensor( mx_scales, mx_data, mx_data_dtype, block_size, x.dtype )
+
+def p_mean(x, p, dim=-1, keepdim=True): 
+
+return x. pow (p).mean(dim=dim, keepdim=keepdim). 
+
+↪ pow (1/p) 
+
+def mx_norm(x, mx_data_dtype, block_size, p): x_blocked = x.reshape(*x.shape[:-1], -1, 
+
+↪ block_size) block_absmax = x_blocked. abs ().amax(dim=-1, 
+
+↪ keepdim=True) 
+
+# absmax_scale_factor returns the expected ratio # of the RMS divided by the mean of the absmaxes 
+
+coef = absmax_scale_factor(block_size, p) rms_estimate = p_mean(block_absmax, p=p) * coef scaled_block_absmax = block_absmax / rms_estimate largest_pow2 = get_largest_pow2(mx_data_dtype) mx_scales = pow 2_round(scaled_block_absmax / 
+
+↪ largest_pow2) 
+
+# Creating data tensor: # Want mx_scale * mx_data = x / rms_estimate # So we want mx_data = (x / rms_estimate) / 
+
+↪ mx_scale # Need to cast MX scales back to match dtypes for 
+
+↪ divide 
+
+mx_data = (x_blocked / rms_estimate) / mx_scales mx_data = mx_data.reshape(x.shape) mx_data = mx_data.to(mx_data_dtype) 
+
+return MXTensor( mx_scales, mx_data, mx_data_dtype, block_size, x.dtype )
+
+def mx_norm_linear_forward( x, norm_weight, linear_weight, mx_data_dtype, block_size, p): mx_normalised_activations = mx_norm( x, mx_data_dtype, block_size, p )mx_fused_weight = mx_quantise( norm_weight * linear_weight, mx_data_dtype, 
+
+↪ block_size )
+
+return torch.mm( mx_normalised_activations, mx_fused_weight.t 
+
+↪ () )
+
+def rms_norm_grad(grad_out, x, rms): delta = torch.mean(grad_out * x, dim=-1, keepdim= 
+
+↪ True) grad_x = rms. pow (-1) * grad_out - rms. pow (-3) * x 
+
+↪ * delta 
+
+return grad_x 
+
+def mx_norm_linear_backward( grad_out, rms_estimate, x, norm_weight, linear_weight, mx_data_dtype, block_size ): 
+
+# Need grad_out to be mx_quantised along both # rows and columns 
+
+mx_grad_out = mx_quantise( grad_out, mx_data_dtype, block_size )mx_t_grad_out = mx_quantise( grad_out.t(), mx_data_dtype, block_size )
+
+# Divide by rms_estimate from forward pass # in higher precision 
+
+normed_x = x / rms_estimate mx_t_normed_x = mx_quantise( normed_x.t(), mx_data_dtype, block_size )mx_linear_weight = mx_quantise( linear_weight, mx_data_dtype, block_size )
+
+# Compute parameter gradients   
+
+> 12 MXNorm: Reusing MXFP block scales for efficient tensor normalisation McLean et al.
+> grad_mm_input = torch.mm( mx_grad_out, mx_linear_weight.t() )grad_linear_weight = torch.mm( mx_t_grad_out, mx_t_normed_x.t()) *
+
+↪ norm_weight grad_norm_weight = torch. sum (normed_x * grad_mm_input, dim=0 ) 
+
+> # Compute gradient w.r.t input # Use rms_norm_grad as a straight through # estimator for mx_norm
+> grad_normed_x = grad_mm_input * norm_weight grad_x = rms_norm_grad( grad_normed_x, x, rms_estimate )
+> return grad_x, grad_norm_weight,
+
+↪ grad_linear_weight 
+
+G. Training Experiment Details 
+
+For all experiments we use the TorchTitan distributed pre-training library [30] with FSDP in conjunction with TorchAO [34] for MX quantization. We used model sizes defined by configurations in Table G for all of our experiments, except where specified. We keep all other hyperparameters from TorchTitan the same.  
+
+> Table 3.
+
+Pretraining configuration for Llama 3 models 
+
+Model Size 125M 1B 8B Global batch size 32 256 256 Sequence length 4096 4096 4096 Total training tokens 2.62B 20.97B 314.57B Transformer block count 8 16 32 Hidden dimension 1024 2048 4096 Q:KV head ratio 4:1 4:1 4:1 FFN dimension 1536 3072 7168 
+
+H. Performance Benchmark Details 
+
+H.1. Kernel Benchmarks 
+
+We implement two PyTorch modules, one that returns the MXFP output of MXNorm and one that normalizes the in-put tensor with RMSNorm and casts the normalized tensor to MXFP. We compile each module with torch.compile 
+
+and use the facilities provided by torch.profiler to pro-file the execution on a random Gaussian input of the appro-priate shape on an NVIDIA GB200. We compute the sum of the durations of the CUDA events to remove noise from the overhead of launching CUDA kernels. For each norm imple-mentation, we profile each combination of the possibilities listed in Table 4 and plot the speedup. The set of hidden dimensions profiled can also be described as the powers of 2 from 210 to 214 , as well as three evenly spaced numbers between each pair of adjacent powers of 2.  
+
+> Table 4.
+
+Kernel benchmark cases. All possible combinations are profiled. 
+
+Set of tested values Tokens {2 12 , 2 13 , 2 14 , 2 15 , 2 16 }
+
+Hidden dim {𝑘 ⋅ 2 𝑟 ∶ 𝑘 ∈ {1, 3, 5, 7}, 𝑟 ∈ ℕ} ∩ [2 10 , 2 14 ]
+
+Block size {16, 32, 64} 
+
+MXFP dtype {E4M3, E2M1} 
+
+H.2. Full Layer Benchmarks 
+
+For both RMSNorm and MXNorm, we profile each possi-ble combination listed in Table 5 (with the sequence length computed as the number of tokens divided by the batch size). For each combination we profile the forward pass of a Llama 3 8B model (with 8 transformer layers rather than 32) on an NVIDIA GB200 inside torch.no_grad() , us-ing torch.compile to compile the model and the facilities provided by torch.profiler to export a Chrome trace as JSON. Linear layers in the model are performed using kernels targeting the appropriate dedicated Tensor Cores on GB200 (accessed from Python via TorchAO [34], with the original kernels coming from cuBLAS for MXFP8 or CUTLASS [15] for NVFP4). To remove noise from the overhead of launching CUDA kernels, we identify the first and last CUDA event of each transformer layer in the Chrome trace and compute the sum of the durations of the events in each transformer layer. We generate 10 profiles for each combination and compute the mean time to execute a transformer layer across all runs (dis-carding the first and second layers, where the embedding layer can be fused into the residual add and norm). We com-pute the speedup of MXNorm over RMSNorm for each com-bination and report the geometric mean of speedups for each data type.  
+
+> Table 5.
+
+Layer benchmark cases 
+
+Set of tested values Batch size {4, 8} 
+
+Tokens {2 12 , 2 13 , 2 14 , 2 15 , 2 16 }
+
+MXFP type {MXFP8 , NVFP4 }
+
+I. Convergence of Llama 3 1B with MXNorm 
+
+In Section 4.1 we demonstrate the learning rate sensitivity of small Llama 3 models with RMSNorm and MXNorm. We il-lustrate the training loss curves to show similarity in conver-gence behaviour of models with the lowest training loss for each category. 
+
+J. Spike score 
+
+To allow us to investigate sources and possible fixes of loss spikes we define a spike score and use this to guide the search for a proxy model that could help us understand why   
+
+> 13 McLean et al. MXNorm: Reusing MXFP block scales for efficient tensor normalisation
+> Figure A.2.
+
+Training loss convergence of 1B parameter models trained on 20B tokens with MXNorm and RMSNorm. 
+
+MXNorm(p=1) suffers from loss spikes at 8B parameter scale, but MXNorm(p=2) and RMSNorm do not. We define a spike score as ”the area under a detrended, nor-malized training loss curve above 3 standard deviations”, i.e., for loss ℒ at step 𝑡 
+
+Spike Score = ∑ 
+
+> 𝑡
+
+max ( ℒ𝑡 − 𝑚 𝑡 
+
+𝜎 − 3, 0) (22) where 𝑚 𝑡 is the rolling minimum of ℒ𝑡 over 8 steps and 
+
+𝜎 is the standard deviation in the loss observed over the last 30% of steps. We show the distribution of spike scores across 8 train-ing runs for our depth=16, width=1024, MXFP block size 16 proxy model for each condition in Figure A.3.  
+
+> Figure A.3.
+
+Boxplot of spike scores showing the mean, interquartile range, and range of values over 8 training runs. Spike score is defined as the area under a detrended loss curve above 3 standard deviations. 
+
+K. Post-round MXNorm 
+
+We define an ablation to our design in which we estimate the RMS of the input using the block scales after they have been rounded to E8M0 (Post-round MXNorm), and demonstrate its instability at 8B parameter scale. 
+
+K.1. Approximating the average of the rounded scale fac-tors 
+
+We wish to calculate the expected value of the rounded MX scale factors assuming the tensor is drawn from a Gaussian distribution with mean zero and unknown standard devia-tion. Suppose 𝑋 𝑖 ∼ 𝒩(0, 𝜎 2) for 0 ≤ 𝑖 < 𝐾 where 𝐾 
+
+is the MX block size and the 𝑋 𝑖 ’s are independent. We de-fine 𝑟(𝑥) ∶= 2 ⌊𝑙𝑜𝑔 2(𝑥)⌋ for the rounded MX scale factors in E8M0 (ignoring the rescale operation in Equation 3, which amounts to multiplication by a constant and hence can be fac-tored out of the calculations). We then have 
+
+𝔼( max  
+
+> 𝑖
+
+(𝑟(𝑋 𝑖 ))) = 
+
+> ∞
+
+∑
+
+> 𝑗=−∞
+
+2𝑗 ⋅ ℙ( max  
+
+> 𝑖
+
+(𝑟(𝑋 𝑖 )) = 2 𝑗 )
+
+We therefore need to compute ℙ( max 𝑖 (𝑟(𝑋 𝑖 )) = 2 𝑗 ). We have ℙ( max  
+
+> 𝑖
+
+(𝑟(𝑋 𝑖 )) = 2 𝑗 )= ℙ(∃𝑖 ∶ 𝑟(𝑋 𝑖 ) = 2 𝑗 ∧ ∀𝑖 ∶ 𝑟(𝑋 𝑖 ) ≤ 2 𝑗 )= ℙ(∃𝑖 ∶ 2 𝑗 ≤ |𝑋 𝑖 | < 2 𝑗+1 ∧ ∀𝑖 ∶ |𝑋 𝑖 | < 2 𝑗+1 )
+
+Applying the law of probability that ℙ(𝐴 ∧ 𝐵) = ℙ(𝐵) ⋅ ℙ(𝐴|𝐵) gives: 
+
+= ℙ(∀𝑖 ∶ |𝑋 𝑖 | < 2 𝑗+1 )⋅ℙ(∃𝑖 ∶ 2 𝑗 ≤ |𝑋 𝑖 | < 2 𝑗+1 ∣∀𝑖 ∶ |𝑋 𝑖 | < 2 𝑗+1 )= ℙ(|𝑋 0| < 2 𝑗+1 )𝐾 ⋅(1−ℙ(∀𝑖 ∶ |𝑋 𝑖 | < 2 𝑗 ∣∀𝑖 ∶ |𝑋 𝑖 | < 2 𝑗+1 )) 
+
+The simplification of the left-hand term of the product comes from the fact that the 𝑋 𝑖 ’s are independent and identi-cally distributed (the choice of 𝑋 0 is arbitrary). Applying the law of probability that if 𝐶 ⇒ 𝐷 we have 
+
+ℙ(𝐶|𝐷) = ℙ(𝐶 ∪ 𝐷)/ℙ(𝐷) = ℙ(𝐶)/ℙ(𝐷) gives: 
+
+= ℙ(|𝑋 0| < 2 𝑗+1 )𝐾 ⋅ (1 − ℙ(|𝑋 0| < 2 𝑗 )𝐾 
+
+ℙ(|𝑋 0| < 2 𝑗+1 )𝑁 )= ℙ(|𝑋 0| < 2 𝑗 )𝐾 − ℙ(|𝑋 0| < 2 𝑗+1 )𝐾 
+
+Note that if 𝑋 0 ∼ 𝒩(0, 𝜎 2), then (using the symmetry of the Gaussian distribution): 
+
+ℙ(|𝑋 0| < 𝑥) = ℙ(𝑋 0 < 𝑥)−ℙ(𝑋 0 ≤ −𝑥) = ℙ(𝑋 0 < 𝑥)−(1−ℙ(𝑋 0 ≤= ℙ(𝑋 0 < 𝑥) − (1 − ℙ(𝑋 0 < 𝑥)) = 2 ⋅ ℙ(𝑋 0 < 𝑥) − 1 
+
+Using the CDF of the standard normal distribution 𝛷(⋅) ,we therefore have the following: 
+
+𝔼( max  
+
+> 𝑖
+
+(𝑟(𝑋 𝑖 ))) = 
+
+> ∞
+
+∑
+
+> 𝑗=−∞
+
+2𝑗 ⋅((2⋅𝛷(2 𝑗 /𝜎)−1) 
+
+> 𝐾
+
+−(2⋅𝛷(2 𝑗+1 /𝜎)−1) 
+
+> 𝐾
+
+As |𝑗| increases, the term in the sum rapidly decreases, so the sum can be truncated from a sum over 𝑗 ∈ ℕ to a sum over −𝐽 < 𝑗 < 𝐽 for large 𝐽 with little loss in accuracy. This  
+
+> 14 MXNorm: Reusing MXFP block scales for efficient tensor normalisation McLean et al.
+
+truncated sum can then be calculated using any mathemati-cal software package that supports evaluating the CDF of the standard normal distribution (including PyTorch). 
+
+K.2. Approximating the RMS from the MX tensor 
+
+For a fixed block size 𝐾 , we define 𝑓 ∶ ℝ + → ℝ + to be given by 𝑓 (𝜎) = 𝔼( max 𝑖 (𝑟(𝑋 𝑖 ))) when 𝑋 𝑖 ∼ 𝒩(0, 𝜎 2) for 0 ≤ 𝑖 < 𝐾 and the 𝑋 𝑖 ’s are independent. We observe that 𝑓 is strictly increasing since if the standard deviation is greater we expect the rounded scale factors to be greater, and therefore 𝑓 is invertible. Hence given the mean of the rounded scale factors ̄ 𝑋 we can approximate the RMS of the original values as 𝑓 −1 (̄𝑋) .Since 𝑓 is strictly increasing, we can compute 𝑓 −1 (̄𝑋) to an arbitrary degree of precision by finding 𝜎 1, 𝜎 2 such that 
+
+𝑓 (𝜎 1) <̄ 𝑋 < 𝑓 (𝜎 2) and then iteratively narrowing this range using a binary search. However, this is computationally expensive to do at every layer in a model. We observe that 𝑓 (2𝜎) = 2𝑓 (𝜎) (since 
+
+𝑟(2𝑥) = 2𝑟(𝑥) and max 𝑖 |2𝑋 𝑖 | = 2 max 𝑖 |𝑋 𝑖 |). Thus we can pre-compute 𝑓 −1 (2 𝑖/𝐴 ) for 0 ≤ 𝑖 ≤ 𝐴 for some 𝐴 and ap-proximate 𝑓 −1 on the interval [1, 2] using linear interpola-tion on these pre-computed values, and approximate 𝑓 −1 (𝑥) 
+
+elsewhere using the identity 𝑓 −1 (𝑥) = 2 −𝑘 𝑓 −1 (2 𝑘 𝑥) , where 
+
+𝑘 is chosen such that 2𝑘 𝑥 ∈ [1, 2] .
+
+K.3. Post-Round MXNorm Results  
+
+> Figure A.4.
+
+The post-round MXNorm scheme training loss shows instability that significantly diverges from the RMSNorm baseline.
