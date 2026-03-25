@@ -6,73 +6,88 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-24
-- 运行时间：2026-03-24 19:56:12 UTC
+- 最新运行日期：2026-03-25
+- 运行时间：2026-03-25 19:39:25 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
+- 本次总论文数：22
+- 精读区：11
 - 速读区：11
 
 ### 今日简报（AI）
-今日精选 17 篇前沿论文，聚焦从传感器端到云端协同的高效 AI 部署方案。
-重点关注 TinyGLASS 实现的传感器内实时自监督异常检测，以及 RoboECC 带来的 VLA 模型边缘云协同部署新范式。
-建议关注自监督学习与硬件协同优化，这是提升复杂模型实时性与落地能力的关键。
-- 详情：[/202603/24/README](/202603/24/README)
+今日深度研读 22 篇前沿文献，聚焦类脑推理架构与多模态 AI 硬件加速的重大突破。
+重点推荐 TorR 的类脑任务导向推理算法及 TRINE 针对多模态推理的自适应 FPGA 引擎。
+建议关注软硬协同设计与“1/W 定律”在提升大模型推理能效方面的实战价值。
+- 详情：[/202603/25/README](/202603/25/README)
 
 ### 精读区论文标签
-1. [TinyGLASS: Real-Time Self-Supervised In-Sensor Anomaly Detection](/202603/24/2603.16451v2-tinyglass-real-time-self-supervised-in-sensor-anomaly-detection)  
+1. [TorR: Towards Brain-Inspired Task-Oriented Reasoning via Cache-Oriented Algorithm-Architecture Co-design](/202603/25/2603.22855v1-torr-towards-brain-inspired-task-oriented-reasoning-via-cache-oriented-algorithm-architecture-co-design)  
+   标签：评分：10.0/10、query:hwnas
+   evidence：针对功耗受限边缘部署的算法-架构协同设计
+2. [TRINE: A Token-Aware, Runtime-Adaptive FPGA Inference Engine for Multimodal AI](/202603/25/2603.22867v1-trine-a-token-aware-runtime-adaptive-fpga-inference-engine-for-multimodal-ai)  
+   标签：评分：10.0/10、query:hwnas
+   evidence：针对多模态AI的FPGA加速器与编译器协同设计
+3. [Empirical Recipes for Efficient and Compact Vision-Language Models](/202603/25/2603.16987v1-empirical-recipes-for-efficient-and-compact-vision-language-models)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对资源受限边缘和传感器内平台的轻量化适配
-2. [RoboECC: Multi-Factor-Aware Edge-Cloud Collaborative Deployment for VLA Models](/202603/24/2603.20711v1-roboecc-multi-factor-aware-edge-cloud-collaborative-deployment-for-vla-models)  
+   evidence：针对资源受限环境的高效视觉语言模型及延迟优化
+4. [S3T-Former: A Purely Spike-Driven State-Space Topology Transformer for Skeleton Action Recognition](/202603/25/2603.18062v1-s3t-former-a-purely-spike-driven-state-space-topology-transformer-for-skeleton-action-recognition)  
    标签：评分：9.0/10、query:hwnas
-   evidence：边缘云协作部署的模型硬件协同感知分割
-3. [SPINONet: Scalable Spiking Physics-informed Neural Operator for Computational Mechanics Applications](/202603/24/2603.21674v1-spinonet-scalable-spiking-physics-informed-neural-operator-for-computational-mechanics-applications)  
+   evidence：针对资源受限边缘设备的能效脉冲神经网络设计
+5. [VeloxNet: Efficient Spatial Gating for Lightweight Embedded Image Classification](/202603/25/2603.19496v1-veloxnet-efficient-spatial-gating-for-lightweight-embedded-image-classification)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对边缘和嵌入式设备能效的架构感知设计
-4. [Federated Learning of Binary Neural Networks: Enabling Low-Cost Inference](/202603/24/2603.15507v1-federated-learning-of-binary-neural-networks-enabling-low-cost-inference)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：通过二值神经网络实现边缘设备的低成本推理
-5. [FlashSampling: Fast and Memory-Efficient Exact Sampling](/202603/24/2603.15854v1-flashsampling-fast-and-memory-efficient-exact-sampling)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：融合算子以减少内存流量和HBM显存占用
-6. [AE-LLM: Adaptive Efficiency Optimization for Large Language Models](/202603/24/2603.20492v1-ae-llm-adaptive-efficiency-optimization-for-large-language-models)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：资源约束下大语言模型的自适应效率优化
+   evidence：针对具有严格内存和延迟限制的嵌入式设备的轻量级CNN架构
+6. [Meeting in the Middle: A Co-Design Paradigm for FHE and AI Inference](/202603/25/2603.20504v1-meeting-in-the-middle-a-co-design-paradigm-for-fhe-and-ai-inference)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对推理电路专门优化FHE方案和编译器的协同设计
+7. [MINISA: Minimal Instruction Set Architecture for Next-gen Reconfigurable Inference Accelerator](/202603/25/2603.20623v1-minisa-minimal-instruction-set-architecture-for-next-gen-reconfigurable-inference-accelerator)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：在可重构加速器中维持高利用率的极简指令集
+8. [PC2IM: An Efficient In-Memory Computing Accelerator for 3D Point Cloud](/202603/25/2603.21167v1-pc2im-an-efficient-in-memory-computing-accelerator-for-3d-point-cloud)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：用于3D点云网络的SRAM存内计算加速器
+9. [Convolutions Predictable Offloading to an Accelerator: Formalization and Optimization](/202603/25/2603.21792v1-convolutions-predictable-offloading-to-an-accelerator-formalization-and-optimization)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：优化受限于片上内存的加速器卷积卸载
+10. [SparseDVFS: Sparse-Aware DVFS for Energy-Efficient Edge Inference](/202603/25/2603.21908v1-sparsedvfs-sparse-aware-dvfs-for-energy-efficient-edge-inference)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：通过稀疏感知的DVFS实现能效边缘推理
+11. [SCALE-Sim TPU: Validating and Extending SCALE-Sim for TPUs](/202603/25/2603.22535v1-scale-sim-tpu-validating-and-extending-scale-sim-for-tpus)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对真实硬件验证脉动阵列加速器模拟器，并与机器学习编译栈集成
 
 ### 速读区论文标签
-1. [Data-Local Autonomous LLM-Guided Neural Architecture Search for Multiclass Multimodal Time-Series Classification](/202603/24/2603.15939v1-data-local-autonomous-llm-guided-neural-architecture-search-for-multiclass-multimodal-time-series-classification)  
+1. [Learnable Pulse Accumulation for On-Device Speech Recognition: How Much Attention Do You Need?](/202603/25/2603.16922v1-learnable-pulse-accumulation-for-on-device-speech-recognition-how-much-attention-do-you-need)  
    标签：评分：8.0/10、query:hwnas
-   evidence：数据本地约束下的LLM引导神经架构搜索
-2. [Dimensional Type Systems and Deterministic Memory Management: Design-Time Semantic Preservation in Native Compilation](/202603/24/2603.16437v1-dimensional-type-systems-and-deterministic-memory-management-design-time-semantic-preservation-in-native-compilation)  
+   evidence：具有优化推理路径的设备端语音识别
+2. [CODMAS: A Dialectic Multi-Agent Collaborative Framework for Structured RTL Optimization](/202603/25/2603.17204v1-codmas-a-dialectic-multi-agent-collaborative-framework-for-structured-rtl-optimization)  
    标签：评分：8.0/10、query:hwnas
-   evidence：编译器驱动的内存管理与数值表示选择
-3. [Fast-HaMeR: Boosting Hand Mesh Reconstruction using Knowledge Distillation](/202603/24/2603.16444v1-fast-hamer-boosting-hand-mesh-reconstruction-using-knowledge-distillation)  
+   evidence：自动化的RTL优化以提升功耗、性能和面积(PPA)
+3. [The 1/W Law: An Analytical Study of Context-Length Routing Topology and GPU Generation Gains for LLM Inference Energy Efficiency](/202603/25/2603.17280v1-the-1w-law-an-analytical-study-of-context-length-routing-topology-and-gpu-generation-gains-for-llm-inference-energy-efficiency)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于资源受限嵌入式系统的轻量级神经网络
-4. [Unifying Optimization and Dynamics to Parallelize Sequential Computation: A Guide to Parallel Newton Methods for Breaking Sequential Bottlenecks](/202603/24/2603.16850v1-unifying-optimization-and-dynamics-to-parallelize-sequential-computation-a-guide-to-parallel-newton-methods-for-breaking-sequential-bottlenecks)  
+   evidence：基于上下文长度的LLM GPU推理能效分析
+4. [VeriAgent: A Tool-Integrated Multi-Agent System with Evolving Memory for PPA-Aware RTL Code Generation](/202603/25/2603.17613v1-veriagent-a-tool-integrated-multi-agent-system-with-evolving-memory-for-ppa-aware-rtl-code-generation)  
    标签：评分：8.0/10、query:hwnas
-   evidence：并行化顺序计算以提升GPU利用率
-5. [Spiking Layer-Adaptive Magnitude-based Pruning](/202603/24/2603.14946v1-spiking-layer-adaptive-magnitude-based-pruning)  
+   evidence：功耗、性能、面积感知的RTL代码生成与联合优化
+5. [Auto Researching, not hyperparameter tuning: Convergence Analysis of 10,000 Experiments](/202603/25/2603.15916v1-auto-researching-not-hyperparameter-tuning-convergence-analysis-of-10000-experiments)  
    标签：评分：7.0/10、query:hwnas
-   evidence：高能效脉冲神经网络剪枝框架
-6. [Affordable Precision Agriculture: A Deployment-Oriented Review of Low-Cost, Low-Power Edge AI and TinyML for Resource-Constrained Farming Systems](/202603/24/2603.15085v1-affordable-precision-agriculture-a-deployment-oriented-review-of-low-cost-low-power-edge-ai-and-tinyml-for-resource-constrained-farming-systems)  
+   evidence：LLM智能体执行自动化架构搜索与实验设计
+6. [AI Application Benchmarking: Power-Aware Performance Analysis for Vision and Language Models](/202603/25/2603.16164v1-ai-application-benchmarking-power-aware-performance-analysis-for-vision-and-language-models)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对资源受限系统的边缘AI和TinyML综述
-7. [Real-Time Oriented Object Detection Transformer in Remote Sensing Images](/202603/24/2603.15497v1-real-time-oriented-object-detection-transformer-in-remote-sensing-images)  
+   evidence：针对高效AI基础设施的功耗感知性能分析与基准测试
+7. [SpikeCLR: Contrastive Self-Supervised Learning for Few-Shot Event-Based Vision using Spiking Neural Networks](/202603/25/2603.16338v1-spikeclr-contrastive-self-supervised-learning-for-few-shot-event-based-vision-using-spiking-neural-networks)  
    标签：评分：7.0/10、query:hwnas
-   evidence：遥感图像的实时定向目标检测
-8. [S2Act: Simple Spiking Actor](/202603/24/2603.15725v1-s2act-simple-spiking-actor)  
+   evidence：神经形态硬件上的能效应用
+8. [DynamicGate MLP Conditional Computation via Learned Structural Dropout and Input Dependent Gating for Functional Plasticity](/202603/25/2603.16367v1-dynamicgate-mlp-conditional-computation-via-learned-structural-dropout-and-input-dependent-gating-for-functional-plasticity)  
    标签：评分：7.0/10、query:hwnas
-   evidence：面向功耗受限移动机器人的轻量级SNN框架
-9. [Balancing Saliency and Coverage: Semantic Prominence-Aware Budgeting for Visual Token Compression in VLMs](/202603/24/2603.14892v1-balancing-saliency-and-coverage-semantic-prominence-aware-budgeting-for-visual-token-compression-in-vlms)  
+   evidence：通过条件计算抑制不必要的运算
+9. [ViT-AdaLA: Adapting Vision Transformers with Linear Attention](/202603/25/2603.16063v1-vit-adala-adapting-vision-transformers-with-linear-attention)  
    标签：评分：6.0/10、query:hwnas
-   evidence：视觉令牌压缩以缓解计算瓶颈
-10. [Flash-Unified: A Training-Free and Task-Aware Acceleration Framework for Native Unified Models](/202603/24/2603.15271v1-flash-unified-a-training-free-and-task-aware-acceleration-framework-for-native-unified-models)  
+   evidence：线性注意力机制降低ViT的二次复杂度
+10. [$D^3$-RSMDE: 40$\times$ Faster and High-Fidelity Remote Sensing Monocular Depth Estimation](/202603/25/2603.16362v1-d3-rsmde-40times-faster-and-high-fidelity-remote-sensing-monocular-depth-estimation)  
    标签：评分：6.0/10、query:hwnas
-   evidence：多模态模型的任务感知加速框架
-11. [MeMix: Writing Less, Remembering More for Streaming 3D Reconstruction](/202603/24/2603.15330v1-memix-writing-less-remembering-more-for-streaming-3d-reconstruction)  
+   evidence：平衡速度与质量的高效遥感深度估计
+11. [Rotated Robustness: A Training-Free Defense against Bit-Flip Attacks on Large Language Models](/202603/25/2603.16382v1-rotated-robustness-a-training-free-defense-against-bit-flip-attacks-on-large-language-models)  
    标签：评分：6.0/10、query:hwnas
-   evidence：具有O(1)推理内存占用的内存高效流式3D重建
+   evidence：针对大模型量化权重中硬件比特翻转攻击的防御
 
 
 <div class="dpr-home-promo-card">
