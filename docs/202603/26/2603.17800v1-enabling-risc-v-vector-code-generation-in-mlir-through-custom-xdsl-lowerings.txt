@@ -1,0 +1,569 @@
+Title: Enabling RISC-V Vector Code Generation in MLIR through Custom xDSL Lowerings
+
+URL Source: https://arxiv.org/pdf/2603.17800v1
+
+Published Time: Thu, 19 Mar 2026 01:23:51 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+## Enabling RISC-V Vector Code Generation in MLIR through Custom xDSL Lowerings 
+
+Jie Lei 1, Héctor Martínez 2, and Adrián Castelló 1 
+
+> 1
+
+Universitat Politècnica de València, València, Spain  
+
+> 2
+
+Universidad de Córdoba, Córdoba, Spain 
+
+jlei@disca.upv.es, el2mapeh@uco.es, adcastel@disca.upv.es 
+
+Abstract. The growing adoption of RISC-V in high-performance and scientific computing has in-creased the need for performance-portable code targeting the RISC-V Vector (RVV) extension. How-ever, current compiler infrastructures provide limited end-to-end support for generating optimized RVV code from high-level representations to low-level implementations. In particular, existing MLIR distributions lack practical lowering paths that map high-level abstractions to RVV intrinsics, limiting their applicability for production-ready RISC-V kernels. This paper presents a compilation approach that combines MLIR with xDSL to bridge the missing lowering stages required for RVV code genera-tion. Using custom intermediate representations and transformation passes implemented in xDSL, we systematically translate high-level operations into specialized, hardware-aware C code invoking RVV intrinsics. The resulting kernels are emitted as portable C functions that can be directly integrated into existing applications, enabling incremental adoption without modifying surrounding software stacks. We demonstrate the approach on the General Matrix Multiplication ( gemm ) kernel and evaluate the generated micro-kernels on two real RISC-V platforms, the K230 and the BananaPi F3, comparing against OpenBLAS for both square-matrix benchmarks and transformer-based workloads derived from the BERT-Large model. When integrated into a matrix multiplication kernel, the proposed approach consistently outperforms OpenBLAS, reaching up to 12.2 GFLOPS compared to the baseline’s 5.1 GFLOPS and providing performance improvements between 10–35% across the evaluated workloads. These results demonstrate that combining MLIR with xDSL provides a practical pathway to portable, optimized code generation for RISC-V platforms. 
+
+Keywords: RISC-V Vector extension · Compiler infrastructures · Code generation · MLIR · xDSL ·
+
+High-Performance Computing. 
+
+1 Introduction 
+
+The growing adoption of RISC-V as a common Instruction Set Architecture (ISA) across domains ranging from Internet-of-Things (IoT) devices to high-performance computing (HPC) systems has introduced new challenges for software portability and optimization. In the HPC context, modern RISC-V processors increas-ingly implement the RISC-V Vector (RVV). extension in diverse configurations, including Simple-Instruction Multiple-Data (SIMD) floating-point units of varying widths, and long vector register architectures. Al-though these platforms share a common ISA, their microarchitectural diversity complicates the development of portable, high-performance software. Achieving high performance on RVV requires explicit management of vector-length–agnostic program-ming, intrinsic selection, and tile sizing. As the number and heterogeneity of RISC-V implementations con-tinue to grow, maintaining hand-tuned kernels becomes increasingly impractical, even for regular HPC work-loads such as dense linear algebra. Compiler infrastructures such as Halide [14], MLIR [10,11], Apache TVM [6], or Exo [9] address this chal-lenge by generating optimized, hardware-aware code from high-level representations. Among them, MLIR provides a powerful multi-level intermediate representation (IR) and extensible lowering framework. How-ever, current MLIR distributions lack complete end-to-end lowering paths for RVV targets, particularly for mapping high-level vector abstractions to RVV intrinsics and hardware-aware C code. This limitation restricts MLIR’s applicability to production-ready RVV kernel generation. 
+
+> arXiv:2603.17800v1 [cs.AR] 18 Mar 2026
+
+2 J. Lei et al.                                                             
+
+> 1for ( jc =0; jc < n ; jc += nc ) // Loop L1
+> 2for ( pc =0; pc < k ; pc += kc ) {// L2
+> 3Bc := B ( pc : pc + kc -1 , jc : jc + nc -1) ; // Pack B
+> 4for ( ic =0; ic < m ; ic += mc ) {// L3
+> 5Ac := A ( ic : ic + mc -1 , pc : pc + kc -1) ; // Pack A
+> 6for ( jr =0; jr < nc ; jr += nr ) // L4
+> 7for ( ir =0; ir < mc ; ir += mr ) // L5
+> 8// Micro - kernel
+> 9for ( pr =0; pr < kc ; pr ++) // L6
+> 10 C ( ic + ir : ic + ir + mr -1 , jc + jr : jc + jr + nr -1)
+> 11 += Ac ( ir : ir + mr -1 , pr ) *Bc ( pr , jr : jr + nr -1) ;
+> 12 }}
+
+Fig. 1: Pseudo-code of the Goto-based BLIS gemm algorithm. In this work, we bridge this gap by combining MLIR with xDSL [3,7], a Python-native toolkit for designing domain-specific compilers, to enable systematic generation of C code targeting RVV intrinsics. Using xDSL, we implement the missing lowering stages and introduce IRs that explicitly model RVV semantics and vector-length–aware transformations. The resulting kernels are emitted as standalone C functions that can be directly integrated into existing applications. Taking advantage of the automatic code generation, we also benefit from generating a complete collection of different micro-kernels. The generated combinations are then used for fine-tuning HPC applications, making it possible to choose the best micro-kernel for each scenario, and in particular for deep learning (DL) models, the best micro-kernel for each layer and target architecture. Concretely, this paper makes the following contributions: 
+
+– We analyze the limitations of MLIR for RVV code generation and identify the missing lowering stages. 
+
+– We design and implement a hybrid MLIR–xDSL compilation pipeline that bridges these gaps through custom dialects and transformations. 
+
+– We enable the generation of specialized, hardware-aware C micro-kernels for the General Matrix Multi-plication ( gemm ), targeting RVV intrinsics. 
+
+– We evaluate the generated C code and compare it against the highly optimized implementation of gemm 
+
+in OpenBLAS [13] using different DL models. The rest of the paper is organized as follows. Section 2 summarizes a high-performance algorithm for 
+
+gemm and introduces the MLIR and xDSL frameworks; Section 3 lists other approaches to automatic code generation and visits some existing work; Section 4 presents the complete workflow of our proposed solution; Section 5 evaluates and compares the auto-generated C code on gemm operations; Section 6 closes the paper with some concluding remarks. 
+
+2 Background 
+
+2.1 gemm in High-Performance Libraries 
+
+Consider the gemm C ← C +AB , where A ∈ Rm×k, B ∈ Rk×n, and C ∈ Rm×n. High-performance implemen-tations of gemm in modern BLAS libraries follow the algorithmic structure popularized by GotoBLAS [8], with the computation organized as a hierarchy of loops and packing routines designed to exploit the memory hierarchy and SIMD units, as depicted in Figure 1. In particular, at the outmost level, three nested loops iterate over the n-, k-, and m-dimensions using cache-aware blocking parameters nc, kc, and mc. These loops define the macro-kernel , whose role is to partition the matrices into panels that fit different cache levels. Submatrices of A and B are reorganized and packed into contiguous buffers ( Ac ∈ Rmc×kc and Bc ∈ Rkc×nc ) to ensure predictable cache behavior. The actual and critical arithmetic is performed inside the micro-kernel , a component that is typically written in assembly or in C using vector intrinsics. The micro-kernel updates a small micro-tile of matrix C
+
+of size mr × nr processing the problem across the kc dimension, effectively performing a sequence of outer-product operations. The packed micro-panels Ar ∈ Rmr ×kc and Br ∈ Rkc×nr , which are part of Ac and Bc,are arranged to maximize register reuse, ensure unit-stride memory access, and improve SIMD efficiency. Adapting this structure to RISC-V with RVV requires careful handling of vector-length–agnostic execu-tion, intrinsic selection, and tile sizing, which motivates systematic code generation approaches. RISC-V Vector Code Generation in MLIR through Custom xDSL Lowerings 3
+
+2.2 MLIR 
+
+MLIR is a compiler infrastructure developed within the LLVM ecosystem to address the growing complexity of modern software stacks, particularly in domains such as HPC and machine learning. Unlike traditional compiler IRs that operate at a single abstraction level, MLIR supports multiple levels of abstraction within a unified framework. It achieves this through a flexible system of dialects, each of which can model domain-specific operations, types, and transformations. This design enables progressive lowering from high-level algo-rithmic representations to low-level hardware-oriented code while preserving semantic structure throughout the compilation pipeline. A key strength of MLIR lies in its extensibility and composability. Developers can define custom dialects, introduce new transformation passes, and interoperate with existing LLVM backends. MLIR also provides infrastructure for pattern rewriting, canonicalization and analysis, facilitating systematic optimization and code generation. In the context of machine learning and linear algebra, MLIR enables structured represen-tations of tensor operations, memory references, and arithmetic expressions, which can be incrementally lowered toward target-specific dialects or external code emission frameworks. 
+
+2.3 xDSL 
+
+xDSL is a lightweight, Python-native compiler toolkit designed to mirror and complement the MLIR philoso-phy while emphasizing rapid prototyping and accessibility. It provides a lightweight environment for defining dialects, constructing IRs, and implementing lowering passes without the engineering overhead of large C++-based infrastructures. By adopting many of MLIR’s core abstractions, such as operations, regions, blocks, and dialects xDSL maintains conceptual compatibility while significantly reducing development complexity. A primary advantage of xDSL is its flexibility in experimentation and automation. Its Python foundation enables seamless integration with scripting, testing frameworks, and external tooling, making it particu-larly suitable for research-driven compiler development. With xDSL, developers can quickly prototype new transformations, generate IR, and iterate on lowering strategies with minimal boilerplate. As a result, xDSL serves as an effective environment for exploring novel compilation pipelines and bridging gaps in existing infrastructures. 
+
+3 Related Work 
+
+The rapid proliferation of computing platforms has created a significant performance portability challenge: achieving efficient execution across architectures with fundamentally different vector widths, memory hierar-chies, instruction sets, and architectural characteristics. In this context, automatic generation of optimized code has become a central research topic. Therefore, in this section, we briefly revisit some examples ap-plied to the generation of gemm and micro-kernel. The authors of [1,15] use TVM to optimize the overall 
+
+gemm operation across different hardware architectures, and the authors from [2] use MLIR to describe early experiences also with the entire gemm algorithm. In the case of optimized micro-kernels, the work in [5] focuses on generating Arm NEON solutions. Moreover, the work in [4] uses the Exo framework to implement specialized code generators for RISC-V CPUs. From the perspective of using xDSL for code generation, our work is inspired by [12], which also utilizes xDSL and MLIR for RISC-V extension. Their approach explicitly avoids general-purpose compilers, opting instead to build a self-contained backend optimized for their in-house micro-architecture, namely the Snitch accelerator, to generate highly efficient native assembly code. In contrast, our work prioritizes broad portability and agile development across the fragmented RISC-V ecosystem, specifically targeting the RVV intrinsics. By emitting standard C code, our dynamically sized micro-kernels act as a “universal assembly.” This ensures wider applicability and seamless integration into existing toolchains without locking the user into a single custom hardware backend. 
+
+4 Building the Code Generator 
+
+This work aims to leverage MLIR to facilitate automatic code generation for high-performance gemm designs on RISC-V CPUs. Therefore, the ultimate goal is to propose a design flow that allows users to specify the 4 J. Lei et al. Stage 1: Con fi guration Phase    
+
+> De fi ne kernel parameters: vector length, data type, kernel dimensions
+> Stage 2: Core Kernel Generation
+> Construct high-level micro-kernels using xDSL API
+> Stage 3: IR Lowering
+> Apply transformation passes:
+> MemRefToEmitCPass() RVVToEmitCPass()
+> xDSL
+> Stage 4: C++ Translation
+> Invoke mlir-translate
+> to lower MLIR emitc to C++
+> Stage 5: Test Bench Generation
+> C++ wrapper, header, Make fi le generation
+> Stage 6: Deployment & Execution
+> Compile and benchmark on RISC-V board MLIR Python RISC-V Hardware
+
+Fig. 2: MLIR-xDSL hybrid code generation pipeline micro-kernel dimensions mr × nr , the data type, and the length of the vector registers using high-level MLIR dialects. The workflow is designed to generate portable C code micro-kernels enriched with native RVV 1.0 in-trinsics. Standard C code was strategically chosen as the final output format, providing a highly compatible solution. Due to its portability, it can be compiled and executed across diverse RISC-V platforms. 
+
+4.1 The incomplete MLIR lowering algorithm 
+
+MLIR facilitates the C code generation through its emitc dialect, created to bridge the gap between LLVM abstractions and novel or embedded systems where access to full LLVM infrastructure is limited. Once the code is fully written in emitc , the built-in mlir-translate tool directly converts it into C code. In MLIR, users can formulate their designs using higher-level abstractions in a variety of dialects. For example, they can express floating-point multiplication as %a = arith.mulf %b, %c : f32 using the arith 
+
+dialect; or dynamic memory allocation as %0 = memref.alloc() : memref<?xf32, 1> using the memref 
+
+dialect. Both of these operations are critical for high-performance gemm .Therefore, we started using MLIR (LLVM 22.0) to lower these high-level functions to emitc . While this version successfully lowered the arith dialect, it was unable to handle the memref lowering. This problem occurs because the lowering pass from memref to emitc for dynamic array types is incomplete in the upstream version, preventing the generation of standard C pointers. We also tested that MLIR was able to lower code written in pure emitc to C. However, writing emitc is close to doing so in assembly, which this work aims to avoid. Furthermore, since the target hardware involves RISC-V systems with Vector Extensions, we have also expanded our design to integrate native RVV intrinsic support directly into the emission flow. 
+
+4.2 The proposed MLIR–xDSL hybrid automatic code generation pipeline 
+
+While attempting to implement our custom lowering passes directly within the upstream MLIR project, we encountered the high development cost and rigidity of the MLIR infrastructure, which presents a steep learning curve. Focusing on our core objective, which aims to develop a lowering process that converts high-level MLIR dialects into emitc for generating C code via the mlir-translate tool, we concluded that we needed an alternative framework to simplify the design of the lowering. To resolve this, we mixed xDSL and MLIR in the hybrid pipeline in Figure 2. We utilize xDSL to generate micro-kernels with a user-specified configuration in MLIR dialects. The xDSL uses the xDSL API to generate an IR design mixed with various MLIR dialects. Once the IR has been generated, it passes through our lowering algorithm to generate the emitc code. Then, we return to the official mlir-translate 
+
+tool to complete the C translation workflow. Within this unified environment, we leverage Python to automatically generate the necessary C project headers and main test programs, deploy the source files to a RISC-V board, compile them natively, and benchmark each kernel’s performance. This seamless integration ensures that the end-to-end development cycle from micro-kernel high-level specification to code generation and benchmarking can be executed in a matter of minutes. RISC-V Vector Code Generation in MLIR through Custom xDSL Lowerings 5                                                                                                         
+
+> 1#1. Emit vle32 . v instruction to load the Ar vector from Ac data
+> 2Ar . append ( lb . vle32 ( Ac , k_mul_lda , vl ) )
+> 34#2. Emit nr vfmacc instructions to multiply scalar from Bc across vector Ar , accumulating into Cr
+> 5for iin range ( nr ) :
+> 6c_new [( i , mr ) ] =lb . vfmacc (
+> 7Cr [( i , mr ) ] , #Incoming SSA accumulator
+> 8Bc , b_offset , #Bc memory scalar
+> 9Ar [ mr ] , #Loaded Avector
+> 10 vl #Vector length
+> 11 )
+> 12 13 #3. Yield the newly minted vector registers to the next iteration
+> 14 yield_vals =[ c_new [( i , j ) ] for nin range ( nr ) for jin range ( mr ) ]
+> 15 loop_body . add_op ( scf . YieldOp (* yield_vals ) )
+> 16 17 #4. Construct the surrounding scf . for loop representation of L6
+> 18 for_op =scf . ForOp ( start , stop , step , iter_inits , Region ([ loop_body ]) )
+
+Fig. 3: Python xDSL representation of loop L6 for the 8 × 4 micro-kernel. 
+
+4.3 The end-to-end micro-kernel generator pipeline 
+
+To illustrate the capabilities of our MLIR-xDSL hybrid code generation pipeline, we trace the creation of an 
+
+8 × 4 RISC-V Vector (RVV) micro-kernel. We focus specifically on the most critical component: Loop L6 of the micro-kernel (Figure 1), which performs the Fused Multiply-Accumulate (FMA) operations. 
+
+Stage 1: Micro-kernel configuration (xDSL). The pipeline is designed to be flexible for constructing kernels for both scalar and vector data types. The pipeline begins in the Python-based xDSL environment where the user specifies the micro-kernel dimensions (e.g., mr = 8 , n r = 4 ), the data type (e.g., FP32), and the target vector length expressed in bits (e.g., vlen=256 ). Our custom xDSL abstractions then dynamically construct the high-level MLIR representation for all micro-kernels for all possible combinations of dimensions from 1 × 1 to mr × nr . This automatically generated set of micro-kernels cover all possible edge cases in the 
+
+gemm operation. 
+
+Stage 2: Core kernel generation (xDSL). Our Python IRBuilder orchestrates the construction of the micro-kernel, including loading the micro-tile from matrix C to Cr registers, loop L6, and storing the results from Cr registers into C matrix. L6 loop includes loading data from the buffer Ac to Ar registers and nr
+
+AXPI operations. Notice that the micro-kernel loads the values from the buffer Bc directly instead of using 
+
+Br registers due to the performance loss pointed in [4]. The code for the generation of loop L6 is shown in Figure 3. Line 2 emits the vector load of the Ac values into Ar registers. In the case of 8 × 4 micro-kernel, only one register is used because the 8 FP32 elements fit inside a unique register of 256 bits; lines 5–11 insert nr (4 in this case) FMA instructions using the lb.vfmacc abstraction that is part of our proposed rvv dialect; lines 14–15 add the logic for reusing the Cr register accumulators ( scf.YieldOp ); and line 18 constructs the L6
+
+for loop. The code in Figure 3 produces the MLIR IR in Figure 4, where: lines 5–6 display the first RVV FMA operation of loop L6. We omit the other 3 FMAs’ instructions for brevity; line 9 manages the reuse of the Cr
+
+registers; and lines 1–10 are the body of the loop L6 ( scf.for ). The variable naming method used in MLIR code uses sequential names like %33 or v68 because the MLIR tool deterministically maps the underlying MLIR register numbering. To understand how the xDSL pipeline orchestrates the FMA generation, let us break down the 5 argu-ments passed into the generated MLIR 
+
+rvv.vfmacc_vf_f32m1Op instruction: %42 (rvv.vfloat32m1) is the running accumulator register Cr for this column of C, mandated by the SSA iter_args ; %4 (memref<...>) : the memory pointer to the Bc pack-ing; %53 (index) is the integer offset required to extract the scalar from Bc; %52 (rvv.vfloat32m1) is the previously fetched Ar vector register loaded from Ac; and %51 (index) is the vector length controlling the operation’s hardware bounds. 6 J. Lei et al.                                                                 
+
+> 1%37 , ... , %40 =scf . for %41 =%10 to %0 step %11 iter_args (%42 =%19 ,...) -> (...)
+> 2{
+> 3...
+> 4// Emit FMA for Column 0( taking incoming accumulator %42)
+> 5%61 =" rvv . vfmacc_vf_f32m1Op " (%42 , %4 , %53 , %52 , %51) :
+> 6(! rvv . vfloat32m1 , memref < -1 xf32 > , index , ! rvv . vfloat32m1 , index ) -> ! rvv . vfloat32m1
+> 7...
+> 8// Explicit SSA handoff of new accumulators (%61) to the next loop iteration
+> 9scf . yield %61 , %62 , %63 , %64
+> 10 }
+
+Fig. 4: MLIR IR with the scf.for representation of loop L6 and FMA bindings.                                                             
+
+> 1// 1. Initial xDSL / MLIR Generation ( Abstract Vector Algebra )
+> 2func . func @xdsl_api_kernel_ (%0: index , %1: memref < -1 xf32 > , %2: memref < -1 xf32 > , ...) {... }
+> 34// 2. Transformed EmitC IR ( Flattened Memory Pointers )
+> 5" func . func " () <{ sym_name =" xdsl_api_kernel_ " ,
+> 6function_type =( index , ! emitc . ptr < f32 > , ! emitc . ptr < f32 > , ...) -> () } >
+> 78// 3. Final Executable C ++ Emission ( Standard CArrays )
+> 9void xdsl_api_kernel_ ( void * , int v1 , float * v2 , float * v3 , ...) {... }
+
+Fig. 5: Transformation of the kernel function signature across generating stages. The rvv.* namespace including both the FMA instruction and the !rvv.vfloat32m1 data type is our proposed, custom RVV-MLIR dialect. 
+
+Stage 3: IR lowering to emitc (xDSL). The current IR structure mixing scf , memref , arith , and custom 
+
+rvv dialects cannot be directly compiled. Therefore, this stage in the pipeline applies targeted transformation passes one-by-one to lower these high-level dialects into emitc . Concretely, as the result of this stage, our xDSL-generated MLIR IR converges into an MLIR pure emitc dialect code. Reaching that result is done as follows: First, xDSL addresses memory abstractions through the MemRefToEmitCPass . The memref type provides a mechanism for representing multidimensional arrays with complex strides and layouts. However, C compilers natively operate on flat memory blocks managed by standard pointers. This pass identifies 
+
+memref occurrences (such as structures Ac, B c, C ) and translates them to standard C pointer abstractions. We can trace this specific transformation through the kernel function’s signature across the pipeline stages summarized in Figure 5. Line 2 defines the xDSL function with the memref objects; lines 4–5 show emitc.ptr 
+
+structures; and line 9 the C pointers. Next, the SCFToEmitCPass resolves the control flow constraints imposed by MLIR’s Static Single As-signment (SSA) form. It deconstructs the scf.for block into an imperative emitc.for loop, replacing the SSA loop-carried parameters with mutable C variables ( emitc.variable ) and direct assignment operations (emitc.assign ). Continuing with the lowering, the RVVToEmitCPass translates the vector operations into C intrinsics. To achieve this, our design defines a custom rvv MLIR dialect within xDSL by subclassing the IRDLOperation 
+
+class for each hardware instruction, see Figure 6. For instance, the FMA instruction vfmacc_vf_f32m1Op 
+
+(line 2) is constructed by declaring its required inputs using operand_def (lines 5–9) and its output using 
+
+result_def (line 10). During this lowering stage, the RVVToEmitCPass utilizes the RewritePattern infrastructure to map these constructs into emitc nodes; see Figure 7. At its core is the match_and_rewrite function (lines 3–20), which intercepts instances of the custom rvv operations during tree traversal. When the rewriter encounters a vfmacc_vf_f32m1Op , it extracts the SSA operands, such as the accumulator, the memory inputs, and the vector length (lines 11–14). The rewriter then constructs the equivalent structural representation, injects 
+
+EmitCSubscriptOp nodes to calculate memory pointers, and builds an emitc.CallOpaqueOp operation (lines 8–17) to bridge the functional gap. This instructs the translator to emit the raw string literal of the C hardware intrinsic: "__riscv_vfmacc_vf_f32m1" (line 9). The fully lowered FMA operation appears inside the emitc code as shown in Figure 8. The emitc opaque calls encapsulate both the translated C strings and the data type constraints. We can deconstruct the four RISC-V Vector Code Generation in MLIR through Custom xDSL Lowerings 7                                                            
+
+> 1@irdl_op_definition
+> 2class vfmacc_vf_f32m1Op ( IRDLOperation ) :
+> 3name =" rvv . vfmacc_vf_f32m1Op "
+> 4#Statically define and enforce structural data type constraints
+> 5vd =operand_def ( RVVFloat32M1Type ) #Accumulator vector register
+> 6memref =operand_def ( MemRefType ) #Abstract multidimensional memory pointer
+> 7offset =operand_def ( IndexType ) #Integer offset to extract scalar
+> 8vs =operand_def ( RVVFloat32M1Type ) #Fetched vector register
+> 9avl =operand_def ( IndexType ) #Integer vector length bound
+> 10 result =result_def ( RVVFloat32M1Type ) #Returning accumulator
+
+Fig. 6: xDSL definition of the vfmacc_vf_f32m1Op dialect operation.                                                                                      
+
+> 1class C o n v e r t R V V _ v f m a c c _ v f _ f 3 2 m 1 _ T o E m i t C ( RewritePattern ) :
+> 2@ o p _ t y p e _ r e w r i t e _ p a t t e r n
+> 3def match_and_rewrite ( self , op : vfmacc_vf_f32m1Op , rewriter : PatternRewriter ) :
+> 4#1. Define the resulting Cstruct type as an opaque wrapper
+> 5vector_type =emitc . EmitC_OpaqueType ( StringAttr ( " vfloat32m1_t " ) )
+> 67#2. Construct the literal Cintrinsic call with the intercepted MLIR SSA operands
+> 8call_op =emitc . EmitC_CallOpaqueOp (
+> 9callee = " _ _ r i s cv _ v f m ac c _ v f_ f 3 2 m 1 " ,
+> 10 call_args =[
+> 11 op . vd , #Accumulator Cr vector
+> 12 load_op . result , #Loaded Bc scalar ( omitted subscript logic for brevity )
+> 13 op . vs , #Loaded Ar vector
+> 14 op . avl #Vector length
+> 15 ] ,
+> 16 result_types =[ vector_type ] ,
+> 17 )
+> 18 19 #3. Replace the abstract custom dialect operation with the concrete EmitC node
+> 20 rewriter . replace_op ( op , call_op )
+
+Fig. 7: Rewrite pattern to lower FMA instructions to EmitC opaque calls for RVV intrinsics. concretized arguments passed into this emitted hardware call: %71 (!emitc.opaque<"vfloat32m1_t">) is the accumulator Cr register and the SSA pass-through ( %42 ) is transformed into a loaded mutable state vari-able ( %71 ); %73 (f32) is the scalar extracted from the Bc vector; %62 (!emitc.opaque<"vfloat32m1_t">) 
+
+is the Ar register, preserving the opaque hardware struct type; and %59 (index) is the vector length con-trolling the operation. 
+
+Stage 4: C++ Translation. With the IR fully flattened into emitc nodes, we exit the xDSL environment and invoke the official MLIR mlir-translate tool. This tool walks the emitc syntax and generates the final C code. The translation of loop L6 is in Figure 9, where the complex SSA yield mechanisms are lowered into stan-dard mutable variable updates, and the FMA math operations are represented as native RISC-V hardware intrinsics. We can visibly trace how the final compilation stage maps the opaque emitc data types strictly as native C 
+
+vfloat32m1_t structs. Furthermore, the five original arguments from our abstract MLIR rvv.vfmacc_vf_f32m1Op 
+
+have seamlessly resolved into the exactly four concrete variables required by the vfmacc hardware intrinsic: 
+
+v63 (vfloat32m1_t) is the running Cr accumulator vector, loaded directly from the mutable loop proxy variable ( v42 ); v64 (float) is the explicitly extracted scalar Bc float value. Note how emitc successfully resolved the dual memref /offset MLIR arguments by mapping them directly to a standard C hardware                            
+
+> 1// Lowered RVV FMA intrinsic preserving the opaque target data types
+> 2%74 =" emitc . call_opaque " (%71 , %73 , %62 , %59) <{ callee =" __ r i s c v_ v f m a cc _ v f _f 3 2 m 1 " } >
+> 3:(! emitc . opaque < " vfloat32m1_t " >, f32 , ! emitc . opaque < " vfloat32m1_t " >, index )
+> 4-> ! emitc . opaque < " vfloat32m1_t " >
+
+Fig. 8: Emitc representation of the lowered FMA instruction. 8 J. Lei et al.                                                                                       
+
+> 1// Mutable stateful accumulators replacing SSA mechanisms ( using lowered Ctypes )
+> 2vfloat32m1_t v42 =v21 ;
+> 3...
+> 4// Standard Imperative kc - Loop
+> 5for ( size_t i50 =v11 ; i50 <v1 ; i50 += v12 ) {// L6 loop
+> 6// RVV Load Intrinsic
+> 7vfloat32m1_t v54 =_ _r isc v_ vl e32 _v _f3 2m 1 ( v53 , v52 ) ; // Ac loading
+> 89// RVV FMA Intrinsic ( Computing Col 0)
+> 10 vfloat32m1_t v63 =v42 ;
+> 11 float v64 =v5 [ v55 ];
+> 12 vfloat32m1_t v65 =_ _r i s c v _v f m a c c_ v f _ f 32 m 1 ( v63 , v64 , v54 , v52 ) ; // FMA
+> 13 14 // Overwriting the mutable variables for the next loop iteration
+> 15 v42 =v65 ;
+> 16 ...
+> 17 }
+
+Fig. 9: Final emitted C code implementing the hardware-accelerated loop L6. array ( v5[v55] ); v54 (vfloat32m1_t) is the loaded Ar vector register; and v52 (size_t) is the vector length of the operation. 
+
+Stages 5, 6: Test Bench Generation and Deployment. Our pipeline automatically generates a com-prehensive C test bench harness, complete with verification routines and Makefile infrastructure. It then orchestrates the deployment, native compilation, and benchmarking of the generated kernels on the target remote RISC-V hardware, providing end-to-end analysis. The artifact for generating micro-kernels and reproducing the results of this paper is available at https: //github.com/JieGH/RVV_code_gen_via_MLIR_xDSL .
+
+5 Performance Evaluation 
+
+In this section, we first evaluate the performance of the generated micro-kernels in a stand-alone setting. Then, we assess the impact of the automatically generated micro-kernels within the complete gemm algorithm and compare the resulting performance with the OpenBLAS library across several scenarios. The experiments presented in this work were conducted on the following platforms: 
+
+K230. This platform corresponds to a CanMV-K230 board integrating the K230 system-on-chip (SoC). The processor follows a big-LITTLE configuration; however, only the RVV-capable C908 core was used in our experiments. This core operates at 1.6 GHz and supports the RISC-V Vector Extension (RVV) version 1.0 with a 128-bit vector unit. The processor includes 32 KB of L1 data cache and 256 KB of L2 cache. 
+
+BPI. The BananaPi F3 board integrates an 8-core SpaceMiT K1 processor operating at 1.6 GHz. Each core features a 32 KB L1 data cache, while a 512 KB L2 cache is shared among clusters of four cores. The processor implements the RVV 1.0 specification with a vector length of 256 bits. Experiments used Python 3.13.9 , xDSL v0.54.3 , and LLVM v22.0 . Generated C code was compiled with g++-14 -march=rv64gcvzfh -mabi=lp64d . We compared against OpenBLAS v0.3.31 , compiled di-rectly for the K230 (TARGET=RISCV64_ZVL128B , 8 × 8 kernel) and BPI ( TARGET=RISCV64_ZVL256B , 16 × 8 kernel). We report single-core, single-precision performance in GFLOPS, averaging 1500 runs for micro-kernels and 200 for 
+
+gemm . Parallel evaluation was excluded to isolate core architectural effects. 
+
+5.1 Micro-kernel evaluation 
+
+Figure 10 summarizes the performance of different micro-kernel configurations evaluated in isolation. The results reveal a clear relationship between micro-kernel dimensions and vector utilization. In particular, configurations in which the mr dimension is a multiple of the number of elements that fit into a vector register achieve higher performance. For FP32 operands, this corresponds to multiples of 4 elements on K230 and multiples of 8 elements on BPI. RISC-V Vector Code Generation in MLIR through Custom xDSL Lowerings 91 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 
+
+mr 
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+10 
+
+11 
+
+12 
+
+13 
+
+14 
+
+15 
+
+16 
+
+> nr
+
+0.4 0.9 1.2 1.8 0.8 1.0 1.2 2.6 1.3 1.5 1.6 3.0 1.6 1.9 1.9 3.3 2.0 2.2 2.2 3.3 2.1 2.5 2.3 3.2 2.3 2.6 2.5 3.2 2.4 2.7 2.5 3.3 
+
+0.8 1.6 2.3 3.3 1.6 1.9 2.2 4.3 2.4 2.8 3.0 4.6 3.1 3.5 3.6 4.9 3.2 3.6 3.6 4.9 3.5 3.9 3.8 5.0 3.6 4.0 3.9 5.1 3.9 4.2 4.1 5.0 
+
+0.9 1.8 2.7 3.6 1.5 1.8 2.1 5.5 3.3 3.7 3.9 5.8 3.9 4.3 4.4 6.1 4.3 4.8 4.8 6.1 4.5 5.0 5.0 6.1 4.7 5.1 5.1 6.3 4.8 5.3 5.1 6.2 
+
+1.1 2.3 3.3 4.6 1.7 2.0 2.3 6.0 3.7 4.1 4.4 6.4 4.1 4.6 4.7 6.7 4.4 4.7 4.9 6.8 4.5 4.9 5.0 6.9 5.6 5.9 6.0 7.4 2.6 2.7 2.8 2.9 
+
+1.2 2.5 3.5 4.9 1.8 2.2 2.5 6.0 3.8 4.3 4.6 6.8 4.2 4.6 4.9 7.2 4.7 5.1 5.2 7.4 6.2 6.4 6.7 7.0 2.8 2.9 3.0 3.3 2.0 2.1 2.2 2.4 
+
+1.2 2.4 3.6 4.9 1.9 2.3 2.6 6.4 4.4 5.0 5.4 6.9 5.2 5.7 6.0 7.4 6.2 6.7 6.9 8.1 2.6 2.7 2.8 3.1 1.9 2.0 2.1 2.2 1.5 1.6 1.6 1.7 
+
+1.2 2.4 3.6 4.7 2.0 2.4 2.8 6.6 4.7 5.3 5.7 7.2 5.4 5.9 6.3 7.7 2.7 2.9 3.0 3.1 1.9 2.0 2.1 2.2 1.4 1.4 1.5 1.6 1.2 1.3 1.3 1.3 
+
+1.3 2.6 3.8 5.1 2.0 2.5 2.8 6.8 4.2 4.7 5.1 7.4 2.6 2.8 3.0 3.3 1.9 2.0 2.1 2.4 1.6 1.7 1.8 1.8 1.2 1.2 1.3 1.4 1.1 1.1 1.2 1.2 
+
+1.2 2.6 3.7 5.3 2.1 2.5 2.9 6.9 4.3 4.8 5.2 7.5 2.4 2.6 2.8 3.1 1.5 1.6 1.6 2.0 1.3 1.4 1.4 1.5 1.1 1.1 1.2 1.3 1.0 1.0 1.0 1.1 
+
+1.3 2.6 3.8 5.1 2.1 2.6 3.0 6.8 5.2 5.8 6.3 7.5 1.8 2.0 2.1 2.3 1.4 1.5 1.6 1.7 1.1 1.2 1.2 1.3 1.0 1.0 1.1 1.1 0.9 0.9 0.9 1.0 
+
+1.3 2.5 3.8 5.0 2.2 2.6 3.0 7.0 2.4 2.7 2.9 3.4 1.4 1.5 1.6 1.8 1.1 1.2 1.3 1.5 1.1 1.1 1.2 1.2 0.9 0.9 1.0 1.0 0.8 0.9 0.9 0.9 
+
+1.3 2.6 3.9 5.3 2.2 2.7 3.1 7.1 2.5 2.8 3.1 3.5 1.4 1.5 1.6 1.6 1.1 1.2 1.2 1.3 0.9 1.0 1.0 1.1 0.9 0.9 0.9 1.0 0.8 0.8 0.9 0.9 
+
+1.3 2.7 3.9 5.4 2.2 2.7 3.1 7.1 2.2 2.4 2.7 3.0 1.2 1.3 1.4 1.4 1.1 1.1 1.2 1.3 0.9 0.9 1.0 1.0 0.8 0.9 0.9 0.9 0.8 0.8 0.8 0.9 
+
+1.3 2.6 3.9 5.2 2.2 2.7 3.2 7.0 1.8 2.0 2.2 2.4 1.1 1.2 1.3 1.3 0.9 1.0 1.0 1.1 0.8 0.9 0.9 1.0 0.8 0.8 0.9 0.9 0.8 0.8 0.8 0.8 
+
+1.3 2.6 3.9 5.2 2.3 2.7 3.2 7.1 1.5 1.6 1.8 2.0 1.1 1.1 1.2 1.3 0.9 0.9 1.0 1.0 0.8 0.8 0.9 0.9 0.8 0.8 0.8 0.9 0.7 0.7 0.8 0.8 
+
+1.3 2.7 4.0 5.3 1.5 1.9 2.1 3.8 1.3 1.5 1.6 1.8 1.0 1.1 1.2 1.2 0.8 0.9 0.9 1.0 0.8 0.8 0.9 0.9 0.8 0.8 0.8 0.8 0.7 0.7 0.8 0.8 
+
+xDSL micro-kernels performance on K230 
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10 
+
+12 
+
+14 
+
+16 
+
+GFLOPS 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 
+
+mr 
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+10 
+
+11 
+
+12 
+
+13 
+
+14 
+
+15 
+
+16 
+
+> nr
+
+0.4 0.9 1.3 2.0 2.2 2.7 3.1 3.9 1.7 1.9 2.1 2.3 2.5 2.7 2.9 6.0 2.7 2.9 3.0 3.2 3.2 3.4 3.5 6.3 3.3 3.5 3.5 3.5 3.2 3.4 3.5 4.7 
+
+0.8 1.6 2.3 3.4 3.8 4.8 5.4 6.8 2.4 2.7 3.0 3.2 3.5 3.8 4.1 9.6 4.1 4.4 4.6 4.9 5.0 5.2 5.4 9.2 4.9 5.2 5.2 5.2 4.8 5.0 5.3 7.4 
+
+0.9 1.8 2.7 3.9 4.5 5.5 6.3 7.8 2.9 3.2 3.6 3.9 4.2 4.5 4.9 11.3 4.7 5.1 5.3 5.8 5.8 6.1 6.3 10.5 6.1 6.4 6.5 6.5 6.0 6.2 6.1 8.5 
+
+1.1 2.3 3.4 4.8 5.6 6.9 7.8 9.6 3.2 3.6 3.9 4.3 4.7 5.0 5.4 12.1 5.0 5.4 5.6 6.2 6.1 6.5 6.6 12.3 6.8 7.0 7.3 7.4 7.2 7.4 7.5 10.0 
+
+1.2 2.5 3.6 5.1 6.0 7.4 8.4 10.2 3.5 3.8 4.2 4.6 5.0 5.4 5.8 11.2 5.4 5.8 6.0 6.6 6.6 7.0 7.1 11.6 6.9 7.3 7.4 7.7 7.5 7.8 8.0 10.5 
+
+1.1 2.2 3.3 4.6 5.5 6.7 7.7 9.2 3.6 4.0 4.4 4.8 5.2 5.6 6.0 13.4 5.7 6.1 6.3 6.9 6.9 7.3 7.5 13.4 7.1 7.3 7.5 7.6 7.8 8.1 8.2 11.7 
+
+1.3 2.6 3.9 5.4 6.4 7.8 9.0 10.8 3.7 4.2 4.6 5.0 5.4 5.8 6.2 13.8 5.9 6.3 6.6 7.1 7.2 7.6 7.8 12.1 7.5 7.5 7.8 8.2 8.0 8.4 8.4 12.0 
+
+1.3 2.7 4.0 5.5 6.6 8.0 9.3 10.9 3.8 4.3 4.7 5.1 5.5 6.0 6.4 14.4 6.1 6.5 6.7 7.3 7.3 7.8 7.9 14.0 4.8 4.9 5.2 5.4 5.5 5.7 5.9 6.9 
+
+1.3 2.7 4.0 5.6 6.7 8.2 9.4 11.2 3.9 4.4 4.8 5.2 5.6 6.1 6.5 15.3 6.2 6.6 6.9 7.3 7.3 7.7 7.9 13.7 2.0 2.1 2.2 2.3 2.4 2.5 2.5 2.9 
+
+1.4 2.8 4.1 5.7 6.8 8.3 9.6 11.3 4.0 4.4 4.9 5.3 5.7 6.1 6.6 14.9 5.4 5.8 6.1 6.4 6.5 6.8 7.0 10.4 1.5 1.6 1.7 1.7 1.8 1.8 1.9 2.1 
+
+1.3 2.6 3.9 5.3 6.4 7.8 9.0 10.5 4.1 4.5 5.0 5.4 5.8 6.2 6.7 15.6 2.7 2.8 3.0 3.1 3.2 3.3 3.5 4.3 2.6 2.7 2.8 2.9 3.0 3.1 3.2 3.7 
+
+1.4 2.7 4.2 5.7 7.0 7.8 9.7 11.5 4.1 4.6 5.0 5.4 5.9 6.3 6.7 15.7 2.1 2.2 2.3 2.4 2.5 2.7 2.8 3.4 1.2 1.2 1.3 1.3 1.3 1.4 1.4 1.6 
+
+1.4 2.9 4.2 5.4 6.7 8.6 9.9 11.5 4.1 4.6 5.1 5.5 5.9 6.4 6.8 15.6 2.9 3.1 3.2 3.4 3.5 3.7 3.8 5.4 1.0 1.1 1.1 1.2 1.2 1.3 1.3 1.4 
+
+1.4 2.9 4.3 5.8 7.1 8.6 10.0 11.6 4.2 4.6 5.1 5.5 6.0 6.4 6.8 15.9 2.5 2.7 2.8 2.9 3.1 3.2 3.4 4.4 1.0 1.0 1.0 1.1 1.1 1.1 1.2 1.3 
+
+1.4 2.9 4.3 5.9 7.1 8.6 10.0 11.6 4.2 4.7 5.1 5.6 6.0 6.5 6.9 16.2 2.3 2.4 2.5 2.6 2.8 2.9 3.0 3.7 0.9 0.9 1.0 1.0 1.1 1.1 1.1 2.1 
+
+1.4 2.7 4.1 5.5 6.8 8.2 9.4 11.0 3.3 3.7 4.0 4.4 4.7 5.1 5.4 9.0 2.1 2.2 2.3 2.5 2.6 2.7 2.8 3.5 0.9 0.9 0.9 1.0 1.0 1.0 1.1 1.2 
+
+xDSL micro-kernels performance on BPI 
+
+0
+
+2
+
+4
+
+6
+
+8
+
+10 
+
+12 
+
+14 
+
+16 
+
+GFLOPS 
+
+Fig. 10: Micro-kernels performance for K230 (left) and BPI (right). 
+
+Case ID m n k Case ID m n k
+
+S1 1000 1000 1000 B1 1024 384 1024 S2 2000 2000 2000 B2 384 384 64 Square S3 3000 3000 3000 BERT B3 64 384 384 S4 4000 4000 4000 B4 4096 384 1024 S5 5000 5000 5000 B5 1024 384 4096 
+
+Table 1: Layer dimensions ( m, n, k ) for the evaluated scenarios. Among the evaluated configurations, the best micro-kernel dimensions are 20 × 6 for K230 and 16 × 15 
+
+for BPI, achieving peak performances of 8.1 GFLOPS and 16.2 GFLOPS, respectively. Notice that the range of values is up to 16.2 GFLOPS for both charts, revealing the performance difference between devices. 
+
+5.2 gemm evaluation 
+
+To evaluate the impact of micro-kernels on the gemm implementation, we first analyze performance using square matrices, which constitute a standard benchmark configuration widely used to evaluate dense linear algebra kernels. Second, we evaluate the algorithm using the gemm shapes that arise in inference for the BERT-Large model. This dual evaluation allows us to assess both the peak performance of the implemen-tation and its effectiveness in realistic machine learning. Table 1 highlights the different gemm scenarios for the evaluation. We adopted the established gemm implementation on https://github.com/martineh/gemm_blis_family .This design provided a cache-efficient gemm implementation that allows us to directly plug in our xDSL-generated kernel code and evaluate its performance. Figure 11 presents the performance comparison between the proposed xDSL implementation and Open-BLAS across the two workloads. For the square workload on K230, GEMM+xDSL consistently outperforms OpenBLAS across all evalu-ated layers (S1–S5). OpenBLAS achieves performance values between approximately 4.5 and 4.9 GFLOPS, whereas xDSL reaches between 5.1 and 5.4 GFLOPS. This corresponds to an average improvement of roughly 10–15%. Notably, the optimized implementation uses the same tiling configuration (20 ×6) for all layers, indi-cating that this configuration provides stable and efficient utilization of the hardware resources for matrices with regular shapes. For the BERT Large workload on the same platform, the performance improvements are more variable but remain favorable to the proposed approach. OpenBLAS achieves between 3.9 and 4.5 GFLOPS, while xDSL reaches between 4.6 and 5.9 GFLOPS depending on the layer. The largest improve-ment occurs in layer B2, where performance increases from 4.0 GFLOPS to 5.9 GFLOPS, corresponding to a speedup close to 47%. Other layers exhibit improvements between 10% and 35%. Unlike the Square workload, different tiling configurations (e.g., 24 ×5, 20 ×6, and 8 ×11) are selected for each layer, reflecting the greater diversity of matrix shapes in transformer-based models. On BPI, the advantages of xDSL become more pronounced. For the square workload, OpenBLAS achieves between 6.1 and 7.0 GFLOPS, whereas xDSL reaches approximately 8.3–8.6 GFLOPS. This corresponds to 10 J. Lei et al. S1 S2 S3 S4 S5                           
+
+> Layer
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> 12
+> GFLOPS
+> 20x6 20x6 20x6 20x6 20x6
+> Square Performance Comparison on K230: xDSL vs OpenBLAS
+> OpenBLAS
+> GEMM+xDSL B1 B2 B3 B4 B5
+> Layer
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> 12
+> GFLOPS
+> 24x5
+> 20x6
+> 8x11
+> 20x6 24x5
+> BERT Large Performance Comparison on K230: xDSL vs OpenBLAS
+> OpenBLAS
+> GEMM+xDSL S1 S2 S3 S4 S5
+> Layer
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> 12
+> GFLOPS  32x7 32x7 32x7 32x7 32x7
+> Square Performance Comparison on BPI: xDSL vs OpenBLAS
+> OpenBLAS
+> GEMM+xDSL B1 B2 B3 B4 B5
+> Layer
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> 12
+> GFLOPS  32x6
+> 16x15
+> 16x15
+> 32x7 32x6
+> BERT Large Performance Comparison on BPI: xDSL vs OpenBLAS
+> OpenBLAS
+> GEMM+xDSL
+
+Fig. 11: Comparison between gemm with xDSL micro-kernels against OpenBLAS on K230 (top) and on BPI (bottom), for square matrices (left) and BERT (right). performance improvements ranging from about 20% to 35%. As in the K230, a single tiling configuration (32 ×7) is used for all layers, demonstrating that a well-chosen configuration can deliver stable performance when matrix dimensions remain relatively uniform. The largest performance gains are observed for the BERT Large workload on BPI. OpenBLAS achieves between 5.1 and 7.3 GFLOPS, while GEMM+xDSL reaches between 6.8 and 12.2 GFLOPS. In particular, layer B2 shows a significant improvement from approximately 5.1 GFLOPS to 12.2 GFLOPS, representing more than a twofold speedup. The remaining layers show im-provements ranging from roughly 15% to 30%. Similar to the K230 experiments, different tiling configurations (e.g., 32 ×6, 16 ×15, and 32 ×7) are selected to better match the computational characteristics of each layer. Overall, the results demonstrate that xDSL consistently outperforms OpenBLAS across both hardware platforms and workloads. The improvements are particularly significant for the transformer, where layer-specific matrix dimensions benefit from adaptive tiling strategies. Furthermore, the results suggest that the proposed approach is capable of effectively exploiting the underlying hardware characteristics, especially on the BPI platform, where performance gains exceed 2 × in certain layers. 
+
+6 Conclusions 
+
+This paper presented a hybrid MLIR–xDSL compilation pipeline that enables the generation of optimized RISC-V Vector code starting from high-level MLIR abstractions. The proposed approach addresses a practical limitation of the current MLIR infrastructure, namely the lack of complete lowering paths that translate high-level dialects into hardware-aware RVV implementations suitable for production environments. By leveraging the flexibility of xDSL, we implemented custom lowering passes that bridge the gap between high-level MLIR representations and the emitc dialect, ultimately enabling the automatic generation of portable C code invoking RVV intrinsics. The evaluation demonstrated that the automatically generated micro-kernels achieve performance compa-rable to hand-written implementations, confirming the effectiveness of the proposed code generation strategy. When integrated into a complete gemm implementation, the generated kernels consistently outperformed the OpenBLAS baseline across both evaluated workloads. For square matrices, the proposed implementation achieved performance improvements of up to 35%, while for transformer-based workloads derived from the BERT-Large model, the speedups reached up to 2.4 ×. These results highlight the benefits of automatically RISC-V Vector Code Generation in MLIR through Custom xDSL Lowerings 11 
+
+generating multiple micro-kernel configurations and selecting the most suitable one for each workload or layer dimension. Future work will explore extending the framework to additional linear-algebra kernels, mixed-precision arithmetic, and the automatic generation of packing routines. 
+
+Acknowledgments. This work received funding from projects PID2023-146569NB-C2 of MCIN/AEI/10.13 039/501100011033, and CIPROM/2022/20 of the Generalitat Valenciana, the DARE SGA1 Project, from the European High-Performance Computing Joint Undertaking (JU) under Grant Agreement No 101202459 and from PCI2024-161687-3 Project funded by MICIU/AEI/10.13039/ 501100011033 and European’s Union “NextGenerationEU”/PRTR”. The JU receives support from the European Union’s Horizon Europe research and innovation programme and Spain, Germany, Czechia, Italy, Netherlands, Belgium, Finland, Greece, Croatia, Portugal, Poland, Sweden, France and Austria. 
+
+References 
+
+1. Alaejos, G., Castelló, A., Martínez, H., Alonso-Jordá, P., Igual, F.D., Quintana-Ortí, E.S.: Micro-kernels for portable and efficient matrix multiplication in deep learning. The Journal of Supercomputing pp. 1–24 (2022) 2. Bondhugula, U.: High performance code generation in MLIR: an early case study with GEMM. CoRR 
+
+abs/2003.00532 (2020), https://arxiv.org/abs/2003.00532 
+
+3. Brown, N., Grosser, T., Fehr, M., Steuwer, M., Kelly, P.: xDSL: A common compiler ecosystem for domain specific languages. In: Proceedings of the SC ’23 Workshops of The Int. Conference on High Performance Computing, Network, Storage, and Analysis (Nov 2022), supercomputing 2023, SC23 4. Castelló, A., Martínez, H., Catalán, S., Igual, F.D., Quintana-Ortí, E.S.: Evaluation of RVV-enabled COTS platforms with matrix multiplication and Exo. In: High Performance Computing. Lecture Notes in Computer Science, vol. 16091. pp. 534–547. Springer Nature Switzerland, Cham (2026) 5. Castelló, A., Bellavita, J., Dinh, G., Ikarashi, Y., Martínez, H.: Tackling the matrix multiplication micro-kernel generation with Exo. In: IEEE/ACM Int. Symp. Code Gen. & Optimization. pp. 182–193 (2024). https://doi. org/10.1109/CGO57630.2024.10444883 
+
+6. Chen, T., Moreau, T., Jiang, Z., Shen, H., Yan, E.Q., Wang, L., Hu, Y., Ceze, L., Guestrin, C., Krishnamurthy, A.: TVM: end-to-end optimization stack for deep learning. CoRR abs/1802.04799 (2018), http://arxiv.org/ abs/1802.04799 
+
+7. Fehr, M., Weber, M., Ulmann, C., Lopoukhine, A., Lücke, M.P., Degioanni, T., Vasiladiotis, C., Steuwer, M., Grosser, T.: xDSL: Sidekick compilation for SSA-based compilers. In: ACM/IEEE Int. Symp. Code Gen. & Optimization. p. 179–192. CGO ’25, Association for Computing Machinery (2025). https://doi.org/10.1145/ 3696443.3708945 
+
+8. Goto, K., Geijn, R.A.v.d.: Anatomy of high-performance matrix multiplication. ACM Trans. Math. Softw. 34 (3), 12:1–12:25 (May 2008). https://doi.org/10.1145/1356052.1356053 
+
+9. Ikarashi, Y., Bernstein, G.L., Reinking, A., Genc, H., Ragan-Kelley, J.: Exocompilation for productive pro-gramming of hardware accelerators. In: Proceedings of the 43rd ACM SIGPLAN International Conference on Programming Language Design and Implementation. p. 703–718. PLDI, Association for Computing Machinery (2022). https://doi.org/10.1145/3519939.3523446 
+
+10. Lattner, C., Amini, M., Bondhugula, U., Cohen, A., Davis, A., Pienaar, J., Riddle, R., Shpeisman, T., Vasilache, N., Zinenko, O.: Mlir: Scaling compiler infrastructure for domain specific computation. In: 2021 IEEE/ACM International Symposium on Code Generation and Optimization (CGO). pp. 2–14 (2021). https://doi.org/10. 1109/CGO51591.2021.9370308 
+
+11. Lattner, C., Pienaar, J.A., Amini, M., Bondhugula, U., Riddle, R., Cohen, A., Shpeisman, T., Davis, A., Vasilache, N., Zinenko, O.: MLIR: A compiler infrastructure for the end of Moore’s law. CoRR (2020), https://arxiv. org/abs/2002.11054 
+
+12. Lopoukhine, A., Ficarelli, F., Vasiladiotis, C., Lydike, A., Van Delm, J., Dutilleul, A., Benini, L., Verhelst, M., Grosser, T.: A multi-level compiler backend for accelerated micro-kernels targeting RISC-V ISA extensions. In: ACM/IEEE Int. Symp. Code Gen. & Optimization. p. 163–178. CGO ’25, Association for Computing Machinery (2025). https://doi.org/10.1145/3696443.3708952 
+
+13. OpenBLAS. http://xianyi.github.com/OpenBLAS/ (2012) 14. Ragan-Kelley, J., Barnes, C., Adams, A., Paris, S., Durand, F., Amarasinghe, S.: Halide: a language and compiler for optimizing parallelism, locality, and recomputation in image processing pipelines. In: Proceedings of the 34th ACM SIGPLAN Conference on Programming Language Design and Implementation. p. 519–530. PLDI ’13, Association for Computing Machinery, New York, NY, USA (2013). https://doi.org/10.1145/2491956. 2462176 , https://doi.org/10.1145/2491956.2462176 12 J. Lei et al. 15. Siwinska, P., Lei, J., Castelló, A., Alonso-Jordá, P., Quintana-Ortí, E.: Enhancing transformer performance and portability through auto-tuning frameworks. In: The Journal of Supercomputing (2025). https://doi.org/10. 1007/s11227-026-08327-6
