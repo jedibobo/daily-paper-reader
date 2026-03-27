@@ -6,73 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-26
-- 运行时间：2026-03-26 20:01:53 UTC
+- 最新运行日期：2026-03-27
+- 运行时间：2026-03-27 19:44:30 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日精选 17 篇论文，深度探讨从 TinyML 到大模型的软硬协同能效优化及 NPU 算子自动调优。
-重点推荐机器学习全场景的能效设计指南，以及利用强化学习智能体突破昇腾 NPU 性能瓶颈的最新实践。
-建议关注 MLIR 编译器与 RISC-V 向量化的融合趋势，探索通过自动化工具降低异构计算开发门槛的新路径。
-- 详情：[/202603/26/README](/202603/26/README)
+今日深度解析 17 篇前沿论文，聚焦边缘 AI 硬件加速与 TinyML 生成式压缩的性能突破。
+重点关注 Edge TPU 在中微子识别中的量化表现，以及 HYPERTINYPW 带来的极低功耗模型压缩新方案。
+建议普通读者关注 LLM 辅助电路设计与视频推理加速，把握大模型向端侧设备渗透的技术趋势。
+- 详情：[/202603/27/README](/202603/27/README)
 
 ### 精读区论文标签
-1. [Energy Efficient Software Hardware CoDesign for Machine Learning: From TinyML to Large Language Models](/202603/26/2603.23668v1-energy-efficient-software-hardware-codesign-for-machine-learning-from-tinyml-to-large-language-models)  
-   标签：评分：10.0/10、query:hwnas
-   evidence：能效软硬件协同设计综述
-2. [AscendOptimizer: Episodic Agent for Ascend NPU Operator Optimization](/202603/26/2603.23566v1-ascendoptimizer-episodic-agent-for-ascend-npu-operator-optimization)  
+1. [Physics at the Edge: Benchmarking Quantisation Techniques and the Edge TPU for Neutrino Interaction Recognition](/202603/27/2603.24607v1-physics-at-the-edge-benchmarking-quantisation-techniques-and-the-edge-tpu-for-neutrino-interaction-recognition)  
    标签：评分：9.0/10、query:hwnas
-   evidence：基于硬件反馈和分块搜索的NPU算子优化
-3. [LLM Inference at the Edge: Mobile, NPU, and GPU Performance Efficiency Trade-offs Under Sustained Load](/202603/26/2603.23640v1-llm-inference-at-the-edge-mobile-npu-and-gpu-performance-efficiency-trade-offs-under-sustained-load)  
+   evidence：在 Edge TPU 上进行量化和部署的基准测试
+2. [Once-for-All Channel Mixers (HYPERTINYPW): Generative Compression for TinyML](/202603/27/2603.24916v1-once-for-all-channel-mixers-hypertinypw-generative-compression-for-tinyml)  
    标签：评分：9.0/10、query:hwnas
-   evidence：在热约束下对移动端 NPU 和边缘设备的 LLM 推理进行基准测试
-4. [PowerFlow-DNN: Compiler-Directed Fine-Grained Power Orchestration for End-to-End Edge AI Inference](/202603/26/2603.23882v1-powerflow-dnn-compiler-directed-fine-grained-power-orchestration-for-end-to-end-edge-ai-inference)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：编译器指导的边缘AI细粒度功耗编排
-5. [DVM: Real-Time Kernel Generation for Dynamic AI Models](/202603/26/2603.24239v1-dvm-real-time-kernel-generation-for-dynamic-ai-models)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：实时编译器设计，旨在加速动态AI模型的编译并隐藏开销。
-6. [S3T-Former: A Purely Spike-Driven State-Space Topology Transformer for Skeleton Action Recognition](/202603/26/2603.18062v2-s3t-former-a-purely-spike-driven-state-space-topology-transformer-for-skeleton-action-recognition)  
+   evidence：针对内存受限微控制器的TinyML生成式压缩方法
+3. [EdgeCrafter: Compact ViTs for Edge Dense Prediction via Task-Specialized Distillation](/202603/27/2603.18739v2-edgecrafter-compact-vits-for-edge-dense-prediction-via-task-specialized-distillation)  
    标签：评分：8.0/10、query:hwnas
-   evidence：面向边缘设备的能效脉冲神经网络
+   evidence：面向资源受限边缘设备的紧凑型ViT
+4. [Mix-and-Match Pruning: Globally Guided Layer-Wise Sparsification of DNNs](/202603/27/2603.20280v1-mix-and-match-pruning-globally-guided-layer-wise-sparsification-of-dnns)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：针对边缘设备高效部署的架构感知剪枝策略
+5. [Efficient Visual Anomaly Detection at the Edge: Enabling Real-Time Industrial Inspection on Resource-Constrained Devices](/202603/27/2603.20288v1-efficient-visual-anomaly-detection-at-the-edge-enabling-real-time-industrial-inspection-on-resource-constrained-devices)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：在内存受限的边缘设备上实现实时工业检测。
+6. [Holistic Scaling Laws for Optimal Mixture-of-Experts Architecture Optimization](/202603/27/2603.21862v1-holistic-scaling-laws-for-optimal-mixture-of-experts-architecture-optimization)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：连接缩放法则与设计的整体MoE架构优化
 
 ### 速读区论文标签
-1. [The Program Hypergraph: Multi-Way Relational Structure for Geometric Algebra, Spatial Compute, and Physics-Aware Compilation](/202603/26/2603.17627v1-the-program-hypergraph-multi-way-relational-structure-for-geometric-algebra-spatial-compute-and-physics-aware-compilation)  
+1. [POET: Power-Oriented Evolutionary Tuning for LLM-Based RTL PPA Optimization](/202603/27/2603.19333v1-poet-power-oriented-evolutionary-tuning-for-llm-based-rtl-ppa-optimization)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对空间计算和路由约束的编译相关属性
-2. [Enabling RISC-V Vector Code Generation in MLIR through Custom xDSL Lowerings](/202603/26/2603.17800v1-enabling-risc-v-vector-code-generation-in-mlir-through-custom-xdsl-lowerings)  
+   evidence：基于大模型的RTL代码功耗、性能和面积优化
+2. [ParallelVLM: Lossless Video-LLM Acceleration with Visual Alignment Aware Parallel Speculative Decoding](/202603/27/2603.19610v1-parallelvlm-lossless-video-llm-acceleration-with-visual-alignment-aware-parallel-speculative-decoding)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于生成优化RISC-V向量代码的编译器基础设施
-3. [A Synthesizable RTL Implementation of Predictive Coding Networks](/202603/26/2603.18066v1-a-synthesizable-rtl-implementation-of-predictive-coding-networks)  
+   evidence：通过并行投机解码最大化硬件利用率
+3. [ParallelVLM: Lossless Video-LLM Acceleration with Visual Alignment Aware Parallel Speculative Decoding](/202603/27/2603.19610v2-parallelvlm-lossless-video-llm-acceleration-with-visual-alignment-aware-parallel-speculative-decoding)  
    标签：评分：8.0/10、query:hwnas
-   evidence：硬件学习系统的RTL实现
-4. [LRConv-NeRV: Low Rank Convolution for Efficient Neural Video Compression](/202603/26/2603.18261v1-lrconv-nerv-low-rank-convolution-for-efficient-neural-video-compression)  
+   evidence：通过并行投机解码最大化 Video-LLM 的硬件利用率
+4. [Is It a Good Idea to Build an HLS Tool on Top of MLIR? Experience from Building the Dynamatic HLS Compiler](/202603/27/2603.19856v1-is-it-a-good-idea-to-build-an-hls-tool-on-top-of-mlir-experience-from-building-the-dynamatic-hls-compiler)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于资源受限环境下高效部署的低秩卷积
-5. [Quantum reservoir computing with classical and nonclassical states in an integrated optical circuit](/202603/26/2603.17103v1-quantum-reservoir-computing-with-classical-and-nonclassical-states-in-an-integrated-optical-circuit)  
+   evidence：高层次综合编译器基础设施与算子映射
+5. [Self-Tuning Sparse Attention: Multi-Fidelity Hyperparameter Optimization for Transformer Acceleration](/202603/27/2603.18417v1-self-tuning-sparse-attention-multi-fidelity-hyperparameter-optimization-for-transformer-acceleration)  
    标签：评分：7.0/10、query:hwnas
-   evidence：硬件实现友好的量子神经网络方案
-6. [FastLoop: Parallel Loop Closing with GPU-Acceleration in Visual SLAM](/202603/26/2603.17201v1-fastloop-parallel-loop-closing-with-gpu-acceleration-in-visual-slam)  
+   evidence：Transformer加速的自动超参数优化
+6. [DA-Mamba: Learning Domain-Aware State Space Model for Global-Local Alignment in Domain Adaptive Object Detection](/202603/27/2603.18757v1-da-mamba-learning-domain-aware-state-space-model-for-global-local-alignment-in-domain-adaptive-object-detection)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对 SLAM 的 GPU 加速与并行优化
-7. [SYMDIREC: A Neuro-Symbolic Divide-Retrieve-Conquer Framework for Enhanced RTL Synthesis and Summarization](/202603/26/2603.17208v1-symdirec-a-neuro-symbolic-divide-retrieve-conquer-framework-for-enhanced-rtl-synthesis-and-summarization)  
+   evidence：用于高效领域自适应目标检测的混合 CNN-SSM 架构
+7. [PAI: Fast, Accurate, and Full Benchmark Performance Projection with AI](/202603/27/2603.19330v1-pai-fast-accurate-and-full-benchmark-performance-projection-with-ai)  
    标签：评分：7.0/10、query:hwnas
-   evidence：硬件设计自动化与RTL综合
-8. [QuantFL: Sustainable Federated Learning for Edge IoT via Pre-Trained Model Quantisation](/202603/26/2603.17507v1-quantfl-sustainable-federated-learning-for-edge-iot-via-pre-trained-model-quantisation)  
+   evidence：基于AI的SoC软硬件功耗性能分析
+8. [Vision Tiny Recursion Model (ViTRM): Parameter-Efficient Image Classification via Recursive State Refinement](/202603/27/2603.19503v1-vision-tiny-recursion-model-vitrm-parameter-efficient-image-classification-via-recursive-state-refinement)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对边缘物联网的计算轻量化量化技术
-9. [HierarchicalKV: A GPU Hash Table with Cache Semantics for Continuous Online Embedding Storage](/202603/26/2603.17168v1-hierarchicalkv-a-gpu-hash-table-with-cache-semantics-for-continuous-online-embedding-storage)  
+   evidence：适用于资源受限环境的参数高效递归架构
+9. [Efficient and Versatile Quadrupedal Skating: Optimal Co-design via Reinforcement Learning and Bayesian Optimization](/202603/27/2603.18408v1-efficient-and-versatile-quadrupedal-skating-optimal-co-design-via-reinforcement-learning-and-bayesian-optimization)  
    标签：评分：6.0/10、query:hwnas
-   evidence：针对内存带宽和容量协同设计GPU哈希表
-10. [ReLMXEL: Adaptive RL-Based Memory Controller with Explainable Energy and Latency Optimization](/202603/26/2603.17309v1-relmxel-adaptive-rl-based-memory-controller-with-explainable-energy-and-latency-optimization)  
+   evidence：通过贝叶斯优化和强化学习进行硬件与控制协同设计
+10. [AcceRL: A Distributed Asynchronous Reinforcement Learning and World Model Framework for Vision-Language-Action Models](/202603/27/2603.18464v1-accerl-a-distributed-asynchronous-reinforcement-learning-and-world-model-framework-for-vision-language-action-models)  
    标签：评分：6.0/10、query:hwnas
-   evidence：基于强化学习的内存控制器能效与延迟优化
-11. [Auto-Unrolled Proximal Gradient Descent: An AutoML Approach to Interpretable Waveform Optimization](/202603/26/2603.17478v1-auto-unrolled-proximal-gradient-descent-an-automl-approach-to-interpretable-waveform-optimization)  
+   evidence：分布式强化学习框架中的高效硬件利用率
+11. [GAPSL: A Gradient-Aligned Parallel Split Learning on Heterogeneous Data](/202603/27/2603.18540v1-gapsl-a-gradient-aligned-parallel-split-learning-on-heterogeneous-data)  
    标签：评分：6.0/10、query:hwnas
-   evidence：在包括网络深度在内的扩展搜索空间中进行超参数优化的AutoML方法
+   evidence：为资源受限设备卸载计算负载
 
 
 <div class="dpr-home-promo-card">
