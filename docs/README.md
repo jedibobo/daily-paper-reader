@@ -6,73 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-27
-- 运行时间：2026-03-27 19:44:30 UTC
+- 最新运行日期：2026-03-28
+- 运行时间：2026-03-28 19:24:29 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日深度解析 17 篇前沿论文，聚焦边缘 AI 硬件加速与 TinyML 生成式压缩的性能突破。
-重点关注 Edge TPU 在中微子识别中的量化表现，以及 HYPERTINYPW 带来的极低功耗模型压缩新方案。
-建议普通读者关注 LLM 辅助电路设计与视频推理加速，把握大模型向端侧设备渗透的技术趋势。
-- 详情：[/202603/27/README](/202603/27/README)
+今日精选 17 篇前沿论文，重点攻克 GPU 算子自动优化与长文本推理的内存瓶颈。
+AutoKernel 实现了智能体驱动的 GPU 算子搜索，而 PRISM 则利用光子技术将长文本推理内存复杂度降至 $O(1)$。
+推荐关注 AI 基础设施与模型轻量化方向，探索硬件创新如何赋能超大规模模型的高效落地。
+- 详情：[/202603/28/README](/202603/28/README)
 
 ### 精读区论文标签
-1. [Physics at the Edge: Benchmarking Quantisation Techniques and the Edge TPU for Neutrino Interaction Recognition](/202603/27/2603.24607v1-physics-at-the-edge-benchmarking-quantisation-techniques-and-the-edge-tpu-for-neutrino-interaction-recognition)  
+1. [AutoKernel: Autonomous GPU Kernel Optimization via Iterative Agent-Driven Search](/202603/28/2603.21331v1-autokernel-autonomous-gpu-kernel-optimization-via-iterative-agent-driven-search)  
    标签：评分：9.0/10、query:hwnas
-   evidence：在 Edge TPU 上进行量化和部署的基准测试
-2. [Once-for-All Channel Mixers (HYPERTINYPW): Generative Compression for TinyML](/202603/27/2603.24916v1-once-for-all-channel-mixers-hypertinypw-generative-compression-for-tinyml)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对内存受限微控制器的TinyML生成式压缩方法
-3. [EdgeCrafter: Compact ViTs for Edge Dense Prediction via Task-Specialized Distillation](/202603/27/2603.18739v2-edgecrafter-compact-vits-for-edge-dense-prediction-via-task-specialized-distillation)  
+   evidence：机器学习系统的自主GPU算子优化
+2. [SIMPLER: Efficient Foundation Model Adaptation via Similarity-Guided Layer Pruning for Earth Observation](/202603/28/2603.19873v1-simpler-efficient-foundation-model-adaptation-via-similarity-guided-layer-pruning-for-earth-observation)  
    标签：评分：8.0/10、query:hwnas
-   evidence：面向资源受限边缘设备的紧凑型ViT
-4. [Mix-and-Match Pruning: Globally Guided Layer-Wise Sparsification of DNNs](/202603/27/2603.20280v1-mix-and-match-pruning-globally-guided-layer-wise-sparsification-of-dnns)  
+   evidence：微调前的架构选择以降低推理和部署成本
+3. [DGNNFlow: A Streaming Dataflow Architecture for Real-Time Edge-based Dynamic GNN Inference in HL-LHC Trigger Systems](/202603/28/2603.20364v1-dgnnflow-a-streaming-dataflow-architecture-for-real-time-edge-based-dynamic-gnn-inference-in-hl-lhc-trigger-systems)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对边缘设备高效部署的架构感知剪枝策略
-5. [Efficient Visual Anomaly Detection at the Edge: Enabling Real-Time Industrial Inspection on Resource-Constrained Devices](/202603/27/2603.20288v1-efficient-visual-anomaly-detection-at-the-edge-enabling-real-time-industrial-inspection-on-resource-constrained-devices)  
+   evidence：用于FPGA上实时边缘GNN推理的流式数据流架构
+4. [KV Cache Optimization Strategies for Scalable and Efficient LLM Inference](/202603/28/2603.20397v1-kv-cache-optimization-strategies-for-scalable-and-efficient-llm-inference)  
    标签：评分：8.0/10、query:hwnas
-   evidence：在内存受限的边缘设备上实现实时工业检测。
-6. [Holistic Scaling Laws for Optimal Mixture-of-Experts Architecture Optimization](/202603/27/2603.21862v1-holistic-scaling-laws-for-optimal-mixture-of-experts-architecture-optimization)  
+   evidence：针对内存带宽和容量的KV缓存优化系统综述
+5. [Memory-Efficient Fine-Tuning Diffusion Transformers via Dynamic Patch Sampling and Block Skipping](/202603/28/2603.20755v1-memory-efficient-fine-tuning-diffusion-transformers-via-dynamic-patch-sampling-and-block-skipping)  
    标签：评分：8.0/10、query:hwnas
-   evidence：连接缩放法则与设计的整体MoE架构优化
+   evidence：通过动态补丁采样和区块跳过实现内存高效微调
+6. [Optimizing Feature Extraction for On-device Model Inference with User Behavior Sequences](/202603/28/2603.21508v1-optimizing-feature-extraction-for-on-device-model-inference-with-user-behavior-sequences)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：优化设备端模型执行流水线
 
 ### 速读区论文标签
-1. [POET: Power-Oriented Evolutionary Tuning for LLM-Based RTL PPA Optimization](/202603/27/2603.19333v1-poet-power-oriented-evolutionary-tuning-for-llm-based-rtl-ppa-optimization)  
+1. [PRISM: Breaking the O(n) Memory Wall in Long-Context LLM Inference via O(1) Photonic Block Selection](/202603/28/2603.21576v1-prism-breaking-the-on-memory-wall-in-long-context-llm-inference-via-o1-photonic-block-selection)  
    标签：评分：8.0/10、query:hwnas
-   evidence：基于大模型的RTL代码功耗、性能和面积优化
-2. [ParallelVLM: Lossless Video-LLM Acceleration with Visual Alignment Aware Parallel Speculative Decoding](/202603/27/2603.19610v1-parallelvlm-lossless-video-llm-acceleration-with-visual-alignment-aware-parallel-speculative-decoding)  
+   evidence：通过光子块选择突破内存带宽瓶颈
+2. [PRISM: Breaking the O(n) Memory Wall in Long-Context LLM Inference via O(1) Photonic Block Selection](/202603/28/2603.21576v2-prism-breaking-the-on-memory-wall-in-long-context-llm-inference-via-o1-photonic-block-selection)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过并行投机解码最大化硬件利用率
-3. [ParallelVLM: Lossless Video-LLM Acceleration with Visual Alignment Aware Parallel Speculative Decoding](/202603/27/2603.19610v2-parallelvlm-lossless-video-llm-acceleration-with-visual-alignment-aware-parallel-speculative-decoding)  
+   evidence：通过光子选择突破内存带宽瓶颈
+3. [IMMSched: Interruptible Multi-DNN Scheduling via Parallel Multi-Particle Optimizing Subgraph Isomorphism](/202603/28/2603.21659v1-immsched-interruptible-multi-dnn-scheduling-via-parallel-multi-particle-optimizing-subgraph-isomorphism)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过并行投机解码最大化 Video-LLM 的硬件利用率
-4. [Is It a Good Idea to Build an HLS Tool on Top of MLIR? Experience from Building the Dynamatic HLS Compiler](/202603/27/2603.19856v1-is-it-a-good-idea-to-build-an-hls-tool-on-top-of-mlir-experience-from-building-the-dynamatic-hls-compiler)  
+   evidence：边缘加速器上的可中断多DNN调度以处理不可预测的工作负载
+4. [A Theoretical Framework for Energy-Aware Gradient Pruning in Federated Learning](/202603/28/2603.22465v1-a-theoretical-framework-for-energy-aware-gradient-pruning-in-federated-learning)  
    标签：评分：8.0/10、query:hwnas
-   evidence：高层次综合编译器基础设施与算子映射
-5. [Self-Tuning Sparse Attention: Multi-Fidelity Hyperparameter Optimization for Transformer Acceleration](/202603/27/2603.18417v1-self-tuning-sparse-attention-multi-fidelity-hyperparameter-optimization-for-transformer-acceleration)  
+   evidence：考虑内存密集型和计算高效型操作之间的硬件级差异
+5. [Efficiency Follows Global-Local Decoupling](/202603/28/2603.19567v1-efficiency-follows-global-local-decoupling)  
    标签：评分：7.0/10、query:hwnas
-   evidence：Transformer加速的自动超参数优化
-6. [DA-Mamba: Learning Domain-Aware State Space Model for Global-Local Alignment in Domain Adaptive Object Detection](/202603/27/2603.18757v1-da-mamba-learning-domain-aware-state-space-model-for-global-local-alignment-in-domain-adaptive-object-detection)  
+   evidence：具有亚二次缩放特性的低计算成本视觉模型
+6. [CurveStream: Boosting Streaming Video Understanding in MLLMs via Curvature-Aware Hierarchical Visual Memory Management](/202603/28/2603.19571v1-curvestream-boosting-streaming-video-understanding-in-mllms-via-curvature-aware-hierarchical-visual-memory-management)  
    标签：评分：7.0/10、query:hwnas
-   evidence：用于高效领域自适应目标检测的混合 CNN-SSM 架构
-7. [PAI: Fast, Accurate, and Full Benchmark Performance Projection with AI](/202603/27/2603.19330v1-pai-fast-accurate-and-full-benchmark-performance-projection-with-ai)  
+   evidence：分层视觉内存管理以避免内存溢出
+7. [Beyond Quadratic: Linear-Time Change Detection with RWKV](/202603/28/2603.19606v1-beyond-quadratic-linear-time-change-detection-with-rwkv)  
    标签：评分：7.0/10、query:hwnas
-   evidence：基于AI的SoC软硬件功耗性能分析
-8. [Vision Tiny Recursion Model (ViTRM): Parameter-Efficient Image Classification via Recursive State Refinement](/202603/27/2603.19503v1-vision-tiny-recursion-model-vitrm-parameter-efficient-image-classification-via-recursive-state-refinement)  
+   evidence：遥感任务中的线性时间推理效率
+8. [BEAVER: A Training-Free Hierarchical Prompt Compression Method via Structure-Aware Page Selection](/202603/28/2603.19635v1-beaver-a-training-free-hierarchical-prompt-compression-method-via-structure-aware-page-selection)  
    标签：评分：7.0/10、query:hwnas
-   evidence：适用于资源受限环境的参数高效递归架构
-9. [Efficient and Versatile Quadrupedal Skating: Optimal Co-design via Reinforcement Learning and Bayesian Optimization](/202603/27/2603.18408v1-efficient-and-versatile-quadrupedal-skating-optimal-co-design-via-reinforcement-learning-and-bayesian-optimization)  
+   evidence：通过结构感知页面选择最大化硬件并行性
+9. [Skilled AI Agents for Embedded and IoT Systems Development](/202603/28/2603.19583v1-skilled-ai-agents-for-embedded-and-iot-systems-development)  
    标签：评分：6.0/10、query:hwnas
-   evidence：通过贝叶斯优化和强化学习进行硬件与控制协同设计
-10. [AcceRL: A Distributed Asynchronous Reinforcement Learning and World Model Framework for Vision-Language-Action Models](/202603/27/2603.18464v1-accerl-a-distributed-asynchronous-reinforcement-learning-and-world-model-framework-for-vision-language-action-models)  
+   evidence：AI智能体中的硬件在环嵌入式开发与硬件特定行为
+10. [MFil-Mamba: Multi-Filter Scanning for Spatial Redundancy-Aware Visual State Space Models](/202603/28/2603.20074v1-mfil-mamba-multi-filter-scanning-for-spatial-redundancy-aware-visual-state-space-models)  
    标签：评分：6.0/10、query:hwnas
-   evidence：分布式强化学习框架中的高效硬件利用率
-11. [GAPSL: A Gradient-Aligned Parallel Split Learning on Heterogeneous Data](/202603/27/2603.18540v1-gapsl-a-gradient-aligned-parallel-split-learning-on-heterogeneous-data)  
+   evidence：空间冗余感知的视觉状态空间架构
+11. [Realization of a Fully Connected Neural Layer Over-the-Air through Multi-hop Amplify-and-Forward Relays](/202603/28/2603.20489v1-realization-of-a-fully-connected-neural-layer-over-the-air-through-multi-hop-amplify-and-forward-relays)  
    标签：评分：6.0/10、query:hwnas
-   evidence：为资源受限设备卸载计算负载
+   evidence：使用无线空中计算实现神经层
 
 
 <div class="dpr-home-promo-card">
