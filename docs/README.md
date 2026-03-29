@@ -6,73 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-28
-- 运行时间：2026-03-28 19:24:29 UTC
+- 最新运行日期：2026-03-29
+- 运行时间：2026-03-29 19:26:25 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日精选 17 篇前沿论文，重点攻克 GPU 算子自动优化与长文本推理的内存瓶颈。
-AutoKernel 实现了智能体驱动的 GPU 算子搜索，而 PRISM 则利用光子技术将长文本推理内存复杂度降至 $O(1)$。
-推荐关注 AI 基础设施与模型轻量化方向，探索硬件创新如何赋能超大规模模型的高效落地。
-- 详情：[/202603/28/README](/202603/28/README)
+今日聚焦 17 篇前沿成果，深度拆解边缘端大模型量化与卫星增强的可信计算架构。
+重点关注 APreQEL 的自适应混合精度方案与 Space Fabric 的空间安全架构，两者分别突破了端侧算力瓶颈与星地组网信任难题。
+建议优先研读模型轻量化与自主进化搜索技术，为构建更高效、安全的分布式智能系统储备方案。
+- 详情：[/202603/29/README](/202603/29/README)
 
 ### 精读区论文标签
-1. [AutoKernel: Autonomous GPU Kernel Optimization via Iterative Agent-Driven Search](/202603/28/2603.21331v1-autokernel-autonomous-gpu-kernel-optimization-via-iterative-agent-driven-search)  
+1. [APreQEL: Adaptive Mixed Precision Quantization For Edge LLMs](/202603/29/2603.23575v1-apreqel-adaptive-mixed-precision-quantization-for-edge-llms)  
    标签：评分：9.0/10、query:hwnas
-   evidence：机器学习系统的自主GPU算子优化
-2. [SIMPLER: Efficient Foundation Model Adaptation via Similarity-Guided Layer Pruning for Earth Observation](/202603/28/2603.19873v1-simpler-efficient-foundation-model-adaptation-via-similarity-guided-layer-pruning-for-earth-observation)  
+   evidence：针对边缘端大语言模型的自适应混合精度量化
+2. [Space Fabric: A Satellite-Enhanced Trusted Execution Architecture](/202603/29/2603.23745v1-space-fabric-a-satellite-enhanced-trusted-execution-architecture)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：轨道计算的可信执行架构
+3. [TsetlinWiSARD: On-Chip Training of Weightless Neural Networks using Tsetlin Automata on FPGAs](/202603/29/2603.24186v1-tsetlinwisard-on-chip-training-of-weightless-neural-networks-using-tsetlin-automata-on-fpgas)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：FPGA上无权重神经网络的片上训练
+4. [Compass: Optimizing Compound AI Workflows for Dynamic Adaptation](/202603/29/2603.20821v1-compass-optimizing-compound-ai-workflows-for-dynamic-adaptation)  
    标签：评分：8.0/10、query:hwnas
-   evidence：微调前的架构选择以降低推理和部署成本
-3. [DGNNFlow: A Streaming Dataflow Architecture for Real-Time Edge-based Dynamic GNN Inference in HL-LHC Trigger Systems](/202603/28/2603.20364v1-dgnnflow-a-streaming-dataflow-architecture-for-real-time-edge-based-dynamic-gnn-inference-in-hl-lhc-trigger-systems)  
+   evidence：精度与延迟的帕累托最优配置
+5. [No Dense Tensors Needed: Fully Sparse Object Detection on Event-Camera Voxel Grids](/202603/29/2603.21638v1-no-dense-tensors-needed-fully-sparse-object-detection-on-event-camera-voxel-grids)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于FPGA上实时边缘GNN推理的流式数据流架构
-4. [KV Cache Optimization Strategies for Scalable and Efficient LLM Inference](/202603/28/2603.20397v1-kv-cache-optimization-strategies-for-scalable-and-efficient-llm-inference)  
+   evidence：用于高效目标检测的全稀疏架构
+6. [Color When It Counts: Grayscale-Guided Online Triggering for Always-On Streaming Video Sensing](/202603/29/2603.22466v1-color-when-it-counts-grayscale-guided-online-triggering-for-always-on-streaming-video-sensing)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对内存带宽和容量的KV缓存优化系统综述
-5. [Memory-Efficient Fine-Tuning Diffusion Transformers via Dynamic Patch Sampling and Block Skipping](/202603/28/2603.20755v1-memory-efficient-fine-tuning-diffusion-transformers-via-dynamic-patch-sampling-and-block-skipping)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：通过动态补丁采样和区块跳过实现内存高效微调
-6. [Optimizing Feature Extraction for On-device Model Inference with User Behavior Sequences](/202603/28/2603.21508v1-optimizing-feature-extraction-for-on-device-model-inference-with-user-behavior-sequences)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：优化设备端模型执行流水线
+   evidence：针对资源受限边缘平台的高效流式视频感知
 
 ### 速读区论文标签
-1. [PRISM: Breaking the O(n) Memory Wall in Long-Context LLM Inference via O(1) Photonic Block Selection](/202603/28/2603.21576v1-prism-breaking-the-on-memory-wall-in-long-context-llm-inference-via-o1-photonic-block-selection)  
+1. [Sparser, Faster, Lighter Transformer Language Models](/202603/29/2603.23198v1-sparser-faster-lighter-transformer-language-models)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过光子块选择突破内存带宽瓶颈
-2. [PRISM: Breaking the O(n) Memory Wall in Long-Context LLM Inference via O(1) Photonic Block Selection](/202603/28/2603.21576v2-prism-breaking-the-on-memory-wall-in-long-context-llm-inference-via-o1-photonic-block-selection)  
+   evidence：稀疏打包格式与CUDA内核用于高效计算
+2. [Mixed-signal implementation of feedback-control optimizer for single-layer Spiking Neural Networks](/202603/29/2603.24113v1-mixed-signal-implementation-of-feedback-control-optimizer-for-single-layer-spiking-neural-networks)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过光子选择突破内存带宽瓶颈
-3. [IMMSched: Interruptible Multi-DNN Scheduling via Parallel Multi-Particle Optimizing Subgraph Isomorphism](/202603/28/2603.21659v1-immsched-interruptible-multi-dnn-scheduling-via-parallel-multi-particle-optimizing-subgraph-isomorphism)  
+   evidence：神经形态硬件片上训练的混合信号实现
+3. [AVO: Agentic Variation Operators for Autonomous Evolutionary Search](/202603/29/2603.24517v1-avo-agentic-variation-operators-for-autonomous-evolutionary-search)  
    标签：评分：8.0/10、query:hwnas
-   evidence：边缘加速器上的可中断多DNN调度以处理不可预测的工作负载
-4. [A Theoretical Framework for Energy-Aware Gradient Pruning in Federated Learning](/202603/28/2603.22465v1-a-theoretical-framework-for-energy-aware-gradient-pruning-in-federated-learning)  
+   evidence：针对英伟达Blackwell GPU的优化算子自动演化
+4. [Surrogates, Spikes, and Sparsity: Performance Analysis and Characterization of SNN Hyperparameters on Hardware](/202603/29/2603.24891v1-surrogates-spikes-and-sparsity-performance-analysis-and-characterization-of-snn-hyperparameters-on-hardware)  
    标签：评分：8.0/10、query:hwnas
-   evidence：考虑内存密集型和计算高效型操作之间的硬件级差异
-5. [Efficiency Follows Global-Local Decoupling](/202603/28/2603.19567v1-efficiency-follows-global-local-decoupling)  
+   evidence：量化硬件延迟对脉冲神经网络超参数的敏感性
+5. [Beyond Token Eviction: Mixed-Dimension Budget Allocation for Efficient KV Cache Compression](/202603/29/2603.20616v1-beyond-token-eviction-mixed-dimension-budget-allocation-for-efficient-kv-cache-compression)  
    标签：评分：7.0/10、query:hwnas
-   evidence：具有亚二次缩放特性的低计算成本视觉模型
-6. [CurveStream: Boosting Streaming Video Understanding in MLLMs via Curvature-Aware Hierarchical Visual Memory Management](/202603/28/2603.19571v1-curvestream-boosting-streaming-video-understanding-in-mllms-via-curvature-aware-hierarchical-visual-memory-management)  
+   evidence：降低Transformer推理的内存开销
+6. [IBCapsNet: Information Bottleneck Capsule Network for Noise-Robust Representation Learning](/202603/29/2603.20682v1-ibcapsnet-information-bottleneck-capsule-network-for-noise-robust-representation-learning)  
    标签：评分：7.0/10、query:hwnas
-   evidence：分层视觉内存管理以避免内存溢出
-7. [Beyond Quadratic: Linear-Time Change Detection with RWKV](/202603/28/2603.19606v1-beyond-quadratic-linear-time-change-detection-with-rwkv)  
+   evidence：通过取代迭代路由实现高效推理
+7. [Efficient Coupled-Cluster Python Frameworks for Next-Generation GPUs: A Comparative Study of CuPy and PyTorch on the Hopper and Grace Hopper Architecture](/202603/29/2603.20912v1-efficient-coupled-cluster-python-frameworks-for-next-generation-gpus-a-comparative-study-of-cupy-and-pytorch-on-the-hopper-and-grace-hopper-architecture)  
    标签：评分：7.0/10、query:hwnas
-   evidence：遥感任务中的线性时间推理效率
-8. [BEAVER: A Training-Free Hierarchical Prompt Compression Method via Structure-Aware Page Selection](/202603/28/2603.19635v1-beaver-a-training-free-hierarchical-prompt-compression-method-via-structure-aware-page-selection)  
+   evidence：针对显存和特定GPU架构优化收缩运算
+8. [StreamTGN: A GPU-Efficient Serving System for Streaming Temporal Graph Neural Networks](/202603/29/2603.21090v1-streamtgn-a-gpu-efficient-serving-system-for-streaming-temporal-graph-neural-networks)  
    标签：评分：7.0/10、query:hwnas
-   evidence：通过结构感知页面选择最大化硬件并行性
-9. [Skilled AI Agents for Embedded and IoT Systems Development](/202603/28/2603.19583v1-skilled-ai-agents-for-embedded-and-iot-systems-development)  
+   evidence：针对TGN的GPU高效推理系统
+9. [Optimal low-rank stochastic gradient estimation for LLM training](/202603/29/2603.20632v1-optimal-low-rank-stochastic-gradient-estimation-for-llm-training)  
    标签：评分：6.0/10、query:hwnas
-   evidence：AI智能体中的硬件在环嵌入式开发与硬件特定行为
-10. [MFil-Mamba: Multi-Filter Scanning for Spatial Redundancy-Aware Visual State Space Models](/202603/28/2603.20074v1-mfil-mamba-multi-filter-scanning-for-spatial-redundancy-aware-visual-state-space-models)  
+   evidence：用于LLM训练的内存高效低秩矩阵估计器
+10. [Modernizing Amdahl's Law: How AI Scaling Laws Shape Computer Architecture](/202603/29/2603.20654v1-modernizing-amdahls-law-how-ai-scaling-laws-shape-computer-architecture)  
    标签：评分：6.0/10、query:hwnas
-   evidence：空间冗余感知的视觉状态空间架构
-11. [Realization of a Fully Connected Neural Layer Over-the-Air through Multi-hop Amplify-and-Forward Relays](/202603/28/2603.20489v1-realization-of-a-fully-connected-neural-layer-over-the-air-through-multi-hop-amplify-and-forward-relays)  
+   evidence：异构硬件间的资源分配
+11. [Enhancing Vision-Based Policies with Omni-View and Cross-Modality Knowledge Distillation for Mobile Robots](/202603/29/2603.20679v1-enhancing-vision-based-policies-with-omni-view-and-cross-modality-knowledge-distillation-for-mobile-robots)  
    标签：评分：6.0/10、query:hwnas
-   evidence：使用无线空中计算实现神经层
+   evidence：针对受限机载计算资源的轻量化策略
 
 
 <div class="dpr-home-promo-card">
