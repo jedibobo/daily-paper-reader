@@ -6,73 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-29
-- 运行时间：2026-03-29 19:26:25 UTC
+- 最新运行日期：2026-03-30
+- 运行时间：2026-03-30 19:51:32 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日聚焦 17 篇前沿成果，深度拆解边缘端大模型量化与卫星增强的可信计算架构。
-重点关注 APreQEL 的自适应混合精度方案与 Space Fabric 的空间安全架构，两者分别突破了端侧算力瓶颈与星地组网信任难题。
-建议优先研读模型轻量化与自主进化搜索技术，为构建更高效、安全的分布式智能系统储备方案。
-- 详情：[/202603/29/README](/202603/29/README)
+今日聚焦 17 篇前沿成果，重点突破 FPGA 细粒度电压控制与低算力设备专属的视觉骨干网络设计。
+推荐关注 VolTune 对 FPGA 运行效率的动态提升，以及 CPUBone 在低并行度硬件上展现的卓越视觉性能。
+建议深入探索硬件底层优化与轻量化感知算法的协同，以应对资源受限环境下的高性能部署挑战。
+- 详情：[/202603/30/README](/202603/30/README)
 
 ### 精读区论文标签
-1. [APreQEL: Adaptive Mixed Precision Quantization For Edge LLMs](/202603/29/2603.23575v1-apreqel-adaptive-mixed-precision-quantization-for-edge-llms)  
+1. [VolTune: A Fine-Grained Runtime Voltage Control Architecture for FPGA Systems](/202603/30/2603.26147v1-voltune-a-fine-grained-runtime-voltage-control-architecture-for-fpga-systems)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对边缘端大语言模型的自适应混合精度量化
-2. [Space Fabric: A Satellite-Enhanced Trusted Execution Architecture](/202603/29/2603.23745v1-space-fabric-a-satellite-enhanced-trusted-execution-architecture)  
+   evidence：FPGA系统运行时电压控制的硬件软件协同设计
+2. [CPUBone: Efficient Vision Backbone Design for Devices with Low Parallelization Capabilities](/202603/30/2603.26425v1-cpubone-efficient-vision-backbone-design-for-devices-with-low-parallelization-capabilities)  
    标签：评分：9.0/10、query:hwnas
-   evidence：轨道计算的可信执行架构
-3. [TsetlinWiSARD: On-Chip Training of Weightless Neural Networks using Tsetlin Automata on FPGAs](/202603/29/2603.24186v1-tsetlinwisard-on-chip-training-of-weightless-neural-networks-using-tsetlin-automata-on-fpgas)  
+   evidence：针对CPU等低并行化设备的效率视觉骨干网设计
+3. [SPECTRA: An Efficient Spectral-Informed Neural Network for Sensor-Based Activity Recognition](/202603/30/2603.26482v1-spectra-an-efficient-spectral-informed-neural-network-for-sensor-based-activity-recognition)  
    标签：评分：9.0/10、query:hwnas
-   evidence：FPGA上无权重神经网络的片上训练
-4. [Compass: Optimizing Compound AI Workflows for Dynamic Adaptation](/202603/29/2603.20821v1-compass-optimizing-compound-ai-workflows-for-dynamic-adaptation)  
+   evidence：针对真实边缘运行和内存约束的协同设计架构
+4. [Beyond MACs: Hardware Efficient Architecture Design for Vision Backbones](/202603/30/2603.26551v1-beyond-macs-hardware-efficient-architecture-design-for-vision-backbones)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：边缘设备视觉骨干网的硬件高效架构设计
+5. [PQuantML: A Tool for End-to-End Hardware-aware Model Compression](/202603/30/2603.26595v1-pquantml-a-tool-for-end-to-end-hardware-aware-model-compression)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：用于剪枝和量化的硬件感知模型压缩库
+6. [DS2SC-Agent: A Multi-Agent Automated Pipeline for Rapid Chiplet Model Generation](/202603/30/2603.21190v1-ds2sc-agent-a-multi-agent-automated-pipeline-for-rapid-chiplet-model-generation)  
    标签：评分：8.0/10、query:hwnas
-   evidence：精度与延迟的帕累托最优配置
-5. [No Dense Tensors Needed: Fully Sparse Object Detection on Event-Camera Voxel Grids](/202603/29/2603.21638v1-no-dense-tensors-needed-fully-sparse-object-detection-on-event-camera-voxel-grids)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：用于高效目标检测的全稀疏架构
-6. [Color When It Counts: Grayscale-Guided Online Triggering for Always-On Streaming Video Sensing](/202603/29/2603.22466v1-color-when-it-counts-grayscale-guided-online-triggering-for-always-on-streaming-video-sensing)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限边缘平台的高效流式视频感知
+   evidence：用于架构探索的自动化芯粒模型生成
 
 ### 速读区论文标签
-1. [Sparser, Faster, Lighter Transformer Language Models](/202603/29/2603.23198v1-sparser-faster-lighter-transformer-language-models)  
+1. [3D optoelectronics and co-packaged optics: when solving the wrong problems stalls deployment](/202603/30/2603.21313v1-3d-optoelectronics-and-co-packaged-optics-when-solving-the-wrong-problems-stalls-deployment)  
    标签：评分：8.0/10、query:hwnas
-   evidence：稀疏打包格式与CUDA内核用于高效计算
-2. [Mixed-signal implementation of feedback-control optimizer for single-layer Spiking Neural Networks](/202603/29/2603.24113v1-mixed-signal-implementation-of-feedback-control-optimizer-for-single-layer-spiking-neural-networks)  
+   evidence：AI加速器光互连的硬件和软件协同设计
+2. [FAAR: Format-Aware Adaptive Rounding for NVFP4](/202603/30/2603.22370v1-faar-format-aware-adaptive-rounding-for-nvfp4)  
    标签：评分：8.0/10、query:hwnas
-   evidence：神经形态硬件片上训练的混合信号实现
-3. [AVO: Agentic Variation Operators for Autonomous Evolutionary Search](/202603/29/2603.24517v1-avo-agentic-variation-operators-for-autonomous-evolutionary-search)  
+   evidence：针对边缘设备低比特量化的格式感知舍入
+3. [Efficient Universal Perception Encoder](/202603/30/2603.22387v1-efficient-universal-perception-encoder)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对英伟达Blackwell GPU的优化算子自动演化
-4. [Surrogates, Spikes, and Sparsity: Performance Analysis and Characterization of SNN Hyperparameters on Hardware](/202603/29/2603.24891v1-surrogates-spikes-and-sparsity-performance-analysis-and-characterization-of-snn-hyperparameters-on-hardware)  
+   evidence：受限计算资源边缘设备上的推理效率
+4. [Dual-Gated Epistemic Time-Dilation: Autonomous Compute Modulation in Asynchronous MARL](/202603/30/2603.23722v1-dual-gated-epistemic-time-dilation-autonomous-compute-modulation-in-asynchronous-marl)  
    标签：评分：8.0/10、query:hwnas
-   evidence：量化硬件延迟对脉冲神经网络超参数的敏感性
-5. [Beyond Token Eviction: Mixed-Dimension Budget Allocation for Efficient KV Cache Compression](/202603/29/2603.20616v1-beyond-token-eviction-mixed-dimension-budget-allocation-for-efficient-kv-cache-compression)  
+   evidence：针对受热预算限制的边缘设备的自主计算调节
+5. [ResPrune: Text-Conditioned Subspace Reconstruction for Visual Token Pruning in Large Vision-Language Models](/202603/30/2603.21105v1-resprune-text-conditioned-subspace-reconstruction-for-visual-token-pruning-in-large-vision-language-models)  
    标签：评分：7.0/10、query:hwnas
-   evidence：降低Transformer推理的内存开销
-6. [IBCapsNet: Information Bottleneck Capsule Network for Noise-Robust Representation Learning](/202603/29/2603.20682v1-ibcapsnet-information-bottleneck-capsule-network-for-noise-robust-representation-learning)  
+   evidence：通过视觉令牌剪枝减少计算和内存开销
+6. [High-Endurance UCAV Propulsion System: A 1-D CNN-Based Real-Time Fault Classification for Tactical-Grade IPMSM Drive](/202603/30/2603.21133v1-high-endurance-ucav-propulsion-system-a-1-d-cnn-based-real-time-fault-classification-for-tactical-grade-ipmsm-drive)  
    标签：评分：7.0/10、query:hwnas
-   evidence：通过取代迭代路由实现高效推理
-7. [Efficient Coupled-Cluster Python Frameworks for Next-Generation GPUs: A Comparative Study of CuPy and PyTorch on the Hopper and Grace Hopper Architecture](/202603/29/2603.20912v1-efficient-coupled-cluster-python-frameworks-for-next-generation-gpus-a-comparative-study-of-cupy-and-pytorch-on-the-hopper-and-grace-hopper-architecture)  
+   evidence：嵌入式控制器上的亚毫秒级推理
+7. [Efficient Coarse-to-Fine Diffusion Models with Time Step Sequence Redistribution](/202603/30/2603.21348v1-efficient-coarse-to-fine-diffusion-models-with-time-step-sequence-redistribution)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对显存和特定GPU架构优化收缩运算
-8. [StreamTGN: A GPU-Efficient Serving System for Streaming Temporal Graph Neural Networks](/202603/29/2603.21090v1-streamtgn-a-gpu-efficient-serving-system-for-streaming-temporal-graph-neural-networks)  
+   evidence：适用于资源受限边缘设备的扩散模型
+8. [The Workload-Router-Pool Architecture for LLM Inference Optimization: A Vision Paper from the vLLM Semantic Router Project](/202603/30/2603.21354v1-the-workload-router-pool-architecture-for-llm-inference-optimization-a-vision-paper-from-the-vllm-semantic-router-project)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对TGN的GPU高效推理系统
-9. [Optimal low-rank stochastic gradient estimation for LLM training](/202603/29/2603.20632v1-optimal-low-rank-stochastic-gradient-estimation-for-llm-training)  
+   evidence：LLM推理的集群优化与能效分析
+9. [Mixture of Chapters: Scaling Learnt Memory in Transformers](/202603/30/2603.21096v1-mixture-of-chapters-scaling-learnt-memory-in-transformers)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于LLM训练的内存高效低秩矩阵估计器
-10. [Modernizing Amdahl's Law: How AI Scaling Laws Shape Computer Architecture](/202603/29/2603.20654v1-modernizing-amdahls-law-how-ai-scaling-laws-shape-computer-architecture)  
+   evidence：通过架构机制在可控计算量下扩展内存容量
+10. [Sonny: Breaking the Compute Wall in Medium-Range Weather Forecasting](/202603/30/2603.21284v1-sonny-breaking-the-compute-wall-in-medium-range-weather-forecasting)  
    标签：评分：6.0/10、query:hwnas
-   evidence：异构硬件间的资源分配
-11. [Enhancing Vision-Based Policies with Omni-View and Cross-Modality Knowledge Distillation for Mobile Robots](/202603/29/2603.20679v1-enhancing-vision-based-policies-with-omni-view-and-cross-modality-knowledge-distillation-for-mobile-robots)  
+   evidence：针对有限计算预算的高效架构
+11. [Communication-Avoiding SpGEMM via Trident Partitioning on Hierarchical GPU Interconnects](/202603/30/2603.21444v2-communication-avoiding-spgemm-via-trident-partitioning-on-hierarchical-gpu-interconnects)  
    标签：评分：6.0/10、query:hwnas
-   evidence：针对受限机载计算资源的轻量化策略
+   evidence：分层GPU互连上的内存效率与带宽优化
 
 
 <div class="dpr-home-promo-card">
