@@ -6,71 +6,79 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-31
-- 运行时间：2026-03-31 19:53:28 UTC
+- 最新运行日期：2026-04-01
+- 运行时间：2026-04-01 19:56:56 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
+- 本次总论文数：19
+- 精读区：8
 - 速读区：11
 
 ### 今日简报（AI）
-今日深度研读 17 篇前沿论文，重点攻克端侧图像生成与低并行度设备上的视觉骨干网络
-- 详情：[/202603/31/README](/202603/31/README)
+今日聚焦 19 篇 AI 前沿进展，重点攻克航天遥测边缘化部署与端侧智能的可持续性难题。
+满分论文揭示了航天器异常检测的边缘化潜力，并量化了端侧 AI 在性能、能耗与隐私间的复杂权衡。
+建议深入探索资源受限环境下的模型优化，在追求算力增长的同时关注能源边界与隐私保护。
+- 详情：[/202604/01/README](/202604/01/README)
 
 ### 精读区论文标签
-1. [EdgeDiT: Hardware-Aware Diffusion Transformers for Efficient On-Device Image Generation](/202603/31/2603.28405v1-edgedit-hardware-aware-diffusion-transformers-for-efficient-on-device-image-generation)  
+1. [Deep Learning-Based Anomaly Detection in Spacecraft Telemetry on Edge Devices](/202604/01/2603.29375v1-deep-learning-based-anomaly-detection-in-spacecraft-telemetry-on-edge-devices)  
    标签：评分：10.0/10、query:hwnas
-   evidence：针对移动NPU的硬件感知优化，并针对移动数据流剪枝结构冗余
-2. [CPUBone: Efficient Vision Backbone Design for Devices with Low Parallelization Capabilities](/202603/31/2603.26425v2-cpubone-efficient-vision-backbone-design-for-devices-with-low-parallelization-capabilities)  
+   evidence：针对边缘设备上航天器遥测的多目标神经架构优化
+2. [Sustainability Is Not Linear: Quantifying Performance, Energy, and Privacy Trade-offs in On-Device Intelligence](/202604/01/2603.26603v1-sustainability-is-not-linear-quantifying-performance-energy-and-privacy-trade-offs-in-on-device-intelligence)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对CPU等低并行化能力的设备进行高效视觉骨干网设计
-3. [A Lightweight High-Throughput Collective-Capable NoC for Large-Scale ML Accelerators](/202603/31/2603.26438v1-a-lightweight-high-throughput-collective-capable-noc-for-large-scale-ml-accelerators)  
+   evidence：分析边缘设备上的能源、延迟和内存约束
+3. [ANVIL: Accelerator-Native Video Interpolation via Codec Motion Vector Priors](/202604/01/2603.26835v2-anvil-accelerator-native-video-interpolation-via-codec-motion-vector-priors)  
    标签：评分：9.0/10、query:hwnas
-   evidence：为机器学习加速器协同设计的片上网络以提高吞吐量
-4. [Hardware-Aware Tensor Networks for Real-Time Quantum-Inspired Anomaly Detection at Particle Colliders](/202603/31/2603.26604v1-hardware-aware-tensor-networks-for-real-time-quantum-inspired-anomaly-detection-at-particle-colliders)  
+   evidence：针对移动 NPU 的加速器原生设计，移除了硬件不友好的算子
+4. [AceleradorSNN: A Neuromorphic Cognitive System Integrating Spiking Neural Networks and DynamicImage Signal Processing on FPGA](/202604/01/2603.28429v1-aceleradorsnn-a-neuromorphic-cognitive-system-integrating-spiking-neural-networks-and-dynamicimage-signal-processing-on-fpga)  
    标签：评分：9.0/10、query:hwnas
-   evidence：用于边缘部署的硬件感知张量网络
-5. [ANVIL: Accelerator-Native Video Interpolation via Codec Motion Vector Priors](/202603/31/2603.26835v1-anvil-accelerator-native-video-interpolation-via-codec-motion-vector-priors)  
+   evidence：在FPGA上集成基于SNN的NPU和可重构ISP以实现高效能检测
+5. [Gleanmer: A 6 mW SoC for Real-Time 3D Gaussian Occupancy Mapping](/202604/01/2603.29005v1-gleanmer-a-6-mw-soc-for-real-time-3d-gaussian-occupancy-mapping)  
    标签：评分：9.0/10、query:hwnas
-   evidence：解决结构化部署障碍的加速器原生设计
-6. [MotiMem: Motion-Aware Approximate Memory for Energy-Efficient Neural Perception in Autonomous Vehicles](/202603/31/2603.27108v1-motimem-motion-aware-approximate-memory-for-energy-efficient-neural-perception-in-autonomous-vehicles)  
+   evidence：针对边缘应用 6 mW SoC 的算法-硬件协同优化
+6. [AP-DRL: A Synergistic Algorithm-Hardware Framework for Automatic Task Partitioning of Deep Reinforcement Learning on Versal ACAP](/202604/01/2603.29369v1-ap-drl-a-synergistic-algorithm-hardware-framework-for-automatic-task-partitioning-of-deep-reinforcement-learning-on-versal-acap)  
    标签：评分：9.0/10、query:hwnas
-   evidence：软硬件协同设计中的内存带宽优化
+   evidence：针对Versal ACAP的深度强化学习算法-硬件协同框架
+7. [Adaptive High-Speed Radar Signal Processing Architecture for 3D Localization of Multiple Targets on System on Chip](/202604/01/2603.29487v1-adaptive-high-speed-radar-signal-processing-architecture-for-3d-localization-of-multiple-targets-on-system-on-chip)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：在MPSoC上采用软硬件协同设计方法实现可重构加速器
+8. [SISA: A Scale-In Systolic Array for GEMM Acceleration](/202604/01/2603.29913v1-sisa-a-scale-in-systolic-array-for-gemm-acceleration)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：最大化LLM的脉动阵列利用率
 
 ### 速读区论文标签
-1. [Agile-VLA: Few-Shot Industrial Pose Rectification via Implicit Affordance Anchoring](/202603/31/2603.22899v1-agile-vla-few-shot-industrial-pose-rectification-via-implicit-affordance-anchoring)  
+1. [MAGNET: Autonomous Expert Model Generation via Decentralized Autoresearch and BitNet Training](/202604/01/2603.25813v1-magnet-autonomous-expert-model-generation-via-decentralized-autoresearch-and-bitnet-training)  
    标签：评分：8.0/10、query:hwnas
-   evidence：在资源受限的边缘平台部署VLA模型
-2. [Numerical Kernels on a Spatial Accelerator: A Study of Tenstorrent Wormhole](/202603/31/2603.23343v1-numerical-kernels-on-a-spatial-accelerator-a-study-of-tenstorrent-wormhole)  
+   evidence：针对CPU原生推理的自动模型生成
+2. [FireBridge: Cycle-Accurate Hardware + Firmware Co-Verification for Modern Accelerators](/202604/01/2603.25969v1-firebridge-cycle-accurate-hardware--firmware-co-verification-for-modern-accelerators)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对AI加速器的架构特定优化
-3. [PIM-CACHE: High-Efficiency Content-Aware Copy for Processing-In-Memory](/202603/31/2603.23762v1-pim-cache-high-efficiency-content-aware-copy-for-processing-in-memory)  
+   evidence：现代加速器的硬件与固件协同验证
+3. [Data Gravity and the Energy Limits of Computation](/202604/01/2603.26053v1-data-gravity-and-the-energy-limits-of-computation)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对存内计算架构的软硬件协同设计
-4. [Attention-aware Inference Optimizations for Large Vision-Language Models with Memory-efficient Decoding](/202603/31/2603.23914v1-attention-aware-inference-optimizations-for-large-vision-language-models-with-memory-efficient-decoding)  
+   evidence：架构中计算和数据移动的能量限制
+4. [TinyML for Acoustic Anomaly Detection in IoT Sensor Networks](/202604/01/2603.26135v1-tinyml-for-acoustic-anomaly-detection-in-iot-sensor-networks)  
    标签：评分：8.0/10、query:hwnas
-   evidence：内存高效解码与推理优化
-5. [From Arithmetic to Logic: The Resilience of Logic and Lookup-Based Neural Networks Under Parameter Bit-Flips](/202603/31/2603.22770v1-from-arithmetic-to-logic-the-resilience-of-logic-and-lookup-based-neural-networks-under-parameter-bit-flips)  
+   evidence：用于边缘微控制器的节能TinyML流水线
+5. [SiftMoE: Similarity-Aware Energy-Efficient Expert Selection for Wireless Distributed MoE Inference](/202604/01/2603.23888v1-siftmoe-similarity-aware-energy-efficient-expert-selection-for-wireless-distributed-moe-inference)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对硬件弹性的神经架构结构特性研究
-6. [Characterizing CPU-Induced Slowdowns in Multi-GPU LLM Inference](/202603/31/2603.22774v1-characterizing-cpu-induced-slowdowns-in-multi-gpu-llm-inference)  
+   evidence：资源受限边缘网络中MoE推理的能效专家选择策略
+6. [SDD-YOLO: A Small-Target Detection Framework for Ground-to-Air Anti-UAV Surveillance with Edge-Efficient Deployment](/202604/01/2603.25218v1-sdd-yolo-a-small-target-detection-framework-for-ground-to-air-anti-uav-surveillance-with-edge-efficient-deployment)  
    标签：评分：7.0/10、query:hwnas
-   evidence：分析CPU瓶颈以最大化LLM推理中的GPU利用率
-7. [A Latency Coding Framework for Deep Spiking Neural Networks with Ultra-Low Latency](/202603/31/2603.23206v1-a-latency-coding-framework-for-deep-spiking-neural-networks-with-ultra-low-latency)  
+   evidence：针对小目标检测的边缘高效部署
+7. [CIAR: Interval-based Collaborative Decoding for Image Generation Acceleration](/202604/01/2603.25463v1-ciar-interval-based-collaborative-decoding-for-image-generation-acceleration)  
    标签：评分：7.0/10、query:hwnas
-   evidence：基于SNN的能效神经处理与超低延迟
-8. [Pruning for efficient deterministic global optimization over trained ReLU neural networks](/202603/31/2603.23299v1-pruning-for-efficient-deterministic-global-optimization-over-trained-relu-neural-networks)  
+   evidence：云端协作框架加速终端设备部署
+8. [LEMMA: Laplacian pyramids for Efficient Marine SeMAntic Segmentation](/202604/01/2603.25689v1-lemma-laplacian-pyramids-for-efficient-marine-semantic-segmentation)  
    标签：评分：7.0/10、query:hwnas
-   evidence：用于优化中高效神经网络代理的剪枝技术
-9. [Communication-Avoiding SpGEMM via Trident Partitioning on Hierarchical GPU Interconnects](/202603/31/2603.21444v1-communication-avoiding-spgemm-via-trident-partitioning-on-hierarchical-gpu-interconnects)  
+   evidence：资源受限下的轻量级遥感语义分割模型
+9. [LightSplat: Fast and Memory-Efficient Open-Vocabulary 3D Scene Understanding in Five Seconds](/202604/01/2603.24146v1-lightsplat-fast-and-memory-efficient-open-vocabulary-3d-scene-understanding-in-five-seconds)  
    标签：评分：6.0/10、query:hwnas
-   evidence：优化分层GPU互连上的内存效率和带宽
-10. [NeuralFVM: Neural-physics-based Finite Volume Method for Turbulent Flows Using the $k$-$ω$ Model](/202603/31/2603.21869v1-neuralfvm-neural-physics-based-finite-volume-method-for-turbulent-flows-using-the-k--model)  
+   evidence：通过紧凑语义索引消除存储开销的内存高效框架
+10. [UniScale: Synergistic Entire Space Data and Model Scaling for Search Ranking](/202604/01/2603.24226v1-uniscale-synergistic-entire-space-data-and-model-scaling-for-search-ranking)  
    标签：评分：6.0/10、query:hwnas
-   evidence：专为高效GPU执行设计的标准k-omega模型
-11. [A Task Decomposition Framework for Aircraft Health Diagnosis: Balancing Safety and Efficiency via Heterogeneous Long-Micro Scale Cascading](/202603/31/2603.22885v2-a-task-decomposition-framework-for-aircraft-health-diagnosis-balancing-safety-and-efficiency-via-heterogeneous-long-micro-scale-cascading)  
+   evidence：联合优化数据和架构的模型缩放协同设计框架
+11. [UniScale: Synergistic Entire Space Data and Model Scaling for Search Ranking](/202604/01/2603.24226v2-uniscale-synergistic-entire-space-data-and-model-scaling-for-search-ranking)  
    标签：评分：6.0/10、query:hwnas
-   evidence：在部署中平衡准确性与计算约束
+   evidence：联合优化搜索排序数据和架构的协同设计框架
 
 
 <div class="dpr-home-promo-card">
