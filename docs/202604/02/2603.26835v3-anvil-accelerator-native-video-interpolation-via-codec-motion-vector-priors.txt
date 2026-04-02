@@ -1,0 +1,502 @@
+Title: ANVIL: Accelerator-Native Video Interpolation via Codec Motion Vector Priors
+
+URL Source: https://arxiv.org/pdf/2603.26835v3
+
+Published Time: Thu, 02 Apr 2026 00:25:48 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+> 1
+
+# ANVIL: Accelerator-Native Video Interpolation via Codec Motion Vector Priors 
+
+Shibo Liu 
+
+Abstract —Real-time 30-to-60 fps video frame interpolation on mobile neural processing units (NPUs) requires each synthesized frame within 33.3 ms. We show that mainstream flow-based video frame interpolation faces three structural deployment barriers on mobile NPUs: spatial sampling operators exceed the frame budget or lack hardware support, iterative flow refinement collapses under 8-bit integer post-training quantization, and memory-bound operators dominate the inference graph. ANVIL addresses these barriers by reusing motion vectors from the H.264/AVC decoder to prealign input frames, removing learned optical flow, spatial sampling, and iterative accumulation from the accelerator graph. The remaining residual is refined by a convolution-dominated network composed almost entirely of compute-bound operators. On a Snapdragon 8 Gen 3 device, ANVIL achieves 12.8 ms 1080p inference at 8-bit integer precision; an open-source Android player sustains 28.4 ms median end-to-end latency over 30-minute continuous playback. Per-operator causal analysis identifies quantized accumulation on recurrent flow states as a key mechanism behind integer quantization failure in iterative methods. The current design targets H.264/AVC playback with decoder-exposed motion vectors. 
+
+Index Terms —Video frame interpolation, motion vectors, mo-bile neural processing units, post-training quantization. 
+
+I. I NTRODUCTION 
+
+# VIDEO frame interpolation (VFI) synthesizes intermediate frames for frame rate upconversion, slow-motion genera-tion, and video enhancement. Recent methods—RIFE [1] with iterative intermediate flow estimation, IFRNet [2] with joint feature–flow refinement, AMT [3] with all-pairs multi-field transforms—have advanced interpolation quality substantially. Several works have explored lightweight or compressed vari-ants for resource-constrained settings [4], and mobile video deployment has been studied for related tasks such as neu-ral video compression [5]. However, systematic deployment evidence for mainstream VFI pipelines at full resolution on public mobile NPU stacks remains scarce, particularly un-der operator-compatibility and practical W8A8 constraints. Offloading interpolation to client devices can reduce server compute for streaming platforms and enables privacy-sensitive offline use cases such as mobile gallery slow-motion; in both scenarios, INT8 quantization robustness and operator compat-ibility on mobile NPUs become first-class design constraints. To understand the deployment gap, we systematically benchmarked operators drawn from 9 representative VFI meth-ods [1]–[3], [6]–[11] on two mobile NPU platforms from different vendors. The results reveal that deployment bottle-necks stem not from model size or FLOPs, but from structural operator–accelerator mismatch, manifesting in three ways: 
+
+> S. Liu is with the College of Science, North China University of Science and Technology, Tangshan 063210, China (e-mail: spencerliu@stu.ncst.edu.cn).
+
+(1) grid_sample latency is prohibitive. The bilinear sampling operation central to flow-based warping [12] requires irregular memory access patterns that conflict with NPU architectures optimized for regular tensor computation. At 1080p, a single grid_sample exceeds the entire 33.3 ms frame budget on one platform and is unsupported on the other, affecting 7 of the 9 evaluated methods. 
+
+(2) Iterative flow refinement collapses under INT8 quantization. Mobile NPUs are optimized for integer arith-metic [13], with FP16 throughput 3–5 × lower in our mea-surements (Table I); for the target 1080p 30 →60 setting, FP16 exceeds the latency deadline for every tested model, making W8A8 the practical operating point. However, methods that accumulate flow estimates across iterative stages [1], [2] suffer severe quality degradation under W8A8 post-training quantization. Per-operator instrumented analysis traces this to the Add operator on recurrent flow states, which amplifies quantization error across iterations. 
+
+(3) Memory-bound operations dominate the inference graph. Per-operator profiling reveals that convolutions—the only compute-bound, INT8-accelerable operations—account for merely 5% of inference cycles in a representative flow-based architecture (RIFE [1]), with the remaining 95% con-sumed by memory-bound operations that benefit minimally from INT8 acceleration. These barriers recur across flow-, kernel-, and attention-based VFI pipelines in our benchmark, indicating a structural problem rather than a model-specific limitation. The findings point to a unified conclusion: the deployment bottleneck lies in the operator vocabulary , not in model capacity. Restricting the inference graph to the operator subset that NPUs exe-cute efficiently—standard convolutions and simple pointwise operations, while avoiding grid_sample , attention-heavy blocks, and recurrent flow accumulation—would resolve all three barriers simultaneously. The key observation enabling this restriction is that the H.264 decoder already computes per-block motion vectors (MVs) during decoding [14]; these MVs serve as a zero-learnable-parameter motion prior. Pre-aligning input frames with spatially smoothed MVs reduces the interpolation problem to small-residual prediction, whose limited output dynamic range permits an NPU-friendly resid-ual network well matched to INT8 execution characteristics. This design therefore targets H.264 playback scenarios where MV side-data is available. Building on this principle, our deployment design decom-poses mobile VFI into codec-side prealignment and NPU-side residual refinement. Codec MVs are spatially smoothed and used to prealign input frames (CPU + GPU); an NPU-friendly residual network dominated by standard convolutions 
+
+> This work has been submitted to the IEEE for possible publication. Copyright may be transferred without notice, after which this version may no longer be accessible.
+> arXiv:2603.26835v3 [eess.IV] 1 Apr 2026 2
+
+and simple pointwise operations, with batch normalization folded into convolution weights at deploy time, handles the remaining prediction on the NPU. Our contributions span deployment diagnosis, operator-constrained co-design, and system-level validation: 1) Deployment diagnosis. Through per-operator instru-mented quantization, we identify the Add-on-recurrent-state pattern as a key mechanism behind INT8 quality collapse in iterative flow VFI, verified on two methods (RIFE, IFRNet) via ORT and additionally confirmed on QNN for RIFE. A systematic operator-level benchmark quantifies latency and compatibility barriers for 9 VFI methods on two NPU platforms (Sec. IV-C). 2) Operator-constrained co-design. We show that decom-posing VFI into codec-side prealignment (CPU/GPU) and NPU-side residual refinement eliminates the domi-nant deployment blockers, producing a three-processor pipeline (CPU, GPU, NPU) whose inference graph is composed almost entirely of compute-bound operators. The resulting quality–deployability tradeoff is quantified explicitly (Sec. IV-B, IV-D). 3) System validation. We demonstrate sustained end-to-end 1080p 30 →60 fps playback in an open-source mpv-android fork on SM8650, with 28.4 ms median VFI latency over 54,623 consecutively logged frame pairs during a 30-minute run (94.9% within the 33.3 ms budget), with preliminary cross-vendor feasibility checks on two MediaTek APU generations under the public NeuroPilot SDK (Sec. IV-F). 
+
+Code availability. Training code, evaluation scripts, and table-reproduction recipes are publicly available at https: //github.com/NihilDigit/anvil; pre-trained checkpoints are hosted on HuggingFace (linked from the repository). Some tables additionally require external vendor repositories (RIFE, IFRNet) or device-side tools (QAIRT SDK, Android device). A separate open-source Android demo is available at https: //github.com/NihilDigit/mpv-android-anvil. 
+
+Scope. This work is a deployment-oriented systems study targeting H.264 playback scenarios where codec parameters can be controlled: bframes=0 , software decoding with MV side-data export ( export_mvs ), and known reference dis-tance. Quality metrics are reported as the measured cost of reaching a deployable operating point under these constraints plus operator compatibility, W8A8 quantization, and sustained thermal requirements. Hardware decoding via MediaCodec 
+
+does not expose per-macroblock MVs; extending to hardware decode and uncontrolled content is discussed in Sec. V. II. R ELATED WORK 
+
+A. Flow-Based VFI and the NPU Deployment Gap 
+
+Flow-based VFI methods estimate bidirectional optical flow and synthesize intermediate frames via differentiable warp-ing. From a deployment perspective, these methods share three operator-level patterns: (i) grid_sample -based spatial warping, established by Super SloMo [15] and adopted by nearly all subsequent flow-based methods; (ii) iterative or multi-scale flow refinement—RIFE [1] refines intermediate flow across scales, IFRNet [2] jointly refines features and flow, and UPR-Net [8] uses a pyramid recurrent design; (iii) all-pairs attention or multi-field warping—AMT [3] computes dense correlation volumes, VFIformer [7] and EMA-VFI [6] introduce transformer or inter-frame attention. Kernel-based methods [16] fold motion estimation into adaptive convolution kernels, while depth-aware methods [17] add geometric cues. From a mobile-NPU deployment perspective, however, these methods frequently rely on operators such as grid_sample ,multi-scale Resize , and iterative accumulation, which later emerge as the dominant practical barriers under public deploy-ment stacks (Sec. IV-C). Network-compression-driven design has been explored for lightweight VFI: CDFI [4] uses network pruning to reduce model complexity for resource-constrained settings. For mo-bile video deployment more broadly, MobileNVC [5] demon-strates real-time 1080p neural video compression on a mobile device through integer quantization and multi-processor co-design, establishing that mobile video models must be archi-tected around operator–accelerator affinity. Recent work on mobile-efficient architectures reinforces that on-device latency depends on this affinity rather than FLOPs: MobileOne [18] reports phone-measured latency, and EfficientViT [19] identifies memory-bound operators as the primary speed bottleneck. However, these insights have been developed primarily for classification, detection, and com-pression; systematic operator-level deployment evidence for mainstream VFI pipelines on public mobile NPU stacks— where grid_sample , iterative accumulation, and multi-scale Resize dominate the operator mix—remains absent. 
+
+B. Codec Motion Priors 
+
+Video codecs compute block-level motion vectors as part of the compression pipeline. The H.264 [14], HEVC [20], and VVC [21] standards provide progressively richer motion models, and early work showed that codec-produced MVs can approximate optical flow [22] despite their block-level granularity. Traditional motion-compensated frame interpolation (MCFI) methods directly use codec or block-matching MVs for frame-rate up-conversion: bilateral motion estimation with adaptive OBMC [23], its triple-frame extension [24], and weighted convolutional motion-compensated interpolation [25]. These signal-processing approaches demonstrate that alignment quality and post-warp refinement are the dominant factors in interpolation quality, but they operate at block level without neural refinement and are limited by block artifacts and occlusion handling. In the neural domain, codec-side motion has been exploited across several tasks. CoViAR [26] uses compressed-domain motion and residuals for action recognition; MVFlow [27] uses codec MVs as a prior for optical flow estimation; CIAF [28] uses codec MVs as an alignment prior for com-pressed video super-resolution (not interpolation), achieving quality comparable to optical-flow alignment at lower cost. Related work also inserts learned prediction inside the codec loop to improve encoding efficiency [29], [30], a goal distinct 3H.264 Decode         
+
+> export_mvs
+> I₀
+> I₁
+> MV
+> CPU
+> Prealign
+> ZOH + 4× ⬇+ pack
+> 2.9 ms
+> GPU (Vulkan)
+> Smooth + Warp
+> med ₅+ Gauss σ=2 + warp + quant
+> 3.7 ms
+> 6ch
+> copy
+> HTP (INT8)
+> ANVIL
+> Conv+ReLU
+> 13–17 ms
+> 3ch
+> GPU (Vu
+> Post-pro
+> dequant + re + RGB→YU
+> 3.3 ms
+> lkan)
+> cess
+> esidual UV420
+> s
+> Î0.5
+> Fig. 1. ANVIL three-processor pipeline. CPU densifies and downsamples MVs ( ∼2.9 ms); GPU (Vulkan) performs median filtering, Gaussian blur, and sub-pixel remap ( ∼3.7 ms); HTP runs the INT8 residual network ( ∼13–17 ms). CPU/GPU preparation for frame N+1 is pipelined with HTP inference for frame N.
+
+from playback-time interpolation. Most recently, Hint-Guided VFI [31] exploits compressed-domain hints (low-resolution encoded target frames) to guide neural frame interpolation within a compression pipeline; its hints are pixel-domain representations of the target frame rather than motion-domain priors. We note that these codec-aware neural methods are distinct from VFI architectures that predict learned motion offsets internally ( e.g. , deformable convolutions); the latter do not reuse decoder-side motion information. These works collectively show that codec-domain motion cues are useful across compressed-video tasks, and recent work has begun to exploit compressed-domain hints for VFI itself. Our focus differs in targeting playback-time client-side 
+
+interpolation, where decoder-exposed block-level MVs serve as the primary motion prior—replacing learned optical flow entirely—and the neural component is co-designed for INT8 execution on public mobile NPU deployment stacks. To our knowledge, this combination of codec MV prealignment as sole motion source with NPU-friendly residual refinement and operator-constrained architecture has not been studied. 
+
+C. Deploy-Time Optimization 
+
+Post-training quantization (PTQ) [32], [33] is the standard route to low-precision NPU deployment. For single-pass con-volutional architectures, W8A8 PTQ typically incurs negligi-ble quality loss [34]. However, quantization becomes harder when activation distributions are shaped by normalization or recurrent refinement; RepQ-ViT [35] showed this clearly for transformer activations. In VFI specifically, the quantization sensitivity of iterative flow refinement under public mobile W8A8 deployment has not been characterized at the operator level; our per-operator causal analysis (Sec. IV-C) addresses this gap by identifying the specific mechanism—quantized 
+
+Add on recurrent flow states—through which INT8 error amplifies across refinement stages. Neither line of work addresses grid_sample NPU compatibility, iterative flow quantization sensitivity, or the compute-bound operator ratio governing real-time 1080p fea-sibility. III. P ROPOSED METHOD 
+
+A. System Overview 
+
+ANVIL decomposes video frame interpolation into two stages (Fig. 1): 1) Codec MV prealignment (Sec. III-B): Block-level H.264 motion vectors are extracted during decoding, converted to a dense flow field, spatially smoothed, and used to warp both input frames toward the target intermediate time step. This produces a prealigned frame pair where corresponding regions are roughly registered, reducing residual motion to small local displacements. 2) NPU-native residual refinement (Sec. III-C): An NPU-friendly U-Net, dominated by standard convolu-tions and simple pointwise operations, takes the 6-channel prealigned input (concatenated warped frames) and predicts a 3-channel RGB residual that is added to the pixel-wise average of the prealigned frames. This motion-compensation-then-residual-refinement de-composition follows a principle established in earlier frame-rate up-conversion work [25], but our network is designed around NPU operator constraints with BN fusion at deploy time (Sec. III-D). This decomposition exploits the fact that the video codec has already solved a coarse version of the motion estimation problem. By reusing this information, we avoid learned optical flow entirely, eliminating both grid_sample from the NPU inference graph and the iterative flow refinement that causes INT8 quantization collapse. 
+
+B. Codec MV Extraction and Prealignment 1) H.264 Motion Vector Extraction: We extract forward motion vectors from P-frames during H.264 decoding. For training data preparation, each frame triplet (I0, I t, I 1) is independently encoded as a two-frame H.264 clip (one I-frame followed by one P-frame) using FFmpeg’s libx264 
+
+with bframes=0 and -preset medium . This per-triplet encoding ensures every P-frame MV references a high-quality I-frame rather than a previously compressed P-frame, yielding cleaner motion vectors than extraction from a long-GOP stream. At deployment, MVs are instead extracted from the user’s video stream via the decoder’s export_mvs side data, where reference quality varies with encoding settings. We validate in Sec. V that for dref = 1 frames (P-frames referencing the immediately preceding frame), CRF and pre-set variation have negligible impact ( ±0.12 dB), because the spatial smoothing pipeline (Sec. III-B) absorbs MV quality differences. B-frames with dref > 1 remain a significant factor ( −1.16 dB); our deployment handles this via selective interpolation (Sec. V). The raw MVs represent block-level displacements from the current frame I1 to the reference frame I0, reported at quarter-pixel precision ( motion_scale = 4 ). Although block-level MVs are coarser than optical flow, prior work has shown that 4
+
+they provide a reasonable approximation [22]. We negate these vectors to obtain forward flow f0→1 and assign each vector to the corresponding macroblock region via zero-order hold (ZOH), yielding a block-wise dense flow field. 
+
+2) Spatial Flow Smoothing: The raw block-level flow field contains discontinuities at macroblock boundaries and occa-sional outlier vectors from poor codec matches. Our prealign-ment pipeline addresses these through spatial smoothing: 1) Downsample the ZOH flow field by 4× (nearest-neighbor, preserving blockwise structure). 2) Median filter (5 × 5 kernel) at quarter resolution to suppress outlier vectors while preserving motion edges. 3) Gaussian blur (σ = 2 .0) at quarter resolution to smooth transitions between blocks. Combined with bilinear up-sampling, this is equivalent to σ ≈ 8 at full resolution. 4) Bilinear upsample back to full resolution. 5) Sub-pixel remap using bilinear interpolation to warp I0
+
+by +f /2 and I1 by −f /2, producing prealigned frames at the temporal midpoint t = 0 .5. (Offline evaluation uses OpenCV remap ; the deployment pipeline replaces this with a Vulkan compute shader, Sec. IV-F.) Our ablation study (Sec. IV-E) confirms that flow field smoothness is the dominant factor for prealignment quality: sub-pixel remap alone (no smoothing) scores 29.63 dB, while median +Gaussian smoothing reaches 31.20 dB( +1 .57 dB); cosine-windowed OBMC [23] without smoothing yields 29.58 dB—no better than plain ZOH (Table VII). We adopt ZOH +spatial smoothing for simplicity and deployment effi-ciency. The pipeline operates at quarter resolution for com-putational efficiency. On mobile, CPU handles ZOH densifi-cation and 4× downsampling ( ∼2.9 ms), while GPU (Vulkan compute) performs median filtering, Gaussian blur, and sub-pixel remap ( ∼3.7 ms), for a total prealignment latency under 7 ms(measured in the end-to-end system, Sec. IV-F). 
+
+Zero-parameter MCFI baseline. Simply averaging the prealigned frames without any neural network (“MV Blend”) achieves 31.20 dBon Vimeo90K ( +5 .59 dB over naive averag-ing). The neural residual adds +2 .25 dB (ANVIL-S) on top of this strong classical starting point. 
+
+C. NPU-Native Residual Architecture 1) Design Principles from INT8 Profiling: Our architec-ture design is guided by per-operator INT8 profiling on the Hexagon V75 HTP, revealing several non-obvious constraints:  
+
+> •
+
+Standard Conv 3×3 + ReLU achieves the high-est INT8 utilization. These compute-bound operations achieve 3.2–5.2 × INT8/FP16 speedup on the HTP. In a pure-Conv model, convolution accounts for ∼59% of INT8 inference cycles—the only operator class that scales with INT8 SIMD width.  
+
+> •
+
+DWConv and channel attention degrade INT8 effi-ciency. Replacing standard convolutions with depthwise separable convolutions and squeeze-channel attention (SCA) reduces whole-model INT8/FP16 speedup from 3.2–5.2 × to 2.4–2.7 ×. Per-operator INT8 profiling at-tributes this to the memory-bound SCA path: Mul +GAP consumes 30% of cycles and residual Add another 17%, neither benefiting from reduced arithmetic precision.  
+
+> •
+
+LayerNorm and GELU incur disproportionate cost or lack hardware support. In a NAFNet [36] HTP FP16 profile, LayerNorm accounts for 57% of inference cycles versus 19% for all convolutions combined. On MediaTek APU, LayerNorm and PReLU fail to map to the neural accelerator entirely (NEURON UNMAPPABLE); GELU executes at 5.8 × the normalized latency of Conv 3 ×3.  
+
+> •
+
+Activation memory dominates at full resolution. 
+
+At 1080p, doubling channel width across all encoder– decoder stages adds only 15% INT8 latency despite 4.4 ×
+
+more parameters, because activation tensor transfer—not weight computation—is the throughput bottleneck. 
+
+2) UNet-v3b Architecture: Based on these insights, we design a 4-level asymmetric U-Net [37] (Fig. 2) restricted to Conv 3 ×3, ReLU, stride-2 transposed convolution, element-wise Add, and a 1 ×1 output head:  
+
+> •
+
+Asymmetric channels: Full-resolution stages use narrow channels (16) to limit memory bandwidth, while deep stages use wide channels (64–96) where spatial dimen-sions are reduced by 8× and compute cost is low.  
+
+> •
+
+ResBlock with skip connection: Each block consists of Conv-BN-ReLU-Conv-BN with an element-wise Add skip. BN provides training stability and is fused into Conv weights at deploy time.  
+
+> •
+
+Zero-initialized output: The final 1 ×1 convolution is initialized with zero weights and bias, ensuring the net-work’s initial prediction is the prealigned blend itself. Training then learns to correct residual errors.  
+
+> •
+
+Element-wise Add skip connections instead of channel-wise Concat at decoder stages, halving feature map memory at connection points. We provide two configurations: Variant Channels Params INT8 1080p ANVIL-S [16 , 32 , 64 , 64] 855K 12.8 ms ANVIL-M [16 , 32 , 96 , 96] 2.66M 16.7 ms 
+
+D. Deploy-Time Optimization 
+
+We apply two optimizations to maximize NPU efficiency: 
+
+(1) Additive U-Net skip connections. Decoder skip con-nections use element-wise Add instead of channel concatena-tion, eliminating the Concat operations and their associated 1×1 projection convolutions. This choice, guided by INT8 per-operator profiling, reduces total graph operations from 92 to 84 and removes all memory-copy-bound Concat nodes. 
+
+(2) BN Fusion. Batch normalization layers [38] used during training are folded into preceding convolution weights at deploy time: Wfused = γ√σ2+ϵ W , bfused = γ√σ2+ϵ (b − μ) + β.This is a mathematically exact transformation (maximum absolute difference < 1.5 × 10 −5 across 10 random inputs, limited by FP32 rounding from multi-step weight arithmetic) that eliminates all normalization operations from the inference graph while preserving training-time BN benefits. Together, these optimizations reduce INT8 1080p latency by 17–26% relative to the baseline concatenation-based U-56ch Input                          
+
+> H × W
+> Conv 3×3
+> 6→16, ReLU
+> ResBlock
+> ×1, ch=16 Conv ⬇2ResBlock
+> ×1, ch=32
+> H/2 × W/2
+> Conv ⬇2ResBlock
+> ×1, ch=64
+> H/4 × W/4
+> Conv ⬇2ResBlock
+> ×2, ch=64
+> H/8 × W/8
+> Conv ⬇2Bottleneck
+> ResBlock ×4, ch=64
+> H/16 × W/16
+> ConvT ⬆2
+> ResBlock
+> ×1, ch=64
+> +
+> ConvT ⬆2
+> ResBlock
+> ×1, ch=64
+> +
+> ConvT ⬆2
+> ResBlock
+> ×1, ch=32
+> +
+> ConvT ⬆2
+> ResBlock
+> ×1, ch=16
+> +
+> Conv 1×1
+> 3ch, zero-init
+> residual
+> +Î0.5
+> avg(Ĩ₀, Ĩ₁)
+> Deploy: BN fuse → plain Conv-ReLU chain
+> Fig. 2. UNet-v3b architecture. Input: 6-channel prealigned pair. Encoder: 4 levels with channel widths [16, 32, 64, 64] (ANVIL-S) or [16, 32, 96, 96] (ANVIL-M); encoder blocks per level (1 ,1,1,2) (ANVIL-S) or (1 ,1,2,2) (ANVIL-M). Bottleneck: 4 ResBlocks (ANVIL-S) or 8 (ANVIL-M) at H
+> 16 ×W
+> 16 .Decoder uses Add skip connections with 1 ResBlock per level. Output: 3-channel residual added to the prealigned blend. BN is folded into Conv at deploy time.
+
+Net in a same-session A/B test (ANVIL-S: 17.2 → 12.8 ms; ANVIL-M: 20.2 → 16.7 ms). IV. E XPERIMENTS 
+
+A. Experimental Setup 
+
+We organize the evaluation around three questions: (Q1) What prevents existing VFI from meeting mobile real-time constraints? (Q2) Does ANVIL remove these blockers under public NPU stacks? (Q3) What quality is retained? Sec. IV-B–IV-C address Q1–Q2; Sec. IV-D addresses Q3. 
+
+Datasets. We train on Vimeo90K [39] (51,313 training triplets) and evaluate on both the Vimeo90K test set (3,782 triplets) and Xiph 1080p [40] (2,662 triplets from 12 sequences at 1080 × 1920 , constructed as stride-1 consecutive frame triplets—frames 2k, 2k+1 , 2k+2 —from each sequence). The Xiph benchmark tests generalization to high-resolution real-world video with diverse motion characteristics. 
+
+Metrics. We report PSNR and SSIM [41] computed on RGB uint8 images, and LPIPS [42] (AlexNet backbone) as a perceptual quality metric. 
+
+Training. Models are trained with L1 loss only (no percep-tual loss), AdamW optimizer (lr = 2 × 10 −4), batch size 16, AMP bfloat16, and torch.compile . Early stopping with patience 7 on validation PSNR (interval 3 epochs, minimum delta 0.10 dB). Data augmentation includes random crops (256 × 256 ), horizontal/vertical flips, and temporal reversal. All ANVIL models use prealigned input. 
+
+Baselines. Our primary external baseline is RIFE HDv3 [1] (3.04M parameters). We evaluate RIFE at native resolution and with resolution reduction strategies (360p/480p flow-upsample and frame-upsample). 
+
+Hardware. Our primary latency and end-to-end measure-ments are collected on three Qualcomm devices, with separate cross-vendor deployment validation on two MediaTek devices under the public NeuroPilot toolchain:  
+
+> •
+
+Qualcomm: Snapdragon 7+ Gen 2 (HTP V69), 8 Gen 2 (V73), 8 Gen 3 (V75), deployed via QNN SDK [43].  
+
+> •
+
+MediaTek: Dimensity 9300 (APU 790), Dimensity 9400+ (APU 890), deployed via NeuroPilot Public SDK [44]. On this path we validated operator support, full-model 1080p INT8 execution, and small-set on-device quality sanity checks. Because MediaTek uses public-SDK runtime compilation rather than Qualcomm-style offline-compiled contexts, we do not place the abso-lute latency numbers in the same table as the Qualcomm results. Note that MediaTek’s premium SDK (requiring NDA) may support additional operators; our conclusions here are restricted to the publicly available toolchain. 
+
+Quantization protocol. All INT8 results use static W8A8 post-training quantization with percentile 99.99 calibration. 
+
+Calibration data is drawn from a distribution matching each model’s deployment scenario: for ANVIL, 100 samples strat-ified by motion magnitude from the Vimeo90K training set (upscaled to 1080p), since the model operates on prealigned training-distribution inputs; for cross-method baselines (RIFE, IFRNet), calibration samples are drawn from Xiph 1080p frames downsampled to each model’s input resolution (360p or 480p), matching the deployment pipeline of reduced-resolution inference on high-resolution content. Calibration and evaluation are split at the sequence level : two Xiph sequences ( sunflower , pedestrian_area ) are reserved exclusively for calibration; evaluation uses only the remain-ing ten sequences, ensuring zero content overlap. For Qual-comm HTP: QNN SDK (QAIRT 2.42), per-tensor symmet-ric activation quantization, models compiled offline to HTP context binaries. For ONNX Runtime: quantize_static 
+
+with QOperator format, per-tensor activation quantization. For MediaTek: TFLite INT8 via mtk_converter with default symmetric quantization. All latency measurements use BURST profile, 50–100 iterations after 10 warm-up, reporting minimum latency to exclude scheduling jitter. 
+
+B. NPU Deployment Analysis 
+
+We first establish why existing VFI methods cannot be deployed at 1080p INT8 on current mobile NPUs, before evaluating ANVIL’s quality under these constraints. 
+
+1) Cross-Device Latency: Table I presents INT8 1080p latency across three Qualcomm generations. ANVIL-S meets the 33.3 msdeadline on V73/V75; on V69, 720p remains viable (10.5 ms). 
+
+ANVIL-S vs. RIFE latency. On the HTP V75, ANVIL-S at full 1080p INT8 (12.8 ms) runs faster than RIFE at 360p INT8 (14.7 ms), despite processing 9× more pixels. This reflects ANVIL’s compute-bound graph versus RIFE’s 5.1% 6                                   
+
+> TABLE I HTP INT8 NETWORK INFERENCE LATENCY AT 1080 P(NPU FORWARD PASS ONLY ;END -TO -END IN TABLE IX). †720 P FALLBACK : ANVIL-S 10.5 MS , ANVIL-M 14.1 MS .‡RIFE AT 360 P.SoC NPU ANVIL-S ANVIL-M RIFE ‡≤33.3ms SD 7+ Gen2 HTP V69 46.0 ms 56.6 ms 45.6 ms ×†
+> SD 8 Gen2 HTP V73 15.5 ms 20.8 ms 20.7 ms ✓
+> SD 8 Gen3 HTP V75 12.8 ms 16.7 ms 14.7 ms ✓
+
+Conv ratio (95% memory-bound operations including Resize, GridSample, and element-wise arithmetic). 
+
+FP16 is insufficient. All models—including RIFE at 360p—exceed the 33.3 msdeadline under FP16 on all tested devices. Under the studied public deployment stacks, W8A8 is the practical operating point for 1080p mobile VFI. 
+
+MediaTek validation. Under NeuroPilot Public SDK, ANVIL-S executes at 1080p INT8 on both tested generations (24.4 mson D9300, 25.5 mson D9400+) with all operators APU-delegated and negligible INT8 loss. These are cross-vendor deployment validations rather than directly comparable latency points, as the public MediaTek path uses runtime compilation whose overhead dominates absolute timing. 
+
+Deployment audit of existing methods. To confirm that the deployment barriers are not RIFE-specific, we attempted full deployment pipelines for IFRNet [2] (5.0M, 4-level iterative refinement) and AMT-S [3] (3.0M, 3-stage correlation +32 ×GridSample ). IFRNet exports and compiles success-fully in our audit, but the archived artifacts do not establish a quality-preserving 1080p real-time operating point; Sec. IV-C shows that under a unified PTQ protocol its frame-output path loses 2.95 dB and even the flow-up path still requires a full-resolution warp stage. AMT-S fails HTP context binary generation entirely (“Graph Finalize failure”). These failures are structural, not implementation-specific. 
+
+2) Cross-Vendor Operator Compatibility: Table II presents a systematic operator-level benchmark across both NPU ven-dors, testing 17 operators drawn from 9 prominent VFI meth-ods [1]–[3], [6]–[11]. The results reveal that operators used by ANVIL (standard convolutions and simple pointwise operations) are the only ones achieving ∼1.0 × baseline performance on both platforms . In contrast:  
+
+> •
+
+GridSample , used by 7/9 methods, is mapped to a vendor-specific custom op (MTKEXT_GRID_SAMPLE_2D ) unavailable through MediaTek’s public NeuroPilot SDK (the premium SDK with NDA access may support it), and incurs 3.2 ×
+
+overhead on Qualcomm HTP.  
+
+> •
+
+PReLU and LayerNorm are unmappable on MediaTek APU entirely, blocking RIFE and transformer-based VFI.  
+
+> •
+
+Resize 2 × is a bottleneck on both platforms (4.4 × HTP, 12.6 × APU), penalizing multi-scale pyramid approaches.  
+
+> •
+
+Self-Attention causes OOM at 1080p on both platforms. 
+
+RIFE HTP per-operator profile. Profiling RIFE 360p FP16 on HTP V75 confirms the structural inefficiency: con-volutions account for only 5.1% of inference cycles, while memory-bound operations consume 95% ( Resize : 26.6%, 
+
+GridSample : 15.6%, Div : 13.6%, Add : 8.9%, Mul : 8.4%, 
+
+Concat : 6.9%, PReLU : 6.5%, Slice : 4.6%). By contrast, ANVIL’s inference graph ensures that the majority of NPU cycles are spent on compute-bound operations. The operator compatibility and latency data establish that no tested VFI method simultaneously meets the 33.3 mslatency budget and the cross-vendor operator constraint. We next evaluate whether INT8 quantization preserves quality. 
+
+C. INT8 Quantization Analysis 
+
+The preceding section established that INT8 is the only precision mode meeting latency budgets. We now evaluate whether INT8 quantization preserves interpolation quality, comparing ANVIL, RIFE [1], and IFRNet [2] using two backends overall—QNN on-device for ANVIL (matching the deployment target) and ORT CPU for RIFE/IFRNet (repro-ducible offline baseline)—to distinguish architectural quanti-zation sensitivity from backend-specific effects. AMT-S [3] cannot be included because its 32 GridSample operators cause HTP context compilation to fail. 
+
+1) Cross-Method INT8 Quality: Table III presents INT8 quality on Xiph 1080p under the best archived protocols avail-able for each method. Three patterns emerge. First, ANVIL shows negligible degradation : ANVIL-S loses −0.19 dB and ANVIL-M −0.09 dB in the archived full 2,662-triplet QNN on-device evaluation. Second, iterative flow methods de-grade , with severity depending on mode: IFRNet frame mode collapses by −4.38 dB (CI [ −4.75 , −4.01 ], 60% of samples 
+
+>3 dB), while flow-up modes show moderate degradation (RIFE −0.89 dB, IFRNet −0.40 dB). All confidence intervals exclude zero. Third, flow-up mitigates but does not eliminate 
+
+the problem—and still requires a full-resolution warp stage outside the low-resolution network. 
+
+2) Per-Operator Causal Analysis: To identify the mech-anism, we progressively add operator types to ORT W8A8 quantization and measure output cosine similarity (CosSim) against the FP32 baseline. We perform this analysis on both RIFE and IFRNet with trained weights. The causal chain (Table IV) is identical for both methods: 1) Conv quantization introduces initial error ( −0.048 for RIFE, −0.055 for IFRNet), acceptable in isolation. 2) PReLU quantization has zero additional effect in both methods, confirming it is benign. 3) Add quantization triggers collapse. Add implements iterative flow accumulation ( faccum =faccum +∆ f ); each stage’s quantized output feeds the next, amplifying error across iterations. 4) Full W8A8 ≈ Conv + Add —no other operator con-tributes. Notably, individual operators are robust in isolation: astandalone 3-stage iterative Add with random data achieves CosSim = 0 .9999 . The collapse emerges only when trained weights produce flow states with large dynamic range ( ±19 
+
+pixels for RIFE, ±11 for IFRNet) that are iteratively accumu-lated through quantized Add operations. 
+
+3) Why ANVIL Is Immune: ANVIL’s architecture avoids all three quantization risk factors identified above: 7
+
+TABLE II CROSS -VENDOR OPERATOR COMPATIBILITY FOR 17 VFI OPERATORS AT 1080 P. L ATENCY NORMALIZED TO CONV 3×3 = 1.0 ×. “F REQ ”: METHODS USING THE OPERATOR (OUT OF 9 SURVEYED ). G ROUPS : (A) UNIVERSAL , (B) PARTIAL , (C) LIMITED , (D) ITERATIVE PATTERNS .Group Operator Freq HTP V75 APU 790 Impact A Conv2d 3 ×3 9/9 1.0 × 1.0 × Baseline A Conv2d 1 ×1 8/9 0.9 × 1.0 ×
+
+A Conv + ReLU 5/9 1.0 × 1.0 ×
+
+A ConvTranspose2d 7/9 3.9 × 2.7 × Moderate cost both platforms A Residual Add 9/9 2.3 × 1.8 ×
+
+B GridSample 7/9 3.2 × N/A MTKEXT custom op, public SDK unavailable B Resize 2 × 7/9 4.4 × 12.6 × Both platforms bottleneck B Conv + Sigmoid 7/9 1.1 × 0.9 ×
+
+B Conv + PReLU 1/9 1.0 × UNMAP RIFE blocked on MediaTek B Conv + LeakyReLU 2/9 1.0 × 1.0 ×
+
+C Conv + LayerNorm 2/9 1.5 × UNMAP Transformer VFI blocked on MTK C Conv + GELU 1/9 1.1 × 5.8 ×
+
+C DWConv 3 ×3 1/9 1.0 × 0.9 ×
+
+C Self-Attention 2/9 OOM OOM 1080p not exportable C Deformable Conv 1/9 N/A N/A ONNX unsupported D iter_accum_3 4/9 23.8 × 1.7 × HTP 23.8 × overhead; INT8 collapses D warp_chain 7/9 5.8 × N/A Contains GridSample TABLE III INT8 QUANTIZATION QUALITY ON XIPH 1080 P. “M ODE ”: FLOW ↑ 
+
+> OUTPUTS FLOW FOR
+
+CPU WARP ; FRAME OUTPUTS RGB DIRECTLY . † FULL 
+
+2,662-TRIPLET QNN ON -DEVICE EVALUATION (AGGREGATE PSNR; 
+
+> PER
+
+-SAMPLE BOOTSTRAP CI NOT AVAILABLE FOR DEVICE -SIDE INFERENCE ). C ALIBRATION AND EVAL PROTOCOL DETAILS IN SEC . IV. Method Stg Mode PSNR: FP32 → INT8 ( ∆) 95% CI 
+
+ANVIL-S 0 direct 29.28 → 29.09 (−0.19 )† —†
+
+ANVIL-M 0 direct 29.37 → 29.28 (−0.09 )† —†
+
+RIFE 3 flow ↑ 26.79 → 25.90 ( −0.89) [−0.96, −0.83] IFRNet 4 flow ↑ 25.43 → 25.03 ( −0.40) [−0.44, −0.37] IFRNet 4 frame 25.84 → 21.46 ( −4.38) [−4.75, −4.01] TABLE IV PER -OPERATOR INSTRUMENTED INT8 QUANTIZATION . C OS SIM MEASURED AGAINST FP32 OUTPUT . T HE SAME CAUSAL PATTERN HOLDS FOR BOTH METHODS : C ONV INTRODUCES INITIAL ERROR , PR ELU HAS ZERO EFFECT , AND ADD TRIGGERS THE COLLAPSE . F ULL W8A8 ≈
+
+CONV +ADD .Quantized Ops RIFE (3-stage) IFRNet (4-stage) CosSim ∆ CosSim ∆
+
+None (FP32) 1.000 — 1.000 —Conv, ConvTr 0.952 −0.048 0.945 −0.055 
+
++ PReLU 0.952 0.000 0.945 0.000 
+
++ Add 0.815 −0.137 0.878 −0.068 
+
+Full W8A8 0.790 ≈Add 0.859 ≈Add Resize only 1.000 0.000 1.000 0.000  
+
+> •
+
+No iterative accumulation. Adds are single-pass residual skips (output = blend + residual), no recurrent state.  
+
+> •
+
+Small dynamic range. Residual range ±0.25 (vs. ±19 
+
+px for RIFE flow), well within 8-bit capacity.  
+
+> •
+
+No grid_sample . Warping occurs outside the NPU graph, so sampling does not amplify quantization noise. These structural differences explain the large gap in INT8 degradation: ANVIL loses only −0.19 dB, while iterative flow systems degrade more strongly ( −0.89 dB for RIFE flow ↑,
+
+−4.38 dB for IFRNet frame mode). 
+
+Implications for quality evaluation. The deployment and INT8 analyses above establish that ANVIL is the only VFI method in our evaluation with a fully verified 1080p INT8 operating point on Qualcomm HTP and an additional public-SDK deployment validation on two MediaTek APU genera-tions. With this context, we now evaluate interpolation quality. 
+
+D. Quality Under Deployment Constraints 
+
+Having established in Sec. IV-B and IV-C that no tested iterative flow method meets the 1080p latency budget while surviving INT8 quantization, Table V jointly evaluates inter-polation quality alongside deployment status. We benchmark RIFE [1] under our unified protocol as the primary flow-based reference, including reduced-resolution variants at 360p and 480p with on-device INT8 latency verification—both within the 33.3 msbudget but suffering INT8 quality collapse on two independent backends ( −2.03 dB ORT at 360p flow ↑;Table VI). The perceptual gap is notable: RIFE achieves substantially better LPIPS (0.019 vs. 0.036 on Vimeo, 0.077 vs. 0.148 on Xiph), reflecting the smoothness bias inherent in residual prediction versus sub-pixel warping. Among deploy-able configurations, ANVIL-M achieves the highest quality on both datasets. Traditional MCFI methods [23]–[25] do not provide Vimeo90K or Xiph evaluations under comparable pro-tocols; our MV Blend baseline, which applies the same codec-MV smoothing pipeline without neural refinement, serves as the most direct classical reference point. 
+
+Deployment–quality tradeoff. The quality gap between ANVIL-M and non-deployable RIFE native (33.66 vs. 34.26 dBon Vimeo, 29.74 vs. 30.04 dBon Xiph) reflects the cost of eliminating grid_sample and iterative flow from the NPU graph. A NAFNet ceiling model (17.1M, same 8
+
+TABLE V QUALITY AND DEPLOYMENT STATUS ON VIMEO 90K AND XIPH 1080 P. BOLD : BEST AMONG DEPLOYABLE METHODS . F OR CONTEXT , NON -DEPLOYABLE METHODS REACH 35–36 DB ON VIMEO 90K (IFRN ET [2] 35.80, AMT-S [3] 35.72, EMA-VFI [6] 36.11). Method Params Vimeo90K Xiph 1080p Deployment Status PSNR SSIM LPIPS PSNR SSIM LPIPS 
+
+Zero-parameter baselines 
+
+Naive Blend 0 25.61 0.753 0.099 25.32 0.658 0.165 —MV Blend 0 31.20 0.926 0.053 28.98 0.813 0.115 —
+
+ANVIL (ours) — 1080p INT8 deployable 
+
+ANVIL-S 855K 33.45 0.949 0.037 29.65 0.835 0.154 Deployable 
+
+ANVIL-M 2.66M 33.66 0.951 0.036 29.74 0.836 0.148 Deployable 
+
+Flow/warp methods — deployment blocked (Sec. IV-B, IV-C) 
+
+RIFE [1] 3.04M 34.26 0.956 0.019 30.04 0.828 0.077 grid sample + recurrent flow RIFE 360p flow ↑ 3.04M — — — 29.19 0.805 0.113 INT8 collapse (Table VI) RIFE 480p flow ↑ 3.04M — — — 29.77 0.820 0.103 INT8 collapse (Table VI) 
+
+Architecture ceiling (not deployable) 
+
+NAFNet-ceiling 17.1M 34.58 0.959 0.030 30.30 0.850 0.175 LayerNorm 57% cycles 
+
+prealigned input) reaches 34.58 dB—still below sub-pixel flow methods (IFRNet 35.80, EMA-VFI 36.11)—suggesting 
+
+∼0.9 dBfrom capacity constraints and ∼1.2 dBfrom the struc-tural limitation of residual prediction versus learned warping. The LPIPS gap ( ∼2×: 0.036 vs. 0.019 on Vimeo; 0.148 vs. 0.077 on Xiph) persists even in the NAFNet ceiling, indicating a structural property of the residual paradigm rather than a capacity issue. This is the primary perceptual cost of NPU-native design, one that could be partially mitigated by perceptual loss fine-tuning (though such tuning must be validated against INT8 robustness); temporal quality analysis follows in Sec. V. 
+
+Deployment quality analysis. Fig. 3 illustrates represen-tative failure modes. On old_town_cross (slow pan), ANVIL’s smoothing suppresses noise ( +0 .7 dB vs. RIFE) but loses fine detail. On tractor (large rigid motion), ANVIL over-smooths edges while RIFE produces ghosting; neither is artifact-free. On riverbed (stochastic texture), all methods collapse as non-rigid motion defeats both paradigms. The smoothness bias from spatial flow smoothing benefits low-texture regions but penalizes high-frequency detail, explaining ANVIL’s LPIPS disadvantage. 
+
+Resolution reduction strategies. Table VI evaluates RIFE at 360p and 480p in two modes: flow-upsample (low-res flow, CPU warp at full resolution) and frame-upsample (entire pipeline at low resolution, bicubic output). At FP32, 480p flow-upsample (29.13 dB) approaches ANVIL-M (29.37 dB). However, INT8 collapses on both ORT and QNN backends (−2.03 to −5.12 dB); frame-upsample degrades more severely because the quantized warp path amplifies errors internally. All FP16 latencies exceed 33.3 ms, and 480p frame-upsample exceeds the deadline even at INT8. No RIFE configuration simultaneously satisfies latency, quality, and INT8 robustness. FP32 values differ from Table V because two sequences are reserved for INT8 calibration (Sec. IV). 
+
+TABLE VI RIFE RESOLUTION REDUCTION STRATEGIES ON XIPH 1080 P. ORT ∆:W8A8 VIA ORT CPU. QNN ∆: W8A8 VS FP16 ON HTP V75. B OTH BACKENDS CONFIRM INT8 DEGRADATION ; ALL FP16 LATENCIES EXCEED 
+
+33.3 MS .Res. Mode FP32 ORT ∆ QNN ∆ INT8 lat. 360p flow ↑ 28.54 −2.03 −1.43 14.7 ms 360p frame ↑ 27.00 −3.80 −3.44 17.8 ms 480p flow ↑ 29.13 −2.90 −2.24 28.2 ms 480p frame ↑ 28.23 −5.12 −4.84 36.3 ms ∗∗Exceeds 33.3 msdeadline even at INT8. 
+
+E. Ablation Studies 1) Prealignment Contribution: MV prealignment is the single most impactful design choice. A same-capacity Route A baseline (A-small, 33K parameters, no prealignment) achieves only 29.00 dBon Vimeo—worse than the zero-parameter MV Blend (31.20 dB, Table V). Replacing the production smooth-ing pipeline with a legacy block-averaging scheme (v1: box fil-ter + 16 ×16 block average) degrades MV Blend from 31.20 to 29.92 dBon Vimeo ( −1.28 dB) and from 28.98 to 28.26 dBon Xiph 1080p ( −0.72 dB), with 95.3% of Vimeo test samples improving under the production pipeline. From a deployment perspective, prealignment offloads motion estimation from the NPU entirely, enabling the NPU-friendly residual architecture. 
+
+TABLE VII PREALIGNMENT METHOD ABLATION ON VIMEO 90K TEST SET (3,782 
+
+> TRIPLETS
+
+, MV B LEND PSNR). A LL METHODS USE THE SAME BLOCK -LEVEL H.264 MV S; THEY DIFFER IN FLOW CONSTRUCTION AND POST -PROCESSING .Flow construction Post-processing PSNR ZOH none (sub-pixel remap only) 29.63 OBMC (cosine) none 29.58 Daala Gaussian σ=6 30.89 
+
+ZOH median 5 +Gaussian σ≈8 31.20 9ANVIL-M RIFE HDv3 Ground Truth 
+
+Fig. 3. Visual comparison on Xiph 1080p ( 3× magnified insets). (a) old_town_cross : ANVIL smoothing suppresses noise, RIFE preserves detail. (b) tractor : ANVIL over-smooths edges, RIFE produces ghosting. (c) riverbed : both fail on stochastic texture. TABLE VIII CAPACITY SCALING UNDER THE 33.3 MSLATENCY BUDGET . P REALIGNED VARIANTS (R OUTE D) ARE FULLY TRAINED ON VIMEO 90K WITH BASIC PREALIGNMENT . A-SMALL (R OUTE A) RECEIVES RAW FRAMES WITHOUT 
+
+MV PREALIGNMENT .Model Params Vimeo PSNR INT8 1080p 
+
+Route A (no prealignment) 
+
+A-small 33K 29.00 —
+
+Route D (MV prealignment) 
+
+D-tiny-nomv 1.8K 30.67 3.52 ms D-mini-nomv 10.6K 31.08 4.26 ms D-mid-nomv 33K 31.38 8.16 ms D-unet-s-nomv 129K 31.83 8.84 ms D-unet-l-nomv 289K 32.49 15.5 ms 
+
+2) Capacity Scaling: Table VIII and Fig. 4 show that quality scales continuously with model capacity, with no saturation across the 1.8K–289K parameter range under ba-sic prealignment. Smoothed prealignment (Sec. III-B) shifts the entire curve upward: ANVIL-S (855K) and ANVIL-M (2.66M) continue the scaling trend toward the NAFNet ceiling (34.58 dBat 17.1M), confirming that the framework has not reached its quality ceiling. The U-Net multi-scale design yields the highest quality-per-latency gain: D-mid → D-unet-s adds 
+
++0 .45 dB with only 1.08 × latency increase. 
+
+3) Deploy-Time Optimization: Replacing concatenation-based U-Net skip connections with additive skips, combined with BN fusion, reduces INT8 1080p latency by 17–26% in a same-session A/B test (ANVIL-S: 17.2 → 12.8 ms; ANVIL-1K 10K 100K 1M 10M 
+
+Parameters 
+
+> 30
+> 31
+> 32
+> 33
+> 34
+> 35
+> Vimeo90K PSNR (dB)
+> Basic prealign
+> Smoothed prealign
+> RIFE HDv3
+> NAFNet ceiling
+> D-unet-l
+> ANVIL-S
+> ANVIL-M
+> RIFE HDv3
+> NAFNet ceiling
+
+Fig. 4. Quality scaling with model capacity. Basic prealignment (dashed) and smoothed prealignment (solid) series both scale without saturation. Dashed horizontal lines show RIFE HDv3 (3.04M) and NAFNet ceiling (17.1M, smoothed prealignment retrained) as reference points. 
+
+M: 20.2 → 16.7 ms) by eliminating memory-bound Concat and projection operations from the inference graph. 
+
+4) Final Design: The final ANVIL-S and ANVIL-M mod-els integrate three improvements over the D-nomv scaling series: (1) smoothed prealignment (Sec. III-B), which raises the zero-parameter MV Blend baseline by +1 .28 dB; (2) an asymmetric-channel U-Net with narrow full-resolution stages 10 
+
+and wide bottleneck stages, designed from INT8 per-operator profiling to maximize compute-bound Conv ratio; and (3) ad-ditive U-Net skip connections with deploy-time BN fusion. Quality and latency are in Table V and Table I. 
+
+F. End-to-End System Validation 
+
+We implemented the full ANVIL pipeline as a video filter (vf_anvil ) in an open-source Android player, integrating H.264 software decoding with MV extraction, GPU compute shaders, and HTP INT8 inference on a single SoC. Software decoding (FFmpeg libavcodec ) is used because Android’s 
+
+MediaCodec does not expose per-macroblock MVs. Ta-ble IX reports per-stage VFI latency under concurrent software decoding; decode runs on a separate thread but competes for CPU and memory bandwidth, so timing reflects realistic contention. 
+
+1) Pipeline Architecture: The pipeline processes each frame pair through five stages distributed across CPU, GPU, and HTP:                                 
+
+> TABLE IX END -TO -END PER -STAGE LATENCY ON SM8650, ANVIL-S 1080 PINT8. MEDIANS OVER 54,623 CONSECUTIVE FRAME PAIRS (30-MINUTE PLAYBACK ). Stage HW Latency Operation P1a CPU 2.9 ms ZOH densify + 4×downsample + YUV pack P1b+P2 GPU 3.7 ms median 5+ Gauss σ= 2 + warp + quant Copy CPU 0.9 ms 12 MB uint8 NHWC to QNN buffer P3 HTP 17.0 ms INT8 graphExecute (async, pipelined) P4 GPU 3.3 ms dequant + residual + RGB →YUV420
+> Total per pair 28.4 ms median; 94.9% ≤33.3 ms
+
+Three optimizations were critical for achieving this latency: 
+
+GPU-side quantization. A fused Vulkan compute shader performs flow upsampling, warp, blend, and INT8 quantization in a single dispatch, producing a compact uint8 buffer that replaces ∼71 MB of intermediate float32 tensors. This reduces the CPU →HTP copy from ∼8 msto ∼0.9 ms. 
+
+Pipelined HTP with double-buffered I/O. A dedicated inference thread with double-buffered pending state enables frame-level pipeline overlap: CPU/GPU preparation for frame 
+
+N +1 runs concurrently with HTP inference for frame N , so HTP and CPU/GPU stages execute in parallel. 
+
+GPU post-processing. Dequantization, residual addition, and RGB-to-YUV420 conversion are moved from CPU to a GPU compute shader, reducing this phase from 11– 21 ms(CPU, variable with big.LITTLE scheduling) to 3.3 ms. 
+
+2) Sustained Performance: To characterize deployment vi-ability, we run a 30-minute continuous 1080p playback val-idation on SM8650 (Adreno 750 + HTP V75) with H.264 30 fps content, 50% brightness, WiFi on. Every frame pair is timed and logged (54,623 total). Full-frame logging adds CPU overhead ( ∼30 writes/s, shell 45 ◦C vs. 41 ◦C under sampled logging, battery −16 % vs. −12 %); the figures below are therefore conservative upper bounds. 
+
+Thermal phases. The system exhibits three distinct thermal regimes: (1) cold (minutes 0–5): median 22.2 ms, HTP me-dian 14.0 ms; (2) warm steady state (minutes 6–21): median 28.0 ms, HTP median 17.0 ms, as DVFS throttles the HTP from peak to sustained operating points; (3) hot (minutes 22– 30): median 31.0 ms, HTP median 17.6 ms, with second-stage throttling under sustained thermal load. 
+
+Frame drop statistics. Over the full 30-minute run, 94.9% of frame pairs complete within the 33.3 msbudget (note: this includes the favorable cold-start phase at minutes 0–5; the warm/hot steady-state rate is ∼94%). The 5.1% that exceed it are concentrated in the hot phase (minutes 22–30: 11% drop rate vs. 2–3% in warm steady state). Of the 2,795 over-budget frames, 80% are isolated single-frame events attributable to OS scheduling jitter rather than sustained overload: the longest consecutive drop is 10 frames (0.33 s), and the median burst length is 1. The 148 extreme outliers ( >50 ms) are dominated by GPU scheduling spikes (GPU stage 20–40 msvs. typical 3.7 ms), not HTP degradation. 
+
+Budget analysis. The 12.8 msNPU-only latency (Ta-ble I) expands to 28.4 msend-to-end once prealignment, copies, and synchronization are included; HTP increases from 12.8 ms(BURST) to 17.0 msin-pipeline due to DVFS throttling. The warm-steady-state median of 28.0 msleaves 5.3 msof margin. Hot-phase degradation suggests a thermal-aware frame-skip policy could maintain artifact-free playback at the cost of reduced temporal enhancement ratio. V. D ISCUSSION 
+
+Resolution-dependent residual gains. The neural residual adds +2 .25 dB on Vimeo but only +0 .67 dB on Xiph 1080p (ANVIL-S vs. MV Blend). At higher resolution, prealign-ment already reduces residual motion substantially, leaving less room for neural refinement—consistent with the zero-parameter MV Blend itself improving from +5 .59 dB over naive blend on Vimeo to +3 .66 dB on Xiph. 
+
+Perceptual and temporal quality. Replacing differentiable warping with residual prediction produces smoother outputs, reflected in both LPIPS (0.148 vs. 0.077 on Xiph) and tem-poral fidelity. Table X reports tOF (mean inter-frame optical flow magnitude via RAFT-Small [45] at 540p) and warping error (WE) across 12 Xiph sequences.                            
+
+> TABLE X TEMPORAL QUALITY ON XIPH 1080 P(12 SEQUENCES , 15 CONSECUTIVE PAIRS EACH ). TOF: MEAN INTER -FRAME OPTICAL FLOW MAGNITUDE
+> (RAFT-S MALL AT 540 P). WE: WARPING ERROR .Method tOF tOF dev ↓WE ↓
+> GT 8.93 —0.034 RIFE HDv3 7.42 1.62 0.027
+> ANVIL-S 6.91 2.09 0.027 ANVIL-M 6.87 2.09 0.027 MV Blend 6.13 2.83 0.026
+
+RIFE achieves better temporal fidelity (tOF dev 1.62 vs. 2.09), but warping error is comparable across all methods (0.026–0.027), indicating that ANVIL is smoother than RIFE, not less correct. These gaps are the quantified cost of eliminat-ing grid_sample and iterative flow from the NPU graph. 
+
+Encoding robustness. Training uses per-triplet encoding (high-quality I-frame reference), while deployment extracts 11 
+
+MVs from arbitrary streams. Sweeping preset, CRF, and B-frame configuration on Xiph 1080p shows B-frames are the only significant factor (−1.16 dB for bframes=3 vs. 
+
+bframes=0 ); preset ( ±0.07 dB) and CRF ( +0 .12 dB) are negligible because x264’s motion estimation operates before quantization and the smoothing pipeline absorbs MV qual-ity differences. For uncontrolled content with B-frames, the deployed system restricts interpolation to dref = 1 frames, passing through frames where reliable MVs are unavailable. 
+
+Codec scope. ANVIL currently relies on H.264 MV side data via FFmpeg’s export_mvs (also supporting MPEG-1/2/4). HEVC and VP9/AV1 decoders lack MV export in FFmpeg—these are API gaps, not architectural constraints. Modern codecs (HEVC [20], VVC [21]) provide richer motion models that could improve prealignment if per-block MVs become accessible through public mobile decoding APIs. 
+
+Practical coverage. Under controlled encoding (bframes=0 ), every inter-frame is interpolatable (30 →60 fps). For uncontrolled content with bframes=1 or 3, approximately 50% of frames qualify (30 →45 fps). The 16% battery drain over 30 minutes (software decoding) is a further constraint relative to hardware decode. 
+
+INT8 quantization implications. Potential mitigations for iterative flow collapse—QAT [32] or mixed-precision schemes keeping recurrent states in FP16—remain unexplored on cur-rent mobile NPU runtimes. More broadly, quantization-aware design should consider graph-level recurrent patterns , not just individual operator sensitivity. VI. C ONCLUSION 
+
+We presented ANVIL, a framework that addresses three structural barriers to deploying video frame interpolation on mobile NPUs—prohibitive grid_sample latency, INT8 quantization collapse in iterative flow methods, and memory-bound operation dominance—by decomposing VFI into codec-side MV prealignment (CPU/GPU) and NPU-side resid-ual refinement restricted to compute-bound operators. Per-operator INT8 analysis identifies Add-on-recurrent-state am-plification as a key mechanism behind quantization collapse in iterative flow architectures, verified across two methods and two backends. ANVIL-M achieves 33.66 dBon Vimeo90K (0.6 dBbelow RIFE), the measured cost of NPU-deployable design; end-to-end system validation on SM8650 confirms 28.4 msmedian VFI latency over 54,623 frame pairs during 30-minute playback (94.9% within budget). The approach currently requires H.264 MV side data; extending to other codecs and uncontrolled content remains future work. ACKNOWLEDGMENT 
+
+The author gratefully acknowledges the individuals who provided mobile devices for cross-platform benchmarking. Claude (Anthropic) and ChatGPT (OpenAI) were used to assist with code development, including benchmark scripts, evaluation pipelines, and deployment code, as well as with English language editing. They were also used to assist in the interpretation of experimental and profiling results, including structural analysis of performance bottlenecks and profiling patterns. The author designed all experiments, directed all implementation, independently verified all analyses and re-sults, wrote and approved the final manuscript, and takes sole responsibility for the scientific content of this paper. REFERENCES [1] Z. Huang, T. Zhang, W. Heng, B. Shi, and S. Zhou, “RIFE: Real-time intermediate flow estimation for video frame interpolation,” in Computer Vision – ECCV 2022 , ser. Lecture Notes in Computer Science, vol. 13674, 2022, pp. 624–642. [2] L. Kong, B. Jiang, D. Luo, W. Chu, X. Huang, Y. Tai, C. Wang, and J. Yang, “IFRNet: Intermediate feature refine network for efficient frame interpolation,” in Proc. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2022, pp. 1969–1978. [3] Z. Li, Z.-L. Zhu, L.-H. Han, Q. Hou, C.-L. Guo, and M.-M. Cheng, “AMT: All-pairs multi-field transforms for efficient frame interpolation,” in Proc. IEEE/CVF Conference on Computer Vision and Pattern Recog-nition (CVPR) , 2023, pp. 9801–9810. [4] T. Ding, L. Liang, Z. Zhu, and I. Zharkov, “CDFI: Compression-driven network design for frame interpolation,” in Proc. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2021, pp. 7997– 8007. [5] T. van Rozendaal, T. Singhal, H. Le, G. Sautiere, A. Said, K. Buska, A. Raha, D. Kalatzis, H. Mehta, F. Mayer, L. Zhang, M. Nagel, and A. Wiggers, “MobileNVC: Real-time 1080p neural video compression on a mobile device,” in Proc. IEEE/CVF Winter Conference on Appli-cations of Computer Vision (WACV) , 2024. [6] G. Zhang, Y. Zhu, H. Wang, Y. Chen, G. Wu, and L. Wang, “EMA-VFI: Extracting motion and appearance via inter-frame attention for efficient video frame interpolation,” in Proc. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2023, pp. 5682–5692. [7] L. Lu, R. Wu, H. Lin, J. Lu, and J. Jia, “VFIformer: Video frame interpolation with transformer,” in Proc. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2022, pp. 17 959– 17 968. [8] X. Jin, L. Wu, J. Chen, Y. Chen, J. Koo, and C.-h. Hahm, “A unified pyramid recurrent network for video frame interpolation,” in Proc. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2023, pp. 1578–1587. [9] P. Hu, S. Niklaus, S. Sclaroff, and K. Saenko, “M2M-VFI: Many-to-many splatting for efficient video frame interpolation,” in Proc. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2022, pp. 3553–3562. [10] J. Park, C. Lee, and C.-S. Kim, “Asymmetric bilateral motion estima-tion for video frame interpolation,” in Proc. IEEE/CVF International Conference on Computer Vision (ICCV) , 2021, pp. 14 539–14 548. [11] T. Kalluri, D. Pathak, M. Chandraker, and D. Tran, “FLAVR: Flow-agnostic video representations for fast frame interpolation,” in Proc. IEEE Winter Conference on Applications of Computer Vision (WACV) ,2023. [12] M. Jaderberg, K. Simonyan, A. Zisserman, and K. Kavukcuoglu, “Spatial transformer networks,” in Advances in Neural Information Processing Systems 28 (NeurIPS) , 2015, pp. 2017–2025. [13] D. Xu, H. Zhang, L. Yang, R. Liu, G. Huang, M. Xu, and X. Liu, “Fast on-device LLM inference with NPUs,” in Proc. ACM International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS) , 2025, pp. 445–462. [14] T. Wiegand, G. J. Sullivan, G. Bjontegaard, and A. Luthra, “Overview of the H.264/AVC video coding standard,” IEEE Transactions on Circuits and Systems for Video Technology , vol. 13, no. 7, pp. 560–576, 2003. [15] H. Jiang, D. Sun, V. Jampani, M.-H. Yang, E. Learned-Miller, and J. Kautz, “Super SloMo: High quality estimation of multiple interme-diate frames for video interpolation,” in Proc. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2018, pp. 9000– 9008. [16] S. Niklaus, L. Mai, and F. Liu, “Video frame interpolation via adaptive separable convolution,” in Proc. IEEE/CVF International Conference on Computer Vision (ICCV) , 2017. [17] W. Bao, W.-S. Lai, C. Ma, X. Zhang, Z. Gao, and M.-H. Yang, “Depth-aware video frame interpolation,” in Proc. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2019. [18] P. K. A. Vasu, J. Gabriel, J. Zhu, O. Tuzel, and A. Ranjan, “Mobileone: An improved one millisecond mobile backbone,” in Proc. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2023, pp. 7907–7917. 12 
+
+[19] X. Liu, H. Peng, N. Zheng, Y. Yang, H. Hu, and Y. Yuan, “Efficientvit: Memory efficient vision transformer with cascaded group attention,” in 
+
+Proc. IEEE/CVF Conference on Computer Vision and Pattern Recogni-tion (CVPR) , 2023, pp. 14 420–14 430. [20] G. J. Sullivan, J.-R. Ohm, W.-J. Han, and T. Wiegand, “Overview of the high efficiency video coding (HEVC) standard,” IEEE Transactions on Circuits and Systems for Video Technology , vol. 22, no. 12, pp. 1649– 1668, 2012. [21] B. Bross, Y.-K. Wang, Y. Ye, S. Liu, J. Chen, G. J. Sullivan, and J.-R. Ohm, “Overview of the versatile video coding (VVC) standard and its applications,” IEEE Transactions on Circuits and Systems for Video Technology , vol. 31, no. 10, pp. 3736–3764, 2021. [22] M. T. Coimbra and M. Davies, “Approximating optical flow within the MPEG-2 compressed domain,” IEEE Transactions on Circuits and Systems for Video Technology , vol. 15, no. 1, pp. 103–107, 2005. [23] B.-D. Choi, J.-W. Han, C.-S. Kim, and S.-J. Ko, “Motion-compensated frame interpolation using bilateral motion estimation and adaptive over-lapped block motion compensation,” IEEE Transactions on Circuits and Systems for Video Technology , vol. 17, no. 4, pp. 407–416, 2007. [24] G. Choi, P. G. Heo, and H. W. Park, “Triple-frame-based bi-directional motion estimation for motion-compensated frame interpolation,” IEEE Transactions on Circuits and Systems for Video Technology , vol. 29, no. 5, pp. 1251–1258, 2019. [25] Y. Zhang, L. Chen, C. Yan, P. Qin, X. Ji, and Q. Dai, “Weighted convolutional motion-compensated frame rate up-conversion using deep residual network,” IEEE Transactions on Circuits and Systems for Video Technology , vol. 30, no. 1, pp. 11–22, 2020. [26] C.-Y. Wu, M. Zaheer, H. Hu, R. Manmatha, A. J. Smola, and P. Kr¨ ahenb¨ uhl, “Compressed video action recognition,” in Proc. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2018, pp. 6026–6035. [27] S. Zhou, X. Jiang, W. Tan, R. He, and B. Yan, “MVFlow: Deep optical flow estimation of compressed videos with motion vector prior,” in Proc. 31st ACM International Conference on Multimedia (MM) , 2023, pp. 1964–1974. [28] H. Zhang, X. Zou, J. Guo, Y. Yan, R. Xie, and L. Song, “A codec information assisted framework for efficient compressed video super-resolution,” in Computer Vision – ECCV 2022 , ser. Lecture Notes in Computer Science, vol. 13677, 2022, pp. 220–235. [29] H. Choi and I. V. Baji´ c, “Deep frame prediction for video coding,” IEEE Transactions on Circuits and Systems for Video Technology , vol. 30, no. 7, pp. 1843–1855, 2020. [30] Y. Wang, X. Fan, R. Xiong, D. Zhao, and W. Gao, “Neural network-based enhancement to inter prediction for video coding,” IEEE Trans-actions on Circuits and Systems for Video Technology , vol. 32, no. 2, pp. 826–838, 2022. [31] P. Tan and W.-c. Feng, “Hint-guided video frame interpolation for video compression,” in Proc. 7th ACM International Conference on Multimedia in Asia (MMAsia) , 2025, pp. 1–7. [32] B. Jacob, S. Kligys, B. Chen, M. Zhu, M. Tang, A. Howard, H. Adam, and D. Kalenichenko, “Quantization and training of neural networks for efficient integer-arithmetic-only inference,” in Proc. IEEE/CVF Confer-ence on Computer Vision and Pattern Recognition (CVPR) , 2018, pp. 2704–2713. [33] A. Gholami, S. Kim, Z. Dong, Z. Yao, M. W. Mahoney, and K. Keutzer, “A survey of quantization methods for efficient neural network infer-ence,” in Low-Power Computer Vision . Chapman and Hall/CRC, 2022, pp. 291–326. [34] M. Nagel, M. Fournarakis, R. A. Amjad, Y. Bondarenko, M. v. Baalen, and T. Blankevoort, “A white paper on neural network quantization,” 2021. [35] Z. Li, J. Xiao, L. Yang, and Q. Gu, “RepQ-ViT: Scale reparameteri-zation for post-training quantization of vision transformers,” in Proc. IEEE/CVF International Conference on Computer Vision (ICCV) , 2023, pp. 17 227–17 236. [36] L. Chen, X. Chu, X. Zhang, and J. Sun, “Simple baselines for image restoration,” in Proc. European Conference on Computer Vision (ECCV) ,2022, pp. 17–33. [37] O. Ronneberger, P. Fischer, and T. Brox, “U-net: Convolutional networks for biomedical image segmentation,” in Proc. International Confer-ence on Medical Image Computing and Computer-Assisted Intervention (MICCAI) , 2015. [38] S. Ioffe and C. Szegedy, “Batch normalization: Accelerating deep network training by reducing internal covariate shift,” in Proc. 32nd In-ternational Conference on Machine Learning (ICML) , vol. 37. PMLR, 2015, pp. 448–456. [39] T. Xue, B. Chen, J. Wu, D. Wei, and W. T. Freeman, “Video enhance-ment with task-oriented flow,” International Journal of Computer Vision ,vol. 127, no. 8, pp. 1106–1125, 2019. [40] Xiph.org Foundation, “Xiph.org test media,” https://media.xiph.org/ video/derf/, 2023, accessed: 2026-03-15. [41] Z. Wang, A. C. Bovik, H. R. Sheikh, and E. P. Simoncelli, “Image quality assessment: From error visibility to structural similarity,” IEEE Transactions on Image Processing , vol. 13, no. 4, pp. 600–612, 2004. [42] R. Zhang, P. Isola, A. A. Efros, E. Shechtman, and O. Wang, “The unreasonable effectiveness of deep features as a perceptual metric,” in 
+
+Proc. IEEE/CVF Conference on Computer Vision and Pattern Recogni-tion (CVPR) , 2018. [43] Qualcomm Technologies, Inc., “Qualcomm AI engine direct (QNN) SDK,” https://developer.qualcomm.com/software/ qualcomm-ai-engine-direct-sdk, 2024, accessed: 2026-03-15. [44] MediaTek Inc., “NeuroPilot SDK,” https://neuropilot.mediatek.com/, 2024, accessed: 2026-03-15. [45] Z. Teed and J. Deng, “RAFT: Recurrent all-pairs field transforms for optical flow,” in Proc. European Conference on Computer Vision (ECCV) , 2020.
