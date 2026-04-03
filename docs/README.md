@@ -6,73 +6,71 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-02
-- 运行时间：2026-04-02 19:53:23 UTC
+- 最新运行日期：2026-04-03
+- 运行时间：2026-04-03 19:30:53 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日精选 17 篇论文聚焦高效 AI 推理，重点解析了利用编解码器运动矢量实现硬件原生视频插帧的 ANVIL 架构。
-研究表明，通过架构解耦与知识蒸馏，大语言视觉模型及强化学习已能在边缘侧和能源管理系统中实现高性能部署。
-建议关注硬件友好型算法的优化思路，探索如何将复杂视觉与音频任务低成本地迁移至嵌入式设备。
-- 详情：[/202604/02/README](/202604/02/README)
+今日深度解析 17 篇前沿成果，聚焦边缘计算的碳足迹管理与大模型推理的硬件协同优化
+- 详情：[/202604/03/README](/202604/03/README)
 
 ### 精读区论文标签
-1. [ANVIL: Accelerator-Native Video Interpolation via Codec Motion Vector Priors](/202604/02/2603.26835v3-anvil-accelerator-native-video-interpolation-via-codec-motion-vector-priors)  
+1. [CarbonEdge: Carbon-Aware Deep Learning Inference Framework for Sustainable Edge Computing](/202604/03/2603.27420v2-carbonedge-carbon-aware-deep-learning-inference-framework-for-sustainable-edge-computing)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对移动NPU的加速器原生设计
-2. [Efficient Inference of Large Vision Language Models](/202604/02/2603.27960v1-efficient-inference-of-large-vision-language-models)  
+   evidence：碳感知的边缘计算与模型分区
+2. [FlatAttention: Dataflow and Fabric Collectives Co-Optimization for Large Attention-Based Model Inference on Tile-Based Accelerators](/202604/03/2604.02110v1-flatattention-dataflow-and-fabric-collectives-co-optimization-for-large-attention-based-model-inference-on-tile-based-accelerators)  
    标签：评分：9.0/10、query:hwnas
-   evidence：高效架构设计与内存管理综述
-3. [OneComp: One-Line Revolution for Generative AI Model Compression](/202604/02/2603.28845v1-onecomp-one-line-revolution-for-generative-ai-model-compression)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：用于硬件依赖模型压缩的自动化资源自适应流水线
-4. [Compiling Code LLMs into Lightweight Executables](/202604/02/2603.29813v1-compiling-code-llms-into-lightweight-executables)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：将大模型编译为轻量级可执行文件以进行本地部署
-5. [Integer-State Dynamics of Quantized Spiking Neural Networks for Efficient Hardware Acceleration](/202604/02/2604.01042v1-integer-state-dynamics-of-quantized-spiking-neural-networks-for-efficient-hardware-acceleration)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：具有整数状态动力学的硬件导向SNN
-6. [Per-Bank Memory Bandwidth Regulation for Predictable and Performant Real-Time System](/202604/02/2603.26054v1-per-bank-memory-bandwidth-regulation-for-predictable-and-performant-real-time-system)  
+   evidence：加速器的数据流与架构协同优化
+3. [Computer Vision with a Superpixelation Camera](/202604/03/2603.26900v1-computer-vision-with-a-superpixelation-camera)  
    标签：评分：8.0/10、query:hwnas
-   evidence：实时系统的每银行内存带宽调节
+   evidence：针对资源受限的计算机视觉应用设计的硬件友好型相机
+4. [On-Device Super Resolution Imaging Using Low-Cost SPAD Array and Embedded Lightweight Deep Learning](/202604/03/2603.27018v1-on-device-super-resolution-imaging-using-low-cost-spad-array-and-embedded-lightweight-deep-learning)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：用于微控制器端侧超分辨率的轻量级深度学习
+5. [ScoutAttention: Efficient KV Cache Offloading via Layer-Ahead CPU Pre-computation for LLM Inference](/202604/03/2603.27138v1-scoutattention-efficient-kv-cache-offloading-via-layer-ahead-cpu-pre-computation-for-llm-inference)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：GPU-CPU协同计算以防止GPU利用率低下
+6. [OptINC: Optical In-Network-Computing for Scalable Distributed Learning](/202604/03/2603.28290v1-optinc-optical-in-network-computing-for-scalable-distributed-learning)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：用于分布式学习的光学网络内计算
 
 ### 速读区论文标签
-1. [A Human-Inspired Decoupled Architecture for Efficient Audio Representation Learning](/202604/02/2603.26098v1-a-human-inspired-decoupled-architecture-for-efficient-audio-representation-learning)  
+1. [GSR-GNN: Training Acceleration and Memory-Saving Framework of Deep GNNs on Circuit Graph](/202604/03/2603.27156v1-gsr-gnn-training-acceleration-and-memory-saving-framework-of-deep-gnns-on-circuit-graph)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限设备的高效架构
-2. [Efficient Few-Shot Learning for Edge AI via Knowledge Distillation on MobileViT](/202604/02/2603.26145v1-efficient-few-shot-learning-for-edge-ai-via-knowledge-distillation-on-mobilevit)  
+   evidence：针对电路图深度GNN的省内存框架和优化执行流水线
+2. [RSR-core: A High-Performance Engine for Low-Bit Matrix-Vector Multiplication](/202604/03/2603.27462v1-rsr-core-a-high-performance-engine-for-low-bit-matrix-vector-multiplication)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于边缘计算的高效MobileViT骨干网络
-3. [Knowledge Distillation for Efficient Transformer-Based Reinforcement Learning in Hardware-Constrained Energy Management Systems](/202604/02/2603.26249v1-knowledge-distillation-for-efficient-transformer-based-reinforcement-learning-in-hardware-constrained-energy-management-systems)  
+   evidence：用于低比特硬件级计算的高性能引擎
+3. [Fully Spiking Neural Networks with Target Awareness for Energy-Efficient UAV Tracking](/202604/03/2603.27493v1-fully-spiking-neural-networks-with-target-awareness-for-energy-efficient-uav-tracking)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于资源受限嵌入式控制器的高效模型
-4. [Brain-Inspired Multimodal Spiking Neural Network for Image-Text Retrieval](/202604/02/2603.26787v1-brain-inspired-multimodal-spiking-neural-network-for-image-text-retrieval)  
+   evidence：用于无人机跟踪的节能全脉冲神经网络
+4. [An Energy-Efficient Spiking Neural Network Architecture for Predictive Insulin Delivery](/202604/03/2603.27589v1-an-energy-efficient-spiking-neural-network-architecture-for-predictive-insulin-delivery)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于多模态任务的低能耗脉冲神经网络
-5. [NERO-Net: A Neuroevolutionary Approach for the Design of Adversarially Robust CNNs](/202604/02/2603.25517v1-nero-net-a-neuroevolutionary-approach-for-the-design-of-adversarially-robust-cnns)  
+   evidence：针对超低功耗可穿戴边缘设备的能效脉冲神经网络架构
+5. [Beyond Attention Magnitude: Leveraging Inter-layer Rank Consistency for Efficient Vision-Language-Action Models](/202604/03/2603.24941v1-beyond-attention-magnitude-leveraging-inter-layer-rank-consistency-for-efficient-vision-language-action-models)  
    标签：评分：7.0/10、query:hwnas
-   evidence：用于自动神经网络设计的神经进化方法
-6. [Agent Factories for High Level Synthesis: How Far Can General-Purpose Coding Agents Go in Hardware Optimization?](/202604/02/2603.25719v1-agent-factories-for-high-level-synthesis-how-far-can-general-purpose-coding-agents-go-in-hardware-optimization)  
+   evidence：用于高效视觉-语言-动作模型的动态框架以降低推理延迟
+6. [ARTA: Adaptive Mixed-Resolution Token Allocation for Efficient Dense Feature Extraction](/202604/03/2603.26258v1-arta-adaptive-mixed-resolution-token-allocation-for-efficient-dense-feature-extraction)  
    标签：评分：7.0/10、query:hwnas
-   evidence：用于硬件优化和高层次综合的自主智能体
-7. [IBEX: Internal Bandwidth-Efficient Compression Architecture for Scalable CXL Memory Expansion](/202604/02/2603.26131v1-ibex-internal-bandwidth-efficient-compression-architecture-for-scalable-cxl-memory-expansion)  
+   evidence：通过自适应令牌分配实现高效的密集特征提取
+7. [Realtime-VLA V2: Learning to Run VLAs Fast, Smooth, and Accurate](/202604/03/2603.26360v1-realtime-vla-v2-learning-to-run-vlas-fast-smooth-and-accurate)  
    标签：评分：7.0/10、query:hwnas
-   evidence：通过压缩优化内存带宽和容量
-8. [Hardware-Agnostic and Insightful Efficiency Metrics for Accelerated Systems: Definition and Implementation within TALP](/202604/02/2603.26576v1-hardware-agnostic-and-insightful-efficiency-metrics-for-accelerated-systems-definition-and-implementation-within-talp)  
+   evidence：在机器人任务中达到硬件极限的部署技术
+8. [Rethinking Feature Conditioning for Robust Forged Media Detection in Edge AI Sensing Systems](/202604/03/2603.26387v1-rethinking-feature-conditioning-for-robust-forged-media-detection-in-edge-ai-sensing-systems)  
    标签：评分：7.0/10、query:hwnas
-   evidence：异构加速系统的效率指标
-9. [Sparse Growing Transformer: Training-Time Sparse Depth Allocation via Progressive Attention Looping](/202604/02/2603.23998v1-sparse-growing-transformer-training-time-sparse-depth-allocation-via-progressive-attention-looping)  
+   evidence：传感系统中视觉工作负载的边缘兼容推理成本
+9. [SliderQuant: Accurate Post-Training Quantization for LLMs](/202604/03/2603.25284v1-sliderquant-accurate-post-training-quantization-for-llms)  
    标签：评分：6.0/10、query:hwnas
-   evidence：Transformer训练时的稀疏深度分配以提高能效
-10. [Local learning for stable backpropagation-free neural network training towards physical learning](/202604/02/2603.24790v1-local-learning-for-stable-backpropagation-free-neural-network-training-towards-physical-learning)  
+   evidence：针对硬件友好型大模型的逐层量化设计
+10. [PRISM: Dynamic Primitive-Based Forecasting for Large-Scale GPU Cluster Workloads](/202604/03/2603.25378v1-prism-dynamic-primitive-based-forecasting-for-large-scale-gpu-cluster-workloads)  
    标签：评分：6.0/10、query:hwnas
-   evidence：面向物理学习和芯片制造限制的训练
-11. [Numerical Superoptimization for Library Learning](/202604/02/2603.24812v1-numerical-superoptimization-for-library-learning)  
+   evidence：动态GPU资源管理的架构感知基础
+11. [AgenticRS-Architecture: System Design for Agentic Recommender Systems](/202604/03/2603.26085v1-agenticrs-architecture-system-design-for-agentic-recommender-systems)  
    标签：评分：6.0/10、query:hwnas
-   evidence：库学习和内核优化的超级优化技术
+   evidence：自动化模型设计与性能优化代理
 
 
 <div class="dpr-home-promo-card">
