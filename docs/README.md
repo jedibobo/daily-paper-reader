@@ -6,73 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-04
-- 运行时间：2026-04-04 19:25:11 UTC
+- 最新运行日期：2026-04-05
+- 运行时间：2026-04-05 19:24:24 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日精选 17 篇前沿成果，重点突破了神经架构搜索的鲁棒性瓶颈与 MoE 模型的大规模推理加速。
-核心看点在于结合梯度与群体智能的 G-ICSO-NAS 算法，以及通过多芯片架构优化 MoE 推理的 Expert Streaming 技术。
-建议关注 GPU 底层算子优化与流式多模态模型的融合，这是实现高性能实时 AI 应用的关键路径。
-- 详情：[/202604/04/README](/202604/04/README)
+今日深度解析 17 篇前沿成果，重点攻克大模型推理加速与自动驾驶实时感知难题。
+核心突破在于提出以交换机为中心的共享内存架构，以及利用 VLM 实现车载异常检测的低延迟方案。
+建议关注大模型与底层硬件的协同优化，以及在无人机等边缘场景下的语义分割新趋势。
+- 详情：[/202604/05/README](/202604/05/README)
 
 ### 精读区论文标签
-1. [G-ICSO-NAS: Shifting Gears between Gradient and Swarm for Robust Neural Architecture Search](/202604/04/2604.00703v1-g-icso-nas-shifting-gears-between-gradient-and-swarm-for-robust-neural-architecture-search)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：鲁棒且高效的神经架构搜索混合框架
-2. [Expert Streaming: Accelerating Low-Batch MoE Inference via Multi-chiplet Architecture and Dynamic Expert Trajectory Scheduling](/202604/04/2603.27624v1-expert-streaming-accelerating-low-batch-moe-inference-via-multi-chiplet-architecture-and-dynamic-expert-trajectory-scheduling)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：边缘MoE推理的多芯粒架构与调度
-3. [Q-DIVER: Integrated Quantum Transfer Learning and Differentiable Quantum Architecture Search with EEG Data](/202604/04/2603.28122v1-q-diver-integrated-quantum-transfer-learning-and-differentiable-quantum-architecture-search-with-eeg-data)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：用于任务最优电路拓扑的可微分量子架构搜索
-4. [BlankSkip: Early-exit Object Detection onboard Nano-drones](/202604/04/2603.28149v1-blankskip-early-exit-object-detection-onboard-nano-drones)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限纳米无人机的目标检测早退自适应深度神经网络
-5. [A Switch-Centric In-Network Architecture for Accelerating LLM Inference in Shared-Memory Network](/202604/04/2603.28239v1-a-switch-centric-in-network-architecture-for-accelerating-llm-inference-in-shared-memory-network)  
+1. [A Switch-Centric In-Network Architecture for Accelerating LLM Inference in Shared-Memory Network](/202604/05/2603.28239v2-a-switch-centric-in-network-architecture-for-accelerating-llm-inference-in-shared-memory-network)  
    标签：评分：8.0/10、query:hwnas
    evidence：通过软硬件协同设计加速大模型推理的在网计算架构
-6. [Kernel-Smith: A Unified Recipe for Evolutionary Kernel Optimization](/202604/04/2603.28342v1-kernel-smith-a-unified-recipe-for-evolutionary-kernel-optimization)  
+2. [A Semantic Observer Layer for Autonomous Vehicles: Pre-Deployment Feasibility Study of VLMs for Low-Latency Anomaly Detection](/202604/05/2603.28888v1-a-semantic-observer-layer-for-autonomous-vehicles-pre-deployment-feasibility-study-of-vlms-for-low-latency-anomaly-detection)  
    标签：评分：8.0/10、query:hwnas
-   evidence：结合编译反馈的进化算子与内核生成
+   evidence：低延迟VLM推理的量化与硬件优化
+3. [A Multi-Sensor Fusion Parking Barrier System with Lightweight Vision on Edge](/202604/05/2603.29126v1-a-multi-sensor-fusion-parking-barrier-system-with-lightweight-vision-on-edge)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：针对边缘设备的轻量化视觉与结构剪枝
+4. [Exploration of Energy and Throughput Tradeoffs for Dataflow Networks](/202604/05/2603.29367v1-exploration-of-energy-and-throughput-tradeoffs-for-dataflow-networks)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：数据流网络的能量和吞吐量权衡
+5. [From Skeletons to Semantics: Design and Deployment of a Hybrid Edge-Based Action Detection System for Public Safety](/202604/05/2603.29777v1-from-skeletons-to-semantics-design-and-deployment-of-a-hybrid-edge-based-action-detection-system-for-public-safety)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：边缘端动作检测系统的设计与部署
+6. [RePart: Efficient Hypergraph Partitioning with Logic Replication Optimization for Multi-FPGA System](/202604/05/2604.00780v1-repart-efficient-hypergraph-partitioning-with-logic-replication-optimization-for-multi-fpga-system)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：多FPGA系统的拓扑感知优化
 
 ### 速读区论文标签
-1. [StreamingVLA: Streaming Vision-Language-Action Model with Action Flow Matching and Adaptive Early Observation](/202604/04/2603.28565v1-streamingvla-streaming-vision-language-action-model-with-action-flow-matching-and-adaptive-early-observation)  
+1. [CuTeGen: An LLM-Based Agentic Framework for Generation and Optimization of High-Performance GPU Kernels using CuTe](/202604/05/2604.01489v1-cutegen-an-llm-based-agentic-framework-for-generation-and-optimization-of-high-performance-gpu-kernels-using-cute)  
    标签：评分：8.0/10、query:hwnas
-   evidence：资源受限边缘平台的效率挑战
-2. [GPU-Accelerated Optimization of Transformer-Based Neural Networks for Real-Time Inference](/202604/04/2603.28708v1-gpu-accelerated-optimization-of-transformer-based-neural-networks-for-real-time-inference)  
+   evidence：高性能GPU算子内核的自动生成与优化
+2. [Prototype-Based Low Altitude UAV Semantic Segmentation](/202604/05/2604.01550v1-prototype-based-low-altitude-uav-semantic-segmentation)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对Transformer实时推理的GPU加速优化和混合精度技术
-3. [Improving Efficiency of GPU Kernel Optimization Agents using a Domain-Specific Language and Speed-of-Light Guidance](/202604/04/2603.29010v1-improving-efficiency-of-gpu-kernel-optimization-agents-using-a-domain-specific-language-and-speed-of-light-guidance)  
+   evidence：针对资源受限边缘设备的高效分割
+3. [Swift-SVD: Theoretical Optimality Meets Practical Efficiency in Low-Rank LLM Compression](/202604/05/2604.01609v1-swift-svd-theoretical-optimality-meets-practical-efficiency-in-low-rank-llm-compression)  
    标签：评分：8.0/10、query:hwnas
-   evidence：使用领域特定语言和编译引导的GPU内核优化
-4. [Quantization with Unified Adaptive Distillation to enable multi-LoRA based one-for-all Generative Vision Models on edge](/202604/04/2603.29535v1-quantization-with-unified-adaptive-distillation-to-enable-multi-lora-based-one-for-all-generative-vision-models-on-edge)  
+   evidence：用于降低LLM内存和带宽需求的硬件友好型低秩压缩
+4. [LiteInception: A Lightweight and Interpretable Deep Learning Framework for General Aviation Fault Diagnosis](/202604/05/2604.01725v1-liteinception-a-lightweight-and-interpretable-deep-learning-framework-for-general-aviation-fault-diagnosis)  
    标签：评分：8.0/10、query:hwnas
-   evidence：边缘部署生成模型的量化与蒸馏
-5. [UNIFERENCE: A Discrete Event Simulation Framework for Developing Distributed AI Models](/202604/04/2603.26469v1-uniference-a-discrete-event-simulation-framework-for-developing-distributed-ai-models)  
+   evidence：资源受限边缘设备的轻量化框架
+5. [Decompose, Mix, Adapt: A Unified Framework for Parameter-Efficient Neural Network Recombination and Compression](/202604/05/2603.27383v1-decompose-mix-adapt-a-unified-framework-for-parameter-efficient-neural-network-recombination-and-compression)  
    标签：评分：7.0/10、query:hwnas
-   evidence：用于分布式AI异构设备和网络建模的仿真框架
-6. [Rocks, Pebbles and Sand: Modality-aware Scheduling for Multimodal Large Language Model Inference](/202604/04/2603.26498v1-rocks-pebbles-and-sand-modality-aware-scheduling-for-multimodal-large-language-model-inference)  
+   evidence：针对资源受限边缘设备的模型压缩与适配
+6. [K-Means Based TinyML Anomaly Detection and Distributed Model Reuse via the Distributed Internet of Learning (DIoL)](/202604/05/2603.27393v1-k-means-based-tinyml-anomaly-detection-and-distributed-model-reuse-via-the-distributed-internet-of-learning-diol)  
    标签：评分：7.0/10、query:hwnas
-   evidence：模态感知调度以优化多模态大模型推理的资源利用率
-7. [On the Codesign of Scientific Experiments and Industrial Systems](/202604/04/2603.26613v1-on-the-codesign-of-scientific-experiments-and-industrial-systems)  
+   evidence：用于资源受限微控制器的轻量级TinyML异常检测
+7. [TurboAngle: Near-Lossless KV Cache Compression via Uniform Angle Quantization](/202604/05/2603.27467v1-turboangle-near-lossless-kv-cache-compression-via-uniform-angle-quantization)  
    标签：评分：7.0/10、query:hwnas
-   evidence：硬件与软件解决方案的协同设计
-8. [Throughput Optimization as a Strategic Lever in Large-Scale AI Systems: Evidence from Dataloader and Memory Profiling Innovations](/202604/04/2603.26823v1-throughput-optimization-as-a-strategic-lever-in-large-scale-ai-systems-evidence-from-dataloader-and-memory-profiling-innovations)  
+   evidence：通过量化进行KV缓存压缩以提高内存效率
+8. [Beating vDSP: A 138 GFLOPS Radix-8 Stockham FFT on Apple Silicon via Two-Tier Register-Threadgroup Memory Decomposition](/202604/05/2603.27569v1-beating-vdsp-a-138-gflops-radix-8-stockham-fft-on-apple-silicon-via-two-tier-register-threadgroup-memory-decomposition)  
    标签：评分：7.0/10、query:hwnas
-   evidence：大规模AI的吞吐量优化与内存分析
-9. [Learnable Instance Attention Filtering for Adaptive Detector Distillation](/202604/04/2603.26088v1-learnable-instance-attention-filtering-for-adaptive-detector-distillation)  
+   evidence：针对Apple Silicon计算利用率的内存分解
+9. [Efficient CMOS Invertible Logic Using Stochastic Computing](/202604/05/2603.27030v1-efficient-cmos-invertible-logic-using-stochastic-computing)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于紧凑学生模型和部署效率的知识蒸馏
-10. [CarbonEdge: Carbon-Aware Deep Learning Inference Framework for Sustainable Edge Computing](/202604/04/2603.27420v1-carbonedge-carbon-aware-deep-learning-inference-framework-for-sustainable-edge-computing)  
+   evidence：脉冲神经网络的CMOS硬件实现
+10. [E-TIDE: Fast, Structure-Preserving Motion Forecasting from Event Sequences](/202604/05/2603.27757v1-e-tide-fast-structure-preserving-motion-forecasting-from-event-sequences)  
    标签：评分：6.0/10、query:hwnas
-   evidence：边缘计算的碳感知调度和模型分区
-11. [KVSculpt: KV Cache Compression as Distillation](/202604/04/2603.27819v1-kvsculpt-kv-cache-compression-as-distillation)  
+   evidence：资源受限环境下的低功耗运动预测
+11. [Hierarchical Tensor Network Structure Search for High-Dimensional Data](/202604/05/2603.27856v1-hierarchical-tensor-network-structure-search-for-high-dimensional-data)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于高效长上下文LLM推理的KV缓存压缩
+   evidence：张量网络的层次结构搜索
 
 
 <div class="dpr-home-promo-card">
