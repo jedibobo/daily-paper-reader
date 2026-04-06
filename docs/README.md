@@ -6,73 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-05
-- 运行时间：2026-04-05 19:24:24 UTC
+- 最新运行日期：2026-04-06
+- 运行时间：2026-04-06 19:53:48 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日深度解析 17 篇前沿成果，重点攻克大模型推理加速与自动驾驶实时感知难题。
-核心突破在于提出以交换机为中心的共享内存架构，以及利用 VLM 实现车载异常检测的低延迟方案。
-建议关注大模型与底层硬件的协同优化，以及在无人机等边缘场景下的语义分割新趋势。
-- 详情：[/202604/05/README](/202604/05/README)
+今日深度研读 17 篇论文，重点聚焦轻量化 KAN 网络在 SAR 图像识别中的性能突破。
+核心结论指出，利用 Gram 多项式与参数共享技术可大幅优化模型效率，同时自适应数据类型与 GPU 集群平衡技术正成为算力优化的关键。
+推荐关注高效架构设计与底层硬件协同，这是提升复杂任务处理效能的必经之路。
+- 详情：[/202604/06/README](/202604/06/README)
 
 ### 精读区论文标签
-1. [A Switch-Centric In-Network Architecture for Accelerating LLM Inference in Shared-Memory Network](/202604/05/2603.28239v2-a-switch-centric-in-network-architecture-for-accelerating-llm-inference-in-shared-memory-network)  
+1. [Light-ResKAN: A Parameter-Sharing Lightweight KAN with Gram Polynomials for Efficient SAR Image Recognition](/202604/06/2604.01903v1-light-reskan-a-parameter-sharing-lightweight-kan-with-gram-polynomials-for-efficient-sar-image-recognition)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：用于资源受限边缘设备高效SAR图像识别的轻量化KAN
+2. [Light-ResKAN: A Parameter-Sharing Lightweight KAN with Gram Polynomials for Efficient SAR Image Recognition](/202604/06/2604.01903v2-light-reskan-a-parameter-sharing-lightweight-kan-with-gram-polynomials-for-efficient-sar-image-recognition)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：用于资源受限边缘设备SAR图像识别的轻量化模型
+3. [ITQ3_S: High-Fidelity 3-bit LLM Inference via Interleaved Ternary Quantization with Rotation-Domain Smoothing](/202604/06/2603.27914v2-itq3s-high-fidelity-3-bit-llm-inference-via-interleaved-ternary-quantization-with-rotation-domain-smoothing)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过软硬件协同设计加速大模型推理的在网计算架构
-2. [A Semantic Observer Layer for Autonomous Vehicles: Pre-Deployment Feasibility Study of VLMs for Low-Latency Anomaly Detection](/202604/05/2603.28888v1-a-semantic-observer-layer-for-autonomous-vehicles-pre-deployment-feasibility-study-of-vlms-for-low-latency-anomaly-detection)  
+   evidence：针对硬件优化的3比特量化及CUDA共享内存优化
+4. [MCPT-Solver: An Monte Carlo Algorithm Solver Using MTJ Devices for Particle Transport Problems](/202604/06/2603.28042v1-mcpt-solver-an-monte-carlo-algorithm-solver-using-mtj-devices-for-particle-transport-problems)  
    标签：评分：8.0/10、query:hwnas
-   evidence：低延迟VLM推理的量化与硬件优化
-3. [A Multi-Sensor Fusion Parking Barrier System with Lightweight Vision on Edge](/202604/05/2603.29126v1-a-multi-sensor-fusion-parking-barrier-system-with-lightweight-vision-on-edge)  
+   evidence：基于自旋器件的硬件求解器，弥合随机算法与确定性硬件之间的失配
+5. [AXON: An Automated Netlist Optimization Framework for High-Speed Adders](/202604/06/2603.28184v1-axon-an-automated-netlist-optimization-framework-for-high-speed-adders)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对边缘设备的轻量化视觉与结构剪枝
-4. [Exploration of Energy and Throughput Tradeoffs for Dataflow Networks](/202604/05/2603.29367v1-exploration-of-energy-and-throughput-tradeoffs-for-dataflow-networks)  
+   evidence：集成架构搜索与单元感知映射的自动化网表优化
+6. [TwinMixing: A Shuffle-Aware Feature Interaction Model for Multi-Task Segmentation](/202604/06/2603.28233v1-twinmixing-a-shuffle-aware-feature-interaction-model-for-multi-task-segmentation)  
    标签：评分：8.0/10、query:hwnas
-   evidence：数据流网络的能量和吞吐量权衡
-5. [From Skeletons to Semantics: Design and Deployment of a Hybrid Edge-Based Action Detection System for Public Safety](/202604/05/2603.29777v1-from-skeletons-to-semantics-design-and-deployment-of-a-hybrid-edge-based-action-detection-system-for-public-safety)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：边缘端动作检测系统的设计与部署
-6. [RePart: Efficient Hypergraph Partitioning with Logic Replication Optimization for Multi-FPGA System](/202604/05/2604.00780v1-repart-efficient-hypergraph-partitioning-with-logic-replication-optimization-for-multi-fpga-system)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：多FPGA系统的拓扑感知优化
+   evidence：在低成本硬件上实现自动驾驶分割的实时性能
 
 ### 速读区论文标签
-1. [CuTeGen: An LLM-Based Agentic Framework for Generation and Optimization of High-Performance GPU Kernels using CuTe](/202604/05/2604.01489v1-cutegen-an-llm-based-agentic-framework-for-generation-and-optimization-of-high-performance-gpu-kernels-using-cute)  
+1. [Adaptive Block-Scaled Data Types](/202604/06/2603.28765v1-adaptive-block-scaled-data-types)  
    标签：评分：8.0/10、query:hwnas
-   evidence：高性能GPU算子内核的自动生成与优化
-2. [Prototype-Based Low Altitude UAV Semantic Segmentation](/202604/05/2604.01550v1-prototype-based-low-altitude-uav-semantic-segmentation)  
+   evidence：硬件支持的4位量化数据类型
+2. [Scalable Co-Design via Linear Design Problems: Compositional Theory and Algorithms](/202604/06/2603.29083v1-scalable-co-design-via-linear-design-problems-compositional-theory-and-algorithms)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限边缘设备的高效分割
-3. [Swift-SVD: Theoretical Optimality Meets Practical Efficiency in Low-Rank LLM Compression](/202604/05/2604.01609v1-swift-svd-theoretical-optimality-meets-practical-efficiency-in-low-rank-llm-compression)  
+   evidence：子系统能力与资源需求协同设计的组合理论
+3. [From Skew to Symmetry: Node-Interconnect Multi-Path Balancing with Execution-time Planning for Modern GPU Clusters](/202604/06/2604.00317v1-from-skew-to-symmetry-node-interconnect-multi-path-balancing-with-execution-time-planning-for-modern-gpu-clusters)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于降低LLM内存和带宽需求的硬件友好型低秩压缩
-4. [LiteInception: A Lightweight and Interpretable Deep Learning Framework for General Aviation Fault Diagnosis](/202604/05/2604.01725v1-liteinception-a-lightweight-and-interpretable-deep-learning-framework-for-general-aviation-fault-diagnosis)  
+   evidence：通过平衡多路径互连最大化硬件利用率
+4. [Spectral Compact Training: Pre-Training Large Language Models via Permanent Truncated SVD and Stiefel QR Retraction](/202604/06/2604.00733v1-spectral-compact-training-pre-training-large-language-models-via-permanent-truncated-svd-and-stiefel-qr-retraction)  
    标签：评分：8.0/10、query:hwnas
-   evidence：资源受限边缘设备的轻量化框架
-5. [Decompose, Mix, Adapt: A Unified Framework for Parameter-Efficient Neural Network Recombination and Compression](/202604/05/2603.27383v1-decompose-mix-adapt-a-unified-framework-for-parameter-efficient-neural-network-recombination-and-compression)  
+   evidence：通过谱因子减少消费级硬件上的训练内存占用
+5. [RTLSeek: Boosting the LLM-Based RTL Generation with Multi-Stage Diversity-Oriented Reinforcement Learning](/202604/06/2603.27630v1-rtlseek-boosting-the-llm-based-rtl-generation-with-multi-stage-diversity-oriented-reinforcement-learning)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对资源受限边缘设备的模型压缩与适配
-6. [K-Means Based TinyML Anomaly Detection and Distributed Model Reuse via the Distributed Internet of Learning (DIoL)](/202604/05/2603.27393v1-k-means-based-tinyml-anomaly-detection-and-distributed-model-reuse-via-the-distributed-internet-of-learning-diol)  
+   evidence：基于大语言模型的硬件设计RTL生成
+6. [Gated Condition Injection without Multimodal Attention: Towards Controllable Linear-Attention Transformers](/202604/06/2603.27666v1-gated-condition-injection-without-multimodal-attention-towards-controllable-linear-attention-transformers)  
    标签：评分：7.0/10、query:hwnas
-   evidence：用于资源受限微控制器的轻量级TinyML异常检测
-7. [TurboAngle: Near-Lossless KV Cache Compression via Uniform Angle Quantization](/202604/05/2603.27467v1-turboangle-near-lossless-kv-cache-compression-via-uniform-angle-quantization)  
+   evidence：用于边缘设备高效生成的线性注意力架构
+7. [Trust-Aware Routing for Distributed Generative AI Inference at the Edge](/202604/06/2603.28622v1-trust-aware-routing-for-distributed-generative-ai-inference-at-the-edge)  
    标签：评分：7.0/10、query:hwnas
-   evidence：通过量化进行KV缓存压缩以提高内存效率
-8. [Beating vDSP: A 138 GFLOPS Radix-8 Stockham FFT on Apple Silicon via Two-Tier Register-Threadgroup Memory Decomposition](/202604/05/2603.27569v1-beating-vdsp-a-138-gflops-radix-8-stockham-fft-on-apple-silicon-via-two-tier-register-threadgroup-memory-decomposition)  
+   evidence：跨异构边缘设备的分布式生成式AI推理
+8. [Loop Control Management in Tightly Coupled Processor Arrays (TCPAs)](/202604/06/2603.28645v1-loop-control-management-in-tightly-coupled-processor-arrays-tcpas)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对Apple Silicon计算利用率的内存分解
-9. [Efficient CMOS Invertible Logic Using Stochastic Computing](/202604/05/2603.27030v1-efficient-cmos-invertible-logic-using-stochastic-computing)  
+   evidence：减少并行循环加速器的控制开销
+9. [Amped: Adaptive Multi-stage Non-edge Pruning for Edge Detection](/202604/06/2603.27661v1-amped-adaptive-multi-stage-non-edge-pruning-for-edge-detection)  
    标签：评分：6.0/10、query:hwnas
-   evidence：脉冲神经网络的CMOS硬件实现
-10. [E-TIDE: Fast, Structure-Preserving Motion Forecasting from Event Sequences](/202604/05/2603.27757v1-e-tide-fast-structure-preserving-motion-forecasting-from-event-sequences)  
+   evidence：自适应剪枝以减少计算量并促进实际部署
+10. [What an Autonomous Agent Discovers About Molecular Transformer Design: Does It Transfer?](/202604/06/2603.28015v1-what-an-autonomous-agent-discovers-about-molecular-transformer-design-does-it-transfer)  
    标签：评分：6.0/10、query:hwnas
-   evidence：资源受限环境下的低功耗运动预测
-11. [Hierarchical Tensor Network Structure Search for High-Dimensional Data](/202604/05/2603.27856v1-hierarchical-tensor-network-structure-search-for-high-dimensional-data)  
+   evidence：跨不同序列领域的自动架构搜索
+11. [ORSIFlow: Saliency-Guided Rectified Flow for Optical Remote Sensing Salient Object Detection](/202604/06/2603.28584v1-orsiflow-saliency-guided-rectified-flow-for-optical-remote-sensing-salient-object-detection)  
    标签：评分：6.0/10、query:hwnas
-   evidence：张量网络的层次结构搜索
+   evidence：高效遥感目标检测
 
 
 <div class="dpr-home-promo-card">
