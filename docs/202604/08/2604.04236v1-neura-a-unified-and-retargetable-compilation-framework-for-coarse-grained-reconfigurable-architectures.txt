@@ -1,0 +1,1826 @@
+Title: NEURA: A Unified and Retargetable Compilation Framework for Coarse-Grained Reconfigurable Architectures
+
+URL Source: https://arxiv.org/pdf/2604.04236v1
+
+Published Time: Tue, 07 Apr 2026 01:27:11 GMT
+
+Number of Pages: 26
+
+Markdown Content:
+> Accepted by PLDI 2026
+
+NEURA: A Unified and Retargetable Compilation Framework for Coarse-Grained Reconfigurable Architectures 
+
+SHANGKUN LI, The Hong Kong University of Science and Technology, Hong Kong 
+
+JINMING GE, The Hong Kong University of Science and Technology, Hong Kong 
+
+DIYUAN TAO, Independent Researcher, China 
+
+ZEYU LI, The Hong Kong University of Science and Technology, Hong Kong 
+
+JIAWEI LIANG, The Hong Kong University of Science and Technology, Hong Kong 
+
+LINFENG DU, The Hong Kong University of Science and Technology, Hong Kong 
+
+JIANG XU, The Hong Kong University of Science and Technology (Guangzhou), China 
+
+WEI ZHANG ∗, The Hong Kong University of Science and Technology, Hong Kong 
+
+CHENG TAN ∗, Google and Arizona State University, USA Coarse-Grained Reconfigurable Architectures (CGRAs) are a promising and versatile accelerator platform, offering a balance between the performance and efficiency of specialized accelerators and the software programmability. However, their full potential is severely hindered by control flow in accelerated kernels, as the control flow (e.g., loops, branches) is fundamentally incompatible with the parallel, data-driven CGRA fabric. Prior strategies to resolve this mismatch in CGRA kernel acceleration are either inefficient, sacrificing performance for generality, or lack generality due to the difficulty of adapting them across different execution models. Thus, a general and unified solution for efficient CGRA kernel acceleration remains elusive. This paper introduces NEURA, a unified and retargetable compilation framework that systematically resolves the control-dataflow mismatch in CGRAs. NEURA’s core innovation is a novel, pure dataflow inter-mediate representation (IR) built on a predicated type system. In this IR, control contexts are embedded as a predicate within each data, making control an intrinsic property of data. This mechanism enables NEURA to systematically flatten complex control flow into a single unified dataflow graph. This unified representation decouples kernel representation from hardware, empowering NEURA to retarget diverse CGRAs with different execution models and microarchitectural features. When targeted to a high-performance spatio-temporal 
+
+CGRA, NEURA delivers a 2.20 × speedup on kernel benchmarks and up to 2.71 × geometric mean speedup on real-world applications over state-of-the-art (SOTA) high-performance baselines. It also provides a com-petitive solution against the SOTA low-power CGRA when retargeted to a spatial-only CGRA. NEURA is open-source and available at https://github.com/coredac/neura .
+
+CCS Concepts: • Computer systems organization → Data flow architectures ; Reconfigurable comput-ing ; • Software and its engineering → Compilers .Additional Key Words and Phrases: Dataflow Computing, Coarse-Grained Reconfigurable Architecture (CGRA), Dataflow Compiler 
+
+1 Introduction 
+
+The relentless pursuit of performance in the post-Moore era [ 12 , 15 , 28 ] has spurred specialized hardware accelerators. However, these accelerators are often constrained by lengthy design cycles 
+
+∗Co-Corresponding Authors Authors’ Contact Information: Shangkun Li, shangkun.li@connect.ust.hk, The Hong Kong University of Science and Technology, Hong Kong; Jinming Ge, jgeab@connect.ust.hk, The Hong Kong University of Science and Technology, Hong Kong; Diyuan Tao, 1173710114az@gmail.com, Independent Researcher, China; Zeyu Li, zliki@connect.ust.hk, The Hong Kong University of Science and Technology, Hong Kong; Jiawei Liang, jliangbr@connect.ust.hk, The Hong Kong University of Science and Technology, Hong Kong; Linfeng Du, linfeng.du@connect.ust.hk, The Hong Kong University of Science and Technology, Hong Kong; Jiang Xu, jiang.xu@hkust-gz.edu.cn, The Hong Kong University of Science and Technology (Guangzhou), China; Wei Zhang, wei.zhang@ust.hk, The Hong Kong University of Science and Technology, Hong Kong; Cheng Tan, chengtan@google.com, Google and Arizona State University, USA. 
+
+> arXiv:2604.04236v1 [cs.PL] 5 Apr 2026 Accepted by PLDI 2026
+
+2 Shangkun Li, Jinming Ge, Diyuan Tao, Zeyu Li, Jiawei Liang, Linfeng Du, Jiang Xu, Wei Zhang, and Cheng Tan 
+
+and rigid architectures [ 7 , 66 , 71 , 75 ], struggling to adapt to rapid algorithmic evolution. Furthermore, edge devices cannot deploy multiple specialized accelerators due to power and area constraints [ 19 ]. These limitations have spurred significant interest in Coarse-Grained Reconfigurable Architectures (CGRAs), which offer a balanced solution between the performance and efficiency of specialized accelerators and the flexibility for diverse computational demands. A CGRA is a spatial array of interconnected compute tiles [ 16 , 20 , 21 , 23 , 52 , 60 , 68 , 69 ], communi-cating via a Network-on-Chip (NoC), as shown in Fig. 1(a). Each tile contains several function units (FUs) for computation, a crossbar for intra- or inter-tile routing, register files for temporary data storage, and a control memory, as shown in Fig. 1(b). By loading configurations into control mem-ory, the behavior of the FUs and the connections established by the crossbar can be reconfigured cycle-by-cycle. A CGRA compiler typically transforms a computational kernel into a Control-Data Flow Graph (CDFG) representation [ 1 , 43 ], as this naturally captures both computation and control. The CDFG consists of a Control Flow Graph (CFG) and Data Flow Graphs (DFGs). A DFG depicts operations as nodes and data dependencies as edges, as shown in Fig. 2(b). Each DFG corresponds to the computation within a basic block (BB). The CFG is a graph whose nodes are BBs, and its edges represent the control flows between BBs, as shown in Fig. 2(a). The compiler maps the DFG nodes onto tiles’ FUs and DFG edges onto the routing resources (e.g., crossbar, registers). This allows the CGRA to exploit instruction-level parallelism (ILP) within a single DFG. Host   
+
+> Processor Memory
+> CGRA
+> DMA Unit
+> T
+> T
+> T
+> T
+> T
+> T
+> T
+> T
+> T
+> T
+> T
+> T
+> T
+> T
+> T
+> T
+> SRAM
+> Accelerator
+> Respond/ Cmd
+> Data/
+> Control Signal
+> Bypass
+> Buffers
+> Function Units
+> Crossbar
+> Control
+> Memory
+> Unit
+> Regs
+> Regs
+> …
+> N
+> E
+> S
+> W
+> SRAM
+> (a) CGRA Architecture (b) CGRA Tile Design
+
+Fig. 1. CGRA Architecture — (a) The CGRA is invoked via the accelerator command interface by the host processor. Control signals generated by the host processor and data required for com-putation are loaded through the Direct Memory Access (DMA) Unit from shared memory into the CGRA’s SRAM and each tile’s control memory unit. (b) CGRA tile components. 
+
+However, while the DFG maps naturally onto the CGRA, the CFG presents a fundamental challenge to kernel acceleration. The CFG is the sequential, control-driven logic (e.g., branches, loops) that dic-tates transitions between different DFGs. A CGRA, in contrast, is configured to execute a specific DFG in a parallel, data-driven manner. It lacks a native mechanism to directly interpret or execute these CFG constructs. This creates a significant control-dataflow semantic gap when accelerating a ker-nel on CGRA: a fundamental mismatch between the sequential control logic of the CFG and the parallel dataflow execution of CGRAs. This gap severely constrains CGRA’s ability to exploit ILP across DFGs, becoming a primary obstacle to achiev-ing the full performance potential of CGRAs. Prior attempts to bridge this control-dataflow semantic gap have followed several strategies, but our observations indicate that they all suffer from critical pitfalls: (1) the common approach of managing the CFG externally using host CPUs or dedicated hardware controllers inherently serializes kernel execution at the BB [ 13 , 52 ] or larger fused-block level [ 56 , 76 ], creating per-formance bottlenecks due to communication and reconfiguration overheads, (2) the strategy of flattening the entire CDFG into a single DFG using steering control [ 20 , 21 , 23 ] is widely adopted for 
+
+spatial-only execution (see Sec. 2.1) but difficult to adapt to spatio-temporal execution, thereby limiting its architectural generality, and (3) existing predication techniques [ 2 , 38 , 43 ], applied in some CGRA compilers [ 25 , 62 , 70 ], are effective for simple branches (e.g., if-conversions) or a single loop but fail to represent hierarchical control dependencies (e.g., nested loop controls), thus still relying on serialized execution for the remaining control structures [ 56 , 76 ]. The pitfalls inherent in these strategies reveal that existing approaches fail to provide a unified, general, and retargetable approach capable of efficiently managing control flows across diverse CGRA architectures. Accepted by PLDI 2026 
+
+NEURA: A Unified and Retargetable Compilation Framework for Coarse-Grained Reconfigurable Architectures 3
+
+To address the pitfalls of prior works, we propose NEURA — a novel compilation framework centered on Natively Executing a Unified Intermediate Representation on CGR As. NEURA’s core idea is a new intermediate representation (IR) designed specifically for CGRA dataflow execution. This IR is designed to (1) express control flows of a kernel in a unified dataflow manner for high ILP , (2) serve as an extensible, retargetable foundation for diverse CGRAs by decoupling from specific execution models and hardware primitives , and (3) provide native support for hierarchical control dependencies . By seamlessly integrating control flows into data dependencies, this unified representation eliminates the control-dataflow semantic gap ,enabling efficient, holistic kernel execution on CGRAs. The specific contributions are as follows: 
+
+• A Unified and Extensible Dataflow IR: We propose the NEURA Dataflow IR , a pure dataflow representation built on a novel predicated type system and a general operation set. It holistically captures complex, hierarchical control structures in kernels. Its extensible design allows the IR to model diverse microarchitectural features and execution models; 
+
+• A Systematic Methodology for Flattening Control Flow: We introduce a systematic and provably complete methodology that automatically transforms kernels from a conventional CDFG representation into the pure NEURA Dataflow IR; 
+
+• A Versatile and Retargetable Compilation Framework: We propose an end-to-end CGRA compilation framework, integrating frontends, transformations, hardware-agnostic/-specific optimizations, mapping, an IR interpreter, and a cycle-accurate simulator. Leveraging the IR’s extensibility, it provides a retargetable solution for diverse CGRA architectures; 
+
+• A Comprehensive Evaluation on NEURA: We conduct extensive evaluations validating NEURA as a unified, retargetable framework for both high-performance and low-power domains across diverse benchmarks. When targeting high-performance spatio-temporal 
+
+architecture, NEURA achieves state-of-the-art (SOTA) performance, delivering an average speedup of 2.20 × on kernel benchmarks and up to 2.71 × geometric mean speedup on real-world applications over leading baselines. NEURA also proves its generality by offering a competitive solution when retargeted to a low-power spatial-only architecture in a direct comparison against the SOTA low-power framework. 
+
+2 Background and Motivation 
+
+This section begins by introducing the two primary execution models of CGRAs and establishing the trade-offs that motivate our design to support both execution models in Sec. 2.1. We then use a motivating example to deconstruct the three prevailing strategies for handling control flow in Sec. 2.2, revealing the pitfalls that necessitate the design of NEURA. 
+
+2.1 Execution Models of CGRAs 
+
+To understand the compilation challenges for CGRAs, we first consider their execution models. Using the synthetic kernel in Fig. 2(a), we illustrate the execution of a simple loop body’s (ignoring loop control for simplicity) DFG. CGRAs typically employ modulo scheduling [ 54 ] to pipeline loop iterations, initiating a new iteration every Initiation Interval (II) cycles to maximize ILP. How the DFG is mapped to the hardware defines two distinct execution models with different trade-offs. 
+
+Spatial-Only execution model statically maps a DFG or a partitioned subgraph onto the CGRA’s tile array, creating a one-to-one mapping between DFG nodes and physical tiles, as shown in the left part of Fig. 2(c). Once configured, each tile’s function and routing are immutable for the duration of the mapped graph’s execution. This static, fully-spatial approach eliminates the cycle-by-cycle runtime reconfiguration overhead, making it exceptionally energy-efficient. However, this static nature introduces inflexibility when executing a DFG larger than the tile array. The compiler must Accepted by PLDI 2026 
+
+4 Shangkun Li, Jinming Ge, Diyuan Tao, Zeyu Li, Jiawei Liang, Linfeng Du, Jiang Xu, Wei Zhang, and Cheng Tan 
+
+Table 1. Execution Models of CGRAs. 
+
+CGRA Execution Model Generality Performance Energy Efficiency Hardware Utilization Representative Works Spatial-Only Low Medium ∗ High Medium ∗ SNAFU [22], RipTide [23], Marionette [13], NUPEA [20], Plasticine [52], DySER [24] 
+
+Spatio-Temporal High High Low High ICED [60], Plaid [35], DRIPS [59], HyCUBE [31], ADRES [45] 
+
+∗ Performance and hardware utilization degrade when executing irregular dataflow patterns. 
+
+partition the large DFG into multiple subgraphs and sequence their execution. This introduces compiler challenges for optimal DFG partitioning and incurs context-switching overheads when reconfiguring the array between subgraphs. Due to these trade-offs, this execution model is an ideal choice for low-power domains [22, 23]. 
+
+Spatio-Temporal execution model combines cycle-by-cycle resource-multiplexing with spatial mapping, as shown in the right part of Fig. 2(c). It allows each tile to be reconfigured every cycle to execute different operations [ 8 , 44 , 62 ]. This dynamic reconfigurability provides high flexibility, enabling even a compact tile array to execute large DFGs by dynamically reusing resources across cycles. This leads to higher hardware utilization and generality across diverse workloads. However, this execution model relies on complex spatio-temporal scheduling. Furthermore, cycle-by-cycle reconfiguration incurs high energy and area overheads. Due to these trade-offs, this execution model is typically the preferred choice for general-purpose and high-performance CGRAs .i < 8                                       
+
+> tmp =A[i] * B[i]
+> sum =tmp +sum *C[i]
+> i++
+> CFG
+> loop.cond :
+> loop.body :
+> loop.inc :
+> exit
+> 1:int A[8], B[8], C[8];
+> 2:int sum =0;
+> 3:for (int i=0;i<8; ++ i)
+> 4: {
+> 5:int tmp =A[i] * B[i];
+> 6:sum =tmp +sum *C[i];
+> 7:}
+
+DFG  
+
+> ×
+> n4
+> ×
+> n3
+> +
+> n5
+> ld
+> n0
+> ld
+> n1
+> ld
+> n2
+> A
+
+i B Ci i
+
+sum  
+
+> n3
+> n5 n4
+> n0
+> n1
+> n2
+> n5
+> n0
+> n1
+> n2
+> n3
+> n4
+> n0
+> n1
+> n2
+> n3
+> n4 n5
+> II = 2
+> Cycle 0 Cycle 1
+> Spatial -Only
+> Cycle 2
+> n0
+> n2
+> n1
+> n3
+> n4
+> n5
+> n0
+> n2
+> n1
+> n3
+> n4
+> II = 2
+> Cycle 0 Cycle 1 Cycle 2 Cycle 3
+> Spatio -Temporal
+
+(c) Two Execution Models (b) DFG (a) Code Snippet and CFG 
+
+> Iter #1  Iter #2
+
+Fig. 2. Kernel Representation and Execution Models — (a) A synthetic kernel and the CFG of this kernel. We show the source code instead of the assembly code in the CFG for simplicity. (b) The DFG of the loop body. (c) The 6-node DFG requires a larger 3 × 3 array to execute in a spatial-only CGRA. The spatio-temporal CGRA can execute the same DFG on a smaller 2 × 2 array by time-multiplexing the tiles. 
+
+The salient characteristics and trade-offs of these two execution models are summarized in Ta-ble 1. As discussed, both models possess unique strengths suited for distinct requirements. Fur-thermore, both remain prevalent and vital to the CGRA ecosys-tem, as evidenced by the continu-ous emergence of recent spatial-only [ 20 , 21 , 23 , 57 ] and spatio-temporal [ 35 , 53 , 60 , 72 ] architec-tures. However, existing compiler frameworks often rely on under-lying abstractions [ 13 , 20 , 21 , 60 ,76 ] that are difficult to general-ize across both execution models. They lack a versatile dataflow abstraction that can decouple computational and control logic from the specific execution model. Since both models are indispensable, NEURA’s objective is to provide a unified, retargetable compilation framework that seamlessly supports both. 
+
+2.2 Pitfalls of Existing Strategies to Bridge the Control-Dataflow Semantic Gap 
+
+As introduced in Sec. 1, accelerating kernels on CGRAs involves bridging the control-dataflow semantic gap between a kernel’s CDFG representation and the hardware’s dataflow fabric. Three primary strategies have emerged to tackle this challenge, but each introduces its own pitfall, ultimately failing to unlock the full potential of CGRAs. The motivating example in Fig. 3(a) — a kernel with a three-level control structure: two-level imperfect nested loops and an inner if-else 
+
+branch — exposes the fundamental limitations of existing strategies. Accepted by PLDI 2026 
+
+NEURA: A Unified and Retargetable Compilation Framework for Coarse-Grained Reconfigurable Architectures 5%i = phi ( 0, %inc1 )
+
+%cond1 = cmp lt , %i, 8
+
+(a) Code Snippet and CDFG 
+
+01 : void kernel (int A[8][ 8]) { 
+
+02 : // Loop 1 
+
+03 : for (int i = 0; i < 8; ++ i) {
+
+04 : A[i][ i] = 1;
+
+05 : // Loop 2 
+
+06 : for (int j = 0; j < i; ++ j) { 
+
+07 : if (A[i][ j] > 0) { 
+
+08 : A[i][ j] = A[i][ j] * 2;
+
+09 : } else {
+
+10 : A[i][ j] += 1;}}}} 
+
+(b) The CDFG Strategy 
+
+BB0 
+
+store %A , %i, %i, 1
+
+%1 = load %A , %i, %j 
+
+%mul = mul %1 , 2
+
+store %A , %i, %j , %mul 
+
+%2 = load %A , %i, %j 
+
+%sum = add %2 , 1
+
+store %A , %i, %j , %sum 
+
+%inc2 = add %j , 1
+
+loop1.cond: 
+
+loop1.body: 
+
+%j = phi ( 0, %inc2 )
+
+%cond2 = cmp lt , %j , %i 
+
+%0 = load %A , %i, %j 
+
+%br = cmp gt , %0 , 0
+
+%inc1 = add %i , 1
+
+loop 2.cond: 
+
+loop 2.body: 
+
+loop2.inc: 
+
+loop1.inc: 
+
+if.then :
+
+if.else :
+
+BB1 
+
+BB2 
+
+BB3 
+
+BB4 
+
+BB5 
+
+BB6 
+
+BB7 
+
+(c) The Steering Control Strategy 
+
+(d) The Limited Predication Strategy 
+
+Time 
+
+> BB 2
+> BB 4
+> BB 0
+> &
+> BB 1
+> BB 6
+
+Communication and reconfiguration time 
+
+A global controller or hardware embedded 
+
+in tiles 
+
+Execution order of blocks 
+
+> External
+> Controller
+
+Time 
+
+The predicated CDFG can be executed by both 
+
+the CDFG and the steering control strategy. 
+
+We only show the CDFG strategy here. 
+
+> BB0
+> BB8
+> BB 1
+> BB7
+> BB 2
+
+BB 4
+
+BB5 BB6 
+
+BB7 
+
+%0 = load %A , %i, %j 
+
+%p = cmp gt , %0 , 0
+
+%mul = mul %0 , 2
+
+%sum = add %0 , 1
+
+%1 = select %p , %mul ,
+
+%sum 
+
+store %A , %i, %j , %1 
+
+BB8 
+
+The Predication Transformation 
+
+If F
+
+If T
+
+If F
+
+exit If T
+
+If F
+
+If T
+
+Spatial -Only 
+
+Mapping 
+
+BB 0
+
+> BB 3
+
+BB 2
+
+BB 4
+
+BB 5
+
+BB 6
+
+> BB 7
+
+BB1 
+
+(e) NEURA’s Approach 
+
+Time 
+
+> Loop 1 Iteration
+
+…
+
+> BB0
+> BB0
+> BB 1
+> BB 2
+> BB 1
+> BB 2
+> BB 4
+> BB 5
+> BB 7
+> BB 2
+> BB 3
+
+Iter 1 
+
+Iter 2
+
+Data Token 
+
+Iter 1 
+
+Iter 2
+
+Unified DFG 
+
+> Loop 1 Iteration
+
+Unified DFG 
+
+Achieving More Aggressive Pipeline 
+
+& Higher ILP 
+
+Time 
+
+External 
+
+Controller 
+
+External 
+
+Controller 
+
+…
+
+The NUERA’s Lowering Process 
+
+Source CDFG 
+
+A Unified DFG 
+
+Represented in 
+
+SSA Format 
+
+NUERA Unified DFG 
+
+IR Builder 
+
+Optimizer 
+
+Execution 
+
+Dataflow 
+
+START 
+
+> BB 7
+
+Fig. 3. Motivating Example — (a) A synthetic kernel with imperfect nested loop and branch divergence and its CDFG. (b) The CDFG strategy serializes the execution of each BB via an external controller. (c) The steering control strategy flattens the control flow in the CFG for spatial-only execution. (d) Limited predication transforms the branch divergence into a single BB but fails to resolve the nested control flow with loops. (e) NEURA represents the kernel as a unified DFG, exploiting both intra- and inter-BB parallelism. 
+
+2.2.1 The CDFG Strategy: Serialization via External Controller. This strategy offloads CFG manage-ment to external controllers, such as a host CPU or dedicated control hardware [ 13 , 24 , 52 , 56 , 76 ]. As shown in Fig. 3(b), the controller sequentially dispatches each BB or larger fused-block to the CGRA. For each BB or fused-block, the controller first configures the CGRA fabric for the corresponding DFG, triggers its execution, and then waits for completion before proceeding to the next (fused-)block. This stall introduces a lock-step interaction, creating execution bubbles due to communication and CGRA reconfiguration. This results in Pitfall I: Serializing execution at the BB or fused-block level severely undermines inter-block parallelism. 
+
+2.2.2 The Steering Control Strategy: Flattening the CDFG via Steering Control. This strategy flattens the CDFG into a single DFG by converting control dependencies into data dependencies using steering control ( 𝜙 −1) [ 11 , 14 , 21 , 23 ]. At runtime, data values are steered through pre-configured paths based on condition results, as shown in Fig. 3(c). While this creates a unified DFG, it is predominantly adopted in the spatial-only execution model. Because spatio-temporal execution requires the compiler to schedule operations across both spatial and temporal dimensions, it is difficult to determine the execution timing and placement for operations that depend on dynamically steered data tokens, since these tokens may experience variable latencies when traversing different execution paths. Consequently, this strategy is hard to adapt to spatio-temporal execution models. Furthermore, statically encoding complex control paths as physical routes often results in long, circuitous routing paths that drastically degrade performance. These drawbacks constitute Pitfall Accepted by PLDI 2026 
+
+6 Shangkun Li, Jinming Ge, Diyuan Tao, Zeyu Li, Jiawei Liang, Linfeng Du, Jiang Xu, Wei Zhang, and Cheng Tan 
+
+Table 2. Comparison between NEURA and Existing CGRA Frameworks ( – Fully Supported, G#– Partially Supported, #– Not Supported)                                                                    
+
+> Framework Input Language Control Flow Strategy Multi--Frontend Microarchitectural Adaptability ∗
+> Holistic Dataflow Representation †
+> Execution Model Versatility ‡
+> Optimization HW-Agnostic HW-Specific
+> Marionette [13] C/C++ CDFG G#####G#
+> Plasticine [52] Spatial [32] CDFG #####G#
+> Ripple [21] C/C++ Steering Control G###G#G#
+> RipTide [23] C/C++ Steering Control G###G#G#
+> TRIPS [56] CLimited Predication #####G#
+> SARA [76] Spatial Limited Predication ##G##G#
+> ICED [60] C/C++ Limited Predication G#G###G#
+> Plaid [35] C/C++ Limited Predication G#G#G###G#
+> NEURA C/C++/MLIR Hierarchical Predication
+> ∗Compiler extensibility for diverse microarchitectural features (e.g., specialized FUs).
+> †Whether the framework can represent an entire kernel as a single, unified dataflow graph.
+> ‡Whether the framework can target both spatial-only and spatio-temporal execution models.
+
+II: Steering control is difficult to adapt to the spatio-temporal execution model, sacrificing performance and architectural generality. 
+
+2.2.3 The Limited Predication Strategy: Failure in Hierarchical Predicates. Conventional predication converts control dependencies into data dependencies [ 2 , 38 , 43 ], enabling concurrent branch execution across both spatial-only and spatio-temporal execution models. However, existing predicate-based CGRA compilers [ 25 , 35 , 60 , 62 ] are limited to simple if-conversions or single loops, failing to handle hierarchical predicates in nested control (e.g., nested loops, branches in loops). As shown in Fig. 3(a), an instruction in BB5 executes only if hierarchical predicates are met – both outer (Loop 1) and inner (Loop 2) loops are active, and the branch condition is true. These predicates are computed in different BBs, and conventional CDFG-based IRs (e.g., LLVM [ 33 ] IR) lack the semantics to propagate the loop predicates (e.g., %cond1 and %cond2 from BB0 and BB2) into an inner BB (e.g., BB5) and merge them with the block’s internal logic. Consequently, as shown in Fig. 3(d), the compiler can only apply predication locally to branch divergences (e.g., BB5 and BB6), leaving the surrounding loop structure stranded in CFG. To manage these stranded structures, existing works (e.g., TRIPS [ 56 ]) are forced to adopt a hybrid execution: utilizing predication for if-conversions and relying on the CDFG strategy of Pitfall I for loop structures. However, this hybrid execution inherently restricts the ability to fully exploit inter-block parallelism (e.g., loop iteration pipelining). This representational flaw constitutes Pitfall III: Failing to unify hierarchical predicates forces a retreat to the serialized CDFG execution strategy. 
+
+A comparison between NEURA and other CGRA frameworks is listed in Table 2. This table highlights NEURA’s unique capabilities, which are enabled by its novel dataflow IR. As shown in Fig. 3(e), NEURA’s IR flattens the entire kernel into a single, unified DFG. This holistic representa-tion eliminates the serialization bubbles and reconfiguration overhead of the CDFG and limited predication strategies, allowing NEURA to fully exploit both intra- and inter-BB ILP. Furthermore, this unified IR is decoupled from any single execution model, thus avoiding the rigid mapping and scalability limitations of the steering control strategy. 
+
+3 NEURA Overview 
+
+The analysis in Sec. 2 reveals that existing approaches fail to provide a unified, general, and retargetable approach for managing complex control flows across diverse CGRA architectures. In this section, we provide an overview of NEURA. What differentiates NEURA from existing works is its NEURA Dataflow IR. Its ability to flatten a kernel’s CDFG into a DFG directly obviates the Pitfall I (see Sec. 5) issue of serialization via external controllers. NEURA Dataflow IR also decouples computational semantics from the CGRA execution model. This versatility allows NEURA to target both energy-efficient spatial-only and high-performance spatio-temporal execution models, overcoming the Pitfall II (see Sec. 7) problems of rigid spatial-only execution and tight hardware Accepted by PLDI 2026 
+
+NEURA: A Unified and Retargetable Compilation Framework for Coarse-Grained Reconfigurable Architectures 7
+
+coupling. Unlike traditional predication, which lacks the semantics for nested control flow, NEURA introduces a novel predicated type system and predicate-management operations. This provides native support for hierarchical control dependencies, directly resolving the core representational flaw of Pitfall III (see Sec. 4) concerning the failure to unify hierarchical predicates. Compilation Pipeline  Passes 
+
+Kernels 
+
+Frontend 
+
+(Sec 5)
+
+IR Builder 
+
+(Sec 4, Sec 5) 
+
+Optimizer 
+
+(Sec 6) 
+
+Mapper 
+
+(Sec 7)        
+
+> Source
+> Code
+> MLIR
+> Assembly
+> Dataflow Opt.
+> Configuration
+> Bitstream
+> Performance
+> Simulation
+> Memref
+> Linalg Tensor
+> Arith Affine
+> C/C++
+> Polygeist Clang
+> High -Level IR
+> Lowering Translate
+> LLVM Arith
+> NEURA  CDFG  IR  Preprocessing/
+> Optimization
+> Flattening
+> Data
+> Predication
+> NEURA Dataflow IR  HW -Agnostic HW -Specific
+> Transform Optimize
+> Data Type
+> Alignment
+> Constant
+> Folding
+> Loop Stream
+> Optimization
+> Computational
+> Pattern Fusion
+> ……
+> lower -arith -to -neura
+> lower -memref -to -neura
+> lower -llvm -to -neura
+> lower -builtin -to -neura
+> promote -func -arg -to -const
+> fold -constant
+> canonicalize -live -in
+> leverage -predicated -value
+> transfrom -ctrl -to -data -flow
+> fold -constant
+> canonicalize -cast
+> fuse -pattern
+> fuse -loop -control
+> map -to -accelerator
+> generate -code
+
+Interpreter 
+
+(Sec 7) IR IR IR 
+
+> Opt.
+
+Fig. 4. Overview of the NEURA Compilation Flow – The frontend accepts C/C++ and high-level IR kernels and lowers them into the NEURA CDFG IR. The IR builder then converts the kernel into the NEURA Dataflow IR through preprocessing, data predication, and flattening. The optimizer refines the dataflow IR using HW-Agnostic (e.g., constant folding) and HW-Specific optimizations (e.g., loop streaming). The optimized IR can be validated by the interpreter and processed by the mapper to get mapping results for configuration bitstream generation or performance simulation. 
+
+The NEURA compilation flow, as shown in Fig. 4, is built on the MLIR [ 34 ] framework. The flow begins at the extensible frontend. It supports any kernel input that can be lowered into standard dialects (e.g., llvm [39 ] and arith [ 4 ] dialects). For now, our frontend accepts C/C++ (via Clang [ 9 ] or Polygeist [ 47 ]) and high-level IR like linalg [36 ] and tensor [ 65 ] dialects and lowers them into our NEURA CDFG IR (see Sec. 4). This IR preserves the conventional CFG structure for preprocessing. Next, the IR builder performs the core transformation (see Sec. 5), systematically converting the NEURA CDFG IR into our novel NEURA Dataflow IR (see Sec. 4), representing the kernel as a pure DFG. This dataflow IR then enters a two-phase optimizer, undergoing hardware-agnostic optimizations to safely optimize the DFG. This is followed by hardware-specific optimizations that leverage hardware-specific microarchitectural features to tailor the DFG for a specific CGRA (see Sec 6). The optimized IR can then be sent to the interpreter for functional validation. It can also be passed to the mapper, which takes hardware specifications and the IR to generate the mapping result for target CGRAs. The mapping result can drive a cycle-accurate simulator for fast evaluation or produce the configuration bitstream for target CGRAs. Fig. 5 shows how a simple kernel is represented during the NEURA compilation flow. The input starts as standard llvm and arith dialects, as shown in Fig. 5(a). It is first converted to the NEURA CDFG IR, as shown in Fig. 5(b), which preserves the explicit control flow via branch instructions (i.e., br , cond_br ). After lowering and optimization, the kernel becomes the pure NEURA Dataflow IR, as shown in Fig. 5(c). This IR is built on our novel predicate type system, where every value’s type is augmented with a predicate, denoted by i1 (e.g., <f32, i1> ). This predicate makes the data’s validity an intrinsic property of the data. This mechanism, combined with specialized operations (e.g., grant_predicate ), allows the kernel’s control flow to be flattened into data dependencies, enabling the kernel to be executed in a pure dataflow manner on a CGRA. Accepted by PLDI 2026 
+
+8 Shangkun Li, Jinming Ge, Diyuan Tao, Zeyu Li, Jiawei Liang, Linfeng Du, Jiang Xu, Wei Zhang, and Cheng Tan 01 : // Source LLVM and arith dialects 
+
+02 : module { 
+
+03 : func.func @loop () -> f32 attributes 
+
+04 : {accelerator = “CGRA”} { 
+
+05: %n = arith.constant 10 : i64 
+
+06: %c0 = arith.constant 0 : i64 
+
+07: %c1 = arith.constant 1 : i64 
+
+08: %c2 = arith.constant 3.0 : f32 
+
+09: %acc_init = arith.constant 0.0 : f32 
+
+10 : llvm.br ^bb1 (%c0 , %acc_init : i64 , i32 )
+
+11 : ^bb1 (%i: i64 , %acc : f32 ): // 2 preds: ^bb0, 
+
+12 : ^bb2 
+
+13: %cmp = llvm.icmp “slt ” %next_i , %n : i64 
+
+14: llvm.cond_br %cmp , ^bb2 , ^bb3 
+
+15: ^bb2 : // pred: ^bb1 
+
+16: %next_i = llvm.add %i, %c1 : i64 
+
+17: %next_acc = llvm.fadd %acc , %c2 : f32 
+
+18: llvm.br ^bb1 (%next_i , %next_acc : i64 , f32 )
+
+19: ^bb3 : // pred: ^bb1 
+
+20 : return %acc : f32 }} 
+
+(a) An Example Input IR (b) The Corresponding NEURA CDFG IR (c) The Transformed NEURA Dataflow IR 
+
+01 : // NEURA CDFG IR 
+
+02 : module { 
+
+03 : func.func @loop () -> f32 attributes 
+
+04: {accelerator = “CGRA”} { 
+
+05: %0 = neura.constant 10 : i64 
+
+06: %1 = neura.constant 0 : i64 
+
+07: %2 = neura.constant 1 : i64 
+
+08: %3 = neura.constant 3.0 : f32 
+
+09: %4 = neura.constant 0.0 : f32 
+
+10 : neura.br ^bb1 (%1 , %4 : i64 , f32 )
+
+11: ^bb1 (%5 : i64 , %6 : f32 ): // 2 preds: ^bb0, 
+
+12: ^bb2 
+
+13: %7 = neura.icmp “slt ” %5 , %0 : i1 
+
+14: neura.cond_br %7 , ^bb2 , ^bb3 
+
+15: ^bb2 : // pred: ^bb1 
+
+16: %8 = neura.fadd %6 , %3 : f32 
+
+17: %9 = neura.add %5 , %2 : i64 
+
+18: neura.br ^bb1 (%9 , %8 : i64 , f32 )
+
+19: ^bb3 : // pred: ^bb1 
+
+20 : neura.return %6 : f32 }} 
+
+01 : // NEURA Dataflow IR after HW -Agnostic Opt. 
+
+02 : module { 
+
+03 : func.func @loop () -> f32 attributes 
+
+04: {accelerator = “CGRA”} { 
+
+05: %0 = neura.grant_once 0.0 : <f32, i1> 
+
+06: %1 = neura.grant_once 0 : <i64, i1> 
+
+07: %2 = neura.reserve : <f32, i1> 
+
+08: %3 = neura.phi %2 , %0 : <f32, i1> 
+
+09: %4 = neura.reserve : <i64, i1> 
+
+10 : %5 = neura.phi %4 , %1 : <i64, i1> 
+
+11: %6 = neura.icmp “slt ” %5 , 10 : <i1, i1> 
+
+12: %7 = neura.grant_predicate %3 , %6 : <f32, i1> 
+
+13: %8 = neura.grant_predicate %5 , %6 : <i64, i1> 
+
+14: %9 = neura.not %6 : <i1, i1> 
+
+15: %10 = neura.grant_predicate %3 , %9 : <f32, i1> 
+
+16: %11 = neura.fadd %7 , 3.0 : <f32, i1> 
+
+17: %12 = neura.add %8 1 : <i64, i1> 
+
+18: neura.ctrl_mov %12 -> %4 
+
+19: neura.ctrl_mov %11 -> %2 
+
+20 : neura.return %10 : <f32, i1> }} 
+
+Fig. 5. A Kernel Example in NEURA — (a) The input simple accumulation kernel represented in llvm and arith 
+
+dialects. (b) The corresponding NEURA CDFG IR for further transformations. (c) The NEURA Dataflow IR leverages our predicated type system to represent the kernel in a pure dataflow manner. The blue blocks show the corresponding code between the input IR and the NEURA CDFG IR, while the yellow blocks show the corresponding control-flow logic in CDFG IR and its dataflow representation. 
+
+4 The NEURA Intermediate Representation 
+
+The NEURA IR is designed to systematically bridge the control-dataflow semantic gap between CDFG kernel representations and the native dataflow nature of CGRAs. It leverages the NEURA CDFG IR as a high-level intermediary to canonicalize standard compiler dialects (e.g., llvm and arith 
+
+dialects). This representation is then systematically lowered into our NEURA Dataflow IR. This novel representation expresses the kernel, including its control flow, in a unified, pure dataflow manner. This section describes the role of the NEURA CDFG IR in Sec. 4.1, details the design of the NEURA Dataflow IR in Sec. 4.2, including its type system, operation set, and concludes in Sec. 4.3 by discussing its interface with the hardware Instruction Set Architecture (ISA). 
+
+4.1 The NEURA CDFG IR: A Canonicalization Bridge for Dataflow Transformation 
+
+The transformation from a CDFG kernel representation to a pure dataflow representation requires converting control dependencies into data dependencies. Our approach is to embed control context into the data values using the predicated type system (see Sec. 4.2). However, a key challenge arises because data dependencies between BBs in a CDFG can be implicit (see Sec. 5.2). A value defined in one BB may be used several BBs later (e.g., %6 used in bb3 in Fig. 9(b)), meaning it is live through intermediate BBs, but no data value is explicitly passed through them. Since our predicates must be attached to a data value, this absence of an explicit dataflow makes it hard to systematically propagate predicate information from one BB to the next. To solve this, we introduce the NEURA CDFG IR as a critical canonicalization stage. Its primary purpose is to provide a structured, LLVM-like representation that enables preprocessing passes to make the subsequent flattening simple and systematic. It adopts the conventional CDFG format and serves three key functionalities. First, it provides a well-defined and extensible entry point for the core control-flow-to-dataflow transformation (see Sec. 5), allowing NEURA to easily support new frontends. Second, it enables crucial preprocessing steps, specifically live-in canonicalization (see Sec. 5.2). This step transforms the NEURA CDFG IR to make inter-BB data dependencies explicit along CFG edges, as shown in Fig. 9(d). This is essential because once every data dependency is explicit, predicate information can be systematically embedded (see Sec. 5.4). Finally, our custom CDFG IR provides a natural home for domain-specific information. This allows us to enrich the IR by attaching CGRA-specific attributes to operations, such as metadata for constant handling (e.g., constant attributes in Fig. 9(c)). Since these attributes lack semantic equivalents in standard dialects, this customizability makes the framework extensible to new CGRA features and optimizations. Accepted by PLDI 2026 
+
+NEURA: A Unified and Retargetable Compilation Framework for Coarse-Grained Reconfigurable Architectures 9
+
+Table 3. A Representative List of Operations in the NEURA Dataflow IR 
+
+Predicate Management Operations Predicated States-Access Operations 
+
+neura.grant_once(val) Assigns a single-use true predicate to an initial value val .
+
+neura.return(val) Terminates the program with val if its predicate is true. 
+
+neura.grant_predicate (val, cond) 
+
+Grants a new predicate to val based on the boolean data cond .
+
+neura.load(addr) Loads from addr only if the predicate is true. 
+
+neura.phi(a, b, ...) Merges multiple dataflow paths by select-ing the unique input with a true predicate. 
+
+neura.store(val, addr) Stores val to memory only if both operands’ predicates are true. 
+
+neura.loop_control ∗ Fused operation generating the next index and validity predicate for a loop. 
+
+neura.load_indexed ∗
+
+(base, <indices>) 
+
+Fused operation combing address calcula-tion and a predicated load. 
+
+Predicated Computational Operations Non-Materialized Structural Operations 
+
+neura.add(a, b) Computes the predicated sum of predicated value a and b.
+
+neura.reserve Creates a placeholder for a value in a back-ward dataflow path. 
+
+neura.icmp(cmp, a, b) Compares two predicated values a and b.Outputs a predicated boolean result. 
+
+neura.ctrl_mov (val, placeholder) 
+
+Defines a data dependency edge from val 
+
+to placeholder .
+
+neura.muladd(a, b, c) ∗ A hardware-specific multiply-add opera-tion operating on predicated values. 
+
+∗ Hardware-specific operations, detailed in Sec. 6.2. 
+
+4.2 The NEURA Dataflow IR: A Predicated IR Enabling Hierarchical Predicates 
+
+The NEURA Dataflow IR is designed to holistically represent a kernel as a single, pure DFG. By transforming control flow into data dependencies, this representation enables kernels with complex control flows to be mapped and executed on CGRA fabrics. This is achieved through two foundational components — a predicated type system and an operation set. 
+
+4.2.1 The Predicated Type System: Making Control an Intrinsic Property of Data. The fundamental principle of the NEURA Dataflow IR is its predicated type system. Conventional CDFGs ensure correct kernel execution by explicitly dictating the sequence of operations and guarding state updates. Our predicated type system embeds control context directly into the data by making every data value carry its own validity information. This is achieved by uniformly pairing every data payload with a single predicate bit. As formalized in Fig. 6, any value in the NEURA Dataflow IR is a tuple consisting of its data payload (e.g., an f32 ) and its predicate (i.e., a boolean i1 ). This predicate bit signifies whether the data payload is valid on the current execution path. If true, the data can be consumed by downstream operations to affect program state. If false, the data is considered invalid or nullified, and any operation consuming it is guaranteed not to produce side effects. This mechanism naturally handles complex control flows. For example, the predicate for an inner operation implicitly combines the validity derived from all enclosing control structures. This type system is the key to flattening the kernel into a pure dataflow representation. 
+
+Γ ⊢ 𝑑 : 𝜏 Γ ⊢ 𝑝 : B
+
+Γ ⊢ ( 𝑑, 𝑝 ) : 𝜏 𝑝 
+
+PredType 
+
+Fig. 6. Predicated Type — Let Γ be a typing context. A value is predicated type 𝜏 𝑝 in NEURA if it is a tuple 
+
+(𝑑, 𝑝 ) pairing a data payload 𝑑 of standard type 𝜏 (e.g., f32 , i64 ) with a predicate 𝑝 of the Boolean type B.
+
+4.2.2 The NEURA Operation Set: From Traditional to Hierarchical Predication. The NEURA Dataflow IR is composed of a set of operations designed to compute on predicated values, manage state, and explicitly handle the predicate logic that replaces traditional control flow. As detailed in Table 3, these operations fall into four categories: (1) Predicated Computational Operations include standard arithmetic and logical operations lifted to operate on predicated values ( PredType in Fig. 6); (2) Predicated State-Access Operations interact with stateful resources, such as memory and the kernel’s termination state, where physical side effects are guaranteed to occur only if all the operands are valid; (3) Predicate Management Operations contain the specialized operations that create, manipulate, and merge predicates to encode control flow; (4) Non-Materialized Structural Accepted by PLDI 2026 
+
+10 Shangkun Li, Jinming Ge, Diyuan Tao, Zeyu Li, Jiawei Liang, Linfeng Du, Jiang Xu, Wei Zhang, and Cheng Tan 
+
+⟨𝑣 𝑎𝑑𝑑𝑟 , 𝜎 ⟩ ⇓ ⟨( 𝑑 𝑎𝑑𝑑𝑟 , true ), 𝜎 ⟩⟨load (𝑣 𝑎𝑑𝑑𝑟 ), 𝜎 ⟩ ⇓ ⟨( 𝜎 (𝑑 𝑎𝑑𝑑𝑟 ), true ), 𝜎 ⟩ Load ⟨𝑣 𝑑𝑎𝑡𝑎 , 𝜎 ⟩ ⇓ ⟨( 𝑑 𝑑𝑎𝑡𝑎 , true ), 𝜎 ⟩ ⟨𝑣 𝑎𝑑𝑑𝑟 , 𝜎 ⟩ ⇓ ⟨( 𝑑 𝑎𝑑𝑑𝑟 , true ), 𝜎 ⟩⟨store (𝑣 𝑑𝑎𝑡𝑎 , 𝑣 𝑎𝑑𝑑𝑟 ), 𝜎 ⟩ ⇓ ⟨() , 𝜎 [𝑑 𝑎𝑑𝑑𝑟 := 𝑑 𝑑𝑎𝑡𝑎 ]⟩ Store 
+
+⟨𝑣 1, 𝜎 ⟩ ⇓ ⟨( 𝑑 1, 𝑝 1), 𝜎 ⟩ ⟨𝑣 2, 𝜎 ⟩ ⇓ ⟨( 𝑑 2, 𝑝 2), 𝜎 ⟩ 𝑑 𝑟𝑒𝑠 = 𝑑 1 ⊕ 𝑑 2 𝑝 𝑟𝑒𝑠 = 𝑝 1 ∧ 𝑝 2
+
+⟨𝑣 1 ⊕𝒑 𝑣 2, 𝜎 ⟩ ⇓ ⟨( 𝑑 𝑟𝑒𝑠 , 𝑝 𝑟𝑒𝑠 ), 𝜎 ⟩ PredComp 
+
+⟨𝑣 𝑖𝑛 , 𝜎 ⟩ ⇓ ⟨( 𝑑 𝑖𝑛 , 𝑝 𝑖𝑛 ), 𝜎 ⟩ 𝜎 (state 𝑖𝑑 ) = fresh 
+
+⟨grant_once 𝑖𝑑 (𝑣 𝑖𝑛 ), 𝜎 ⟩ ⇓ ⟨( 𝑑 𝑖𝑛 , true ), 𝜎 [state 𝑖𝑑 := consumed ]⟩ GrantOnce 
+
+⟨𝑣 𝑣𝑎𝑙 , 𝜎 ⟩ ⇓ ⟨( 𝑑 𝑣𝑎𝑙 , 𝑝 𝑣𝑎𝑙 ), 𝜎 ⟩ ⟨𝑣 𝑐𝑜𝑛𝑑 , 𝜎 ⟩ ⇓ ⟨( 𝑑 𝑐𝑜𝑛𝑑 , 𝑝 𝑐𝑜𝑛𝑑 ), 𝜎 ⟩⟨grant_predicate (𝑣 𝑣𝑎𝑙 , 𝑣 𝑐𝑜𝑛𝑑 ), 𝜎 ⟩ ⇓ ⟨( 𝑑 𝑣𝑎𝑙 , 𝑑 𝑐𝑜𝑛𝑑 ∧ 𝑝 𝑐𝑜𝑛𝑑 ), 𝜎 ⟩ GrantPred 
+
+∀𝑖 ∈ { 1 . . . 𝑛 } : ⟨𝑣 𝑖 , 𝜎 ⟩ ⇓ ⟨( 𝑑 𝑖 , 𝑝 𝑖 ), 𝜎 ⟩ ∃!𝑘 ∈ { 1 . . . 𝑛 } : 𝑝 𝑘 = true 
+
+⟨phi (𝑣 1, . . . , 𝑣 𝑛 ), 𝜎 ⟩ ⇓ ⟨( 𝑑 𝑘 , true ), 𝜎 ⟩ Phi 
+
+Fig. 7. A Selection of Big-Step Structural Operational Semantics for NEURA Dataflow IR — The relation ⇓
+
+defines the evaluation of expressions. The state 𝜎 is an environment that includes memory and the internal state of grant_once operations. A value 𝑣 is a tuple (𝑑, 𝑝 ). In PredComp rule, ⊕𝑝 denotes the predicated computational operations while ⊕ denotes the standard computational operations on the data payloads. 
+
+Operations are used to structure the dataflow graph (e.g., loop recurrences) and maintain Static Single Assignment (SSA) properties [ 10 ] without corresponding to physical hardware (see Sec. 5.4). Fig. 7 presents a selection of big-step structural operational semantics for the NEURA Dataflow IR, defining the evaluation judgment and clarifying its behaviors. The rules illustrate how the predicated type system is operationalized. For example, the PredComp rule shows that computational validity is contingent on the operand validity. The Load and Store rules stipulate that an operation with a false predicate operand does not satisfy the premises, thus producing no side effect on kernel state. The GrantOnce , GrantPred , and Phi rules formally define the mechanisms for creating, transforming, and merging predicated values for control flow encoding. 
+
+4.3 Interface with the Hardware ISA and Retargetability 
+
+A principle of the NEURA Dataflow IR is its hardware-conscious design. The IR is designed to be highly expressive while requiring minimal, low-cost extensions to CGRAs’ ISA. This design philosophy ensures NEURA can be readily adopted by existing or future CGRAs. add 
+
+> mul
+> cmp
+> …
+
+AND 
+
+d1 d2 p1 p2 
+
+<d3, p3> 
+
+> load
+> store
+> return
+> …
+
+AND 
+
+p1 p2 
+
+If F
+
+d1 d2 
+
+If T
+
+null access state 
+
+Predicated Computational 
+
+Instructions 
+
+Predicated State -Access 
+
+Instructions 
+
+Computational Instructions in Existing CGRA ISA 
+
+State -Access Instructions in Existing CGRA ISA 
+
+Fig. 8. Extending the Computational and State-Access Instructions in Existing ISA. 
+
+Modifications to Existing ISA. NEURA requires only minor and uniform modifications to the exist-ing CGRA ISA. As shown in Fig. 8, computational instructions are augmented to accept predicate bits. They perform the original computation in paral-lel with a logical AND of all incoming predicates to produce the output predicate. State-access in-structions (e.g., load , store , return ) use the log-ical AND of the input predicates as an enable signal, triggering side effects (e.g., memory read/write) only if it is true. These modifications are low-cost, typi-cally requiring one additional AND gate per FU. 
+
+Introduction of New ISA Instructions. To manage the predicated type system, NEURA introduces only three new specialized instructions, grant_once , grant_predicate , and phi (see Sec. 4.2.2). Predicated computational and state-access instructions propagate existing predicate bits (typically via an AND gate). In contrast, these new instructions generate and manipulate the Accepted by PLDI 2026 
+
+NEURA: A Unified and Retargetable Compilation Framework for Coarse-Grained Reconfigurable Architectures 11 01 : // Source LLVM and Arith Dialects 
+
+02 : module { 
+
+03 : func.func @loop () -> f32 attributes 
+
+04 : {accelerator = “CGRA”} { 
+
+05 : %0 = arith.constant 10 : i64 
+
+06 : %1 = arith.constant 0 : i64 
+
+07 : %2 = arith.constant 1 : i64 
+
+08 : %3 = arith.constant 3.0 : f32 
+
+09 : %4 = arith.constant 0.0 : f32 
+
+10 : llvm.br ^bb1 (%1 , %4 : i64 , i32 )
+
+11 : ^bb1 (%5 : i64 , %6 : f32 ): 
+
+12 : %7 = llvm.icmp “slt ” %5 , %0 : i64 
+
+13 : llvm.cond_br %7 , ^bb2 , ^bb3 
+
+14 : ^bb2 :
+
+15 : %8 = llvm.add %5 , %2 : i64 
+
+16 : %9 = llvm.fadd %6 , %3 : f32 
+
+17 : llvm.br ^bb1 (%8 , %9 : i64 , f32 )
+
+18 : ^bb3 :
+
+19 : return %acc : f32 
+
+20 : }
+
+21 : } 
+
+01 : // NEURA Dataflow IR 
+
+02 : module { 
+
+03 : func.func @loop () -> f32 attributes 
+
+04 : {accelerator = “CGRA”} { 
+
+05 : %0 = neura.constant 0.0 : <f32, i1> 
+
+06 : %1 = neura.grant_once %0 : <f32, i1> 
+
+07 : %2 = neura.constant 0 : <i64, i1> 
+
+08 : %3 = neura.grant_once %2 : <i64, i1> 
+
+09 : %4 = neura.reserve : <f32, i1> 
+
+10 : %5 = neura.phi %4 , %1 : <f32, i1> 
+
+11 : %6 = neura.reserve : <i64, i1> 
+
+12 : %7 = neura.phi %6 , %3 : <i64, i1> 
+
+13 : %8 = neura.icmp “slt ” %7 , 10 : <i1, i1> 
+
+14 : %9 = neura.grant_predicate %5 , %8 :
+
+15 : <f32, i1> 
+
+16 : %10 = neura.grant_predicate %7 , %8 :
+
+17 : <i64, i1> 
+
+18 : %11 = neura.not %8 : <i1, i1> 
+
+19 : %12 = neura.grant_predicate %5 , %11 :
+
+20 : <f32, i1> 
+
+21 : %13 = neura.fadd %9 , 3.0 : <f32, i1> 
+
+22 : %14 = neura.add %10 1 : <i64, i1> 
+
+23 : neura.ctrl_mov %14 -> %6 
+
+24 : neura.ctrl_mov %13 -> %4 
+
+25 : neura.return %12 : <f32, i1> }} 
+
+(a) (b) (c) 
+
+(d) (e) (f) 
+
+> Lowering to CDFG IR (Sec. 5.1)
+> Constant  Folding (Sec. 5.2)
+
+Live -ins Canonicalization (Sec. 5.2) 
+
+> Data Predication (Sec. 5.3)
+> Flattening to Dataflow IR (Sec. 5.4)
+
+5
+
+2
+
+7
+
+5
+
+6
+
+7
+
+5
+
+7
+
+6
+
+6
+
+6
+
+7
+
+7
+
+7
+
+5
+
+7
+
+7
+
+01 : // IR after Constant Folding 
+
+02 : module { 
+
+03 : func.func @loop () -> f32 attributes 
+
+04 : {accelerator = “CGRA”} { 
+
+05 : %0 = neura.constant 0.0 : f32 
+
+06 : %1 = neura.constant 0 : i64 
+
+07 : neura.br ^bb1( %1 , %0 : i64 , f32 )
+
+08 : ^bb1 (%2 : i64 , %3 : f32 ): 
+
+09 : %4 = neura.icmp “slt ” %2 , 10 : i1 
+
+10 : neura.cond_br %4 , ^bb2 , ^bb3 
+
+11 : ^bb2 :
+
+12 : %5 = neura.fadd %3 , 3.0 : f32 
+
+13 : %6 = neura.add %2 , 1 : i64 
+
+14 : neura.br ^bb1 (%6 , %5 : i64 , f32 )
+
+15 : ^bb3 :
+
+16 : neura.return %3 : f32 
+
+17 : }
+
+18 : } 
+
+01 : // IR after Data Predication 
+
+02 : module { 
+
+03 : func.func @loop () -> f32 attributes 
+
+04 : {accelerator = “CGRA”} { 
+
+05 : %0 = neura.constant 0.0 : <f32, i1> 
+
+06 : %1 = neura.constant 0 : <i64, i1> 
+
+07 : neura.br ^bb1 (%1 , %0 : <i64, i1> ,
+
+08 : <f32, i1> )
+
+09 : ^bb1 (%2 : <i64, i1> , %3 : <f32, i1> ): 
+
+10 : %4 = neura.icmp “slt ” %2 , 10 : <i1, i1> 
+
+11 : neura.cond_br %4 , ^bb2 (%3 , %2 : <f32, 
+
+12 : i1> , <i64, i1> ), ^bb3 (%3 : <f32, i1> )
+
+13 : ^bb2 (%5 : <f32, i1> , %6 : <i64, i1> ): 
+
+14 : %7 = neura.fadd %5 , 3.0 : <f32, i1> 
+
+15 : %8 = neura.add %6 , 1 : <i64, i1> 
+
+16 : neura.br ^bb1 (%8 , %7 : <i64, i1> ,
+
+17 : <f32, i1> )
+
+18 : ^bb3 (%9 : <f32, i1> ): 
+
+19 : neura.return %9 : <f32, i1> }} 
+
+01 : // IR after Live -in Canonicalizing 
+
+02 : module { 
+
+03 : func.func @loop () -> f32 attributes 
+
+04 : {accelerator = “CGRA”} { 
+
+05 : %0 = neura.constant 0.0 : f32 
+
+06 : %1 = neura.constant 0 : i64 
+
+07 : neura.br ^bb1 (%1 , %0 : i64 , f32 )
+
+08 : ^bb1 (%2 : i64 , %3 : f32 ): 
+
+09 : %4 = neura.icmp “slt ” %2 , 10 : i1 
+
+10 : neura.cond_br %4 , ^bb2 (%3 , %2 : f32 ,
+
+11 : i64 ), ^bb3 (%3 : f32 )
+
+12 : ^bb2 (%5 : f32 , %6 : i64 ): 
+
+13 : %7 = neura.fadd %5 , 3.0 : f32 
+
+14 : %8 = neura.add %6 , 1 : i64 
+
+15 : neura.br ^bb1 (%8 , %7 : i64 , f32 )
+
+16 : ^bb3 (%9 : f32 ): 
+
+17 : neura.return %9 : f32 }} 
+
+01 : // NEURA CDFG IR 
+
+02 : module { 
+
+03 : func.func @loop () -> f32 attributes 
+
+04 : {accelerator = “CGRA”} { 
+
+05 : %0 = neura.constant 10 : i64 
+
+06 : %1 = neura.constant 0 : i64 
+
+07 : %2 = neura.constant 1 : i64 
+
+08 : %3 = neura.constant 3.0 : f32 
+
+09 : %4 = neura.constant 0.0 : f32 
+
+10 : neura.br ^bb1( %1 , %4 : i64 , f32 )
+
+11 : ^bb1 (%5 : i64 , %6 : f32 ): 
+
+12 : %7 = neura.icmp “slt ” %5 , %0 : i1 
+
+13 : neura.cond_br %7 , ^bb2 , ^bb3 
+
+14 : ^bb2 :
+
+15 : %8 = neura.fadd %6 , %3 : f32 
+
+16 : %9 = neura.add %5 , %2 : i64 
+
+17 : neura.br ^bb1 (%9 , %8 : i64 , f32 )
+
+18 : ^bb3 :
+
+19 : neura.return %6 : f32 
+
+20 : }
+
+21 : } 
+
+Fig. 9. An End-to-End Example of the NEURA Lowering Process — This figure illustrates the sequential transformation for a simple kernel. (a) standard MLIR dialects are lowered to (b) NEURA CDFG IR (Sec. 5.1). The IR is then preprocessed via (c) constant folding and (d) live-in canonicalization (Sec. 5.2). This is followed by (e) data predication (Sec. 5.3) and finally flattened into (f) the NEURA Dataflow IR (Sec. 5.4). The yellow blocks indicate the code delta from the preceding phase. The circled numbers (e.g., 2 , 5 , 6 , 7 ) annotate the CFG edge types in (c) and (d), and track their transformation into dataflow operations in (f). The CFG edge types are defined in Fig. 10. 
+
+predicate bits. These three instructions are the essential hardware primitives that enable the NEURA compiler to systematically flatten complex control flow into pure dataflow (see Sec. 5). 
+
+Retargetability. The required ISA extensions are minimal, comprising three new instructions and a systematic modification to existing computational and state-access instructions. This design is highly adaptable to diverse CGRAs, including those with specialized microarchitectural features (e.g., specialized FUs). The NEURA Dataflow IR is a pure DFG that only defines logical computations and their dependencies, decoupling the representation from the execution model. This also naturally enables the IR to be executed by both spatio-temporal and spatial-only execution models. Furthermore, facilitated by NEURA’s type system and dataflow semantics, we also implemented a compiler pass to transform the NEURA Dataflow IR into a steering control representation, ensuring NEURA’s compatibility with existing steering-based architectures (e.g., RipTide [ 23 ]). Together, these properties provide NEURA with comprehensive retargetability .
+
+5 Lowering to NEURA Dataflow IR 
+
+A key contribution of NEURA is its systematic methodology to transform kernels represented in a conventional CDFG manner into our pure dataflow representation. This transformation is the core of NEURA to bridge the control-dataflow semantic gap between the CDFG kernel Accepted by PLDI 2026 
+
+12 Shangkun Li, Jinming Ge, Diyuan Tao, Zeyu Li, Jiawei Liang, Linfeng Du, Jiang Xu, Wei Zhang, and Cheng Tan Flattened to Pure Dataflow (See Sec. 5.4) 
+
+Eliminated by Preprocessing (See Sec. 5.2) 
+
+Pred BB 
+
+Succ BB 
+
+Pred BB 
+
+Succ BB 
+
+Pred BB 
+
+Succ BB 
+
+Pred BB 
+
+Succ BB 
+
+cond_br br w/o w/o br w/o w/o cond_br 
+
+Pred BB 
+
+Succ BB 
+
+Pred BB 
+
+Succ BB 
+
+Pred BB 
+
+Succ BB 
+
+Pred BB 
+
+Succ BB 
+
+cond_br br w/ w/ br w/ w/ cond_br 
+
+Forward CFG Edge Backward CFG Edge Pred BB 
+
+Succ BB 
+
+> %0 = phi (% val , …)
+
+Pred BB 
+
+Succ BB        
+
+> %0=grant_predicate
+> (%cmp ,%val )
+> %1=phi (%0,…)
+
+Pred BB 
+
+Succ BB    
+
+> %0 = reserve
+> %1 = phi (%0, …)
+> %2 = grant_predicate
+> (% cmp , % val )
+> ctrl_mov %2 -> %0
+
+Pred BB 
+
+Succ BB   
+
+> %0 = reserve
+> %1 = phi (%0, …)
+> ctrl_mov %val -> %0
+
+Type Type 
+
+Type Type 
+
+(a) CFG Edges Categorization (b) Rewriting Rules for Canonical CDFG IR 
+
+… …
+
+65 7 8
+
+1 2 3 4
+
+5 6
+
+7 8
+
+Fig. 10. CFG Edge Categorization and Rewriting Rules — (a) CFG edges in a kernel can be categorized into eight types. Edges without explicit value passing (type 1 - 4 ) are eliminated by preprocessing. (b) We can convert the remaining four types of edges into pure dataflow dependencies via deterministic rewriting rules. 
+
+representation and the dataflow nature of CGRA fabrics. Built upon the MLIR infrastructure, this process is structured as a sequence of well-defined passes, as outlined in Fig. 4. This section details the four primary stages of this lowering process: initial translation to NEURA CDFG IR (Sec. 5.1), preprocessing (Sec. 5.2), systematic data predication (Sec. 5.3), and final flattening into the NEURA Dataflow IR (Sec. 5.4). Fig. 9 provides an end-to-end example to illustrate this lowering process. 
+
+5.1 Lowering to NEURA CDFG IR 
+
+This stage transforms the kernel from source code or high-level IR into our NEURA CDFG IR. We first leverage existing frontends (e.g., Clang [ 9 ] and Polygeist [ 47 ]) to lower kernels into standard MLIR dialects (see Fig. 9(a)), like llvm [39 ], arith [ 4 ], and memref [46 ]. Then, as illustrated in Fig. 4, a set of custom conversion passes transforms these standard dialects into their semantic equiva-lents in the NEURA CDFG IR (e.g., arith.addi and llvm.br become neura.add and neura.br ,respectively). This conversion establishes a common, CDFG-based starting point tailored for subse-quent transformations, unifying diverse inputs while preserving the original CDFG structure. The resulting NEURA CDFG IR (see Fig. 9(b)) serves as the input for the preprocessing stage. 
+
+5.2 Preprocessing on NEURA CDFG IR 
+
+Before flattening to a pure dataflow representation, the NEURA CDFG IR undergoes several preprocessing passes. These passes are designed to simplify the IR’s structure and establish a canonical form for the subsequent flattening stage. While this stage also includes hardware-agnostic optimizations (e.g., constant folding, detailed in Sec. 6), this section focuses specifically on two canonicalization processes that are critical for enabling the dataflow flattening. First, in NEURA, kernels targeted for CGRA acceleration are represented as functions. To handle their parameters consistently with the dataflow model, we apply the function arguments pro-motion . This transformation replaces all uses of a function’s arguments with neura.constant 
+
+operations materialized in the entry BB. This ensures all inputs to the function are treated uniformly as SSA values defined by operations, simplifying subsequent analysis and transformations. Second, we perform live-ins canonicalization to make inter-BB data dependencies explicit. This explicit representation is a prerequisite for systematically embedding predicate information onto data values during the flattening stage. As shown in Fig. 10(a), we classify CFG edges into eight types based on their direction (forward or backward), terminator type ( br or cond_br ), and whether they explicitly carry SSA values (w/ or w/o values). These different edge types create a non-uniform Accepted by PLDI 2026 
+
+NEURA: A Unified and Retargetable Compilation Framework for Coarse-Grained Reconfigurable Architectures 13 
+
+Algorithm 1 The Canonicalize Live-in Pass 
+
+Input: A function 𝐹 represented by a CDFG. 
+
+Output: A canonical CDFG representation with all inter-block data dependencies explicitly passed along CFG edges. 1: Let 𝐿 𝑖𝑛 be a map from a block to the set of live-in values; ⊲ Phase 1 : Fixed-point live-in analysis 2: for all block 𝐵 ∈ 𝐹 where 𝐵 is not the entry block do ⊲ Initialize the live-in set for each basic block (BB) 3: 𝐿 𝑖𝑛 [𝐵 ] ← ComputeDirectLiveIns( 𝐵 ); 4: while 𝑐ℎ𝑎𝑛𝑔𝑒𝑑 do ⊲ Compute the complete live-ins for each BB 5: 𝑐ℎ𝑎𝑛𝑔𝑒𝑑 ← 𝑓 𝑎𝑙𝑠𝑒 ;6: for all block 𝐵 ∈ 𝐹 where 𝐵 is not the entry block do 
+
+7: for all successor 𝑆 of 𝐵 do 
+
+8: 𝐿 𝑝𝑟𝑜𝑝𝑎𝑔𝑎𝑡𝑒 ← 𝐿 𝑖𝑛 [𝑆 ] \ DefinedIn (𝐵 );9: if 𝐿 𝑝𝑟𝑜𝑝𝑎𝑔𝑎𝑡𝑒 ⊈ 𝐿 𝑖𝑛 [𝐵 ] then 
+
+10: 𝐿 𝑖𝑛 [𝐵 ] ← 𝐿 𝑖𝑛 [𝐵 ] ∪ 𝐿 𝑝𝑟𝑜𝑝𝑎𝑔𝑎𝑡𝑒 ;11: 𝑐ℎ𝑎𝑛𝑔𝑒𝑑 ← 𝑡𝑟𝑢𝑒 ;12: Let 𝐴 𝑛𝑒𝑤 be an empty list of new arguments for 𝐵 ; ⊲ Phase 2 : CDFG transformation 13: for all block 𝐵 ∈ 𝐹 where 𝐿 𝑖𝑛 [𝐵 ] is not empty do 
+
+14: for all value 𝑣 ∈ 𝐿 𝑖𝑛 [𝐵 ] do ⊲ Replace live-ins with block arguments 15: 𝑎𝑟𝑔 ← AddBlockArgument( 𝐵 , TypeOf( 𝑣 )); 16: ReplaceAllUseOf( 𝑣 , 𝑎𝑟𝑔 , within 𝐵 ); 17: 𝐴 𝑛𝑒𝑤 .append(arg); 18: for all predecessor 𝑃 of 𝐵 do ⊲ Modify the terminator of predecessors 19: RewriteTerminator(GetTerminator( 𝑃 ), 𝐵 , 𝐴 𝑛𝑒𝑤 ); 
+
+structure that complicates further flattening. Some edges do not explicitly pass SSA values (e.g., type 2 edge in Fig. 9(c)), which hinders predicate propagation. Others may carry values, but fail to propagate the complete set of live-ins required by the successor, leading to incorrect predication. To establish a uniform and complete mechanism for CDFG flattening, our canonicalize-live-in 
+
+pass, detailed in Algorithm 1, transforms the CDFG into a canonical form where every control flow edge explicitly passes the complete set of live-in values to its target block. For example, this pass transforms the type 2 edge in Fig. 9(c) into a type 6 edge in Fig. 9(d). The canonicalize-live-in pass operates in two phases, as shown in Algorithm 1. Phase 1 
+
+performs a fixed-point analysis to compute the complete transitive live-ins for each BB. It initializes the live-in sets based on direct uses (lines 2-3) and then iteratively propagates liveness information through the CFG until convergence (lines 4-11). Specifically, for each BB, it examines its successors’ live-ins (line 7). If a successor needs a value not defined in the current BB, that value is added to the current BB’s live-in set (lines 9-10). This process repeats until a fixed point is reached, guaranteeing the analysis captures the complete transitive live-ins for each BB. Phase 2 transforms the CDFG based on the analysis results. For each BB with a non-empty live-in set (line 13), the pass first adds new block arguments corresponding to these live-ins (line 15), replaces uses of the original live-in value with these new arguments (lines 6), and rewrites the terminators of all predecessor blocks to explicitly pass the required values when branching to this BB (lines 18-19). This transformation is proven complete in Theorem 1. 
+
+Theorem 1. Given an input function 𝐹 represented in NEURA CDFG IR containing no semantically irrelevant (i.e., dead) code, the canonicalize-live-in pass transforms 𝐹 into an equivalent repre-sentation 𝐹 ′. This transformation guarantees that for every control flow edge 𝑒 = (𝐵 𝑝𝑟𝑒𝑑 , 𝐵 𝑠𝑢𝑐𝑐 ) from a predecessor basic block 𝐵 𝑝𝑟𝑒𝑑 to a successor basic block 𝐵 𝑠𝑢𝑐𝑐 in 𝐹 ′, the terminator of 𝐵 𝑝𝑟𝑒𝑑 explicitly passes the complete live-in set 𝐿𝑖𝑣𝑒𝐼𝑛 (𝐵 𝑠𝑢𝑐𝑐 ) as block arguments to 𝐵 𝑠𝑢𝑐𝑐 .
+
+Proof. Consider an arbitrary control-flow edge 𝑒 = (𝐵 𝑝𝑟𝑒𝑑 , 𝐵 𝑠𝑢𝑐𝑐 ) in the transformed CDFG representation 𝐹 ′. Let 𝐿𝑖𝑣𝑒𝐼𝑛 (𝐵 𝑠𝑢𝑐𝑐 ) be the live-in set of 𝐵 𝑠𝑢𝑐𝑐 computed by the fixed-point analysis in Phase 1 of Algorithm 1. We analyze two mutually exclusive cases on this set: Accepted by PLDI 2026 
+
+14 Shangkun Li, Jinming Ge, Diyuan Tao, Zeyu Li, Jiawei Liang, Linfeng Du, Jiang Xu, Wei Zhang, and Cheng Tan 
+
+Case 1: 𝐿𝑖𝑣𝑒𝐼𝑛 (𝐵 𝑠𝑢𝑐𝑐 ) ≠ ∅ — In this case, the CDFG transformation (Phase 2) explicitly adds block arguments to 𝐵 𝑠𝑢𝑐𝑐 for all 𝑣 ∈ 𝐿𝑖𝑣𝑒𝐼𝑛 (𝐵 𝑠𝑢𝑐𝑐 ) and rewrites the terminator of 𝐵 𝑝𝑟𝑒𝑑 to pass these values along edge 𝑒 . Thus, the edge 𝑒 satisfies the theorem’s property by construction. 
+
+Case 2: 𝐿𝑖𝑣𝑒𝐼𝑛 (𝐵 𝑠𝑢𝑐𝑐 ) = ∅ — An empty live-in set for 𝐵 𝑠𝑢𝑐𝑐 implies that no value defined outside of 𝐵 𝑠𝑢𝑐𝑐 is used within it or is needed by any of its successors. For any reachable successor 𝐵 𝑠𝑢𝑐𝑐 
+
+in a function without dead code, this condition cannot hold. As the theorem premise excludes programs without dead code, this case is precluded for any relevant edge. For any edge in a semantically meaningful program, Case 1 must hold. Thus, the pass is guaranteed to transform all such edges to explicitly pass the complete live-in set of the target BB. □
+
+5.3 Data Predication 
+
+This stage systematically lifts the entire kernel into our predicated type system (see Sec. 4.2). The 
+
+leverage-predicated-value pass converts the type of every SSA value from a standard type 𝜏 to its predicated counterpart 𝜏 𝑝 (e.g., f32 becomes <f32, i1> ) and replaces each standard operation with its predicated version that operates on these new predicated types. The result of this stage, as illustrated in Fig. 9(e), is a kernel where every value explicitly carries a validity predicate. 
+
+5.4 Flattening to NEURA Dataflow IR 
+
+The final stage, accomplished by transform-ctrl-to-data-flow pass, flattens the NEURA CDFG IR into the NEURA Dataflow IR. Leveraging the canonical form from preprocessing (see Sec. 5.2), this pass only needs to handle the four CFG edge types that explicitly carry values (type 5 - 8 edges in Fig. 10(a)). Deterministic rewriting rules are applied to each of these edges, transforming control dependencies into data dependencies using our predicate management operations and non-materialized structural operations, as illustrated in Fig. 10(b). A key challenge arises when flattening backward edges (type 7 - 8 edges). Representing such backward dependencies directly in a DFG risks violating SSA form [ 10 ], as a value might appear used before it is defined. To address this while strictly maintaining SSA, we introduce non-materialized structural operations (see Sec. 4.2). First, neura.reserve defines a placeholder SSA value, acting as a forward declaration. Then, 
+
+neura.ctrl_mov establishes the backward data dependency edge to update this placeholder. By applying these rules, all branch operations are eliminated, flattening all BBs into a single block. The final result, as shown in Fig. 9(f), is a kernel represented by the NEURA Dataflow IR. 
+
+6 Integrating Hardware Agnostic and Specific Optimizations 
+
+NEURA integrates optimizations at multiple stages of its compilation pipeline. A key strength of NEURA’s MLIR-based design is its extensibility. This allows the NEURA frontend to accept high-level MLIR dialects (e.g., linalg and affine dialects) and naturally benefit from their upstream optimizations, such as loop tiling or loop fusion. In addition, NEURA integrates its own optimiza-tion passes, which are the focus of this section. We classify these NEURA internal passes into two categories: Hardware-Agnostic Optimizations (see Sec. 6.1) for logical simplification of the IR, and Hardware-Specific Optimizations (see Sec. 6.2) to tailor the IR for target CGRA microarchitectural features. This section presents representative passes for each category, but NEURA remains extensible, allowing users to easily define their own custom optimizations. More optimizations and implementation details are available in our open-source release. 
+
+6.1 Hardware-Agnostic Optimization 
+
+These optimizations are hardware-agnostic, performing logically equivalent transformations on the NEURA CDFG/Dataflow IR. They aim to produce a more efficient IR by reducing redundancy and canonicalizing data types, and are portable across all supported CGRA targets. Accepted by PLDI 2026 
+
+NEURA: A Unified and Retargetable Compilation Framework for Coarse-Grained Reconfigurable Architectures 15 
+
+Data Type Alignment. Frontends often introduce abstract data types that lack the specific bit width required by hardware. Our canonicalize-cast pass resolves this by canonicalizing these abstract data types (e.g., index ) into concrete base types (e.g., i32 or i64 ) based on user specification. This transformation ensures all data types are explicitly sized before hardware-specific stages, which is a prerequisite for correct mapping and resource allocation. 
+
+Constant Folding. In standard MLIR, constants are materialized via dedicated constant opera-tions [ 40 ]. This approach is inefficient for CGRAs because each DFG operation maps to a physical hardware tile on CGRAs, and dedicating a compute tile solely to produce or forward a constant value significantly wastes hardware resources. These explicit constant operations also add unnecessary nodes and edges to the DFG, increasing mapping complexity. The fold-constant pass resolves this by embedding constant operands as attributes (i.e., immediate values) directly within their consuming operations, simplifying the DFG and freeing hardware resources. Fig. 5(c) shows its application on the NEURA Dataflow IR, and Fig. 9(c) shows its use during the preprocessing stage. 
+
+6.2 Hardware-Specific Optimization 
+
+These passes specialize the general NEURA Dataflow IR by leveraging CGRA microarchitectural features , which showcases NEURA’s retargetability. NEURA facilitates this specialization through MLIR’s pattern-matching and rewriting infrastructure, allowing new hardware-specific operations to be easily integrated. We demonstrate this capability through two example optimizations. 
+
+Computational Pattern Fusion. Many CGRAs provide specialized FUs that fuse common operation patterns into a single, more efficient instruction (e.g., mul-add ). Our fuse-pattern 
+
+pass identifies patterns in our IR that match these predefined patterns and replaces them with corresponding hardware-specific fused operations. As shown in Table 3, an address calculation followed by a memory access (i.e., neura.load ) can be fused into a neura.load_indexed operation. Similarly, a neura.mul followed by a neura.add can be replaced with a neura.muladd operation. This optimization reduces the number of DFG nodes, shortens critical paths, and enables more efficient mapping. 01 : // NEURA Dataflow IR after HW -Specific Opt.                                                                                
+
+> 02 :module {
+> 03 :func.func @loop () ->f32 attributes
+> 04:{accelerator = “CGRA”} {
+> 05:%0 =neura.grant_once 0.0 :<f32, i1>
+> 06:%1 =neura.reserve :<f32, i1>
+> 07:%2 =neura.phi %4 ,%1 :<f32, i1>
+> 08:%3 =neura.grant_always true :<i1, i1>
+> 09:%4 ,%5 =neura.loop_control %3 {start :0,end :10 ,
+> 10 :step :1,iter : “increment”} : <i64, i1>, <i1, i1>
+> 11 :%6 =neura.not %5 :<i1, i1>
+> 12:%7 =neura.grant_predicate %2 ,%5 :<f32, i1>
+> 13:%8 =neura.grant_predicate %2 ,%6 :<f32, i1>
+> 14:%9 =neura.fadd %7 ,3.0 :<f32, i1>
+> 15:neura.ctrl_mov %9 ->%1
+> 16:neura.return %8 :<f32, i1> }}
+
+Fig. 11. NEURA Dataflow IR of Fig. 9(f) after applying Loop Streaming Optimization. 
+
+Loop Streaming Optimization. As shown in Fig. 9(f), while the general NEURA Dataflow IR represents loop control logic using phi , add , and 
+
+icmp operations, this brings inter-iteration depen-dencies that may bottleneck the mapping II [ 31 ]. For CGRAs supporting loop stream operations, our 
+
+fuse-loop-control pass recognizes static-bounded loop patterns and replaces the loop control logic with a neura.loop_control operation, as shown in Fig. 11. This new operation encapsulates the loop control logic (e.g., index update and boundary check) into a single loop streaming FU. This optimization breaks the inter-iteration bottleneck in the DFG, enabling more aggressive pipelining and achieving higher hardware utilization for common loop structures. 
+
+7 Implementation 
+
+The NEURA framework is implemented in 15K lines of C++ code on top of the MLIR infrastructure. We leverage MLIR’s modularity and its powerful features for dialect definition, transformation, and optimization. This section details the implementation of NEURA’s key components. Accepted by PLDI 2026 
+
+16 Shangkun Li, Jinming Ge, Diyuan Tao, Zeyu Li, Jiawei Liang, Linfeng Du, Jiang Xu, Wei Zhang, and Cheng Tan 
+
+Frontends. To ensure broad applicability, NEURA compilation flow starts from kernels lowered into standard MLIR dialects (e.g., llvm and arith dialects). This common starting point allows it to readily support various frontends, including C/C++ (via Clang [ 9 ] and Polygeist [ 47 ]) and high-level IRs like the linalg [36 ] and tensor [ 65 ] dialects. The framework is designed for future extension, with plans to incorporate support for PyTorch [3] via Torch-MLIR [67]. 
+
+Core Compiler Infrastructure. The core of NEURA is a comprehensive dialect defined in MLIR, defining operations for both the NEURA CDFG IR and Dataflow IR (Sec. 4). The transformation logic (Sec. 5) is implemented as a series of MLIR conversion passes, and hardware-agnostic and hardware-specific optimizations (Sec. 6) are built upon MLIR’s pattern-rewriting mechanism. This use of pattern-rewriting enables a highly extensible optimization pipeline, allowing users to easily define and integrate new optimization patterns without modifying the core compiler infrastructure. 
+
+IR Validation and Backend Support. NEURA includes backend components to verify IR cor-rectness and target CGRAs. For functional verification before hardware deployment or simulation, we have implemented an interpreter that interprets the NEURA Dataflow IR in a dataflow-driven manner, validating the correctness of the dataflow IR. Additionally, a heuristic-based mapper, adapted from OpenCGRA [ 62 ], maps the NEURA Dataflow IR onto the CGRAs. This mapper accepts target architecture specifications, supporting both spatial-only and spatio-temporal 
+
+execution models, and aims to find a valid mapping result with the minimum II. A flexible API is also provided to allow for the integration of diverse mapping algorithms. 
+
+8 Experiments 
+
+We present a comprehensive evaluation to demonstrate the effectiveness of NEURA. Our evalua-tion first quantifies the low area overhead of our ISA extensions (Sec. 8.2). It then demonstrates NEURA’s SOTA performance on a high-performance spatio-temporal architecture (Sec. 8.3) and a competitive solution on low-power spatial-only architecture (Sec. 8.4). We analyze the impact of hw-agnostic/-specific optimizations (Sec. 8.5) and show the scalability of NEURA Dataflow IR (Sec. 8.6). NEURA’s ability to support both spatio-temporal and spatial-only execution models, combined with its extensibility for diverse microarchitectural features, validates its retargetability .
+
+8.1 Experiment Settings 
+
+Evaluation Architectures. We develop two prototype CGRAs in RTL [ 61 , 62 ] designed to execute the general NEURA Dataflow IR (i.e., w/o specialized FU). These architectures, referred to as NEURA-SO and NEURA-ST, support the spatial-only and spatio-temporal execution models, respectively. Both are designed as typical CGRAs [ 61 , 62 ], featuring a grid of tiles interconnected by a King Mesh NoC [ 63 ] and incorporating only the minimal ISA extensions required by Sec. 4.3. 
+
+Baselines. We benchmark NEURA against three SOTA frameworks, each representing one of the primary control flow handling strategies discussed in Sec. 2.2: Marionette [ 13 ] (The CDFG Strategy), RipTide [ 23 ] (The Steering Control Strategy), and ICED [ 60 ] (The Limited Predication Strategy). For a fair comparison, ICED’s dynamic power management features have been removed. To justify that the observed differences stem from IR contributions, rather than implementation-specific details (e.g., operating frequencies), we normalize all evaluated architectures to operate at 800MHz. 
+
+Benchmarks. We collect a diverse suite of kernel-level benchmarks from PolyBench [ 74 ], Mach-Suite [ 55 ], CGRA-Bench [ 62 ], and CHStone [ 27 ] that offer a wide spectrum of control flow features (e.g., nested loops, branches in loops). As summarized in Table 4, these benchmarks are categorized into four application domains to systematically evaluate performance on different computational patterns. In addition to these isolated kernels, we evaluate application-level performance using two real-world applications composed of multiple interacting kernels: a 2-layer Graph Convolutional Accepted by PLDI 2026 
+
+NEURA: A Unified and Retargetable Compilation Framework for Coarse-Grained Reconfigurable Architectures 17 
+
+Network (GCN) derived from PyTorch-Geometric [ 18 ], and Lower-Upper (LU) Decomposition sourced from CGRA-Bench [62]. 
+
+Table 4. Evaluation Benchmarks 
+
+Domain/ Application Kernel Control Flow Feature Loop Control Branch Divergence Machine Learning 
+
+conv Imperfect Nested N/A relu Simple Loop Two Branches in Loop spmv Imperfect Nested N/A 
+
+Linear Algebra 
+
+gemm Imperfect Nested N/A bicg Imperfect Nested N/A mvt Perfect Nested N/A 
+
+Signal Processing 
+
+adpcm Simple Loop Four Branches in Loop dtw Perfect Nested Four Branches in Loop jacobi Imperfect Nested, Serial Loops N/A fft Imperfect Nested N/A merge-sort Perfect Nested Loop in Nested Branches 
+
+Graph Algorithm 
+
+dijkstra Imperfect Nested Three Branches (Two Nested) in Loop bfs Imperfect Nested One Branch in Loop floyd Perfect Nested Two Branches in Loop 
+
+2-Layer Graph Convolutional Network (GCN) 
+
+compress Perfect Nested One Branch in Loop aggregate ( ×2) Perfect Nested N/A combine Perfect Nested N/A combRelu Perfect Nested One Branch in Loop pooling Perfect Nested N/A 
+
+Lower-Upper Decomposition (LU) 
+
+init Simple Loop N/A decompose Imperfect Nested N/A solver0 Simple Loop Two Branches in Loop solver1 Simple Loop Two Branches in Loop invert Imperfect Nested One Branch in Loop determinant Simple Loop Nested Branch in Loop 
+
+Comparison Methodol-ogy. To fairly compare strate-gies for bridging the control-dataflow semantic gap , we use the specific compiler pro-vided by each framework to generate its specific ker-nel representation. All ker-nel representations are then processed by the same map-ping algorithm [ 62 ] across all evaluated architectures to iso-late the impact of different mapping algorithms, a pro-cess that typically completes in a few minutes. All archi-tectures are normalized to a 6 × 6 fabric size to miti-gate topological differences in mapping complexity. As typical CGRAs are statically configured, evaluation metrics (e.g., speedup, instructions-per-cycle) are known at compilation time. We can precisely calculate these metrics from the mapping result. We construct cycle-accurate simulators that account for host-CGRA communication for each archi-tecture based on its specifications. We synthesize the RTL implementation of each architecture using Synopsys Design Compiler with the TSMC 22nm ULL library at 800MHz to get area for performance-per-area evaluation (see Sec. 8.3). 0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+> Area (mm 2)
+
+NEURA-SO 
+
+NEURA-ST 
+
+Vanilla w/ ISA Extension 
+
+Area Increase 
+
+0.0 
+
+0.5 
+
+1.0 
+
+1.5 
+
+2.0 
+
+> Area Increase (%)
+
++1.89% 
+
++1.39% 
+
+Fig. 12. Area Overhead of NEURA ISA Exten-sions. 
+
+Evaluation Methodology for NEURA Acceleration Granularity. 
+
+NEURA’s ability to represent complex control flow as a unified DFG pro-vides the flexibility to choose the acceleration granularity — ranging from a single inner loop to the entire kernel. Choosing the optimal granularity is complex, as offloading the entire kernel may not always yield optimal performance (e.g., outer loops with very few iterations prevent effective amortization of initialization overheads). While automatically determin-ing this optimal granularity is a research problem beyond this paper’s scope, we adopt an iterative methodology for the evaluation. We compile and simulate each possible granularity (from the innermost loop to the entire kernel) and select the one yielding the lowest total kernel execution latency. Critically, only NEURA possesses this flexibility in our evaluation. Although RipTide can also flatten complex kernels into a DFG, its rigid spatial-only model and fixed array size constrain it to executing only the innermost loops in our evaluation. 
+
+8.2 Hardware Overhead Analysis 
+
+To show the hardware overhead of ISA extensions required by Sec. 4.3, we synthesize 6 × 6 NEURA-enabled architectures (NEURA-SO and NEURA-ST) and compare them to corresponding vanilla baselines (without ISA extensions). As shown in Fig. 12, the area overhead is negligible: only 1.89% 
+
+for NEURA-SO and 1.39% for NEURA-ST. Furthermore, by bundling and routing the predicate bit Accepted by PLDI 2026 
+
+18 Shangkun Li, Jinming Ge, Diyuan Tao, Zeyu Li, Jiawei Liang, Linfeng Du, Jiang Xu, Wei Zhang, and Cheng Tan 0
+
+1
+
+2
+
+3
+
+4
+
+> Normalized
+> Speedup
+
+conv relu spmv gemm 
+
+bicg mvt 
+
+adpcm dtw 
+
+jacobi fft 
+
+merge-sort 
+
+dijkstra bfs 
+
+floyd 
+
+Geomean 
+
+> 1.00x
+> 0.98x
+> 0.91x
+> 1.00x
+> 2.20x
+
+Marionette ICED RipTide (Operating @800MHz) NEURA-SO NEURA-ST 
+
+Fig. 13. Performance Comparison — All results are normalized to the speedup of Marionette. The rightmost group of bars represents the geometric mean (geomean) across all benchmarks. 0
+
+5
+
+10 
+
+> IPC
+
+conv 
+
+relu 
+
+spmv 
+
+gemm 
+
+bicg 
+
+mvt 
+
+adpcm 
+
+dtw 
+
+jacobi 
+
+fft 
+
+merge-sort 
+
+dijkstra 
+
+bfs 
+
+floyd 
+
+Geomean 
+
+> 1.42
+> 2.43
+> 1.49
+> 1.90  5.71
+
+Marionette ICED RipTide (Operating @800MHz) NEURA-SO NEURA-ST 
+
+Fig. 14. Instructions Per Cycle (IPC) Comparison — IPC achieved by NEURA architectures and baselines. A higher IPC indicates more effective exploitation of instruction-level parallelism (ILP). 0
+
+5
+
+10 
+
+15 
+
+> Normalized
+> Perf/Area
+
+conv relu spmv gemm 
+
+bicg mvt adpcm dtw jacobi fft 
+
+merge-sort 
+
+dijkstra bfs 
+
+floyd 
+
+Geomean 
+
+> 1.00x
+> 2.97x
+> 3.57x
+> 4.01x
+> 6.40x
+
+Marionette ICED RipTide (Operating @800MHz) NEURA-SO NEURA-ST 
+
+Fig. 15. Performance Per Area (Perf/Area) Comparison — All results are normalized to the Perf/Area of Marionette. It illustrates the area efficiency of each architecture. 
+
+alongside the existing data payload, this design incurs negligible routing overhead. Consequently, both architectures maintain the vanilla baselines’ 800MHz operating frequency without degradation. This low cost demonstrates that the ISA extensions to support NEURA’s predicated type system and specialized instructions are highly efficient. 
+
+8.3 NEURA-ST Outperforms SOTA Control Flow Handling Strategies 
+
+To demonstrate a high-performance solution for handling control flow on CGRAs, we evaluate NEURA-ST against the three SOTA baselines across performance (Speedup), Instructions Per Cycle (IPC), and area efficiency (Performance Per Area). Results reveal NEURA-ST consistently outperforms all baselines in performance and achieves high improvements in area efficiency. 
+
+Performance. As shown in Fig. 13, NEURA-ST achieves geometric mean (geomean) speedups of 2.20 × over Marionette, 2.24 × over ICED, and 2.42 × over RipTide. These gains stem directly from NEURA’s ability to generate a single, unified DFG that holistically represents the kernel. This unification eliminates the serialization bottlenecks inherent in Marionette’s dedicated controller approach, which sequentially executes BBs and incurs high reconfiguration latency. NEURA’s ability to handle hierarchical predicates enables the flattening of complex nested control flow, achieving a higher 2.50 × geomean speedup over ICED on benchmarks with hierarchical nested control flows (i.e., relu , adpcm , dtw , merge-sort , dijkstra , bfs , and floyd ). This is because ICED can only predicate the inner branch on these benchmarks and reverts to sequential loop iteration execution, resulting in a higher performance gap. The NEURA Dataflow IR is decoupled from specific execution models, allowing it to leverage the flexible spatio-temporal execution model to route long data dependencies both temporally (across cycles) and spatially. This yields a geomean speedup of 3.59 ×
+
+over RipTide on benchmarks with long data dependencies (i.e., fft , merge-sort , dijkstra , bfs ,
+
+floyd ), as RipTide’s rigid spatial-only execution model can only map these dependencies as long, complex spatial routes, increasing the critical path delay. 
+
+Instructions Per Cycle (IPC). Fig. 14 illustrates the IPC, defined as total tile executions divided by total execution latency. NEURA-ST achieves higher geomean IPC over baselines. NEURA’s unified Accepted by PLDI 2026 
+
+NEURA: A Unified and Retargetable Compilation Framework for Coarse-Grained Reconfigurable Architectures 19 
+
+DFG fundamentally eliminates the severe control-induced idle cycles and inter-BB reconfiguration stalls inherent in Marionette, resulting in low total execution latency. The comparison with ICED reveals a critical insight. Although ICED shows high IPC on some benchmarks (e.g., conv , spmv ), its performance speedup trails NEURA-ST. This paradox is because ICED’s kernel IR is not amenable to critical hardware-agnostic optimizations (e.g., data type alignment). This IR limitation leaves it unable to eliminate redundant operations, inflating its total tile executions and harming performance. NEURA supports these optimizations, producing a more efficient IR. Finally, RipTide’s IPC collapses on benchmarks with long data dependencies. This further validates our performance analysis — its rigid spatial-only execution model creates long, static routes that drastically inflate the total execution latency without adding proportional computational work, destroying the IPC. 
+
+Performance Per Area. Fig. 15 shows the performance per area (Perf/Area) comparison normal-ized to Marionette. NEURA-ST achieves a remarkable 6.40 × geomean Perf/Area over Marionette. This exceptional efficiency stems from NEURA’s compiler-centric design. NEURA achieves its high performance using only minimal ISA extensions, avoiding the significant area overhead of Marionette’s dedicated in-tile control hardware. NEURA-ST’s 2.15 × geomean Perf/Area over ICED further highlights the value of NEURA Dataflow IR. With comparable hardware overhead (NEURA-ST 0.92 mm 2, ICED 0.88 mm 2), NEURA fully exploits the available hardware parallelism by resolving hierarchical predicates, achieving high area efficiency. Finally, NEURA-ST surpasses RipTide by 1.79 × by achieving a superior design tradeoff. While RipTide’s low-power design is area-efficient, it achieves this by sacrificing performance with its rigid spatial-only execution model. NEURA-ST delivers a much higher performance while maintaining excellent area efficiency. 
+
+8.4 NEURA-SO Provides a Competitive Solution for Low-Power CGRAs 
+
+Sec. 8.3 demonstrates NEURA’s high-performance capabilities with the spatio-temporal NEURA-ST architecture. NEURA’s retargetability also extends to the low-power domain. To assess its effectiveness in this domain, we evaluate the NEURA Dataflow IR on our spatial-only NEURA-SO architecture. We compare its performance and energy against RipTide, the SOTA low-power CGRA, to demonstrate that NEURA provides a competitive and general solution in the low-power domain. 0         
+
+> 1
+> 2
+> Normalized
+> Total Energy
+> conv relu spmv
+> gemm bicg mvt
+> adpcm dtw jacobi fft
+> merge-sort
+> dijkstra bfs floyd
+> Geomean 1.00x
+> 1.15x
+> RipTide (Operating @800MHz) NEURA-SO
+
+Fig. 16. Energy Comparison — Energy consumption of NEURA-SO normalized to RipTide (operating at 800MHz). 
+
+Performance, IPC, and Perf/Area. 
+
+As shown in Fig.13, NEURA-SO de-livers competitive performance, ex-ceeding RipTide by 10% on geomean. It also achieves geomean improve-ments of 28% in IPC (see Fig. 14) and 
+
+12% in Perf/Area (see Fig. 15) over RipTide. For benchmarks like relu ,
+
+gemm , and jacobi , NEURA-SO signif-icantly outperforms RipTide in performance. This occurs because RipTide’s highly specialized ISA requires regular control patterns to be converted to match its specific steering-control primitives, which lengthens the critical path. Conversely, RipTide performs better on spmv , where its irregular memory access patterns align well with RipTide’s specialized ISA. 
+
+Energy Consumption. Fig.16 shows that NEURA-SO’s energy consumption is competitive with RipTide across most benchmarks, with a geomean only 1.15 × higher. RipTide (operating at 800MHz) demonstrates lower energy consumption on specific benchmarks like relu , merge-sort ,and dijkstra . This is attributable to RipTide’s specialized merge operation, which efficiently fuses multi-input selection logic from the branches within these benchmarks’ loops. In contrast, the general NEURA Dataflow IR, designed for portability, does not presume such specialized operations. Accepted by PLDI 2026 
+
+20 Shangkun Li, Jinming Ge, Diyuan Tao, Zeyu Li, Jiawei Liang, Linfeng Du, Jiang Xu, Wei Zhang, and Cheng Tan 
+
+Generality vs. Specialization. The evaluation validates that the general NEURA Dataflow IR can achieve competitive performance and energy consumption against the SOTA low-power CGRA. The observed trade-offs in performance and energy underscore NEURA’s design philosophy: relying on a small set of general operations provides strong baseline efficiency and avoids over-specialization. This general design is not a limitation. For scenarios demanding further optimization, NEURA’s extensible framework can readily incorporate hardware-specific operations, via pattern rewriting in Sec. 6.2. Our open-source release already extends our IR with RipTide’s specialized operations and implements the transformation from our general IR to these specific operations. 
+
+8.5 Impact of NEURA Compiler Optimizations 
+
+To quantify the impact of NEURA compiler optimizations presented in Sec. 6, we evaluate their cumulative contributions. The baseline is the unoptimized NEURA Dataflow IR executed on a 6 × 6
+
+NEURA-ST architecture augmented with specialized FUs supporting the neura.load_indexed 
+
+and neura.loop_control operations (see Sec. 6.2). Fig. 17 shows the cumulative speedup as each optimization is applied. 
+
+Hardware-agnostic optimizations yield significant gains. Data type alignment and constant folding provide a 1.69 × geomean speedup over the baseline. This improvement arises because these optimizations eliminate redundant type conversions and avoid the overhead of materializing con-stants as DFG operations. Folding constants into attributes avoids additional predicate management logic, simplifies the data dependencies within the DFG, and frees up hardware resources. 0         
+
+> 1
+> 2
+> 3
+> 4
+> 5
+> Normalized Speedup
+> conv relu
+> spmv
+> gemm bicg mvt
+> adpcm dtw
+> jacobi fft
+> merge-sort
+> dijkstra bfs floyd
+> Geomean
+> 2.45×
+> 1.75× 1.76×
+> 2.33×
+> 3.32×
+> 2.50×
+> 1.63× 2.03×
+> 4.97×
+> 3.28×
+> 1.50× 1.46×
+> 1.89× 1.80× 2.19×
+> Computational Pattern Fusion Loop Streaming
+> w/o Optimization Data Type Alignment Constant Folding
+
+Fig. 17. Impact of NEURA Compiler Optimizations — Cumu-lative speedup on an augmented 6 × 6 NEURA-ST normalized to source IR without optimization. Bars show the cumulative speedup after enabling optimizations. 
+
+Further performance gains are con-tributed by hardware-specific opti-mizations . First, we apply the com-putational pattern fusion . For this evaluation, we enable the load fu-sion pattern to fuse address calcula-tion and memory access into a sin-gle neura.load_indexed operation. This brings the cumulative geomean speedup to 1.79 × over the baseline. Next, the loop streaming optimiza-tion delivers further gains, especially for benchmarks bottlenecked by inter-iteration dependencies in their loop control logic (e.g., jacobi ). By fusing the loop control logic into a single neura.loop_control operation, this optimization breaks the critical inter-iteration dependencies, enabling more aggressive pipelining. The cumulative effect of all optimizations results in a geomean speedup of 2.19 × over the baseline, demonstrating the efficacy and importance of NEURA’s multi-level optimization strategy. 
+
+8.6 NEURA Dataflow IR is Scalable 
+
+A key attribute of a versatile CGRA compilation framework is its ability to scale performance across different hardware fabric sizes. We conduct a scalability study to demonstrate that the NEURA Dataflow IR is not a bottleneck as hardware resources increase. Our initial analysis reveals that 
+
+6 × 6 NEURA-ST already saturates performance for most benchmarks due to inter-iteration data dependencies rather than resource limitations. Comparing against an even larger fabric would fail to reveal the IR’s scalability. Therefore, we compare the performance of the same NEURA Dataflow IR on a smaller 4 × 4 NEURA-ST against the base 6 × 6 array. We exclude benchmarks whose Accepted by PLDI 2026 
+
+NEURA: A Unified and Retargetable Compilation Framework for Coarse-Grained Reconfigurable Architectures 21 
+
+performance is already saturated on the 4 × 4 array due to inter-iteration data dependencies rather than resource constraints. 0
+
+1
+
+2
+
+> Normalized Speedup
+
+bicg mvt 
+
+adpcm dtw jacobi fft 
+
+merge-sort bfs floyd 
+
+Geomean 1.00x 
+
+> 1.34x
+
+4 × 4 NEURA-ST 6 × 6 NEURA-ST Improvement Rate 
+
+0
+
+20 
+
+40 
+
+60 
+
+80 
+
+> Improvement Rate (%)
+
+Fig. 18. Scalability Analysis — Performance of running the same NEURA Dataflow IR on both 4 × 4 and 6 × 6
+
+NEURA-ST architectures. 
+
+As shown in Fig. 18, scaling the architecture from 4 × 4 to 6 × 6 yields performance improve-ment across all tested benchmarks, resulting in a geomean speedup of 1.34 ×. This perfor-mance scaling is not perfectly linear, which is expected due to two inherent factors. First, the performance might saturate on the 4 × 4 array, limiting additional benefits from a larger array. Second, performance scaling is bounded by the theoretical minimum resource II, defined as the instruction count in the DFG divided by the tile count. For example, floyd contains 39 instructions. On a 4 × 4 (16-tile) array, its minimum resource II is ⌈39 /16 ⌉ = 3. Scaling to a 6 × 6 (36-tile) array only reduces the minimum resource II to ⌈39 /36 ⌉ = 2. This implies a theoretical maximum speedup of 1.5×. Considering these inherent factors, the achieved 1.34 × speedup validates the scalability of the NEURA Dataflow IR. 
+
+8.7 NEURA Effectively Accelerates Real-World Applications 
+
+To clearly illustrate the performance disparities across different architectures on real-world work-loads, Fig. 19 presents the execution time breakdown of the constituent kernels within the GCN and LU Decomposition applications. All results are normalized to the execution time of Marionette. 
+
+Performance of NEURA-ST. NEURA-ST achieves the lowest execution time among all eval-uated architectures for both applications. Specifically, NEURA-ST achieves geomean speedup of 
+
+2.57 × and 2.71 × over all evaluated baselines (i.e., Marionette, ICED, and RipTide) on GCN and LU Decomposition, respectively. This performance validates the efficacy of NEURA’s hierarchical predication, which seamlessly flattens complex nested loops and branches into a unified DFG. By doing so, NEURA-ST effectively manages the control overheads present in the CDFG Strategy (e.g., Marionette) and the loop-handling inefficiencies in the Limited Predication Strategy (e.g., ICED). Marionette     
+
+> ICED
+> RipTide
+> NEURA-SO
+> NEURA-ST
+> Marionette
+> ICED
+> RipTide
+> NEURA-SO
+> NEURA-ST
+> 0%
+> 50%
+> 100%
+> 150%
+> 200%
+> Normalized Execution Time
+> 100.0% 102.3%
+> 168.3% 170.7%
+> 46.6%
+> 100.0%
+> 64.4%
+> 199.9% 197.8%
+> 40.1%
+> GCN LU
+> compress
+> combine
+> aggregate1
+> combRelu
+> aggregate2
+> pooling
+> init
+> solver1
+> decompose
+> invert
+> solver0
+> determinant
+> init
+> solver1
+> decompose
+> invert
+> solver0
+> determinant
+
+Fig. 19. Application Execution Time Breakdown — Execution time breakdown of the constituent kernels for GCN and LU Decomposition. All results are normalized to the execution time of Marionette. 
+
+Performance of NEURA-SO. 
+
+When targeting the spatial-only 
+
+execution model, NEURA-SO de-livers performance comparable to the SOTA low-power CGRA base-line, RipTide, across both applica-tions. While NEURA-SO and Rip-Tide exhibit longer execution time than high-performance architec-tures like Marionette and NEURA-ST, this reflects an expected trade-off for low-power CGRAs that pri-oritize extreme energy efficiency over sheer speed. Achieving per-formance on par with RipTide, coupled with the substantial speedups delivered by NEURA-ST, demonstrates NEURA’s capa-bility to retarget applications to different execution models to meet different hardware constraints and performance demands. Accepted by PLDI 2026 
+
+22 Shangkun Li, Jinming Ge, Diyuan Tao, Zeyu Li, Jiawei Liang, Linfeng Du, Jiang Xu, Wei Zhang, and Cheng Tan 
+
+9 Related Works 
+
+Predicated Execution for CGRAs. Predicated execution is a well-established technique aiming to eliminate control flow branches for high ILP [ 2, 30 , 42 , 43 , 51 ], employed across various architectures like CPUs and GPUs [ 48 , 50 , 64 ]. Recognizing its potential, CGRAs have explored predicated execution, but existing approaches exhibit key limitations. One category of works focuses solely on handling intra-loop branch divergence (i.e., if-else ) using predication [ 25 , 26 , 37 , 56 , 73 , 76 ]. However, these solutions do not address the predication of the loop control logic, relying on external hardware to manage loop iterations. Another category attempts to use predication for simple loop control (i.e., single loop) [ 35 , 60 , 62 , 70 ]. However, these solutions fail when faced with nested control structures (e.g., nested loops, branches in loops). They often revert to only predicating either the innermost loop or inner branch, failing to flatten the encompassing loop structure because they cannot represent the required hierarchical predicate context. Consequently, existing predicated execution solutions for CGRAs lack a mechanism to systematically unify predicate contexts originating from different control levels. NEURA addresses this limitation through its predicated type system and predicate management operations, providing the first mechanism to systematically represent and combine these hierarchical predicate contexts directly within a pure dataflow graph. 
+
+IRs and Compilation Frameworks for CGRAs. Compilation frameworks for CGRAs heavily rely on CDFG representations derived from imperative languages [ 1, 17 , 33 , 34 ]. Existing frameworks typically follow one of three main strategies to manage the CDFG. The first category separates the CFG and DFG execution, mapping only DFGs onto the CGRA while managing the CFG externally via host CPUs or dedicated hardware [ 8 , 13 , 22 , 29 , 49 , 76 ]. While Spatial [ 32 ] can generate efficient DFG configurations for CGRAs, this separation fundamentally limits inter-DFG parallelism. The second category attempts to unify the representation into a single DFG. Steering control techniques [ 5, 6, 11 , 14 , 20 , 21 , 23 , 58 ] achieve full flattening and are widely adopted in the spatial-only 
+
+execution model. However, as discussed in Sec. 2.2, steering control is difficult to adapt to spatio-temporal execution, sacrificing performance and architectural generality for complex control flows. The third category employs predicated execution [ 35 , 41 , 56 , 60 , 62 , 70 , 76 ]. They can handle simple branches, but fail to represent nested control flows, preventing the complete conversion of CDFGs. Consequently, existing frameworks lack a unified, pure dataflow IR capable of representing hierarchical control flow while remaining decoupled from specific execution models. NEURA addresses this critical gap with its NEURA Dataflow IR, which leverages a predicated type system to provide the first such unified representation, inherently supporting both spatial-only and 
+
+spatio-temporal execution. 
+
+10 Conclusion 
+
+This paper presents NEURA, a unified and retargetable compilation framework for CGRAs that systematically resolves the control-dataflow semantic gap . NEURA’s core innovation is a novel pure dataflow IR that uses a predicated type system to embed hierarchical control context into data values. This enables flattening a kernel with complex control flow into a single, unified DFG, eliminating the serialization bottlenecks and rigid mapping limitations of prior approaches. Our evaluation validates NEURA’s effectiveness and retargetability with negligible hardware overhead. When targeted to a high-performance spatio-temporal architecture, NEURA achieves a 
+
+2.20 × geomean speedup on kernels and up to 2.71 × geomean speedup on real-world applications over leading baselines. When retargeted to a low-power spatial-only architecture, it provides a competitive solution against the SOTA low-power framework. Accepted by PLDI 2026 
+
+NEURA: A Unified and Retargetable Compilation Framework for Coarse-Grained Reconfigurable Architectures 23 
+
+References 
+
+[1] F. E. Allen and J. Cocke. 1976. A program data flow analysis procedure. Commun. ACM 19, 3 (March 1976), 137. doi:10.1145/360018.360025 [2] J. R. Allen, Ken Kennedy, Carrie Porterfield, and Joe Warren. 1983. Conversion of control dependence to data dependence. In Proceedings of the 10th ACM SIGACT-SIGPLAN Symposium on Principles of Programming Languages (Austin, Texas) 
+
+(POPL ’83) . Association for Computing Machinery, New York, NY, USA, 177–189. doi:10.1145/567067.567085 [3] Jason Ansel, Edward Yang, Horace He, Natalia Gimelshein, Animesh Jain, Michael Voznesensky, Bin Bao, Peter Bell, David Berard, Evgeni Burovski, Geeta Chauhan, Anjali Chourdia, Will Constable, Alban Desmaison, Zachary DeVito, Elias Ellison, Will Feng, Jiong Gong, Michael Gschwind, Brian Hirsh, Sherlock Huang, Kshiteej Kalambarkar, Laurent Kirsch, Michael Lazos, Mario Lezcano, Yanbo Liang, Jason Liang, Yinghai Lu, C. K. Luk, Bert Maher, Yunjie Pan, Christian Puhrsch, Matthias Reso, Mark Saroufim, Marcos Yukio Siraichi, Helen Suk, Shunting Zhang, Michael Suo, Phil Tillet, Xu Zhao, Eikan Wang, Keren Zhou, Richard Zou, Xiaodong Wang, Ajit Mathews, William Wen, Gregory Chanan, Peng Wu, and Soumith Chintala. 2024. PyTorch 2: Faster Machine Learning Through Dynamic Python Bytecode Transformation and Graph Compilation. In Proceedings of the 29th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 2 (La Jolla, CA, USA) (ASPLOS ’24) . Association for Computing Machinery, New York, NY, USA, 929–947. doi:10.1145/3620665.3640366 [4] ’arith’ Dialect. 2025. ’arith’ Dialect. https://mlir.llvm.org/docs/Dialects/ArithOps/ Accessed on Sept 15, 2025. [5] Arvind and R.S. Nikhil. 1990. Executing a program on the MIT tagged-token dataflow architecture. IEEE Trans. Comput. 
+
+39, 3 (1990), 300–318. doi:10.1109/12.48862 [6] Mihai Budiu, Girish Venkataramani, Tiberiu Chelcea, and Seth Copen Goldstein. 2004. Spatial computation. In 
+
+Proceedings of the 11th international conference on Architectural support for programming languages and operating systems . 14–26. [7] Yunji Chen, Tao Luo, Shaoli Liu, Shijin Zhang, Liqiang He, Jia Wang, Ling Li, Tianshi Chen, Zhiwei Xu, Ninghui Sun, and Olivier Temam. 2014. DaDianNao: A Machine-Learning Supercomputer. In 2014 47th Annual IEEE/ACM International Symposium on Microarchitecture . 609–622. doi:10.1109/MICRO.2014.58 [8] S. Alexander Chin, Noriaki Sakamoto, Allan Rui, Jim Zhao, Jin Hee Kim, Yuko Hara-Azumi, and Jason Anderson. 2017. CGRA-ME: A unified framework for CGRA modelling and exploration. In 2017 IEEE 28th International Conference on Application-specific Systems, Architectures and Processors (ASAP) . 184–189. doi:10.1109/ASAP.2017.7995277 [9] Clang. 2025. Clang: a C language family frontend for LLVM. https://clang.llvm.org Accessed on Sept 15, 2025. [10] Ron Cytron, Jeanne Ferrante, Barry K Rosen, Mark N Wegman, and F Kenneth Zadeck. 1989. An efficient method of computing static single assignment form. In Proceedings of the 16th ACM SIGPLAN-SIGACT symposium on Principles of programming languages . 25–35. [11] Ron Cytron, Jeanne Ferrante, Barry K. Rosen, Mark N. Wegman, and F. Kenneth Zadeck. 1991. Efficiently computing static single assignment form and the control dependence graph. ACM Trans. Program. Lang. Syst. 13, 4 (Oct. 1991), 451–490. doi:10.1145/115372.115320 [12] William J. Dally, Yatish Turakhia, and Song Han. 2020. Domain-specific hardware accelerators. Commun. ACM 63, 7 (June 2020), 48–57. doi:10.1145/3361682 [13] Jinyi Deng, Xinru Tang, Jiahao Zhang, Yuxuan Li, Linyun Zhang, Boxiao Han, Hongjun He, Fengbin Tu, Leibo Liu, Shaojun Wei, Yang Hu, and Shouyi Yin. 2023. Towards Efficient Control Flow Handling in Spatial Architecture via Architecting the Control Flow Plane. In Proceedings of the 56th Annual IEEE/ACM International Symposium on Microarchitecture (Toronto, ON, Canada) (MICRO ’23) . Association for Computing Machinery, New York, NY, USA, 1395–1408. doi:10.1145/3613424.3614246 [14] Jack B. Dennis and David P. Misunas. 1974. A preliminary architecture for a basic data-flow processor. In Proceedings of the 2nd Annual Symposium on Computer Architecture (ISCA ’75) . Association for Computing Machinery, New York, NY, USA, 126–132. doi:10.1145/642089.642111 [15] Hadi Esmaeilzadeh, Emily Blem, Renee St. Amant, Karthikeyan Sankaralingam, and Doug Burger. 2011. Dark silicon and the end of multicore scaling. In Proceedings of the 38th Annual International Symposium on Computer Architecture (San Jose, California, USA) (ISCA ’11) . Association for Computing Machinery, New York, NY, USA, 365–376. doi:10.1145/2000064.2000108 [16] Kathleen Feng, Taeyoung Kong, Kalhan Koul, Jackson Melchert, Alex Carsello, Qiaoyi Liu, Gedeon Nyengele, Maxwell Strange, Keyi Zhang, Ankita Nayak, Jeff Setter, James Thomas, Kavya Sreedhar, Po-Han Chen, Nikhil Bhagdikar, Zach A. Myers, Brandon D’Agostino, Pranil Joshi, Stephen Richardson, Christopher Torng, Mark Horowitz, and Priyanka Raina. 2024. Amber: A 16-nm System-on-Chip With a Coarse- Grained Reconfigurable Array for Flexible Acceleration of Dense Linear Algebra. IEEE Journal of Solid-State Circuits 59, 3 (2024), 947–959. doi:10.1109/JSSC.2023.3313116 [17] Jeanne Ferrante, Karl J Ottenstein, and Joe D Warren. 1987. The program dependence graph and its use in optimization. 
+
+ACM Transactions on Programming Languages and Systems (TOPLAS) 9, 3 (1987), 319–349. Accepted by PLDI 2026 
+
+24 Shangkun Li, Jinming Ge, Diyuan Tao, Zeyu Li, Jiawei Liang, Linfeng Du, Jiang Xu, Wei Zhang, and Cheng Tan 
+
+[18] Matthias Fey and Jan Eric Lenssen. 2019. Fast Graph Representation Learning with PyTorch Geometric. arXiv:1903.02428 [cs.LG] https://arxiv.org/abs/1903.02428 [19] Adi Fuchs and David Wentzlaff. 2019. The accelerator wall: Limits of chip specialization. In 2019 IEEE International Symposium on High Performance Computer Architecture (HPCA) . IEEE, 1–14. [20] Souradip Ghosh, Graham Gobieski, Keyi Zhang, Brandon Lucia, Nathan Beckmann, and Tony Nowatzki. 2025. NUPEA: Optimizing Critical Loads on Spatial Dataflow Architectures via Non-Uniform Processing-Element Access. In Pro-ceedings of the 52nd Annual International Symposium on Computer Architecture (ISCA ’25) . Association for Computing Machinery, New York, NY, USA, 1627–1640. doi:10.1145/3695053.3731061 [21] Souradip Ghosh, Yufei Shi, Brandon Lucia, and Nathan Beckmann. 2025. Ripple: Asynchronous Programming for Spatial Dataflow Architectures. Proc. ACM Program. Lang. 9, PLDI, Article 157 (June 2025), 28 pages. doi:10.1145/3729256 [22] Graham Gobieski, Ahmet Oguz Atli, Kenneth Mai, Brandon Lucia, and Nathan Beckmann. 2021. Snafu: An Ultra-Low-Power, Energy-Minimal CGRA-Generation Framework and Architecture. In 2021 ACM/IEEE 48th Annual International Symposium on Computer Architecture (ISCA) . 1027–1040. doi:10.1109/ISCA52012.2021.00084 [23] Graham Gobieski, Souradip Ghosh, Marijn Heule, Todd Mowry, Tony Nowatzki, Nathan Beckmann, and Brandon Lucia. 2022. RipTide: A Programmable, Energy-Minimal Dataflow Compiler and Architecture. In 2022 55th IEEE/ACM International Symposium on Microarchitecture (MICRO) . 546–564. doi:10.1109/MICRO56248.2022.00046 [24] Venkatraman Govindaraju, Chen-Han Ho, Tony Nowatzki, Jatin Chhugani, Nadathur Satish, Karthikeyan Sankar-alingam, and Changkyu Kim. 2012. DySER: Unifying Functionality and Parallelism Specialization for Energy-Efficient Computing. IEEE Micro 32, 5 (2012), 38–51. doi:10.1109/MM.2012.51 [25] Mahdi Hamzeh, Aviral Shrivastava, and Sarma Vrudhula. 2014. Branch-aware loop mapping on CGRAs. In 2014 51st ACM/EDAC/IEEE Design Automation Conference (DAC) . 1–6. [26] Kyuseung Han, Jong Kyung Paek, and Kiyoung Choi. 2010. Acceleration of control flow on CGRA using advanced predicated execution. In 2010 International Conference on Field-Programmable Technology . 429–432. doi:10.1109/FPT. 2010.5681452 [27] Yuko Hara, Hiroyuki Tomiyama, Shinya Honda, and Hiroaki Takada. 2009. Proposal and Quantitative Analysis of the CHStone Benchmark Program Suite for Practical C-based High-level Synthesis. Information and Media Technologies 4, 4 (2009), 740–752. doi:10.11185/imt.4.740 [28] Nikos Hardavellas, Michael Ferdman, Babak Falsafi, and Anastasia Ailamaki. 2011. Toward Dark Silicon in Servers. 
+
+IEEE Micro 31, 4 (2011), 6–15. doi:10.1109/MM.2011.77 [29] Olivia Hsu, Alexander Rucker, Tian Zhao, Varun Desai, Kunle Olukotun, and Fredrik Kjolstad. 2025. Stardust: Compiling Sparse Tensor Algebra to a Reconfigurable Dataflow Architecture. In Proceedings of the 23rd ACM/IEEE International Symposium on Code Generation and Optimization (Las Vegas, NV, USA) (CGO ’25) . Association for Computing Machinery, New York, NY, USA, 628–643. doi:10.1145/3696443.3708918 [30] R. Johnson and M. Schlansker. 1996. Analysis techniques for predicated code. In Proceedings of the 29th Annual IEEE/ACM International Symposium on Microarchitecture. MICRO 29 . 100–113. doi:10.1109/MICRO.1996.566454 [31] Manupa Karunaratne, Aditi Kulkarni Mohite, Tulika Mitra, and Li-Shiuan Peh. 2017. HyCUBE: A CGRA with reconfigurable single-cycle multi-hop interconnect. In 2017 54th ACM/EDAC/IEEE Design Automation Conference (DAC) .1–6. doi:10.1145/3061639.3062262 [32] David Koeplinger, Matthew Feldman, Raghu Prabhakar, Yaqi Zhang, Stefan Hadjis, Ruben Fiszel, Tian Zhao, Luigi Nardi, Ardavan Pedram, Christos Kozyrakis, and Kunle Olukotun. 2018. Spatial: a language and compiler for application accelerators. In Proceedings of the 39th ACM SIGPLAN Conference on Programming Language Design and Implementation 
+
+(Philadelphia, PA, USA) (PLDI 2018) . Association for Computing Machinery, New York, NY, USA, 296–311. doi:10. 1145/3192366.3192379 [33] C. Lattner and V. Adve. 2004. LLVM: a compilation framework for lifelong program analysis & transformation. In 
+
+International Symposium on Code Generation and Optimization, 2004. CGO 2004. 75–86. doi:10.1109/CGO.2004.1281665 [34] Chris Lattner, Mehdi Amini, Uday Bondhugula, Albert Cohen, Andy Davis, Jacques Pienaar, River Riddle, Tatiana Shpeisman, Nicolas Vasilache, and Oleksandr Zinenko. 2021. MLIR: Scaling Compiler Infrastructure for Domain Specific Computation. In 2021 IEEE/ACM International Symposium on Code Generation and Optimization (CGO) . 2–14. doi:10.1109/CGO51591.2021.9370308 [35] Zhaoying Li, Pranav Dangi, Chenyang Yin, Thilini Kaushalya Bandara, Rohan Juneja, Cheng Tan, Zhenyu Bai, and Tulika Mitra. 2025. Enhancing CGRA Efficiency Through Aligned Compute and Communication Provisioning. In 
+
+Proceedings of the 30th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 1 (Rotterdam, Netherlands) (ASPLOS ’25) . Association for Computing Machinery, New York, NY, USA, 410–425. doi:10.1145/3669940.3707230 [36] ’linalg’ Dialect. 2025. ’linalg’ Dialect. https://mlir.llvm.org/docs/Dialects/Linalg/ Accessed on Nov 10, 2025. [37] Leibo Liu, Junbin Wang, Jianfeng Zhu, Chenchen Deng, Shouyi Yin, and Shaojun Wei. 2016. TLIA: Efficient Reconfig-urable Architecture for Control-Intensive Kernels with Triggered-Long-Instructions. IEEE Transactions on Parallel and Accepted by PLDI 2026 
+
+NEURA: A Unified and Retargetable Compilation Framework for Coarse-Grained Reconfigurable Architectures 25 
+
+Distributed Systems 27, 7 (2016), 2143–2154. doi:10.1109/TPDS.2015.2477841 [38] LLVM. 2026. LLVM If-Conversion. https://llvm.org/doxygen/IfConversion_8cpp.html Accessed on Mar 6, 2026. [39] ’llvm’ Dialect. 2025. ’llvm’ Dialect. https://mlir.llvm.org/docs/Dialects/LLVM/# Accessed on Sept 15, 2025. [40] ’llvm’ Dialect. 2025. ’llvm’ Dialect Constant Operation. https://mlir.llvm.org/docs/Dialects/LLVM/#llvmmlirconstant-llvmconstantop Accessed on Oct 21, 2025. [41] Yixuan Luo, Cheng Tan, Nicolas Bohm Agostini, Ang Li, Antonino Tumeo, Nirav Dave, and Tong Geng. 2023. ML-CGRA: An Integrated Compilation Framework to Enable Efficient Machine Learning Acceleration on CGRAs. In 2023 60th ACM/IEEE Design Automation Conference (DAC) . 1–6. doi:10.1109/DAC56929.2023.10247873 [42] Scott A Mahlke, Richard E Hank, James E McCormick, David I August, and Wen-Mei W Hwu. 1995. A comparison of full and partial predicated execution support for ILP processors. In Proceedings of the 22nd annual international symposium on Computer architecture . 138–150. [43] Scott A. Mahlke, David C. Lin, William Y. Chen, Richard E. Hank, and Roger A. Bringmann. 1992. Effective compiler support for predicated execution using the hyperblock. In Proceedings of the 25th Annual International Symposium on Microarchitecture (Portland, Oregon, USA) (MICRO 25) . IEEE Computer Society Press, Washington, DC, USA, 45–54. [44] Bingfeng Mei, S. Vernalde, D. Verkest, H. De Man, and R. Lauwereins. 2002. DRESC: a retargetable compiler for coarse-grained reconfigurable architectures. In 2002 IEEE International Conference on Field-Programmable Technology, 2002. (FPT). Proceedings. 166–173. doi:10.1109/FPT.2002.1188678 [45] Bingfeng Mei, Serge Vernalde, Diederik Verkest, Hugo De Man, and Rudy Lauwereins. 2003. ADRES: An architecture with tightly coupled VLIW processor and coarse-grained reconfigurable matrix. In International conference on field programmable logic and applications . Springer, 61–70. [46] ’memref’ Dialect. 2025. ’memref’ Dialect. https://mlir.llvm.org/docs/Dialects/MemRef/ Accessed on Sept 20, 2025. [47] William S. Moses, Lorenzo Chelini, Ruizhe Zhao, and Oleksandr Zinenko. 2021. Polygeist: Raising C to Polyhedral MLIR. In 2021 30th International Conference on Parallel Architectures and Compilation Techniques (PACT) . 45–59. doi:10.1109/PACT52795.2021.00011 [48] Tarun Nakra, Rajiv Gupta, and Mary Lou Soffa. 1999. Value prediction in VLIW machines. In Proceedings of the 26th annual international symposium on Computer architecture . 258–269. [49] Quan M. Nguyen and Daniel Sanchez. 2021. Fifer: Practical Acceleration of Irregular Applications on Reconfigurable Architectures. In MICRO-54: 54th Annual IEEE/ACM International Symposium on Microarchitecture (Virtual Event, Greece) (MICRO ’21) . Association for Computing Machinery, New York, NY, USA, 1064–1077. doi:10.1145/3466752. 3480048 [50] NVIDIA. 2025. Parallel Thread Execution ISA Version 9.0. https://docs.nvidia.com/cuda/parallel-thread-execution/ Accessed on Oct 25, 2025. [51] Joseph CH Park and Mike Schlansker. 1991. On predicated execution . Hewlett-Packard Laboratories Palo Alto, California. [52] Raghu Prabhakar, Yaqi Zhang, David Koeplinger, Matt Feldman, Tian Zhao, Stefan Hadjis, Ardavan Pedram, Christos Kozyrakis, and Kunle Olukotun. 2017. Plasticine: A Reconfigurable Architecture For Parallel Paterns. SIGARCH Comput. Archit. News 45, 2 (June 2017), 389–402. doi:10.1145/3140659.3080256 [53] Jiajun Qin, Tianhua Xia, Cheng Tan, Jeff Zhang, and Sai Qian Zhang. 2025. PICACHU: Plug-In CGRA Handling Upcom-ing Nonlinear Operations in LLMs. In Proceedings of the 30th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 2 (Rotterdam, Netherlands) (ASPLOS ’25) . Association for Computing Machinery, New York, NY, USA, 845–861. doi:10.1145/3676641.3716013 [54] B. Ramakrishna Rau. 1994. Iterative modulo scheduling: an algorithm for software pipelining loops. In Proceedings of the 27th Annual International Symposium on Microarchitecture (San Jose, California, USA) (MICRO 27) . Association for Computing Machinery, New York, NY, USA, 63–74. doi:10.1145/192724.192731 [55] Brandon Reagen, Robert Adolf, Yakun Sophia Shao, Gu-Yeon Wei, and David Brooks. 2014. MachSuite: Benchmarks for accelerator design and customized architectures. In 2014 IEEE International Symposium on Workload Characterization (IISWC) . 110–119. doi:10.1109/IISWC.2014.6983050 [56] Karthikeyan Sankaralingam, Ramadass Nagarajan, Haiming Liu, Changkyu Kim, Jaehyuk Huh, Nitya Ranganathan, Doug Burger, Stephen W. Keckler, Robert G. McDonald, and Charles R. Moore. 2004. TRIPS: A polymorphous architecture for exploiting ILP, TLP, and DLP. ACM Trans. Archit. Code Optim. 1, 1 (March 2004), 62–93. doi:10.1145/ 980152.980156 [57] Nathan Serafin, Souradip Ghosh, Harsh Desai, Nathan Beckmann, and Brandon Lucia. 2023. Pipestitch: An energy-minimal dataflow architecture with lightweight threads. In Proceedings of the 56th Annual IEEE/ACM International Symposium on Microarchitecture (Toronto, ON, Canada) (MICRO ’23) . Association for Computing Machinery, New York, NY, USA, 1409–1422. doi:10.1145/3613424.3614283 [58] Steven Swanson, Ken Michelson, Andrew Schwerin, and Mark Oskin. 2003. WaveScalar. In Proceedings. 36th Annual IEEE/ACM International Symposium on Microarchitecture, 2003. MICRO-36. IEEE, 291–302. Accepted by PLDI 2026 
+
+26 Shangkun Li, Jinming Ge, Diyuan Tao, Zeyu Li, Jiawei Liang, Linfeng Du, Jiang Xu, Wei Zhang, and Cheng Tan 
+
+[59] Cheng Tan, Nicolas Bohm Agostini, Tong Geng, Chenhao Xie, Jiajia Li, Ang Li, Kevin J. Barker, and Antonino Tumeo. 2022. DRIPS: Dynamic Rebalancing of Pipelined Streaming Applications on CGRAs. In 2022 IEEE International Symposium on High-Performance Computer Architecture (HPCA) . 304–316. doi:10.1109/HPCA53966.2022.00030 [60] Cheng Tan, Miaomiao Jiang, Deepak Patil, Yanghui Ou, Zhaoying Li, Lei Ju, Tulika Mitra, Hyunchul Park, Antonino Tumeo, and Jeff Zhang. 2024. ICED: An Integrated CGRA Framework Enabling DVFS-Aware Acceleration. In 2024 57th IEEE/ACM International Symposium on Microarchitecture (MICRO) . 1338–1352. doi:10.1109/MICRO61859.2024.00099 [61] Cheng Tan, Deepak Patil, Antonino Tumeo, Gabriel Weisz, Steve Reinhardt, and Jeff Zhang. 2023. VecPAC: A Vectorizable and Precision-Aware CGRA. In 2023 IEEE/ACM International Conference on Computer Aided Design (ICCAD) . 1–9. doi:10.1109/ICCAD57390.2023.10323910 [62] Cheng Tan, Chenhao Xie, Ang Li, Kevin J. Barker, and Antonino Tumeo. 2020. OpenCGRA: An Open-Source Unified Framework for Modeling, Testing, and Evaluating CGRAs. In 2020 IEEE 38th International Conference on Computer Design (ICCD) . 381–388. doi:10.1109/ICCD50377.2020.00070 [63] Cheng Tan, Chenhao Xie, Ang Li, Kevin J. Barker, and Antonino Tumeo. 2021. AURORA: Automated Refinement of Coarse-Grained Reconfigurable Accelerators. In 2021 Design, Automation & Test in Europe Conference & Exhibition (DATE) . 1388–1393. doi:10.23919/DATE51398.2021.9473955 [64] Ryan Taylor and Xiaoming Li. 2011. Software-based branch predication for AMD GPUs. ACM SIGARCH Computer Architecture News 38, 4 (2011), 66–72. [65] ’tensor’ Dialect. 2025. ’tensor’ Dialect. https://mlir.llvm.org/docs/Dialects/TensorOps/ Accessed on Nov 10, 2025. [66] Justin Ting, Minsik Kim, Junkang Zhu, Haotian Sheng, and Zhengya Zhang. 2025. HiPER: Hierarchically-Composed Processing for Efficient Robot Learning-Based Control. In Proceedings of the 52nd Annual International Symposium on Computer Architecture (ISCA ’25) . Association for Computing Machinery, New York, NY, USA, 313–326. doi:10.1145/ 3695053.3731097 [67] Torch-MLIR. 2025. Torch-MLIR. https://github.com/llvm/torch-mlir Accessed on Sept 15, 2025. [68] Christopher Torng, Peitian Pan, Yanghui Ou, Cheng Tan, and Christopher Batten. 2021. Ultra-Elastic CGRAs for Irregular Loop Specialization. In 2021 IEEE International Symposium on High-Performance Computer Architecture (HPCA) . 412–425. doi:10.1109/HPCA51647.2021.00042 [69] Jian Weng, Sihao Liu, Zhengrong Wang, Vidushi Dadu, and Tony Nowatzki. 2020. A Hybrid Systolic-Dataflow Architecture for Inductive Matrix Algorithms. In 2020 IEEE International Symposium on High Performance Computer Architecture (HPCA) . 703–716. doi:10.1109/HPCA47549.2020.00063 [70] Dhananjaya Wijerathne, Zhaoying Li, Manupa Karunaratne, Li-Shiuan Peh, and Tulika Mitra. 2022. Morpher: An open-source integrated compilation and simulation framework for cgra. In Fifth Workshop on Open-Source EDA Technology (WOSET) .[71] Yuxin Yang, Xiaoming Chen, and Yinhe Han. 2023. Dadu-RBD: Robot Rigid Body Dynamics Accelerator with Multifunctional Pipelines. In Proceedings of the 56th Annual IEEE/ACM International Symposium on Microarchitecture 
+
+(Toronto, ON, Canada) (MICRO ’23) . Association for Computing Machinery, New York, NY, USA, 297–309. doi:10. 1145/3613424.3614298 [72] Yufei Yang, Chenhao Xie, Chuliang Guo, Liansheng Liu, Xiyuan Peng, Datong Liu, and Yu Peng. 2025. FexMo: Enabling Fuse Execution Mode for Multi-task CGRAs . Association for Computing Machinery, New York, NY, USA, 1236–1249. https://doi.org/10.1145/3725843.3756019 [73] Shouyi Yin, Pengcheng Zhou, Leibo Liu, and Shaojun Wei. 2015. Acceleration of nested conditionals on CGRAs via trigger scheme. In 2015 IEEE/ACM International Conference on Computer-Aided Design (ICCAD) . 597–604. doi:10.1109/ ICCAD.2015.7372624 [74] Tomofumi Yuki. 2014. Understanding polybench/c 3.2 kernels. In International workshop on polyhedral compilation techniques (IMPACT) . 1–5. [75] Shijin Zhang, Zidong Du, Lei Zhang, Huiying Lan, Shaoli Liu, Ling Li, Qi Guo, Tianshi Chen, and Yunji Chen. 2016. Cambricon-X: An accelerator for sparse neural networks. In 2016 49th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO) . 1–12. doi:10.1109/MICRO.2016.7783723 [76] Yaqi Zhang, Nathan Zhang, Tian Zhao, Matt Vilim, Muhammad Shahbaz, and Kunle Olukotun. 2021. SARA: Scaling a Reconfigurable Dataflow Accelerator. In 2021 ACM/IEEE 48th Annual International Symposium on Computer Architecture (ISCA) . 1041–1054. doi:10.1109/ISCA52012.2021.00085

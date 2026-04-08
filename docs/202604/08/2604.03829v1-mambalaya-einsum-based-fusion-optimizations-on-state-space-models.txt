@@ -1,0 +1,604 @@
+Title: Mambalaya: Einsum-Based Fusion Optimizations on State-Space Models
+
+URL Source: https://arxiv.org/pdf/2604.03829v1
+
+Published Time: Tue, 07 Apr 2026 00:43:49 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# Mambalaya: Einsum-Based Fusion Optimizations on State-Space Models 
+
+Toluwanimi O. Odemuyiwa 
+
+University of California, Davis 
+
+Davis, CA, USA todemuyiwa@ucdavis.edu 
+
+John D. Owens 
+
+University of California, Davis 
+
+Davis, CA, USA jowens@ucdavis.edu 
+
+Joel S. Emer 
+
+MIT / NVIDIA 
+
+Cambridge, MA, USA emer@csail.mit.edu 
+
+Michael Pellauer 
+
+NVIDIA 
+
+Westford, MA, USA mpellauer@nvidia.com 
+
+Abstract —Mamba is an emerging, complex workload with various short-range and long-range dependencies, nonlinearities, and elementwise computations that are unable to run at near-peak speeds on modern hardware. Specifically, Mamba’s complex dependency graph makes fusion across its full operator cascade difficult, leaving substantial inter-operator memory traffic on the table. To address these challenges, we propose Mambalaya, a novel reconfigurable accelerator that leverages fusion to over-come the limitations of Mamba. We use the recently proposed cascade-of-Einsums abstraction to characterize Mamba’s full computational structure, then apply the extended Einsum frame-work to systematically explore inter-Einsum fusion opportunities. This principled approach yields a series of fusion mappings that reduce off-chip inter-Einsum traffic. These mappings are sup-ported by the underlying Mambalaya architecture. Mambalaya achieves a layer performance speedup of 4.9 × for prefill and 1.9 ×
+
+for generation over MARCA. In prefill-dominated scenarios, it achieves up to 1.5 × over a recent fine-grained, memory-aware fusion accelerator for Mamba. 
+
+I. I NTRODUCTION 
+
+Sequence modeling [1]—the ability to generate and pre-dict future data or tokens based on an input sequence—has emerged as the key generative AI workload. The Transformer network [2] has emerged as a major front-runner, but concerns over its limited ability to retain context over long sequences of tokens [3]–[5] have led to a renewed interest in State Space Models (SSMs). Mamba [6] is an emerging alternative SSM architecture that efficiently supports large contexts for LLMs. Mamba passes a fixed-size tensor (called the hidden state )recurrently between the same layer of subsequent steps. While this state represents a new inter-token data dependency, it is not any more serial than the Transformer’s existing auto-regressive dependency and therefore is a good candidate for efficient generation. Since 2023, Mamba has been widely adopted by a wide variety of companies and frameworks, including Microsoft [7], NVIDIA [8], Mistral AI [9], and IBM [10], among others [11]–[16]. Additionally, other com-petitive Mamba-inspired models have emerged, including Grif-fin [17], Mamba-2 [18], and Gated Delta Networks [19]. Today, optimized Transformers consistently run at near-peak speeds on modern accelerators: compute-bound for the prefill 
+
+phase, and memory-bound for the generation (or decode )phase. In contrast, we show that Mamba implementations do not reach close to peak utilization due to the significantly larger dependency graph of operators—especially a notably higher fraction of complex non-GEMM operations than Trans-formers. These characteristics make it harder to both optimize the underlying computation and to find straightforward map-pings onto existing unmodified accelerators. Recent work has demonstrated some initial success op-timizing Mamba using inter-operation fusion . Intermediates between producer-consumer operators incur expensive DRAM traffic as entire tensors are dumped to main memory (too large to be efficiently filtered by caching). Fusion has the potential to remove this traffic, thus increasing computational intensity. Thus the benefit of fusion is directly related to the number of operator pairs from Mamba’s complex dependency graph that can be fused. MARCA [20], the first published custom accelerator for Mamba, identified intra- and inter-operation memory traffic staging as a key optimization tradeoff space. MARCA uses a custom buffer that can dynamically configure itself between the two; however, the inter-operation fusion scenarios it could exploit are limited. Recently Geens, Symons and Verhelst [21] report preliminary findings that identify fusion as the key “missing piece” of Mamba acceleration. They are able to extend inter-operation fusion to the SSM itself, but not the normalization, discrete weight generation, result production, or projection portions of Mamba. Unfortunately, as we demonstrate, because of the sheer complexity of Mamba’s non-GEMM operators, fusion opportunities have been only incompletely realized in previous work and do not yet achieve peak performance. In this work, we are the first to demonstrate that the scope of fusion can be expanded across the entire Mamba computational sequence , resulting in minimal inter-operator memory traffic and maximum computational intensity. To ac-complish this, we leverage Einstein summations, or Einsums ,an approach that formally and succinctly describes workloads as a connected graph of tensor algebra operations [22]. Pre-vious work has demonstrated that this formulation enables systematic and tool-based exploration of the space of possible implementations [23]–[26]. Einsums allow for a separation of concerns between a workload’s algorithm, mapping, binding, and architectural specifications, and have been successfully used to productively architect a range of custom accelerators across a wide range of tensor algebra applications [27]–[29]. We demonstrate that the conception of inter-Einsum fu-sion in previous work is not sufficient to optimize Mamba. 1
+
+> arXiv:2604.03829v1 [cs.AR] 4 Apr 2026
+
+Therefore, in this work we extend the state of the art in Einsum analysis with 3 key additions: (1) we demonstrate how the SSM hidden state can be expressed as an iterative tensor index; (2) we demonstrate how inter-Einsum fusion opportunities relate directly to the tensor indices used in fusion pairs; and (3) we develop a taxonomy of fusion options that demonstrate new opportunities not shown by previous work. Finally, we leverage our novel fusion techniques to propose Mambalaya, a custom accelerator for Mamba with an array specifically designed for its fusion needs. Because of its increased computational intensity, Mambalaya increases performance by 4.9 × for prefill and 1.9 × for generation over the previous state-of-the-art custom accelerator. Our specific contributions are as follows: 1) We define a set of inter-Einsum fusion techniques, taxon-omizing previous work and expanding the overall map-space of optimization possibilities. 2) We demonstrate that all tensor algebra Mamba can be expressed as Einsums, allowing its inter-operation com-plexity to be expressed precisely. 3) Leveraging the above, we are the first to demonstrate that fusion is possible across the entire Mamba cascade despite its significantly higher complexity than Trans-formers, reducing it to a single fusion group. II. E INSUM -B ASED ANALYSIS OF MAMBA 
+
+A. Einsum-Based Architecture Design Methodology 
+
+Our analysis is based on the framework of tensors and 
+
+Einstein summations or Einsums , following the terminology proposed in TeAAL [23] and the ExtenDed General Einsums Language (EDGE) [30]. Beyond sum-of-products tensor al-gebra, EDGE extends Einsums in key ways to improve their applicability, with a special focus on bulk nonlinearities. In particular, EDGE allows “higher-order functions” on Einsums to enable the expression of iterative/recursive algorithms, any user-defined operation, and sparsity optimizations. In this work, we employ the following two aspects of EDGE to adequately specify Mamba: 
+
+a) User-Defined Operations: EDGE enables operations beyond multiplication and addition. In Mamba, we only use the case where a user-defined operation is applied to every element in a given tensor. Mamba uses non-linear operators of logarithm ( log ), exponential ( e), and square root ( √). 
+
+b) Generational Ranks: Mamba’s cross-token regressive nature relies on computation that uses information from previ-ous token inputs; that is, Mamba is iterative. Traditional Ein-sums do not support iteration; however, the EDGE framework enables this via generational ranks . Equation (1) shows an example cascade that uses the generational rank i:
+
+▷Initializations :   
+
+> [Initialize Z to the first element in Aby B.]
+
+Zi:i=0 = Ai:i=0 × B (1a) 
+
+▷Extended Einsum :        
+
+> [Update Zto Aat the current iby the previous Zvalue.]
+
+Zi+1 = Ai × Zi (1b)    
+
+> [Continue while i≤K]
+
+⋄ : i ≤ K (1c) Here, both Z and A are 1-tensors, each with a generational rank, I, of shape K. The Initializations tag indicates that at i ≡ 0, execution should initialize Z to A0 × B. Starting at i = 0 , execution iterates through expression 1b until i is equal to K (⋄ : i ≤ K), incrementing i by 1 at each step. On each iteration, we update Z by accessing A at point i and multiplying it by the current value of Z (Zi). Recently, FuseMax [27] successfully applied an Einsum-based methodology to discover a new attention implementa-tion. This was possible as extended Einsums enable a separa-tion of concerns to the design process [31], [32]. This in turn provides what we can call an “Einsum recipe” to systemati-cally explore the design space, starting with an algorithm and ending with an accelerator. Specifically, TeAAL provides a hierarchy of specifica-tions [23, Figure 7] for each concern. At the top of the hierarchy is the extended Einsum cascade, precisely specifying the algorithm. Section II presents a diagrammatic view of the Mamba cascade. The next level in the hierarchy is the mapping space 
+
+(traversal order, partitioning strategy, parallelism, etc.). In this work, we focus on fusion . The final level of the hierarchy is 
+
+binding , which schedules computation specific hardware units at specific points in execution time. In this work, we show that fusion also has a binding component, as intermediate data resulting from the chosen mapping must fit on-chip. Overall, fusion keeps data shared between Einsums on-die in order to reduce off-chip memory accesses on that data. Mambalaya is a novel accelerator that views Mamba as an extended Einsum cascade and enables the proposed fusion mappings through specific bindings. In this section we formalize Mamba as a cascade of depen-dent tensor operations expressed as Einsums. For pedagogical clarity, we represent the cascade graphically. The Einsum cascade for a typical Transformer layer, as captured previously by Nayak et al. [27], has the following notable features: (A) a small number of overall operators (8 per layer), (B) a relative prevalence of GEMM-like operators (6 out of 8), and (C) a relative simplicity of producer-consumer dependencies and short lifetimes of intermediates. In contrast, Figure 1 shows the cascade for Mamba. It contains 24 distinct tensor operations per layer, with a complex set of dependencies and liveness distances of intermediate values. 7 of those 24 are GEMM-like, but as we show in detail many of them struggle to reach the compute-bound region 21    
+
+> 234
+> 5
+> 6
+> 9
+> 8
+> 7
+> 10
+> 11 12
+> 13
+> 14
+> 15
+> 16 17
+> 18 19
+> 20
+> 21
+> 22
+> 23 24
+
+Fig. 1: Overview of the cascade execution flow for Mamba. Rounded, rectangular boxes are tensors, with the rank names (and shapes) in superscripts, and the corresponding rank vari-ables (tensor indices) in the subscripts [30]. Each Einsum is labeled with a number (yellow box) on its output tensor. Colors represent the following: (a) blue: input tensor, (b) green: GEMM with a weight tensor, (c) purple: tensor with recurrent accesses (e.g., Hi−1), (d) light orange: elementwise/broadcast operation, (e) dark grey: unary and nonlinear functions. on modern accelerator hardware. In the rest of this section we explain these equations in detail and quantify the existing challenges and available acceleration opportunity. 
+
+B. Structured State-Space Model Component 
+
+Here is the general Einsum cascade for any SSM: 
+
+HH i,n,c = An · Hi−1,n,c (2a) 
+
+Hi,n,c = Bi,n,k · Xi,k + HH i,n,c (2b) The H tensor is the hidden state ; it represents the memory of the system. On each iteration, it takes as input some scaling TABLE I: Traffic breakdowns for a single layer of the best-case Mamba accelerator without fusion (Best Unfused).          
+
+> Traffic Type Percentage Traffic Type Percentage
+> Read Traffic 47.3% Inter-Einsum 99.1% Write Traffic 52.7% Intra-Einsum 0.9%
+
+of the previous state ( A · H, stored in the temporary tensor 
+
+HH ) and additively combines this with some scaling of the current input ( B · X). Different SSMs vary in how they initialize A, B, or C
+
+to produce different behaviors. Additionally, prior to Mamba, all SSMs used the same A, B, C tensors for every token; that is, there was no time-dependent, iterative rank ( i) on these tensors [33]–[39]. To change how the model remembers information based on the current input token (“input selec-tivity” [6]), Mamba adds the I rank to all three tensors by making them the result of GEMM and non-linear operations on the input tokens (see ¯A, ¯B, ¯C in Figure 1). The input selectivity of Mamba enables the model to decide which inputs to focus on and which to ignore. In attention-based models, the KV cache contains an uncompressed record of every token ever seen, growing linearly in size as token length increases. On the other hand, the H state tensor in Mamba maintains a consistent state size (rank N ), acting as a “compressed summary” of all the tokens seen so far and their relative importance. The larger N is, the less compressed H will be. In Mamba-1, N = 16 . This constant state size enables Mamba to theoretically record an infinite number of tokens. A Mamba layer consists of more than just the SSM: in the prefill phase, Mamba (1) translates the entire context to the embedding space, (2) performs normalization to establish numeric stability, (3) applies causal correlation to the inputs to capture short-range dependencies, (4) transforms the SSM tensors ( A, B, C) into input-dependent and time-varying (via the I rank) tensors, (5) applies the SSM, returning a final state 
+
+H tensor for the prefill phase, and (6) either casts the result back to token space, generating a new token, or passes it to the next layer. In the token generation phase, there is only one token to process at a time. Each token goes through the same steps as the prefill phase, with the state tensor ( H) initialized to the previous token’s state tensor. 
+
+C. Analysis: Challenges and Opportunities 
+
+The cascade in Figure 1 contains two sources of paral-lelism: intra-Einsum (where available parallelism is limited by operand tensor dimensions) and inter-Einsum (where available parallelism is limited by dependency edges). To start, let us consider an accelerator that focuses solely on intra-Einsum parallelism. In this implementation, we execute each Einsum in the cascade sequentially, producing the complete output tensor before moving to the next Einsum. Each input tensor is read from main memory and each output tensor is written back to main memory in completeness. We assume that the accelerator has sufficient on-chip buffering to achieve the algorithmic min-imum DRAM access traffic—where each tensor is accessed 3(a) Overall roofline utilization (b) Prefill: ideal unfused (top) vs fused (c) Generate: ideal unfused (top) vs fused 
+
+Fig. 2: Overall roofline plot (a) confirms that unfused operations are memory-bound, but does not give insight into Einsums’ relative weighting. Plotting detailed roofline utilization over time for a single layer demonstrates that (b) unfused prefill alternates between compute-bound and memory-bound Einsums, whereas (c) decode does not have enough reuse to reach the compute-bound in any Einsum. Phase labels in yellow correspond to the Einsum numbers in Figure 1. Ideal fusion would eliminate all inter-Einsum traffic, resulting in significant increases to intensity, as shown in the bottom figures. once for the specified Einsum without additional spills/fills. Table I shows the total input/output traffic this implementation would achieve. We call this the Best Unfused implementation and refer to it throughout the paper. Some of this traffic is for tensors that are used again by subsequent Einsums. Let us label the traffic for tensors shared across Einsums as inter-Einsum traffic, and the traffic for tensors unique to an Einsum as intra-Einsum traffic. Table I gives a detailed breakdown of the traffic for a best-case unfused implementation that has sufficient buffering to achieve perfect data reuse within each Einsum. Figure 2(a) uses roofline analysis [40] to demonstrate that even with this optimistic assumption, sequential unfused implementations of this Einsum cascade are fundamentally memory-bound. Beyond this, Figures 2(b) and (c) plot the roofline utilization over time across the 24 Einsums. If all inter-Einsum traffic was eliminated (i.e., ideal fusion) it would result in significant speedups (5.79 × for prefill, and 3.8 × for token generation), as well as energy efficiency gains from the traffic reductions. All in all, this demonstrates the great potential of fusion: if we could reduce the inter-Einsum traffic to zero it would result in a tremendous efficiency increase. Of course, this is not straightforward—re-dedicating on-chip buffering to holding inter-Einsum intermediates takes it away from buffering intra-Einsum operands. When analyzing the efficiency of a given Einsum, there are three components to focus on: compute resource utilization, memory accesses, and overall latency. 
+
+D. Related work 1) Fusion in Tensor Algebra Workloads: Fusion, in the context of tensor algebra, has mostly been relegated to neural network accelerators, where various works have focused on inter-layer fusion [25], [26], [51]–[55] to remove the need for sending entire layer outputs off-chip. These all fall into combinations of RI, RSb, and RSp fusion, our proposed fusion classifications (Section III). Table II shows the space of fusion in prior work. Within this space, TileFlow [53] exposed a 3D design space that can explore loop order, binding, and tiling options for fusion between layers. Looptree [26] allows for the modeling of an even larger design space that considers recomputation and more tiling options, although it does not search the space. FuseMax [27] introduces pass analysis to transform a cascade into one that is more amenable to RI, RSb, and RSp fusion. Both MARCA [20] and Geens et al. [21] focus on the SSM portion for fusion (Section V). Due to the extended Einsum framework and our clearly identified taxonomy, we are able to apply fusion to not only the SSM, but the entire workload. III. F USING EXTENDED EINSUMS 
+
+A. Einsum-based Definition of Fusion 
+
+Fusion places constraints on three levels of the separation-of-concerns pyramid proposed in TeAAL [23, Figure 7]: (1) Einsum level, (2) mapping level and (3) binding and architecture. Fusion can occur at any level of the memory hierarchy, with fusion at one level minimizing inter-Einsum traffic to that level’s backing store (e.g., register to on-chip buffer or on-chip buffer to global memory). We walk through the requirements at each level of the pyramid: 
+
+Einsum level Each Einsum has its own iteration space. Fusion is possible between two Einsums only if the upstream Einsum has an output tensor that is an input to the downstream Einsum. We call this shared tensor the intermediate tensor .
+
+Mapping level. An unfused implementation traverses the entire upstream iteration space ( IS up ) before traversing the downstream iteration space ( IS dwn ). Fusing these two Ein-sums requires a combined iteration space composed of their respective iteration spaces. Then, a fused implementation traverses the combined iteration space, resulting in a traversal that alternates between a portion of the upstream and a portion of the downstream. 
+
+Binding level. Finally, fusion requires a binding such that, as execution traverses the iteration space, there are no spills or fills of the intermediate shared tensor to its backing store 4Work RI RSb RSp RD Stitching Minimum ITF Workloads Target Architecture XLA-like [41]–[44] ✓ RI Unit DL CPU, GPU                                                                       
+
+> TVM [45], AStitch [46] ✓✓*RI Unit, Tile DL CPU, GPU, TPU
+> PyTorch-Like [47]–[49] ✓✓✓*RI+RSb+RSp Unit, Tile DL CPU, GPU
+> APOLLO [50] ✓✓✓✓*RI+RSb+RSp Unit, Tile DL GPU, Huawei Ascend
+> CNN DSAs [51], [52] ✓✓RI+RSp, Recomp. Tile CNNs DSA
+> TileFlow [53] ✓✓✓RI+RSb+RSp, Recomp. Tile DL DSA
+> LoopTree [26] ✓✓✓✓RI, Recomp. Tile DL,TA DSA
+> MARCA [20] ✓RI Tile Mamba-1 DSA
+> Geens et al. [21] ✓RI Unit, Tile Mamba-1 DSA
+> This Work (Mambalaya) ✓✓✓✓All combos Unit, Tile (RD) Mamba-1/2, TA+ DSA
+
+TABLE II: Fusion in related works. ITF - Intermediate Tensor Footprint, TA - Tensor Algebra, DSA - Domain specific accelerator, DL - Deep Learning. “*” indicates the fusion type is supported with limitations. Our fusion taxonomy supports Mamba-1, Mamba-2, and any workload expressible as an EDGE [23], [30] cascade (TA+). M     
+
+> NP
+> (a) RI Fusion M
+> NP
+> M
+> N(b) RSb Fusion MM
+> N
+> P(c) RSp Fusion MQ
+> P(d) RD Fusion
+
+Fig. 3: Examples of how each fusion class transforms an upstream iteration space to a downstream iteration space. (usually global memory). Note that with this additional re-quirement, a mapping that completes traversal of the upstream iteration space, then iterates over the downstream could be fused if and only if there is on-chip storage large enough to prevent spills and fills of the shared intermediate tensor. Partial fusion may occur if the intermediate is overbooked [56]. 
+
+B. Challenges 
+
+Given a cascade, a successful fusion strategy must find a mapping and binding that enables communicating between producer Einsums and consumer Einsums without accessing the backing store. However, this goal encounters several chal-lenges associated with successful fusion. On-chip inter-Einsum storage reduces the available space for intra-Einsum storage. Additionally, a mapping that enables fusion to occur may also constrain the dataflow of the upstream or downstream Einsum such that there is poor locality in non-intermediate tensors. This effect can propagate throughout the entire cascade. Finally, finding a good fusion strategy, and knowing how to fuse, becomes difficult as cascades grow in complexity. At the Einsum level, we must find solutions for the following challenges: (A) A producer Einsum with multiple consumer/-downstream Einsums, (B) A consumer/downstream Einsum with multiple producer/upstream Einsums, and (C) Genera-tional ranks with unit sizes (e.g., Hi+1 = Hi) and non-unit step sizes (e.g., the TX to TTX Einsum in Figure 1). 
+
+C. Mapping : Fusing a Pair of Einsums 
+
+We first classify fusion between a pair of Einsums. The fusion opportunity is dependent on the relationship between the upstream Einsum ( IS up ) and the downstream Einsum (IS dwn ). Fusion should minimize the intermediate footprint in                                  
+
+> (a) Unfused
+> for min range (M):
+> for nin range (N): Z[m,n] =A[m,n] * B[m,n]
+> for min range (M):
+> for nin range (N): Y[m] += Z[m,n] /C[m]
+> (b) RI Fusion
+> for min range (M):
+> for nin range (N): Z_reg =A[m,n] *B[m,n] Y[m] += Z_reg /C[m]
+
+Fig. 4: Unfused to RI fusion. Both Einsums share the same iteration space. order to maximize buffer space for intra-Einsum reuse. Our classification guarantees the minimum-possible intermediate tensor footprint (ITF) of one. Regardless of the workload, all fusion opportunities between two Einsums with an output-input tensor relationship fall into the following four categories: 
+
+1) Rank Isomorphic Fusion (RI): If the two Einsums have identical iteration spaces ( IS up ≡ IS dwn ), we can apply rank isomorphic fusion . RI applies an output-stationary dataflow on the upstream Einsum, and an input-stationary dataflow on the downstream. This ensures a minimum ITF of one on-chip, as an element in the upstream can pass directly to its consumer with a liveness distance of one. This does not preclude partitioning: a tile of data may pass from one to the other, and the consumer may even choose to read the buffer in reverse order (which prior work does not allow [49]). Terms such as elementwise-elementwise, elementwise-reduce, reduce-elementwise used as distinct fusion types in prior work [41]–[47], [49] all fall under RI fusion. Figure 4 shows RI fusion on an elementwise-reduce cascade pattern. 5(a) Unfused                              
+
+> for min range (M):
+> for kin range (K): Z[m] += A[m,k] * B[k]
+> for min range (M): Y[m] =Z[m] /C[m]
+> (b) RSb Fusion
+> for min range (M):
+> for kin range (K): Z_reg += A[m,k] * B[k] Y[m] =Z_reg /C[m]
+
+Fig. 5: Unfused to RSb fusion. The upstream Einsum contains a rank ( K) absent from the downstream.                                    
+
+> (a) Unfused
+> for min range (M):
+> for nin range (N): Z[m,n] =A[m,n] * B[n]
+> for min range (M):
+> for nin range (N):
+> for pin range (P): Y[m,p] += Z[m,n] * C[n,p]
+> (b) RSp Fusion
+> for min range (M):
+> for nin range (N): Z_reg =A[m,n] * B[n]
+> for pin range (P): Y[m,p] += Z_reg * C[n,p]
+
+Fig. 6: Unfused to RSp fusion. The downstream Einsum contains a rank ( P ) absent from the upstream. 
+
+2) Rank Subsetted Fusion (RSb): In rank subsetted fusion (RSb), the iteration space of the upstream must be a proper superset of the downstream iteration space ( IS up ⊃ IS dwn ). This occurs in cascades where the output of the upstream is the result of a reduction. With an upstream, output stationary and downstream, input stationary dataflow, RSb guarantees a minimum ITF of one. Figure 5 shows an RSb fusion mapping on a matrix-vector computation followed by an elementwise operation. Note that if we change the mapping to be KM stationary instead of 
+
+M K stationary, fusion will not be guaranteed: an entire M -fiber of Z, and all K of its partial products, is produced before the downstream can consume it. Patterns in prior work that fall into this category include: reduce-elementwise, reduce-reduce, and matrix-matrix mul-tiplication to elementwise [50]. Note that prior work dif-ferentiates between fusing memory-intensive operations and compute-intensive operations [46], [47]. With our taxonomy, any Einsum pair that fits the fusion type criteria is fusible. 
+
+3) Rank Supersetted Fusion (Rsp): In rank supersetted fusion (RSp), the iteration space of the upstream must be a proper subset of the downstream iteration space ( IS up ⊂
+
+IS dwn ). This occurs in cases when the downstream Einsum 
+
+broadcasts a rank in the upstream Einsum. Maintaining an upstream, output stationary and downstream, input stationary dataflow ensures a minimum ITF of one. Figure 6 shows RSp fusion on a broadcast Einsum followed by matrix-matrix multiplication. Since ranks M and N are shared, the mapping must be M N or N M -stationary. Patterns in prior work include elementwise-broadcast, elementwise-convolution, convolution-convolution (without recomputation) [26], [50], [55]. 
+
+4) Rank Disjointed Fusion (RD): In rank disjointed fusion (RD), the iteration space of the upstream is neither equal to, a subset of, nor a superset of the downstream iteration                                       
+
+> (a) Unfused
+> for min range (M):
+> for nin range (N):
+> for kin range (K): Z[m,n] += A[m,k] * B[k,n]
+> for min range (M):
+> for nin range (N):
+> for pin range (P): Y[m,p] += Z[m,n] * C[n,p]
+> (b) RD Fusion
+> for min range (M):
+> for nin range (N):
+> for kin range (K): Z_reg += A[m,k] * B[k,n]
+> for pin range (P): Y[m,p] += Z_reg * C[n,p]
+
+Fig. 7: Unfused to RD fusion. Each Einsum has a rank absent from the other ( K, P ). space ( IS up ⊥ IS dwn ). The upstream iteration space contains one or more ranks absent from the downstream, while the downstream iteration space contains one or more ranks absent from the upstream. Both a reduction and a broadcast are occurring on the intermediate. By enforcing an upstream output stationary/downstream input stationary dataflow, RD guarantees a minimum ITF of one. Figure 7 applies RD fusion to two back-to-back matrix-multiplication Einsums. In this case, the mapping must be 
+
+M N or N M -stationary, to be upstream output stationary/-downstream input stationary. Patterns in prior work include reduce-broadcast and matmul-matmul [26], [50]. Prior work often creates tiles of data in this scenario, but our dataflow constraint guarantees a buffer size of one is sufficient. In each of the above cases, partitioning is an orthogonal concern. Rather than passing unit-sized intermediates between Einsums, a mapping can choose to pass tile-sized interme-diates. However, care must be taken to maintain upstream output-stationarity and downstream input-stationarity. Figure 3 depicts the relationships between the upstream and downstream iteration spaces. A fused pair of Einsums forms a fusion group .
+
+D. Mapping: Stitching Fusion Groups 
+
+The above taxonomy is simple, yet succinctly covers any fusion strategy between a pair of Einsums. However, most interesting workloads today are not 2-Einsum Cascades. Stitch-ing merges an Einsum (or fusion group) to an already existing fusion group. Our proposed stitching strategy greedily forms a fusion group of multiple Einsums whose intermediate tensors stay on-chip. To fuse larger cascades, we begin by fusing two Einsums in the cascade. We then greedily check if each subsequent Einsum in the cascade is fusible with the previous fusion group. A fusion group ends when the last Einsum in the group must access the backing store for its output tensor. This may happen because (A) the tensor is not an input to any downstream Einsums, (B) the algorithm 
+
+requires access to the backing store (e.g., the LEX tensor in Figure 1), or (C) there is not enough on-chip storage to keep the tensor on-chip for as long as required. The second case occurs when an intermediate tensor is part of a two-6or three-pass cascade (see FuseMax [27]), while the last case may occur when an intermediate tensor becomes an input after execution completes several other Einsums (e.g., the X tensor in Figure 1). 
+
+Algorithm 1 Pseudo-code for Greedy Stitching. 
+
+Require: Cascade C = [ E0, . . . , E N −1]
+
+Ensure: List of fusion groups F 
+
+> 1:
+
+Initialize empty fusion group G 
+
+> 2:
+
+G ← G ∪ { E0, E 1} 
+
+> 3:
+
+IS up ← ITER SPACE (E0) 
+
+> 4:
+
+IS dwn ← ITER SPACE (E1) 
+
+> 5:
+
+Iprev ← IS up ∩ IS dwn  
+
+> 6:
+
+IS up ← IS dwn  
+
+> 7:
+
+for i = 2 to N − 1 do  
+
+> 8:
+
+Rdwn ← ITER SPACE (Ei) 
+
+> 9:
+
+Icurr ← IS up ∩ IS dwn  
+
+> 10:
+
+if SUBSET (Iprev , I curr ) 
+
+> 11:
+
+or S UPERSET (Iprev , I curr ) 
+
+> 12:
+
+or Iprev equals Icurr then  
+
+> 13:
+
+G ← G ∪ { Ei} 
+
+> 14:
+
+else  
+
+> 15:
+
+append G to F 
+
+> 16:
+
+return F ∪ GREEDY FUSION (C[i :] , N − i) 
+
+> 17:
+
+end if  
+
+> 18:
+
+Iprev ← Icurr  
+
+> 19:
+
+Rup ← Rdwn  
+
+> 20:
+
+end for  
+
+> 21:
+
+return F ∪ { G}
+
+1) Our Greedy Fusion Recipe: We present our fusion strategy in Listing 1. For simplicity, we assume the cascade is a sequential DAG of Einsums. Given two Einsums, fusion is always possible according to Section III-C. Additionally, the pairwise classification in Section III-C informs which traversal orders are allowed when greedily stitching. Given a cascade, the greedy algorithm fuses the first two Einsums, forming a fusion group. It then intersects their itera-tion spaces to determine common ranks, if any. To determine if the next Einsum can join this fusion group, line 8 retrieves its iteration space. Line 9 then intersects this iteration space with the last Einsum in the current fusion group. If this intersected set is equal to, a subset of, or a superset of the intersected set of the first two Einsums (lines 12, 10, and 11), the algorithm adds the new Einsum to the fusion group. The process repeats with the next Einsum in the cascade. Otherwise, the current fusion group ends and the process repeats starting from the new Einsum. The pairwise intersection lists are the byproduct of output-input stationarity from pairwise fusion: ranks that survive intersection must appear at stationary levels of the final traversal order. Figure 8 depicts an example cascade and the resulting fusion groups after greedy stitching. Since N is shared across all Einsums, the mapping must be N -stationary to enable output-upstream/input-downstream stationarity. Greedy stitching is one approach. Another approach is to globally form the pairwise intersected lists for every pair of 
+
+(a) Iteration spaces 
+
+E1 : [ M, N, K ]
+
+E2 : [ M, N, P ]
+
+E3 : [ M, N, P, Q ]
+
+E4 : [ M, N, Q ]
+
+E5 : [ N ]
+
+(b) Pairwise intersections 
+
+E1 → E2 : [ M, N ]
+
+E2 → E3 : [ M, N, P ]
+
+E3 → E4 : [ M, N, Q ]
+
+E4 → E5 : [ N ]
+
+(c) Final mapping into two fusion groups                                                                          
+
+> 1#Fusion Group 1(E1--E3)
+> 2for nin range(N):
+> 3for min range(M):
+> 4for kin range(K): #E1
+> 5Z[m,n] += A[m,k] * B[k,n]
+> 6for pin range(P): #E2
+> 7Y[m,n,p] =Z[m,n] * C[p]
+> 8for qin range(Q): #E3
+> 9X[m,n,q] += Y[m,n,p] *W[q]
+> 10 #Fusion Group 2(E4--E5)
+> 11 #Q-fiber of Xis ready here (transition to E4)
+> 12 for qin range(Q): #E4
+> 13 V[n] += X[m,n,q] * D[q]
+> 14 U[n] =f(V[n]) #E5
+
+Fig. 8: Example greedy fusion over a five-Einsum cascade. Blue: Fusion Group 1, Yellow: Fusion Group 2. (a) Iteration spaces of Einsums 1–5. (b) Corresponding pairwise intersec-tions. (c) Resulting fused mapping into two fusion groups. (dependent) Einsums in a cascade. The stitching algorithm can then select the group of Einsums that form the longest “passing” set of pairwise intersections. IV. F USING MAMBA 
+
+In Mamba, fusion opportunities exist everywhere there is an outgoing arrow to a box or operand in Figure 1. We now leverage the Einsum fusion taxonomy to apply stitching in a systematic manner. Before stitching, we first apply an algorithmic transforma-tion to the cascade: shared-input tensor merging. This is a common optimization strategy often used to pack multiple GEMM operations into a single, larger GEMM computation ( [6], [47], [49]). We apply shared-input merging on (A) NEX to produce both TX and RX simultaneously (Einsums 7–8, Figure 1), (B) X to produce B, C, and T T ∆
+
+(Einsums 12–14), and (C) ∆ to produce ¯A and ¯B (Einsums 16–17). Given this algebraic transformation, we fuse Mamba by stitching in four different ways: 
+
+A. RI-Only Stitching 
+
+Rank-isomorphic fusion maintains the same iteration space between a pair of Einsums. In this mode, we modify our 71 2 3 4 5 6         
+
+> 7
+> 8
+> 910 11
+> 12
+> 13
+> 14 15 16
+> 17 18
+> 19
+> 20 21 22 23 24
+> RI+RSb+RSp RI+RSb RI
+> Shared-Input
+> Tensor Merge
+
+Fig. 9: Fusion opportunities in the Mamba cascade. Each node denotes an Einsum, and directed edges indicate data dependencies between their input and output tensors. Dashed arrows indicate recurrent or correlation Einsums. RI+RSb+RSp  RI+RSb  RI 
+
+Fig. 10: Roofline utilization over time of single Mamba layer for different fusion strategies. All assume algorithmic mini-mum accesses on intra-Einsum traffic. Successively applying fusion variants reduces the overall number of fusion groups and improves overall latency. greedy stitching algorithm (Algorithm 1) to fuse a downstream Einsum into a fusion group when the iteration space of that Einsum is isomorphic to the upstream (apply the condition on line 12 only). Figure 9 collapses the Einsums (see Figure 1) into nodes. Light grey boxes show the fusion groups formed by RI-only stitching. In total, we reduce the number of fusion groups from 24 (unfused, individual Einsums) to 12. Figure 10 (top) shows the utilization diagram of ideal rank isomorphic (RI) fusion on Mamba. In particular, RI fusion significantly reduces the latency of the SSM portion of Mamba (Einsums 16–21) compared to a best-case, unfused mapping. 
+
+B. RI+RSb Stitching 
+
+The transition from producing NUM (Einsum 3), which reduces over the ED rank, to producing SQEX (Einsum 5) can leverage RSb fusion. We expand the RI stitching approach to now include the cases when the pairwise intersection with the downstream Einsum is a subset of the previous pairwise intersection (Lines 10– 12). Figure 9 shows the fusion groups formed by RI+RSb stitching. The total number of fusion groups is now eight. In particular, note that the SSM region (Einsums 16-21) can now directly pass its output ( S, Einsum 21) with the post-processing that produces Y (Einsums 22–23). Figure 10 (middle) shows the utilization diagram of ideal RI+RSb fusion on Mamba. Adding RSb has the potential to improve performance by 1.18 × compared to RI-only. 
+
+C. RI+RSb+RSp Stitching 
+
+Finally, fully applying the greedy stitching algorithm, (Al-gorithm 1) results in RI+RSb+RSp stitching. In Mamba, an RSp opportunity exists between the NEX 
+
+Einsum and the TX Einsum (Einsums 5–6). Figure 10 (bot-tom) shows the utilization diagram of ideal rank-supersetted fusion with RSb and RI fusion. Adding RSp reduces the number of fusion groups to three. In particular, Einsums 11-13, a shared-input tensor GEMM with non-ideal aspect ratios, now achieves 100% compute throughput utilization as its inputs now remain on-chip. Likewise, some portions of the SSM—traditionally considered memory-bound—now achieve maximum compute utilization as well (Einsums 16–22). 
+
+D. Fully Fused (RI+RSb+RSp+RD Stitching) 
+
+The greedy stitching algorithm (Algorithm 1) cannot suc-cessfully apply RD fusion to Mamba, as doing so breaks the output-upstream/input-downstream stationary requirements defined earlier. Prior work simply recomputes the data as needed when RD fusion is unavailable for stitching [26], or weakly fuses the data such that intermediates are not guaranteed to remain on-chip. We take a different approach. In Mamba, an opportunity for RD fusion exists between the first and second fusion groups of RI+RSb+RSp fusion (previous section) as well as between the second and third fu-sion groups. Rather than recomputing, we carefully form tiles of intermediate data, allow partial products of the upstream 8intermediate tensor to write to main memory, then trigger the downstream Einsum on the final write of an element (or tile) in the upstream. In Figure 8c, note that X cannot be fully fused with the V Einsum as an entire Q fiber is produced at a time. Rather than waiting for the entire fiber, our strategy begins executing V as soon as a final element of X is ready. We term this fusion strategy “fully fused” as it creates one fusion group. This requires careful binding to the underlying architecture (see Section V). 
+
+E. Fusing with Generational Ranks 
+
+We find partitioning aids in fusing Einsums with genera-tional ranks. If an Einsum contains generational ranks (such as TTX and the SSM), we can unroll the cascade and apply the above strategies to the unrolled cascade. However, this unrolling implies a loop order that quickly varies along the iterative rank in order to keep a reasonable-sized portion on-chip. For example, if we are I-stationary on H, we must store a B × D × N partition on-chip. However, if we are B–D–N -stationary, only a unit-sized element of H stays on-chip with a guarantee that there will be no spills to main memory. Par-titioning along the iterative rank ( I) can aid in keeping larger tiles of the iterative rank on-chip, reducing the requirement for a B–D–N -stationary dataflow. This is the strategy we employ for Mambalaya’s fully fused implementation (Sections V, VI). V. M AMBALAYA ACCELERATOR 
+
+To both better support low-intensity operations and enable fusion with high-intensity operations, we propose the fol-lowing reconfigurable architecture for Mambalaya. Overall, 
+
+Mambalaya’s flexible architecture enables the proposed fusion mappings . Without a flexible, reconfigurable 2D-array contain-ing both low- and high-intensity compute units, RI, RI+RSb, RI+RSb+RSp, and the fully fused mappings would not be able to execute efficiently. 
+
+A. Mambalaya Architectural Overview 
+
+Mambalaya consists of a 2D PE array with a reconfigurable 
+
+network that has two modes: (1) A 2D mode where all PEs are connected in a 2D structure with the store-and-forward network assumed by both TPU [57] and FuseMax [27]; and a (2) 1D mode where a subset of the PEs (8192 PEs) are directly connected to the global buffer and linearly to each other. Figure 11a shows the 2D mode, while Figure 11b shows the 1D mode. Mambalaya enters the 2D mode when either (1) executing a GEMM Einsum or (2) executing a fusion group that contains both GEMM and low-intensity Einsums. When executing a fusion group with only low-intensity Einsums, Mambalaya enters 1D mode. The 1D mode with 8192 PEs is necessary to ensure the number of available compute units does not limit low-intensity computation. To enable elementwise fusion, all PEs contain both high-intensity (MACCs) and low-intensity (log/max/SiLU/exp) functional units. Each PE contains a 6-stage, pipelined func-tional unit, allowing an operation to complete in each cycle. We leverage MARCA’s non-linear function unit for SiLU and PE  PE  PE  PE  PE  PE ...      
+
+> PE PE PE PE PE PE
+
+# ...      
+
+> PE PE PE PE PE PE
+
+# ...      
+
+> PE PE PE PE PE PE
+
+# ...      
+
+> ...
+> PE PE PE PE PE PE
+
+# ... 
+
+> +, max, x,
+> NLFU, log
+> Global Buffer (32 MB)
+> DRAM (2039 GB/sec)
+> ...
+> 256
+> 256
+
+(a) 2D mode PE  PE  PE  PE  PE  PE ...      
+
+> PE PE PE PE PE PE
+
+# ... 
+
+# ... 
+
+# ... 
+
+> ...
+
+# ...      
+
+> 256
+> 32
+> PE PE PE PE PE PE
+
+# ... 
+
+> Global Buffer (32 MB)
+
+(b) 1D mode 
+
+Fig. 11: Mambalaya’s reconfigurable architecture, with the (a) 2D array in 2D mode and (b) the 2D array in 1D mode. The 1D 256-PE array also connects to the first row of the 2D array. the exponential function [20], and the logarithm implementa-tion from Mal´ ık [58]. We additionally include a low-intensity 1D PE array (256 PEs) directly connected to the global buffer and to the first and last rows of the 2D structure. We use this structure when a given mapping fuses a low-intensity, producer Einsum with a high-intensity, consumer Einsum: the 1D array broadcasts its result to the 2D array. 
+
+B. Mapping and Binding to Mambalaya 
+
+RI-only : We bind all fusion groups containing elementwise operations to the 2D PE array in 1D mode (8192 PEs). We bind GEMM computations to the 2D array (in 2D mode). 
+
+RI+RSb : In this variant, fusion groups consist of either elementwise or linear operations, followed by an elementwise operation. In the latter case, we run GEMMs followed by elementwise operations on the 2D array in its 2D mode (Einsums 14–15 in Figure 9). Since the GEMM result is already on the 2D array, the subsequent elementwise operation can remain in 2D mode. 9TABLE III: Mambalaya configuration compared to H100 [60]                         
+
+> Category Feature H100 GPU Mambalaya
+> Compute Units # FP16 CUDA Cores 14,592 —# Tensor Cores 456 —Total # PEs —65,536 + 256 1D PE Config. (2D) —8192 ×12D PE Config. (2D) —256 ×256 Frequency Clock Frequency 1.75 GHz 1.75 GHz Memory Memory Bandwidth 2039 GB/s 2039 GB/s L2 / Global Buffer 50 MB 32 MB Total Register Size 28.5 MB 4.25 MB
+
+RI+RSb+RSp and Fully Fused : Fusion groups now consist of (1) elementwise operations followed by a GEMM, or (2) a GEMM or linear operation followed by elementwise opera-tions. In the first case, the elementwise Einsums cannot run in the 1D mode of the 2D array, as the GEMM computation needs all 256 ×256 elements of the 2D array. Thus, all elementwise operations preceding GEMMs in a fusion group are bound to the smaller, 1D-only array (Einsums 1–6 in Figure 9). The resulting intermediate is then broadcast to the 2D PE array for use in the GEMM operations. Any elementwise Einsum that follows a GEMM will execute in 2D mode. VI. M ETHODOLOGY AND EVALUATION 
+
+A. Evaluation Setup 
+
+Accelerator Modeling. To model Mambalaya, we leverage Timeloop, a tensor algebra accelerator modeling and design exploration tool [24]. We use Timeloop to simulate the per-formance of individual Einsums in the cascade. For each fusion strategy, we specify the mapping constraints imposed by Algorithm 1 and feed said constraints into the Timeloop mapper for each individual Einsum. The mapper searches the mapping space and returns a pseudo-optimal mapping along with the corresponding memory and compute costs. 
+
+Workload Parameters. Given the Mamba workload, the only user-specified ranks are the batch size B, the prefill length (I > 1), and the token generation length ( I = 1 ). Following FLAT [54] and FuseMax [27], we use a batch size of 64. We run on both models mamba-370m and mamba-2.8b [59]. The larger model more than doubles the E and D ranks (Figure 1) and uses 64 layers instead of 48. We vary the token length from I = 1 (token generation) to I = 2 20 , in keeping with common configurations in prior work [27], [54]. 
+
+Hardware Configurations. Where possible, we design Mambalaya to match the configurations of a single NVIDIA H100 GPU; otherwise we choose parameters with lower values than the GPU. In this way, we ensure we are at most iso-area with the H100. Table III summarizes the configurations. 
+
+B. Prior State-of-the-Art 
+
+MARCA [20] is the prior state-of-the-art accelerator for Mamba. Although recently released, the extended Einsum framework, combined with our proposed fusion taxonomy, enables us to quickly and easily characterize their work. Within the SSM region of the Mamba cascade, MARCA applies RI fusion to the back-to-back elementwise Einsums. However, MARCA uses non-unit size intermediate tensors, making the implementation brittle to changes in on-chip buffer sizes (see Table II). To address this, Geens et al. [21] propose a fine-grained, memory-aware fusion strategy that partitions the 
+
+H state tensor to unit size along the I rank. When on-chip memory is small, they further tile along the D and N ranks of H to enable the state tensor to fit on-chip. To enable an apples-to-apples comparison, we give both baselines the benefit of the doubt: we assume best-case un-fused Einsums with algorithmic minimum traffic, and apply rank-isomorphic fusion to the SSM region (Einsums 16-21 for Mamba-1) on the Mambalaya architecture. This isolates fusion and mapping strategy as the independent variable. We call these design points MARCA-like and Geens-like .
+
+C. Evaluating Mambalaya 1) End-to-End Performance of Fusion Variants: Figure 12 shows the end-to-end performance of Mambalaya. Each bar grouping is a specific ratio of context length to token genera-tion length. We show three common scenarios: a small context but long token generation (e.g., requesting an explanation on a topic), a medium-length context to similarly-sized token generation (e.g., asking the LLM to edit a paragraph), and a large context to short token generation (e.g., summarizing a document). Regardless of prefill and decode length, performance is consistent across similar ratios (of prefill to decode). For relatively large decode length, RI fusion performs the best, achieving close to its ideal at 2.23 × over the unfused baseline. During token generation—which dominates small context to large generation scenarios—only the rank-isomorphic strategy is able to bind to the 1D configuration (8192 PEs) of the 2D array during the normalization steps (Einsums 1–6). Mean-while, all other strategies are resource limited as they use the 1D array (256 PEs) in order to later broadcast their results to the 2D Einsums. Thus, RI fusion performs well during token generation. As the sequence length in prefill increases relative to the decode length, the fully fused approach dominates perfor-mance with a speedup of 4.9× over the unfused baseline. RI, RI+RSb, and RI+RSb+RSp have speedups of 2.72 ×,2.99 ×, and 3.35 ×, respectively. With parallel pipelining, per-formance improves to 3.9×, 4.7×, 5.9×, 6× during prefill for RI, RI+RSb, RI+RSb+RSp, and fully fused, respectively. All three strategies are near their ideal limit (red line). The fully fused approach does not reach its ideal limit as tensors X and LEX (Einsums 1 and 10) need two passes (see pass analysis in FuseMax [27]) and thus, must be loaded multiple times. Reducing the number of passes on these tensors is not possible as they are used in both reduction Einsums (reducing over the D rank, Einsums 2 and 12– 13), and broadcast/elementwise Einsums (Einsums 6, 17, 22). Additionally, we send RX (Einsum 8) off-chip, as it has a long 10 0            
+
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> Speedup vs Best Unfused  1:16384 1:512 1:256 1:128 1:4 1:1 32:1 64:1 2048:1
+> RI
+> RI+RSb
+> RI+RSb+RSp
+> Fully Fused
+> Variant
+> Small Context: Long Generation Medium Context: Medium Generation Long Context: Short Generation
+
+Fig. 12: End-to-end performance across the different variants for the mamba-370m model [59]. In red is the ideal performance (best-case scenarios with algorithmic minimum accesses). Bars indicate the achieved performance. 0        
+
+> 1
+> 2
+> 3
+> 4
+> 5
+> Speedup vs Best Unfused 1:163841:5121:2561:1281:41:132:164:12048:1
+> MARCA-Like
+> Geens-Like
+> Mambalaya
+> Variant
+
+Fig. 13: Best Mambalaya variant compared to two state-of-the-art Mamba accelerators: MARCA [20] and Geens et al. [21]. Mambalaya achieves 4.9 × and 1.5 × speedup against MARCA-like and Geens-Like, respectively. Unfused MARCA-Like Geens-Like RI RI+RSb RI+RSb+RSpFully Fused      
+
+> FusionVariant
+> 0.00
+> 0.01
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> Total Traffic (GB)
+> IdealIntra-Einsum
+> ExcessIntra-Einsum
+> IdealInter-Einsum
+> ExcessInter-Einsum
+> TrafficType
+
+(a) Prefill phase (B=64, I=2048). Unfused MARCA-Like Geens-Like RI RI+RSb RI+RSb+RSpFully Fused      
+
+> FusionVariant
+> 0
+> 20
+> 40
+> 60
+> 80
+> Total Traffic (GB)
+> IdealIntra-Einsum
+> ExcessIntra-Einsum
+> IdealInter-Einsum
+> ExcessInter-Einsum
+> TrafficType
+
+(b) Decode / Token generation (B=64, I=1). 
+
+Fig. 14: Inter- and intra-Einsum traffic across each fusion variant. Dark red and dark blue indicate the ideal traffic for that variant, while lighter colors show the excess achieved in practice. The best-case RI variant is used as the ideal baseline for both MARCA-Like [20] and Geens-Like [21] dependency chain: it is not needed again until Einsum 22. This frees up buffer space for other tensors during execution. 
+
+2) Performance Compared to the Prior State-of-the-Art: 
+
+Figure 13 compares the best Mambalaya implementation against the MARCA-Like and Geens-Like accelerators. Since all accelerators minimize the memory accesses (and corre-sponding bottle-necked latency) of the H tensor, they all see significant improvement over the unfused baseline. In particular, in large context, shorter token generation scenarios (e.g., summarizing a document), Mambalaya achieves a 4.9 ×
+
+speedup over the unfused baseline, and provides greater than 44 % improvement over the state-of-the-art accelerators. 
+
+(a) Prefill. (b) Token generation. 
+
+Fig. 15: Roofline utilization over time for both prefill and token generation phases. 
+
+3) Intra-/Inter-Einsum Traffic: Although we assumed so in the algorithmic minimum access case in Section III, intra-Einsum traffic is not free. Figure 14 shows the breakdown of intra-Einsum traffic to inter-Einsum traffic across all variants (for a single layer) in both prefill and decode. As previously noted, an unfused implementation has excessive inter-Einsum traffic, as it accesses its input and output tensors from main memory. Fusion drastically reduces this: all variants success-fully reduce the inter-Einsum traffic ranging from 4 × to 34 ×
+
+11 improvement. All variants—except fully fused—achieve near-perfect intra-Einsum traffic, as the tensors that must be loaded on-chip regardless of fusion (i.e., weight tensors) are relatively small. The fully fused variant severely constrains the intra-Einsum dataflow of all Einsums in the cascade, producing large intermediate tensor partial products. This leads to com-paratively worse intra-Einsum traffic (light pink segment). 
+
+4) Utilization Analysis: Figure 15 shows the roofline uti-lization over time for each state-of-the-art baseline and our four proposed fusion strategies, respectively. In prefill, moving from RI to the fully fused mapping, each fusion strategy successfully reduces overall memory volume (shaded area of memory bandwidth region). Geens-like only fuses in the SSM region, yet this is enough to provide a 3.35 × improvement over the MARCA-like baseline. From Geens-like to RI-only fusion, the number of fusion groups reduces by 2. This amount does not provide a significant benefit for RI fusion over Geens-like. When we start fusing broadcast operations as well (RI+RSb), a slight improvement in compute utilization for the fused regions occurs—specifically, the GEMM followed by an elementwise Einsum (Einsums 14–15) now achieves full compute utilization. When stitching includes RSp, nearly all memory-bound regions in the previous strategies disappear, with a 4.76 ×
+
+improvement over the MARCA-like baseline. The fully fused variant, although it consists of one large fusion group, per-forms marginally better than RI+RSb+RSp. Notice the in-crease in memory volume in Figure 15a compared to the RI+RSb+RSp variant, particularly in the last phase where computation is a GEMM. The increased inter-Einsum traffic in Figure 14a, points to the increase in partial products as the underlying cause. During prefill, the benefit of achieving a smooth, compute-bound execution in full fusion outweighs the increase in memory traffic. However, during token generation (Figure 15b), the problem size is not large enough to fully utilize the compute units. Thus, the increase in memory traffic now becomes a bottleneck for the fully fused variant, resulting in relatively poor latency. Overall, Mambalaya successfully achieves a better com-pute utilization compared to the state-of-the-art (Figure 15). Additionally, Mambalaya reaches a per-layer performance improvement of 4.9 × and 1.5 × over MARCA-like and Geens-like. In end-to-end scenarios with varying context-length to token generation, Mambalaya achieves a geomean speedup of 3× and 1.3 × over MARCA-like and Geens-like respectively. VII. C ONCLUSION 
+
+Mamba is a complex application and requires the develop-ment of a complex set of optimization strategies. In this paper, we use this complexity as motivation to advance the state-of-the-art in fusion techniques for tensor algebra applications that can be expressed as Einsums. We then leverage these to design Mambalaya, a reconfigurable, flexible architecture that is the first custom accelerator to support the execution of a fully-fused Mamba across the entire cascade. Although these techniques have been motivated by Mamba, they are quite general. By taxonomizing the space of fusion, we can now mechanically apply a systematic set of fusion strategies to any tensor workload, no matter the complex-ity. Our proposed strategies—rank-isomorphic, rank-subsetted, rank-supersetted, and rank-disjoint—can be combined to fuse any Einsum cascade, simply by observing their tensor indices. All together, these techniques can reduce intermediate tensor traffic to near-minimum. This enables a robust and promising area of future work that carefully explores and trades off inter- and intra- tensor reuse via automatic design-space exploration. By leveraging Einsums, we make this work naturally available for inclusion by a large number of existing tools for design space exploration within the computer architecture community. 12 REFERENCES [1] I. Sutskever, O. Vinyals, and Q. V. Le, “Sequence to sequence learning with neural networks,” in Proceedings of the Advances in Neural Information Processing Systems (NeurIPS) , Montreal, Canada, 2014. [Online]. Available: https://proceedings.neurips.cc/paper files/ paper/2014/file/5a18e133cbf9f257297f410bb7eca942-Paper.pdf [2] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, L. Kaiser, and I. Polosukhin, “Attention is all you need,” in 
+
+Proceedings of the 31st International Conference on Neural Information Processing Systems , ser. NIPS 2017. Curran Associates Inc., 2017, pp. 6000–6010. [Online]. Available: https://proceedings.neurips.cc/paper files/paper/2017/file/3f5ee243547dee91fbd053c1c4a845aa-Paper.pdf [3] G. Chen, X. Li, Z. Meng, S. Liang, and L. Bing, “CLEX: Continuous length extrapolation for large language models,” in 
+
+12th International Conference on Learning Representations , ser. ICLR 2024. OpenReview.net, 2024. [Online]. Available: https: //openreview.net/forum?id=wXpSidPpc5 [4] R. Li, J. Xu, Z. Cao, H.-T. Zheng, and H.-G. Kim, “Extending context window in large language models with segmented base adjustment for rotary position embeddings,” Applied Sciences , vol. 14, no. 7, 2024. doi: 10.3390/app14073076 . [5] A. Chowdhery, S. Narang, J. Devlin, M. Bosma, G. Mishra, A. Roberts, P. Barham, H. W. Chung, C. Sutton, S. Gehrmann, P. Schuh, K. Shi, S. Tsvyashchenko, J. Maynez, A. Rao, P. Barnes, Y. Tay, N. Shazeer, V. Prabhakaran, E. Reif, N. Du, B. Hutchinson, R. Pope, J. Bradbury, J. Austin, M. Isard, G. Gur-Ari, P. Yin, T. Duke, A. Levskaya, S. Ghemawat, S. Dev, H. Michalewski, X. Garcia, V. Misra, K. Robinson, L. Fedus, D. Zhou, D. Ippolito, D. Luan, H. Lim, B. Zoph, A. Spiridonov, R. Sepassi, D. Dohan, S. Agrawal, M. Omernick, A. M. Dai, T. S. Pillai, M. Pellat, A. Lewkowycz, E. Moreira, R. Child, O. Polozov, K. Lee, Z. Zhou, X. Wang, B. Saeta, M. Diaz, O. Firat, M. Catasta, J. Wei, K. Meier-Hellstern, D. Eck, J. Dean, S. Petrov, and N. Fiedel, “PaLM: scaling language modeling with pathways,” J. Mach. Learn. Res. , vol. 24, no. 1, Jan. 2023. [Online]. Available: https://www.jmlr.org/papers/volume24/22-1144/22-1144.pdf [6] A. Gu and T. Dao, “Mamba: Linear-time sequence modeling with selective state spaces,” in First Conference on Language Modeling , ser. COLM 2024, Oct. 2024. [Online]. Available: https: //openreview.net/forum?id=tEYskw1VY2 [7] L. Ren, Y. Liu, Y. Lu, Y. Shen, C. Liang, and W. Chen, “Samba: Simple hybrid state space models for efficient unlimited context language modeling,” in 13th International Conference on Learning Representations , ser. ICLR 2025. OpenReview.net, 2025. [Online]. Available: https://openreview.net/forum?id=bIlnpVM4bc [8] A. Blakeman, A. Basant, A. Khattar, A. Renduchintala, A. Bercovich, A. Ficek, A. Bjorlin, A. Taghibakhshi, A. S. Deshmukh, A. S. Maha-baleshwarkar, A. Tao, A. Shors, A. Aithal, A. Poojary, A. Dattagupta, B. Buddharaju, B. Chen, B. Ginsburg, B. Wang, B. Norick, B. Butter-field, B. Catanzaro, C. del Mundo, C. Dong, C. Harvey, C. Parisien, D. Su, D. Korzekwa, D. Yin, D. Gitman, D. Mosallanezhad, D. Narayanan, D. Fridman, D. Rekesh, D. Ma, D. Pykhtar, D. Ahn, D. Riach, D. Stosic, E. Long, E. Segal, E. Evans, E. Chung, E. Galinkin, E. Bakhturina, E. Dobrowolska, F. Jia, F. Liu, G. Prasad, G. Shen, G. Liu, G. Chen, H. Qian, H. Ngo, H. Liu, H. Li, I. Gitman, I. Kar-manov, I. Moshkov, I. Golan, J. Kautz, J. P. Scowcroft, J. Casper, J. Seppanen, J. Lu, J. Sewall, J. Zeng, J. You, J. Zhang, J. Zhang, J. Huang, J. Xue, J. Huang, J. Conway, J. Kamalu, J. Barker, J. Cohen, J. Jennings, J. Parmar, K. Sapra, K. Briski, K. Chumachenko, K. Luna, K. Santhanam, K. Kong, K. Sivamani, K. Pawelec, K. Anik, K. Li, L. McAfee, L. Derczynski, L. Pavao, L. Vega, L. Voegtle, M. Bala, M. R. de Melo, M. N. Sreedhar, M. Chochowski, M. Kliegl, M. Stepniewska-Dziubinska, M. Le, M. Novikov, M. Samadi, M. Andersch, M. Evans, M. Martinez, M. Chrzanowski, M. Ranzinger, M. Blaz, M. Smelyanskiy, M. Fawzy, M. Shoeybi, M. Patwary, N. Lee, N. Tajbakhsh, N. Xu, O. Rybakov, O. Kuchaiev, O. Delalleau, O. Nitski, P. Chadha, P. Shamis, P. Micikevicius, P. Molchanov, P. Dykas, P. Fischer, P.-Y. Aquilanti, P. Bialecki, P. Varshney, P. Gundecha, P. Tredak, R. Karimi, R. Kandu, R. El-Yaniv, R. Joshi, R. Waleffe, R. Zhang, S. Kavanaugh, S. Jain, S. Kriman, S. Lym, S. Satheesh, S. Muralidharan, S. Narenthiran, S. Anandaraj, S. Bak, S. Kashirsky, S. Han, S. Acharya, S. Ghosh, S. T. Sreenivas, S. Clay, S. Thomas, S. Prabhumoye, S. Pachori, S. Toshniwal, S. Prayaga, S. Jain, S. Das, S. Kierat, S. Majumdar, S. Han, S. Singhal, S. Niverty, S. Alborghetti, S. Panguluri, S. Bhendigeri, S. N. Akter, S. Migacz, T. Shiri, T. Kong, T. Roman, T. Ronen, T. Saar, T. Konuk, T. Rintamaki, T. Poon, U. De, V. Noroozi, V. Singh, V. Korthikanti, V. Kurin, W. U. Ahmad, W. Du, W. Ping, W. Dai, W. Byeon, X. Ren, Y. Xu, Y. Choi, Y. Zhang, Y. Lin, Y. Suhara, Z. Yu, Z. Li, Z. Li, Z. Zhu, Z. Yang, and Z. Chen, “Nemotron-H: A family of accurate and efficient hybrid Mamba-Transformer models,” CoRR , no. 2504.03624v3, Apr. 2025. [9] Mistral AI, “Codestral Mamba: A Mamba2 language model specialized in code generation,” https://mistral.ai/news/codestral-mamba, 2024. [10] L. Chu, D. Kumari, T. Dao, A. Gu, R. Ganti, D. Agrawal, M. Srivatsa, D. Wertheimer, Y. C. F. Lim, A. Viros, N. Gonzalez, T. HoangTrong, O. Arviv, Y. Perlitz, M. Shmueli, H. Shen, M. Zhang, G. Goodhart, N. Wang, N. Hill, J. Rosenkranz, C.-C. Liu, A. Hoque, C.-C. Yang, S. Sharma, A. Uong, J. Gala, S. Zawad, and R. Gordon, “Bamba: Inference-efficient hybrid Mamba2 model,” https://huggingface.co/blog/ bamba, 2024. [11] J. Wang, D. Paliotta, A. May, A. M. Rush, and T. Dao, “The Mamba in the Llama: Distilling and accelerating hybrid models,” in Proceedings of the 38th International Conference on Neural Information Processing Systems , ser. NeurIPS 2024. Curran Associates Inc., 2024. [Online]. Available: https://proceedings.neurips.cc/paper files/paper/2024/hash/ 723933067ad315269b620bc0d2c05cba-Abstract-Conference.html [12] O. Lieber, B. Lenz, H. Bata, G. Cohen, J. Osin, I. Dalmedigos, E. Safahi, S. Meirom, Y. Belinkov, S. Shalev-Shwartz, O. Abend, R. Alon, T. Asida, A. Bergman, R. Glozman, M. Gokhman, A. Manevich, N. Ratner, N. Rozen, E. Shwartz, M. Zusman, and Y. Shoham, “Jamba: A hybrid transformer-Mamba language model,” CoRR , no. 2403.19887v2, Mar. 2024. [13] J. Zuo, M. Velikanov, D. E. Rhaiem, I. Chahed, Y. Belkada, G. Kunsch, and H. Hacid, “Falcon Mamba: The first competitive attention-free 7B language model,” CoRR , no. 2410.05355v1, Oct. 2024. [14] A. Behrouz and F. Hashemi, “Graph Mamba: Towards learning on graphs with state space models,” in Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discovery and Data Min-ing , ser. KDD ’24. ACM, Aug. 2024, pp. 119–130. doi: 10.1145/3637528.3672044 . [15] A. Hatamizadeh and J. Kautz, “MambaVision: A hybrid Mamba-Transformer vision backbone,” in IEEE/CVF Conference on Computer Vision and Pattern Recognition , ser. CVPR 2025. IEEE, Jun. 2025, pp. 25 261–25 270. doi: 10.1109/cvpr52734.2025.02352 . [16] L. Zhu, B. Liao, Q. Zhang, X. Wang, W. Liu, and X. Wang, “Vision Mamba: Efficient visual representation learning with bidirectional state space model,” in Proceedings of the 41st International Conference on Machine Learning , ser. ICML’24, vol. 235. JMLR.org, Jul. 2024, pp. 62 429–62 442. [Online]. Available: https://proceedings.mlr.press/v235/ zhu24f.html [17] S. De, S. L. Smith, A. Fernando, A. Botev, G. Cristian-Muraru, A. Gu, R. Haroun, L. Berrada, Y. Chen, S. Srinivasan, G. Desjardins, A. Doucet, D. Budden, Y. W. Teh, R. Pascanu, N. D. Freitas, and C. Gulcehre, “Griffin: Mixing gated linear recurrences with local attention for efficient language models,” CoRR , no. 2402.19427v1, Feb. 2024. [18] T. Dao and A. Gu, “Transformers are SSMs: Generalized models and efficient algorithms through structured state space duality,” in 
+
+Proceedings of the 41st International Conference on Machine Learning ,ser. ICML’24, vol. 235. JMLR.org, Jul. 2024, pp. 10 041–10 071. [Online]. Available: https://proceedings.mlr.press/v235/dao24a.html [19] S. Yang, J. Kautz, and A. Hatamizadeh, “Gated delta networks: Improving Mamba2 with delta rule,” in 13th International Conference on Learning Representations , ser. ICLR 2025. OpenReview.net, 2025. [Online]. Available: https://openreview.net/forum?id=r8H7xhYPwz [20] J. Li, S. Huang, J. Xu, J. Liu, L. Ding, N. Xu, and G. Dai, “MARCA: Mamba accelerator with reconfigurable architecture,” in Proceedings of the 43rd IEEE/ACM International Conference on Computer-Aided Design , ser. ICCAD ’24. New York, NY, USA: Association for Computing Machinery, 2025. doi: 10.1145/3676536.3676798 . [21] R. Geens, A. Symons, and M. Verhelst, “Fine-grained fusion: The missing piece in area-efficient state space model acceleration,” CoRR ,no. 2504.17333, Apr. 2025. [22] F. Kjolstad, S. Kamil, S. Chou, D. Lugato, and S. Amarasinghe, “The tensor algebra compiler,” Proceedings of the ACM on Program-ming Languages , vol. 1, no. OOPSLA, pp. 1–29, Oct. 2017. doi: 10.1145/3133901 . [23] N. Nayak, T. O. Odemuyiwa, S. Ugare, C. Fletcher, M. Pellauer, and J. Emer, “TeAAL: A declarative framework for modeling sparse tensor 
+
+13 accelerators,” in 56th Annual IEEE/ACM International Symposium on Microarchitecture , ser. MICRO-56. ACM, Oct. 2023, p. 1255–1270. doi: 10.1145/3613424.3623791 . [24] A. Parashar, P. Raina, Y. S. Shao, Y.-H. Chen, V. A. Ying, A. Mukkara, R. Venkatesan, B. Khailany, S. W. Keckler, and J. Emer, “Timeloop: A systematic approach to DNN accelerator evaluation,” in 2019 IEEE International Symposium on Performance Analysis of Systems and Software (ISPASS) . IEEE, Mar. 2019, pp. 304–315. doi: 10.1109/is-pass.2019.00042 . [25] H. Kwon, P. Chatarasi, M. Pellauer, A. Parashar, V. Sarkar, and T. Kr-ishna, “Understanding reuse, performance, and hardware cost of DNN dataflow: A data-centric approach,” in Proceedings of the 52nd Annual IEEE/ACM International Symposium on Microarchitecture , ser. MICRO-52. ACM, Oct. 2019, pp. 754–768. doi: 10.1145/3352460.3358252 . [26] M. Gilbert, Y. N. Wu, J. S. Emer, and V. Sze, “LoopTree: Exploring the fused-layer dataflow accelerator design space,” IEEE Transactions on Circuits and Systems for Artificial Intelligence , vol. 1, no. 1, pp. 97–111, Sep. 2024. doi: 10.1109/tcasai.2024.3461716 . [27] N. Nayak, X. Wu, T. O. Odemuyiwa, M. Pellauer, J. S. Emer, and C. W. Fletcher, “FuseMax: Leveraging extended einsums to optimize attention accelerator design,” in 2024 57th IEEE/ACM International Symposium on Microarchitecture (MICRO) . IEEE, Nov. 2024, pp. 1458–1473. doi: 10.1109/micro61859.2024.00107 . [28] T. O. Odemuyiwa, H. Asghari-Moghaddam, M. Pellauer, K. Hegde, P.-A. Tsai, N. Crago, A. Jaleel, J. D. Owens, E. Solomonik, J. Emer, and C. Fletcher, “Accelerating sparse data orchestration via dynamic reflexive tiling,” in Proceedings of the 28th ACM International Con-ference on Architectural Support for Programming Languages and Operating Systems , ser. ASPLOS ’23, vol. 3, Mar. 2023, pp. 18–32. doi: 10.1145/3582016.3582064 . [29] Y. N. Wu, P.-A. Tsai, A. Parashar, V. Sze, and J. S. Emer, “Sparseloop: An analytical approach to sparse tensor accelerator modeling,” in 
+
+2022 55th IEEE/ACM International Symposium on Microarchitecture (MICRO) . IEEE, Oct. 2022, pp. 1377–1395. doi: 10.1109/mi-cro56248.2022.00096 . [30] T. O. Odemuyiwa, J. S. Emer, and J. D. Owens, “The EDGE lan-guage: Extended general einsums for graph algorithms,” CoRR , no. 2404.11591v1, Apr. 2024. [31] J. Ragan-Kelley, C. Barnes, A. Adams, S. Paris, F. Durand, and S. P. Amarasinghe, “Halide: a language and compiler for optimizing parallelism, locality, and recomputation in image processing pipelines,” in ACM SIGPLAN Conference on Programming Language Design and Implementation , ser. PLDI’13, H. Boehm and C. Flanagan, Eds. ACM, Jun. 2013, pp. 519–530. doi: 10.1145/2491956.2462176 . [32] E. W. Dijkstra, “On the role of scientific thought,” in Selected Writings on Computing: A personal Perspective . New York, NY: Springer New York, 1982, pp. 60–66. doi: 10.1007/978-1-4612-5695-3 12 . [33] A. Gu, T. Dao, S. Ermon, A. Rudra, and C. R´ e, “HiPPO: recurrent memory with optimal polynomial projections,” in Proceedings of the 34th International Conference on Neural Information Processing Systems , ser. NIPS ’20. Curran Associates Inc., Dec. 2020. [Online]. Available: https://proceedings.neurips.cc/paper files/ paper/2020/hash/102f0bb6efb3a6128a3c750dd16729be-Abstract.html [34] A. Gu, I. Johnson, K. Goel, K. Saab, T. Dao, A. Rudra, and C. R´ e, “Combining recurrent, convolutional, and continuous-time models with linear state-space layers,” in Proceedings of the 35th International Conference on Neural Information Processing Systems , ser. NeurIPS 2021. Curran Associates Inc., 2021. [Online]. Available: https://proceedings.neurips.cc/paper/2021/ file/05546b0e38ab9175cd905eebcc6ebb76-Paper.pdf [35] A. Gu, K. Goel, and C. R´ e, “Efficiently modeling long sequences with structured state spaces,” in 10th International Conference on Learning Representations , ser. ICLR 2022. OpenReview.net, 2022. [Online]. Available: https://openreview.net/pdf?id=uYLFoz1vlAC [36] K. Goel, A. Gu, C. Donahue, and C. R´ e, “It’s raw! audio generation with state-space models,” in Proceedings of the 39th International Conference on Machine Learning , vol. 162, Jul. 2022. [Online]. Available: https://proceedings.mlr.press/v162/goel22a/goel22a.pdf [37] A. Gu, I. Johnson, A. Timalsina, A. Rudra, and C. R´ e, “How to train your HiPPO: State space models with generalized basis projections,” in 
+
+International Conference on Learning Representations (ICLR) , 2023. [Online]. Available: https://openreview.net/forum?id=klK17OQ3KB [38] A. Gu, A. Gupta, K. Goel, and C. R´ e, “On the parameterization and initialization of diagonal state space models,” Advances in Neural Information Processing Systems , vol. 35, 2022. [Online]. Available: https://papers.neurips.cc/paper files/paper/2022/file/ e9a32fade47b906de908431991440f7c-Paper-Conference.pdf [39] E. Nguyen, K. Goel, A. Gu, G. W. Downs, P. Shah, T. Dao, S. A. Baccus, and C. R´ e, “S4ND: Modeling images and videos as multidimensional signals using state spaces,” Advances in Neural Information Processing Systems , vol. 35, 2022. [Online]. Available: https://proceedings.neurips.cc/paper files/paper/ 2022/file/13388efc819c09564c66ab2dc8463809-Paper-Conference.pdf [40] S. Williams, A. Waterman, and D. A. Patterson, “Roofline: An in-sightful visual performance model for multicore architectures,” Com-munications of the ACM , vol. 52, no. 4, pp. 65–76, 2009. doi: 10.1145/1498765.1498785 . [41] H. Shen, J. Roesch, Z. Chen, W. Chen, Y. Wu, M. Li, V. Sharma, Z. Tatlock, and Y. Wang, “Nimble: Efficiently compiling dynamic neural networks for model inference,” in Proceedings of the Fourth Conference on Machine Learning and Systems , ser. MLSys 2021, A. Smola, A. Dimakis, and I. Stoica, Eds., vol. 3, Apr. 2021, pp. 208–222. [Online]. Available: https://proceedings.mlsys.org/paper files/ paper/2021/file/5b47430e24a5a1f9fe21f0e8eb814131-Paper.pdf [42] K. Zhu, W. Zhao, Z. Zheng, T. Guo, P. Zhao, J. Bai, J. Yang, X. Liu, L. Diao, and W. Lin, “DISC: A dynamic shape compiler for machine learning workloads,” in Proceedings of the 1st Workshop on Machine Learning and Systems , ser. EuroMLSys ’21. New York, NY, USA: Association for Computing Machinery, 2021, p. 89–95. doi: 10.1145/3437984.3458838 . [43] A. Sabne, “XLA : Compiling machine learning for peak performance,” 2020. [Online]. Available: https://research.google/pubs/ xla-compiling-machine-learning-for-peak-performance/ [44] D. Snider and R. Liang, “Operator fusion in XLA: Analysis and evaluation,” CoRR , no. 2301.13062, Jan. 2023. [45] T. Chen, T. Moreau, Z. Jiang, L. Zheng, E. Yan, M. Cowan, H. Shen, L. Wang, Y. Hu, L. Ceze, C. Guestrin, and A. Krishnamurthy, “TVM: an automated end-to-end optimizing compiler for deep learning,” in 
+
+Proceedings of the 13th USENIX Conference on Operating Systems Design and Implementation , ser. OSDI’18. USA: USENIX Association, 2018, pp. 579–594. [46] Z. Zheng, X. Yang, P. Zhao, G. Long, K. Zhu, F. Zhu, W. Zhao, X. Liu, J. Yang, J. Zhai, S. L. Song, and W. Lin, “AStitch: enabling a new multi-dimensional optimization space for memory-intensive ML training and inference on modern SIMT architectures,” in Proceedings of the 27th ACM International Conference on Architectural Support for Programming Languages and Operating Systems , ser. ASPLOS ’22. New York, NY, USA: Association for Computing Machinery, 2022, p. 359–373. doi: 10.1145/3503222.3507723 . [47] Z. Zheng, Z. Pan, D. Wang, K. Zhu, W. Zhao, T. Guo, X. Qiu, M. Sun, J. Bai, F. Zhang, X. Du, J. Zhai, and W. Lin, “BladeDISC: Optimizing dynamic shape machine learning workloads via compiler approach,” Proc. ACM Manag. Data , vol. 1, no. 3, Nov. 2023. doi: 10.1145/3617327 . [48] NVIDIA Corporation, NVIDIA TensorRT Documentation , NVIDIA Corporation, 2025. [Online]. Available: https://docs.nvidia.com/ deeplearning/tensorrt/latest/index.html [49] J. Ansel, E. Z. Yang, H. He, N. Gimelshein, A. Jain, M. Voznesensky, B. Bao, P. Bell, D. Berard, E. Burovski, G. Chauhan, A. Chourdia, W. Constable, A. Desmaison, Z. DeVito, E. Ellison, W. Feng, J. Gong, M. Gschwind, B. Hirsh, S. Huang, K. Kalambarkar, L. Kirsch, M. La-zos, M. Lezcano, Y. Liang, J. Liang, Y. Lu, C. K. Luk, B. Maher, Y. Pan, C. Puhrsch, M. Reso, M. Saroufim, M. Y. Siraichi, H. Suk, S. Zhang, M. Suo, P. Tillet, X. Zhao, E. Wang, K. Zhou, R. Zou, X. Wang, A. Mathews, W. Wen, G. Chanan, P. Wu, and S. Chintala, “PyTorch 2: Faster machine learning through dynamic Python bytecode transformation and graph compilation,” in Proceedings of the 29th ACM International Conference on Architectural Support for Programming Languages and Operating Systems , ser. ASPLOS’24, R. Gupta, N. B. Abu-Ghazaleh, M. Musuvathi, and D. Tsafrir, Eds., vol. 2. ACM, Apr. 2024, pp. 929–947. doi: 10.1145/3620665.3640366 . [50] J. Zhao, X. Gao, R. Xia, Z. Zhang, D. Chen, L. Chen, R. Zhang, Z. Geng, B. Cheng, and X. Jin, “APOLLO: Automatic partition-based operator fusion through layer by layer optimization,” in 
+
+Proceedings of Machine Learning and Systems , ser. MLSys’22, D. Marculescu, Y. Chi, and C. Wu, Eds., vol. 4, 2022, pp. 1– 19. [Online]. Available: https://proceedings.mlsys.org/paper files/paper/ 2022/file/e175e8a86d28d935be4f43719651f86d-Paper.pdf 
+
+14 [51] L. Waeijen, S. Sioutas, M. Peemen, M. Lindwer, and H. Corpo-raal, “ConvFusion: A model for layer fusion in convolutional neu-ral networks,” IEEE Access , vol. 9, pp. 168 245–168 267, 2021. doi: 10.1109/ACCESS.2021.3134930 . [52] J. Cai, Y. Wei, Z. Wu, S. Peng, and K. Ma, “Inter-layer scheduling space definition and exploration for tiled accelerators,” in Proceedings of the 50th Annual International Symposium on Computer Architecture (ISCA) . ACM, 2023, pp. 13:1–13:17. doi: 10.1145/3579371.3589048 . [53] S. Zheng, S. Chen, S. Gao, L. Jia, G. Sun, R. Wang, and Y. Liang, “TileFlow: A framework for modeling fusion dataflow via tree-based analysis,” in 56th Annual IEEE/ACM International Symposium on Mi-croarchitecture , ser. MICRO-56. ACM, Oct. 2023, pp. 1271–1288. doi: 10.1145/3613424.3623792 . [54] S.-C. Kao, S. Subramanian, G. Agrawal, A. Yazdanbakhsh, and T. Kr-ishna, “FLAT: An optimized dataflow for mitigating attention bot-tlenecks,” in Proceedings of the 28th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 2 , ser. ASPLOS ’23. ACM, Jan. 2023, pp. 295–310. doi: 10.1145/3575693.3575747 . [55] X. Cai, Y. Wang, and L. Zhang, “Optimus: An operator fusion framework for deep neural networks,” ACM Transactions on Embed-ded Computing Systems , vol. 22, no. 1, pp. 1–26, Oct. 2022. doi: 10.1145/3520142 . [56] Z. Y. Xue, Y. N. Wu, J. S. Emer, and V. Sze, “Tailors: Accelerating sparse tensor algebra by overbooking buffer capacity,” in Proceedings of the 56th Annual IEEE/ACM International Symposium on Microar-chitecture , ser. MICRO-56. ACM, Oct. 2023, pp. 1347–1363. doi: 10.1145/3613424.3623793 . [57] T. Norrie, N. Patil, D. H. Yoon, G. Kurian, S. Li, J. Laudon, C. Young, N. Jouppi, and D. Patterson, “The design process for Google’s training chips: TPUv2 and TPUv3,” IEEE Micro , vol. 41, no. 2, pp. 56–63, Mar. 2021. doi: 10.1109/mm.2021.3058217 . [58] P. Mal´ ık, “Dedicated hardware for complex mathematical operations,” 
+
+Computing and Informatics , vol. 35, no. 6, pp. 1438–1466, Feb. 2017. [Online]. Available: https://www.cai.sk/ojs/index.php/cai/article/ view/3557 [59] “Mamba 2.8b,” https://huggingface.co/state-spaces/mamba-2.8b, 2023. [60] NVIDIA, “GPU Technology Conference 2022: Hopper architecture whitepaper,” https://resources.nvidia.com/en-us-tensor-core/ gtc22-whitepaper-hopper, 2022. 
+
+15
