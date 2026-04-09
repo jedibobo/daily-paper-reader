@@ -1,0 +1,626 @@
+Title: QNAS: A Neural Architecture Search Framework for Accurate and Efficient Quantum Neural Networks
+
+URL Source: https://arxiv.org/pdf/2604.07013v1
+
+Published Time: Thu, 09 Apr 2026 01:14:55 GMT
+
+Number of Pages: 8
+
+Markdown Content:
+To appear at the IEEE International Joint Conference on Neural Networks (IJCNN), Maastricht, The Netherlands, June 2026. 
+
+# QNAS: A Neural Architecture Search Framework for Accurate and Efficient Quantum Neural Networks 
+
+Kooshan Maleki 1, Alberto Marchisio 2,3 , and Muhammad Shafique 2,3 1Department of Computer Engineering, Amirkabir University of Technology, Tehran, Iran 
+
+> 2
+
+eBRAIN Lab, Division of Engineering, New York University Abu Dhabi (NYUAD), Abu Dhabi, UAE 
+
+> 3
+
+Center for Quantum and Topological Systems (CQTS), NYUAD Research Institute, NYUAD, Abu Dhabi, UAE Emails: kooshan.mk@gmail.com, alberto.marchisio@nyu.edu, muhammad.shafique@nyu.edu 
+
+Abstract —Designing quantum neural networks (QNNs) that are both accurate and deployable on NISQ hardware is challeng-ing. Handcrafted ans¨ atze must balance expressivity, trainability, and resource use, while limited qubits often necessitate circuit cutting. Existing quantum architecture search methods primarily optimize accuracy while only heuristically controlling quantum resources (qubit count, gate counts, depth, shot complexity) and mostly ignore the exponential overhead of circuit cutting, poten-tially discovering architectures that are accurate but prohibitively expensive to deploy on limited qubit hardware. We introduce 
+
+QNAS , a neural architecture search framework that unifies hard-ware aware one shot evaluation, multi objective optimization, and cutting overhead awareness for hybrid quantum classical neural networks (HQNNs). QNAS trains a shared parameter 
+
+SuperCircuit and uses NSGA-II to optimize three objectives jointly: (i) validation error, (ii) a runtime cost proxy measuring wall clock evaluation time, and (iii) the estimated number of subcircuits under a target qubit budget. Minimizing this cutting overhead reduces the exponential execution cost incurred by circuit partitioning. QNAS evaluates candidate HQNNs under a few epochs of training and discovers clear Pareto fronts that reveal tradeoffs between accuracy, efficiency, and cutting overhead. Across MNIST, Fashion-MNIST, and Iris benchmarks, we observe that embedding type and CNOT mode selection significantly impact both accuracy and efficiency, with angle-y embedding and sparse entangling patterns outperforming other configurations on image datasets, and amplitude embedding excelling on tabular data (Iris). On MNIST, the best architecture achieves 97.16% test accuracy with a compact 8 qubit, 2layer circuit; on the more challenging Fashion-MNIST, 87.38% with a 5 qubit, 2 layer circuit; and on Iris, 100% validation accuracy with a 4 qubit, 2 layer circuit. QNAS surfaces these design insights automatically during search, guiding practitioners toward architectures that balance accuracy, resource efficiency, and practical deployability on current hardware. 
+
+Index Terms —quantum neural networks, neural architecture search, quantum architecture search, hybrid quantum classical networks, evolutionary algorithms, NSGA-II, multi objective op-timization, hardware aware design, circuit cutting, NISQ devices 
+
+I. I NTRODUCTION 
+
+# QUANTUM neural networks (QNNs) built from param-eterized or variational quantum circuits (PQCs) are a promising route to near term quantum machine learning and optimization [1]–[11]. In practice, however, designing effective QNN architectures remains challenging. Handcrafted ans¨ atze (e.g., hardware efficient or problem inspired circuits) must balance expressivity, trainability, and hardware efficiency and can still suffer from optimization pathologies such as bar-ren plateaus [12], where gradients vanish exponentially with system size [13]; noise on Noisy Intermediate-Scale Quan-tum (NISQ) devices can exacerbate these effects [14]–[16]. Initialization strategies can partially alleviate early training plateaus [17], but they do not remove the need to search for architectures that are accurate, trainable, and compatible with hardware constraints. Neural architecture search (NAS) [18], [19] automates this design process for classical deep networks by exploring structured search spaces under tight computational budgets. NAS comprises a variety of search strategies, including re-inforcement learning, evolutionary algorithms, differentiable optimization, and one shot weight sharing approaches. Or-thogonally to the search methodology, NAS techniques may be single objective, typically maximizing predictive accuracy, or multi objective, where hardware-related metrics such as latency, energy consumption, or memory footprint are jointly optimized, often yielding Pareto optimal tradeoffs [20]. Recent work extends these ideas to quantum settings through quan-tum architecture search (QAS), using evolutionary strategies, differentiable relaxations, reinforcement learning, and super-circuit weight sharing. Noise models and device connectivity are increasingly incorporated to score circuits under realistic NISQ conditions [14], [21]–[23]. Despite these advances, two practical gaps limit deploya-bility on current hardware. First , most QAS pipelines opti-mize accuracy while only heuristically controlling quantum resources (qubit count, entangling gate counts, depth, and shot complexity), even though such resources strongly govern wall clock time and fidelity on real devices [24], [25]. Second ,scaling beyond the native qubit budget requires circuit cutting :partitioning a circuit into smaller subcircuits that can be executed on limited qubit hardware [26]. While any quantum circuit can in principle be cut, doing so incurs significant computational overhead, since each cut introduces additional measurements and classical postprocessing, and the number of circuit executions grows exponentially with the number of cuts. Existing QAS methods rarely account for this overhead, potentially discovering architectures that are accurate but pro-hibitively expensive to execute when cut for deployment. To quantify this gap, we compare the results obtained with a multi objective QAS that does not include the cutting overhead in terms of subcircuit count (Without F3) versus a QAS where the subcircuit count is among the optimization objectives (With F3). Fig. 1 shows that the “With F3” approach reduces cutting overhead (e.g., 62.8% on average across accuracy bins) and circuit cost (F2) while maintaining similar accuracy, indicating these objectives are complementary. 
+
+This paper introduces QNAS , a neural architecture search framework for accurate and efficient QNNs that jointly max-imizes accuracy while minimizing runtime cost and cutting          
+
+> arXiv:2604.07013v1 [quant-ph] 8 Apr 2026 Overall Avg: With F3: 2.4 Without F3: 6.45 Reduction: 62.8% (a) Comparison of cutting overhead across accuracy ranges. 0.0 0.1 0.2 0.3 0.4
+> F2: Circuit Cost
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Cumulative
+> Percentage (%)
+> With F3
+> Without F3
+> Mean With F3: 0.0703
+> Mean Without F3: 0.1093
+> (b) Distribution of circuit cost (F2) for both approaches.
+> Fig. 1: Comparison of QAS without F3 versus with F3 on MNIST: (a) Bar chart showing average number of cuts (for Qtarget =4 ) across 5% accuracy bins (solutions with accuracy ≥65%). (b) Cumulative distribution function (CDF) of circuit cost (F2) showing percentage of solutions with F2 ≤x. The “With F3” approach reduces both cutting overhead and circuit cost while maintaining similar accuracy.
+
+overhead. QNAS trains a one shot SuperCircuit for a small number of epochs on a data subset and uses evolutionary search (NSGA-II) to optimize three objectives: (i) validation error, (ii) a circuit cost proxy measuring wall clock execution time, and (iii) the estimated subcircuit count under a target qubit budget, which directly governs cutting overhead. The search yields a Pareto set that balances accuracy, efficiency, and cutting overhead. Selected candidates are then retrained for more epochs on the full data for the final evaluation. Concretely, our contributions are (see Fig. 2):  
+
+> •
+
+A hardware aware, one shot QAS pipeline. We couple a weight sharing SuperCircuit with a few training epochs to amortize the cost of evaluating many candidates, while accounting for NISQ constraints such as number of shots, circuit depth, and entangling gate usage.  
+
+> •
+
+Multi objective optimization over accuracy, circuit cost, and cutting overhead. Inspired by HW-NAS, QNAS uses NSGA-II to directly optimize a circuit cost proxy alongside an explicit subcircuit count that governs cutting overhead.  
+
+> •
+
+A compact QNN search space. QNAS searches over embedding type (angle or amplitude), qubit count, depth, entanglement range and pattern, and a small set of hyper-parameters, producing architectures that are both trainable and deployable.  
+
+> •
+
+Empirical validation. We evaluate QNAS on three bench-marks: MNIST, Fashion-MNIST, and Iris. On MNIST, the best discovered architecture achieves 97.16% test accuracy with a compact 8 qubit, 2 layer circuit; on Fashion-MNIST, 
+
+87.38% with a 5 qubit, 2 layer circuit; and on Iris, 100% 
+
+validation accuracy with a 4 qubit, 2 layer circuit. Angle-y embedding with sparse entangling patterns consistently outperforms other configurations on image datasets, while amplitude embedding dominates on Iris. This demonstrates QNAS’s ability to surface actionable design insights along-side Pareto optimal solutions. 
+
+Open-Source Contribution: To facilitate the reproduction of the experiments, and to ease the adoption of our work in the 
+
+> Fig. 2: Overview of QNAS Framework.
+
+community, we release the code in a public repository at https: //github.com/Kooshano/QNAS. 
+
+Scope and implications. QNAS does not claim to outperform the accuracy of strong classical baselines; instead, it provides a practical methodology for discovering deployable QNN ar-chitectures under realistic constraints. By explicitly optimizing for cutting overhead alongside accuracy and runtime, QNAS helps identify architectures that execute efficiently on limited qubit devices [26]. 
+
+Organization. Section II reviews QNNs, NAS/QAS, and circuit cutting. Section III details the QNAS framework, ob-jectives, and search space. Section IV describes datasets and the search protocol. Section V reports results and analyzes tradeoffs. Section VI concludes the paper. II. B ACKGROUND AND RELATED WORK 
+
+A. Variational Quantum Circuits and QNNs 
+
+Parameterized or variational quantum circuits (PQCs) form the backbone of variational quantum algorithms [2], including quantum neural networks (QNNs). A PQC consists of a se-quence of trainable unitary gates, the ansatz , whose parameters are optimized by a classical algorithm [27]. In practice, QNNs are typically realized as hybrid quantum classical neural net-works (HQNNs) that interleave classical and quantum layers to exploit quantum computation within a trainable pipeline (Fig. 3). The canonical HQNN has three stages:  
+
+> •
+
+Classical input encoding : a linear mapping prepares fea-tures for quantum embedding (angle or amplitude), includ-ing normalization/modulo where applicable.  
+
+> •
+
+Quantum variational circuit : L strongly entangling layers, each applying parameterized single qubit rotations ( RX ,
+
+RY , RZ ) to every qubit followed by a set of CNOT gates; the circuit returns expectation values ⟨Z⟩ on all wires.  
+
+> •
+
+Classical output head : a linear layer maps the ⟨Z⟩ vector to logits for the task loss. This structure allows gradients to flow end to end via back-propagation using the parameter shift rule to compute quantum gradients. The design choices within each stage—embedding type, qubit count, circuit depth, and entangling pattern—define the architecture search space explored by QNAS. The choice of ansatz influences expressivity, trainability, and hardware efficiency. Manually designed ans¨ atze may suffer from barren plateaus where gradients vanish exponen-tially [12], [13], an effect exacerbated by NISQ noise [15]. 
+
+B. Neural Architecture Search: From Classical to Quantum 
+
+In classical deep learning, neural architecture search (NAS) [28]–[30] automates network design by exploring ar-chitectures in a predefined search space (Fig. 4). One shot Encode   
+
+> Encoder Trainable Quantum Layers Measurement
+
+Fig. 3: Hybrid quantum classical neural network used in QNAS. NAS  
+
+> Dataset Objectives
+> Accuracy, Cost, Constraints and ...
+> Adapt Supernet
+> Achieve of Architecture
+> Accuracy Predictor
+> Evolutionary Search
+
+Fig. 4: NAS pipeline. Data and objectives feed a NAS engine that evolves DNN architectures via a supernet and accuracy predictor. 
+
+NAS [31] uses a supernet trained once; candidate networks are subnets of this supernet. Search strategies span reinforcement learning, gradient based methods, and evolutionary algorithms such as NSGA-II. Hardware aware NAS (HW-NAS) [32] formulates architecture design as a multi objective optimiza-tion problem that trades off accuracy against hardware cost, searching for Pareto optimal solutions [20], [33]. 
+
+C. Quantum Architecture Search 
+
+Quantum architecture search (QAS) extends NAS to PQCs, automatically discovering high performing quantum circuits [14]. Modern QAS methods employ evolutionary algorithms, differentiable NAS, reinforcement learning, and Bayesian optimization [14], [34], [35]. SuperCircuit tech-niques train an overparameterized circuit with shared param-eters for efficient candidate evaluation [36], though parameter sharing can degrade some subcircuits’ rankings. Ma et al. ad-dress this with a continuous evolutionary framework coupling SuperCircuit training with NSGA-II [21]. 
+
+D. Scaling QNNs with Circuit Cutting 
+
+To scale beyond the available qubit budget, large circuits can be partitioned via circuit cutting [26]. The overhead is significant: the number of circuit executions scales as O(4 k)
+
+where k is the number of cuts, since each cut requires addi-tional measurements and classical postprocessing. Given this exponential overhead, incorporating cut count as an objective in QAS is essential to steer the search toward architectures that are efficient to deploy when partitioned. 
+
+E. Takeaways for QNAS 
+
+The literature suggests that a practical QNN architecture search framework should combine one shot, hardware aware evaluation (amortizing cost and scoring under realistic NISQ conditions [14], [21]), multi objective optimization over ac-curacy and quantum resource metrics [20], [21], and cutting overhead minimization (fewer subcircuits under a qubit budget Random HQNN    
+
+> (Initial) Evaluate
+> Select Pbest Individuals
+> Generate Q offsprings
+> (crossover, mutations)
+> U
+> Termination Condition
+> NSGA-II
+> Extraction of Accuracy, Circuit Cost and Number of Sub-Circuits
+> HQNN Model
+> HQNN
+> HQNN Training with Limited number of epochs HQNN Accuracy
+> Full Training on Pareto-Optimal Solutions
+> Fully Trained Inference
+> Set of Accuracy-Cost-Cuts Pareto Optimal HQNNs
+> NSGA-II Objectives F1,F2,F3
+> ۳
+> Dataset
+> Search Space Parameters
+> Correlation Analysis
+> Optimal Epoch Count
+
+Fig. 5: QNAS pipeline with NSGA-II. See Sec. III for details. 
+
+reduce exponential execution cost [26]). These requirements motivate QNAS, a search framework combining one shot eval-uation, multi objective evolutionary optimization, and cutting overhead awareness to discover accurate and deployable QNN architectures. III. T HE QNAS F RAMEWORK 
+
+Our proposed Quantum Neural Architecture Search (QNAS) framework unifies hardware aware evaluation, multi objective optimization, and cutting overhead minimization to discover accurate and deployable HQNNs. Building on the HQNN structure described in Section II-A and the design requirements in Section II-E, QNAS couples few epoch training/evaluation of each candidate with NSGA-II and an explicit estimate of the subcircuit count required for deployment on limited qubit hardware. 
+
+A. Search Space and Model Construction 
+
+Fig. 6 summarizes the QNAS genome and parameter ranges. Candidates instantiate the HQNN template in Fig. 3; the genome controls the embedding, circuit size (n, L ), entangle-ment pattern (rℓ, m ℓ), and learning rate η.Two key entanglement parameters govern circuit structure: the entanglement range rℓ determines how far apart qubits can be connected (Fig. 7), while the CNOT mode mℓ controls which qubits participate (Fig. 8). Concretely, for a given range r and n qubits, entangling pairs are generated as {(i, (i + r) mod n) : i ∈ [0 , n −1] },where qubit i acts as control and qubit (i + r) mod n as target. The modular arithmetic ensures that every qubit can potentially be entangled with every other qubit by varying rEmbedding Type            
+
+> Number of Qubits
+> Entanglement Range
+> CNOT Mode
+> Learning Rate
+> Angle-X, Angle-Y, Angle-Z, Amplitude
+> Range: 2-8
+> Range: 1 to (n-1)
+> All, Odd, Even, None
+> Range: 1e-3 to 1e-1 (log Scale)
+> Circuit Depth Range: 1-4
+> Number of Qubits Circuit Depth Entanglement Range CNOT Mode Embedding Type Learning Rate
+
+Fig. 6: QNAS search space parameters and ranges. Each candidate architecture is encoded as a genome vector specifying six parameter groups: embedding type, qubit count, circuit depth, entanglement range, CNOT mode, and learning rate.                                                         
+
+> q5RR
+> q4RR
+> q3RR
+> q2RR
+> q1RR
+> q0RR
+> (a) r= 1
+> q5RR
+> q4RR
+> q3RR
+> q2RR
+> q1RR
+> q0RR
+> (b) r= 2
+> q5RR
+> q4RR
+> q3RR
+> q2RR
+> q1RR
+> q0RR
+> (c) r= 3
+> q5RR
+> q4RR
+> q3RR
+> q2RR
+> q1RR
+> q0RR
+> (d) r= 4
+
+Fig. 7: Effect of entanglement range r on CNOT connectivity for a 6 qubit circuit. r = 1 : nearest neighbor ( qi → qi+1 ). r = 2 : skip one ( qi → qi+2 ). 
+
+r = 3 : opposite pairs ( qi → qi+3 ). r = 4 : skip three ( qi → qi+4 ). Larger ranges enable longer distance correlations but may increase hardware routing overhead. 
+
+q3 R R
+
+q2 R R
+
+q1 R R
+
+q0 R R
+
+> (a) All
+
+q3 R R
+
+q2 R R
+
+q1 R R
+
+q0 R R
+
+> (b) Even
+
+q3 R R
+
+q2 R R
+
+q1 R R
+
+q0 R R
+
+> (c) Odd
+
+q3 R R
+
+q2 R R
+
+q1 R R
+
+q0 R R
+
+> (d) None
+
+Fig. 8: CNOT mode patterns for a 4 qubit circuit with entanglement range 
+
+r=1 . All : every qubit controls its neighbor. Odd : only odd indexed qubits (1, 3) act as controls. Even : only even indexed qubits (0, 2) act as controls. None :no entangling gates (product state). The mode choice significantly impacts trainability and accuracy (see Sec. V-A). 
+
+across layers. E.g., r=1 yields nearest neighbor pairs, while 
+
+r=⌊n/ 2⌋ connects opposite qubits. The CNOT mode then filters which of these pairs are actually applied: all keeps every pair, odd /even retains only pairs where the control index is odd/even, and none removes all pairs (yielding a product state layer). 
+
+B. Evaluation and Objectives 
+
+For efficient scoring, QNAS trains each HQNN briefly on a subset and evaluates three objectives:  
+
+> •
+
+Accuracy loss: 
+
+F1 = 1 − Accuracy val , (1) where Accuracy val is measured on a held out validation set.  
+
+> •
+
+Runtime cost proxy (implementation aligned): 
+
+F2 = tval 
+
+Nval 
+
+(seconds/sample) , (2) where tval is the GPU synchronized wall clock time for the validation loop and Nval is the number of validation samples; this aligns F2 with effective execution cost under the chosen backend.  
+
+> •
+
+Cutting overhead (subcircuit count): 
+
+F3 = Estimated number of subcircuits required under a target qubit budget Qtarget , (3) computed via circuit cut placement heuristics or a conser-Non Dominating Sorting Pt 
+
+> QtRejected
+> Pt+1
+> Crowding Distance Sorting
+
+Fig. 9: NSGA-II selection mechanism. Left : Parent population Pt. Middle :Combined population Pt ∪ Qt sorted into non dominated fronts (darker = better front). Right : Selection of Pt+1 from top fronts; the dashed line indicates where crowding distance breaks ties within a partially selected front. 
+
+vative fallback. Minimizing F3 is critical because circuit cutting incurs exponential overhead: each cut requires ad-ditional measurements and classical postprocessing, and the total number of circuit executions scales as O(4 k) where k
+
+is the number of cuts [26]. Architectures with fewer required subcircuits are thus far more efficient to deploy on limited qubit hardware. 
+
+C. Evolutionary Search 
+
+QNAS uses the Non-dominated Sorting Genetic Algorithm II (NSGA-II) [37] to navigate the multi objective search space. Fig. 9 illustrates the core mechanism: at each generation, the parent population Pt is combined with offspring Qt (generated via crossover and mutation). The combined population is then sorted into non dominated fronts , groups of solutions where no solution dominates another within the same front [38]– [41]. The first front (darkest shade) contains Pareto optimal solutions; subsequent fronts contain progressively dominated solutions. Selection fills the next generation Pt+1 by taking complete fronts in order; when a front would exceed the population size, crowding distance is used to prefer solutions in sparse regions of the objective space, maintaining diversity. From a random initial population, QNAS applies SBX crossover and polynomial mutation to generate offspring, evaluates (F1, F 2, F 3) for each genome, and iterates for a fixed number of generations. The search yields a Pareto set balancing accuracy, cost, and cutting overhead. A selected model (typically the highest accuracy point) is then retrained for more epochs on full data for final reporting. 
+
+D. Transpilation and Hardware Mapping 
+
+To assess deployability on specific NISQ devices, QNAS supports a standard transpilation step that maps each candidate variational circuit from an ideal, device-agnostic description to a device-constrained implementation [42]. Given a candidate circuit C specified by (n, L, {rℓ}, {mℓ}) and a target backend characterized by a coupling graph G = ( V, E ) and a native basis gate set B, transpilation [43] produces an executable circuit 
+
+eC = Transpile( C ; G, B, O) , (4) where O denotes routing and optimization options. In general, transpilation can increase effective depth and two qubit gate count due to (i) routing overhead (e.g., SWAP insertion when the entangling pattern implied by rℓ conflicts with G) and (ii) basis decomposition, both affecting runtime and fidelity. 
+
+Snapshot based backends for noise aware simulation: 
+
+QNAS can employ snapshot based backends (“fake backends”) that mimic IBM Quantum systems using historical snapshots of device connectivity, basis gates, and qubit-level noise prop-erties (e.g., T1, T2, gate error rates, readout errors). Crucially, these backends include calibrated noise models derived from real hardware characterization data, enabling noisy simulation that reflects realistic NISQ device behavior. This means that circuit executions incorporate depolarizing errors, thermal relaxation, and measurement noise representative of actual quantum processors. As a result, architectures evaluated using fake backends are assessed under conditions that approximate real hardware execution, ensuring that reported accuracies account for noise-induced performance degradation typical of current NISQ devices. 
+
+Deployment oriented reporting: Transpilation provides deployment centric diagnostics complementing the QNAS objectives, including transpiled depth eL, two qubit gate count 
+
+eN2q , and routing overhead (e.g., SWAP count). These metrics quantify how a candidate’s entanglement design interacts with hardware topology. 
+
+Relationship to the runtime objective: When transpilation is enabled, the runtime objective F2 can be measured on the transpiled circuit eC, thereby incorporating compilation and routing overhead into the tradeoffs produced by QNAS. IV. E VALUATION METHODOLOGY 
+
+A. Tasks, Datasets, and Preprocessing 
+
+QNAS is designed for supervised classification tasks and can be applied to any dataset with standard train/validation/test splits. During the search phase , the training set is used for parameter optimization and a held out validation set (e.g., 10% of training data) provides fitness scores (F1, F 2, F 3) for NSGA-II selection. The test set is reserved exclusively for final evaluation of Pareto optimal architectures after retraining. 
+
+Preprocessing: Input features are scaled to [0 , 1] . For high-dimensional inputs (e.g., images), dimensionality reduction via PCA extracts the top n principal components matching the qubit count. For angle embeddings , these n features are standardized to zero mean and unit variance, then encoded as rotation angles θi ∈ [0 , 2π). For amplitude embeddings ,feature vectors are ℓ2 normalized and zero padded to length 
+
+2n to match the Hilbert space dimension. 
+
+Instantiation: In this work, we evaluate QNAS on three benchmarks: MNIST [44] and Fashion-MNIST [45], each with 60,000 training / 10,000 test grayscale images across 10 classes (Fashion-MNIST is more challenging due to higher intra-class variation); and the Iris dataset [46] (3-class classifi-cation with 4-dimensional features). For MNIST and Fashion-MNIST, images are flattened to 784-dimensional vectors be-fore PCA reduction to n features. The target qubit budget 
+
+Qtarget is set per dataset to reflect realistic hardware constraints: 
+
+Qtarget =4 for MNIST and Fashion-MNIST (moderate-scale image tasks), and Qtarget =2 for Iris (small-scale tabular task). Optimal Trade-off Epoch           
+
+> Fig. 10: Correlation between checkpoint accuracy and final (epoch 10) accuracy on MNIST using the full 60,000 training set. The dashed line marks
+> r=0 .8(“strong” correlation). By epoch 2, correlations exceed 0.9, validating short training budgets during search.
+
+B. Epoch Selection via Correlation Analysis 
+
+A key design question for QNAS is: how many training epochs are needed during NSGA-II search to reliably rank candidate architectures? Training each candidate for many epochs would yield accurate fitness estimates but is computa-tionally prohibitive when evaluating hundreds of candidates. Conversely, too few epochs may produce rankings that do not correlate with final model performance, leading to suboptimal architecture selection. To answer this question, we conduct a correlation study between checkpoint accuracies at various epochs and final (fully trained) accuracy. We train a diverse set of randomly sampled architectures for several epochs each and record validation accuracy at multiple checkpoints. We then compute both Pearson ( r) and Spearman ( ρ) correlation coefficients between each checkpoint’s accuracy and the final accuracy. Our analysis reveals that strong correlation ( r> 0.8) is typ-ically achieved within the first few epochs, with diminishing returns thereafter. Few epoch training provides a reasonably accurate proxy for final model performance, enabling efficient candidate screening during evolutionary search while signif-icantly reducing computational cost. Based on this analysis, QNAS uses few epoch training during search, and Pareto op-timal architectures from the search phase are then retrained for additional epochs on full data for final performance evaluation. V. R ESULTS AND DISCUSSION 
+
+A. Results on MNIST 
+
+Epoch selection: To validate the few epoch training strategy (Sec. IV-B) on MNIST, we trained 24 diverse randomly sampled architectures for 10 epochs each on the full 60,000 samples of the training set and computed correlations be-tween checkpoint and final accuracy. As shown in Fig. 10, correlations are moderate at epoch 1 but jump dramatically by epoch 2, with both Pearson and Spearman coefficients exceeding 0.9. This validates the use of 2 epoch training during search, reducing computational cost by 5× while maintaining high fidelity architecture rankings. 
+
+Search setup and budget: Table I shows the MNIST search space instantiation, yielding approximately 10 4–10 6
+
+configurations depending on depth. Over six generations, the NSGA-II search evaluated 72 
+
+HQNN candidates using 2 epochs of training per candidate on a GPU backend ( lightning.gpu ). We report validation accuracy (in %) along with F2 (runtime cost in s/sample) and 
+
+F3 (subcircuit count with Qtarget =4 ). A compact summary is TABLE I: MNIST search space configuration. 
+
+Parameter Range 
+
+Embedding type angle-X, angle-Y , angle-Z, amplitude Qubits n [2 , 8] 
+
+Depth L [1 , 4] 
+
+Entanglement range r (per layer) [1 , n −1] 
+
+CNOT mode (per layer) all, odd, even, none Learning rate η [10 −3, 5×10 −3]
+
+TABLE II: MNIST search phase summary. 
+
+Metric Value Metric Value Total evaluations 72 Best search val accuracy (%) 94.80 Generations 6 Best final test accuracy (%) 97.16 Training epochs/eval 2 Mean ± std accuracy (%) 51.32 ± 29.84 
+
+Qtarget (qubits) 4 Mean F2 (s/sample) 0.070 Total search time (h) 71.19 
+
+Fig. 11: Pareto tradeoff between validation accuracy and runtime cost ( F2). The star marks the best accuracy (94.80%). TABLE III: Search results: top configurations by accuracy and Pareto optimal solutions. Rows marked • are Pareto optimal over (F1, F 2, F 3); unmarked rows are top accuracy configurations. Angle-y with CNOT mode “none-odd” dominates both categories.                                                                                                       
+
+> EvalID Gen Embed Qubits Depth CNOT Mode ValAcc(%) F2(s/samp) F3
+> Top accuracy configurations
+> •45 4 angle-y 8 2 none-odd 94.80 0.0150 551 5 angle-y 8 2 none-odd 94.17 0.0151 570 6 angle-y 8 2 none-odd 93.24 0.0152 5
+> •49 5 angle-y 5 2 none-odd 93.12 0.1238 466 6 angle-y 8 1 odd 92.65 0.1409 457 5 angle-x 5 2 odd-odd 91.02 0.1222 515 2 angle-x 5 2 odd-odd 90.75 0.1236 530 3 angle-x 8 2 odd-odd 90.50 0.0156 7
+> •24 2 angle-y 5 2 none-odd 87.72 0.0089 465 6 angle-y 5 1 none 85.94 0.0790 2
+> Additional Pareto optimal solutions (lower accuracy, better efficiency/cutting)
+> •44 4 angle-y 4 1 none 84.79 0.0570 1
+> •40 4 angle-x 4 1 none 82.30 0.0535 1
+> •06 1 angle-x 5 2 none-odd 80.30 0.1231 4
+> •69 6 angle-y 3 1 odd 72.19 0.0425 1
+> •71 6 angle-y 4 2 none-odd 70.24 0.0068 4
+
+provided in Table II. Over six generations, median and highest accuracy improved steadily, while runtime cost decreased. 
+
+Pareto tradeoffs and selected architectures: The tradeoff between accuracy and runtime cost is visualized in Fig. 11; Pareto efficient points (minimizing F2 and maximizing accu-racy) form a clear front. The best search phase model achieved 
+
+94.80% validation accuracy (generation 4), with configuration 8q-2d angle-y, CNOT mode none-odd, F2=0 .0150 s/sample, 
+
+F3=5 . Table III lists the top configurations and Pareto optimal solutions over (F1, F 2, F 3).
+
+Key findings: Angle-y embedding with sparse CNOT (e.g., “none-odd”) consistently outperforms other configurations; dense mode “all” clusters near random chance (∼10% ), suggesting barren plateaus. Depth-2 circuits offer the best accuracy cost tradeoff; 8 qubits achieve highest accuracy while intermediate sizes (4–6 qubits) often underperform smaller circuits. Final Accuracy: 96.83% 
+
+> Final Accuracy: 97.16%
+> Final Accuracy: 87.84%
+
+Fig. 12: Training dynamics during 12 epoch retraining on full MNIST for three Pareto optimal architectures: Balanced (96.83% accuracy), Best Accuracy (97.16%), and Lowest Cost (87.84%). All configurations use angle-y embedding with CNOT mode “none-odd”. Loss (left axis) and accuracy (right axis) are shown for both training and validation sets. Cut Target Qubits = 4 
+
+Fig. 13: Number of subcircuits ( F3) versus qubit count for Qtarget =4 . Since cutting overhead scales as O(4 k ) per cut, minimizing F3 is critical. TABLE IV: Transpilation analysis for Pareto optimal architectures. Circuits transpiled to fake_melbourne (15q) with optimization level 3. Sparse CNOT modes yield minimal routing overhead. 
+
+Config Depth CNOTs Gates CNOT Pre Post Pre Post Pre Post Mode 8q-2d (Best Acc.) 10 14 4 4 68 68 none-odd 5q-2d (Balanced) 9 12 2 2 42 42 none-odd 4q-2d (Low Cost) 9 12 2 2 34 36 none-odd 
+
+Final retraining: Three representative Pareto optimal archi-tectures were retrained for 12 epochs on the full 60,000-sample training set. The Best Accuracy model achieved 97.16% test accuracy, the Balanced model reached 96.83% , and the Lowest Cost model attained 87.84% . This demonstrates that the few epoch search effectively identifies high quality architectures that scale well with extended training. Fig. 12 shows the train-ing dynamics for all three configurations, with loss steadily decreasing and accuracy converging after 12 epochs. 
+
+Cutting overhead analysis ( F3): With a fixed target qubit budget Qtarget =4 , circuits with n ≤ 4 qubits and sparse entanglement require fewer subcircuits, while larger circuits (5–8 qubits) or those with denser entanglement patterns require more subcircuits (up to F3=14 for complex 8 qubit, 4 layer circuits with mixed CNOT modes). Fig. 13 visualizes this relationship. Fig. 15 illustrates how the best performing 8 qubit circuit is partitioned into 5 subcircuits for deployment on a 4 qubit device: SC1-2 handle embedding and Layer 1, SC3-4 execute Layer 2, and SC5 performs cross group CNOTs followed by measurements. 
+
+Transpilation analysis: To assess hardware deployability, we transpile top-performing architectures to IBM Quantum backends using Qiskit’s fake provider snapshots (Sec. III-D). Table IV reports pre- and post-transpilation metrics for repre-sentative architectures. For the best 8-qubit, 2-layer architecture with CNOT mode q5 7 → 0 RZ                                                    
+
+> −2.51
+> √XRZ
+> −1.93
+> √XRZ
+> −π/ 2
+> RZ
+> π/ 2
+> √XRZ
+> 1.42
+> √XRZ
+> −π/ 2
+> q17→1RZ
+> 0.176
+> √XRZ
+> 0.324
+> √XRZ
+> −π/ 2
+> √X√XRZ
+> −0.427
+> q27→2RZ
+> 0.629
+> √XRZ
+> −2.78
+> √XRZ
+> 2.61
+> q47→4RZ
+> 0.629
+> √XRZ
+> −2.78
+> √XRZ
+> 2.61
+> q07→8RZ
+> 0.629
+> √XRZ
+> −2.78
+> √XRZ
+> 2.61
+> q77→10 RZ
+> 0.629
+> √XRZ
+> −1.21
+> √XRZ
+> −π/ 2
+> √X√XRZ
+> −1.72
+> √XRZ
+> −π/ 2
+> q37→11 RZ
+> 0.176
+> √XRZ
+> −2.82
+> √XRZ
+> π/ 2
+> RZ
+> π/ 2
+> √XRZ
+> 2.71
+> q67→12 RZ
+> 0.629
+> √XRZ
+> −2.78
+> √XRZ
+> 2.61
+
+Fig. 14: Transpiled 8 qubit angle-y circuit (CNOT mode “none-odd”) on 
+
+fake_melbourne with global phase π. The transpiler decomposes rotations into the native basis {Rz , √X}. The mapping qi 7 → j shows logical to physical qubit assignment. 
+
+(Embed + Layer 1) (Layer 2 + Meas) 
+
+SC1: q0-q3                    
+
+> q0RYRXRYRZ×
+> q1RYRXRYRZ×
+> q2RYRXRYRZ×
+> q3RYRXRYRZ×
+
+SC3: q0-q3              
+
+> ×q0RXRYRZ
+> ×q1RXRYRZ×
+> ×q2RXRYRZ
+> ×q3RXRYRZ×
+
+SC2: q4-q7                    
+
+> q4RYRXRYRZ×
+> q5RYRXRYRZ×
+> q6RYRXRYRZ×
+> q7RYRXRYRZ×
+
+SC4: q4-q7              
+
+> ×q4RXRYRZ
+> ×q5RXRYRZ×
+> ×q6RXRYRZ
+> ×q7RXRYRZ×
+
+(CNOTs + Meas) 
+
+SC5: q1, q 3, q 5, q 7
+
+> ×
+
+q1
+
+> ×
+
+q3
+
+> ×
+
+q5
+
+> ×
+
+q7
+
+Embed RX RY RZ Meas × Cut Fig. 15: Circuit cutting for the best 8q-2d angle-y architecture ( F3=5 ): 5 subcircuits for a 4 qubit device. SC1-2: embedding and Layer 1; SC3-4: Layer 2; SC5: cross group CNOTs and measurements. TABLE V: Fashion-MNIST search phase summary. 
+
+Metric Value Metric Value Total evaluations 66 Best search val accuracy (%) 83.28 Generations 6 Best final test accuracy (%) 87.38 Training epochs/eval 2 Mean ± std accuracy (%) 52.91 ± 26.47 
+
+Qtarget (qubits) 4 Mean F2 (s/sample) 0.066 Total search time (h) 65.51 
+
+“none-odd”, the sparse entangling pattern (only 4 CNOTs) results in manageable transpilation overhead, circuit depth increases from 10 to 14 due to routing, while CNOT count remains unchanged at 4. Fig. 14 shows the transpiled circuit mapped to fake_melbourne , with the transpiler decom-posing single qubit rotations into the native gate set ( Rz and √X) while preserving the CNOT count. 
+
+B. Results on Fashion-MNIST 
+
+To validate QNAS on a more challenging benchmark, we apply the same search protocol to Fashion-MNIST. This dataset shares the same structure as MNIST (60,000 training / 10,000 test images, 10 classes) but features clothing items instead of digits, presenting greater intra class variation and inter class similarity. 
+
+Search setup: Using the same search space (Table I), NSGA-II evaluated 66 HQNN candidates over six generations with 2 epoch training per candidate. Table V summarizes the search phase. 
+
+Top configurations: Table VI lists the top configurations and Pareto optimal solutions. The best search phase model achieved 83.28% validation accuracy with configuration 5q-2d angle-y, CNOT mode none-none. 
+
+Final retraining: Selected Pareto optimal architectures 
+
+TABLE VI: Fashion-MNIST search results: top configurations by accuracy and Pareto optimal solutions. Angle-y embedding dominates across all top performers. 
+
+EvalID Gen Embed Qubits Depth CNOT Mode ValAcc(%) F2 (s/samp) F3
+
+Top accuracy configurations 
+
+• 31 3 angle-y 5 2 none-none 83.28 0.0694 363 6 angle-x 5 1 none 81.88 0.0805 2
+
+• 47 5 angle-y 8 4 none-none-odd-odd 80.15 0.0258 12 67 6 angle-y 5 2 none-none 80.13 0.1158 3
+
+• 22 2 angle-y 6 1 even 79.74 0.0075 254 5 angle-y 5 1 odd 79.81 0.0842 2
+
+Additional Pareto optimal solutions 
+
+• 36 3 angle-y 5 1 odd 64.06 0.0065 2
+
+• 05 1 angle-y 5 1 odd 58.01 0.0064 2
+
+TABLE VII: Iris search space configuration. 
+
+Parameter Range 
+
+Embedding type angle-X, angle-Y , angle-Z, amplitude Qubits n [2 , 8] 
+
+Depth L [1 , 5] 
+
+Entanglement range r (per layer) [1 , n −1] 
+
+CNOT mode (per layer) all, odd, even, none Learning rate η [10 −3, 5×10 −3]
+
+Qtarget (qubits) 2
+
+TABLE VIII: Iris search phase summary. 
+
+Metric Value Metric Value Total evaluations 120 Best search val accuracy (%) 100.00 Generations 10 Best final val accuracy (%) 100.00 Training epochs/eval 5 Mean ± std accuracy (%) 66.67 ± 28.19 
+
+Qtarget (qubits) 2 Mean F2 (s/sample) 0.121 Total search time (h) 0.60 
+
+TABLE IX: Iris search results: top configurations by accuracy and selected Pareto optimal solutions. Amplitude embedding dominates; best accuracy is 4q-2d with none-odd. 
+
+EvalID Gen Embed Qubits Depth CNOT Mode ValAcc(%) F2 (s/samp) F3
+
+Top accuracy configurations 
+
+• 62 5 amplitude 4 2 none-odd 100.00 0.0070 6
+
+• 104 8 amplitude 2 2 odd-all 100.00 0.0634 148 3 amplitude 4 2 none-even 100.00 0.0395 671 5 amplitude 4 2 none-even 100.00 0.0373 6
+
+• 74 6 amplitude 4 1 odd 100.00 0.0256 484 6 amplitude 4 2 none-odd 96.67 0.0070 678 6 amplitude 4 2 none-even 96.67 0.0074 695 7 amplitude 4 1 odd 100.00 0.0148 2
+
+Additional Pareto optimal (low cost / low F3)
+
+• 81 6 angle-x 2 1 none 96.67 0.0528 1
+
+• 114 9 amplitude 2 1 none 90.00 0.0355 1
+
+were retrained for 12 epochs on the full training set. The 
+
+Best Accuracy model (5q-2d, angle-y, CNOT mode none-none) achieved 87.38% test accuracy, while the Balanced model (8q-4d) reached 87.24% . Lower cost configurations achieved 75– 77% accuracy. 
+
+Consistency with MNIST findings: Angle-y and sparse CNOT again dominate; lower accuracy (87.38% vs. 97.16%) reflects the harder dataset. 
+
+C. Results on Iris Dataset 
+
+To demonstrate QNAS’s applicability beyond grayscale image classification, we evaluate on the Iris dataset (3 class classification with 4 dimensional features). NSGA-II evaluated 
+
+120 HQNN candidates over ten generations with 5 epoch training per candidate. Table VIII summarizes the search phase. 
+
+Top configurations: The best search phase model achieved 
+
+100% validation accuracy with configuration 4q-2d amplitude, CNOT mode none-odd, F2=0 .0070 s/sample, F3=6 . Table IX lists the top configurations by accuracy and selected Pareto optimal solutions. Key findings and final retraining: In contrast to MNIST and Fashion-MNIST, where angle-y embedding dominates, amplitude embedding performs best on Iris. This is due to the small scale of the dataset (150 samples, 4 features) and the use of a compact classical head: one pre- and one post-classical layer with hidden dimension 16, so the number of trainable parameters does not explode despite the higher dimensionality of amplitude encoding. Sparse CNOT modes (e.g., none-odd, none-even) dominate. The number of subcircuits ( F3) varies when partitioned for the 2 qubit target ( Qtarget =2 ). Selected Pareto optimal architectures were retrained for 20 epochs on the full training set. The Best Accuracy model (4q-2d, amplitude, none-odd) achieved 100% validation accuracy after retraining, demonstrating QNAS’s ability to discover cutting-efficient architectures across different data modalities. VI. C ONCLUSION 
+
+We introduced QNAS, a neural architecture search frame-work for hybrid quantum-classical neural networks that jointly optimizes accuracy, runtime cost, and circuit cutting overhead. Our key findings across MNIST, Fashion-MNIST, and Iris include: (1) sparse CNOT modes consistently outperform dense entanglement patterns across all datasets, with em-bedding type (angle-y for images, amplitude for Iris) and optimal CNOT patterns varying by domain; (2) few-epoch training reliably ranks candidate architectures with >0.9 cor-relation to final performance, enabling efficient evolutionary search; and (3) hardware-friendly architectures discovered by QNAS require minimal transpilation overhead and cutting overhead. The best architectures achieved 97.16% test ac-curacy on MNIST (8-qubit, 2-layer), 87.38% on Fashion-MNIST (5-qubit, 2-layer), and 100% validation accuracy on Iris (4-qubit, 2-layer), demonstrating QNAS’s effectiveness across different data modalities. 
+
+Limitations. Our evaluation focuses on image classification and tabular data; generalization to additional domains remains to be validated. While our transpilation to snapshot based backends incorporates realistic noise models, validation on actual quantum hardware remains as future work. 
+
+Future work. We plan to: (i) extend QNAS to additional domains beyond image classification and tabular data; (ii) execute on real quantum devices to validate performance under actual hardware noise; (iii) explore alternative search strategies, such as differentiable NAS; and (iv) conduct multi budget analysis by varying Qtarget to expose tradeoffs under different hardware constraints. ACKNOWLEDGMENT 
+
+This work was supported in part by the NYUAD Center for Quantum and Topological Systems (CQTS), funded by Tamkeen under the NYUAD Research Institute grant CG008. REFERENCES 
+
+[1] J. Biamonte et al. , “Quantum machine learning,” Nature , 2017. [2] M. Cerezo et al. , “Variational quantum algorithms,” Nat. Rev. Phys. , 2021. [3] A. Abbas et al. , “The power of quantum neural networks,” Nat. Comput. Sci. , 2021. [4] N. Killoran et al. , “Continuous-variable quantum neural networks,” Phys. Rev. Res. , 2019. [5] G. Verdon et al. , “Quantum graph neural networks,” arXiv , 2019. [6] K. Zaman et al. , “A survey on quantum machine learning: Current trends, challenges, opportunities, and the road ahead,” arXiv:2310.10315 , 2023. [7] L.-H. Gong et al. , “Quantum convolutional neural network based on varia-tional quantum circuits,” Opt. Commun. , 2024. [8] Y. Kwak et al. , “Quantum neural networks: Concepts, applications, and challenges,” in ICUFN , 2021. [9] K. Zaman et al. , “A comparative analysis of hybrid-quantum classical neural networks,” in CSCE , 2024. [10] N. Innan et al. , “Next-generation quantum neural networks: Enhancing efficiency, security, and privacy,” in IOLTS , 2025. [11] M. Kashif, A. Marchisio, and M. Shafique, “Computational advantage in hybrid quantum neural networks: Myth or reality?” in DAC , 2025. [12] J. R. McClean et al. , “Barren plateaus in quantum neural network training landscapes,” Nat. Commun. , 2018. [13] M. Larocca et al. , “Barren plateaus in variational quantum computing,” Nat. Rev. Phys. , 2025. [14] D. Martyniuk et al. , “Quantum architecture search: A survey,” arXiv , 2024. [15] S. Wang et al. , “Noise-induced barren plateaus in variational quantum algorithms,” Nat. Commun. , 2021. [16] T. Ahmed et al. , “A comparative analysis and noise robustness evaluation in quantum neural networks,” Scientific Reports , 2025. [17] E. Grant et al. , “An initialization strategy for addressing barren plateaus in parametrized quantum circuits,” Quantum , 2019. [18] C. White et al. , “Neural architecture search: Insights from 1000 papers,” 
+
+arXiv , 2023. [19] B. Zoph and Q. V. Le, “Neural architecture search with reinforcement learning,” arXiv , 2017. [20] N. Sinha et al. , “Multi-objective hardware aware neural architecture search using hardware cost diversity,” in CVPRW , 2024. [21] Q. Ma et al. , “Continuous evolution for efficient quantum architecture search,” EPJ Quantum Technol. , 2024. [22] T. Ahmed et al. , “Noisy hqnns: A comprehensive analysis of noise robust-ness in hybrid quantum neural networks,” in IJCNN , 2025. [23] W. El Maouaki et al. , “Designing robust quantum neural networks via optimized circuit metrics,” Advanced Quantum Technologies , 2025. [24] N. Ma and H. Li, “Understanding and estimating the execution time of quantum circuits,” arXiv , 2025. [25] M. Tremba et al. , “Is circuit depth accurate for comparing quantum circuit runtimes?” arXiv , 2025. [26] A. Marchisio et al. , “Cutting is all you need: Execution of large-scale quantum neural networks on limited-qubit devices,” in QAI .[27] K. Zaman et al. , “Studying the impact of quantum-specific hyperparameters on hybrid quantum-classical neural networks,” in CSCE , 2024. [28] P. Ren et al. , “A comprehensive survey of neural architecture search: Challenges and solutions,” ACM Comput. Surv. , 2021. [29] Y. Liu et al. , “A survey on evolutionary neural architecture search,” IEEE Trans. Neural Netw. Learn. Syst. , 2021. [30] T. Elsken et al. , “Neural architecture search: A survey,” JMLR , 2019. [31] Z. Guo et al. , “Single path one-shot neural architecture search with uniform sampling,” in ECCV , 2020. [32] C. Li et al. , “HW-NAS-Bench: Hardware-aware neural architecture search benchmark,” arXiv , 2025. [33] A. Marchisio et al. , “Nascaps: A framework for neural architecture search to optimize the accuracy and hardware efficiency of convolutional capsule networks,” in ICCAD , 2020. [34] M. Kashif et al. , “FAQNAS: FLOPs-aware hybrid quantum neural architec-ture search using genetic algorithm,” arXiv , 2025. [35] M. Kashif, A. Marchisio, and M. Shafique, “Closing the loop: Resource-aware hybrid nas guided by analytical and hardware-calibrated quantum cost modeling,” in DAC , 2026. [36] T. Ahmed et al. , “Gat-qnn: Genetic algorithm-based training of hybrid quantum neural networks,” in IJCNN , 2026. [37] K. Deb et al. , “A fast and elitist multiobjective genetic algorithm: NSGA-II,” IEEE Trans. Evol. Comput. , 2002. [38] F. Pallasdies et al. , “Neural optimization: Understanding trade-offs with pareto theory,” Curr. Opin. Neurobiol. , 2021. [39] D. A. V. Veldhuizen et al. , “Evolutionary computation and convergence to a pareto front,” in GP , 1998. [40] A. Panichella, “An improved pareto front modeling algorithm for large-scale many-objective optimization,” in GECCO , 2022. [41] W. Li et al. , “Hierarchy ranking method for multimodal multiobjective optimization with local pareto fronts,” IEEE Trans. Evol. Comput. , 2022. [42] D. Kremer et al. , “Practical and efficient quantum circuit synthesis and transpiling with reinforcement learning,” arXiv , 2024. [43] F. Hua et al. , “Qasmtrans: A QASM quantum transpiler framework for NISQ devices,” in SC , 2023. [44] L. Deng, “The MNIST database of handwritten digit images for machine learning research,” IEEE Signal Process. Mag. , 2012. [45] H. Xiao et al. , “Fashion-MNIST: a novel image dataset for benchmarking machine learning algorithms,” arXiv , 2017. [46] R. A. Fisher, “Iris,” UCI Machine Learning Repository, 1936, DOI: https://doi.org/10.24432/C56C76.

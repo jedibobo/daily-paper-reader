@@ -6,71 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-08
-- 运行时间：2026-04-08 20:07:02 UTC
+- 最新运行日期：2026-04-09
+- 运行时间：2026-04-09 20:06:58 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日聚焦卫星遥感边缘智能与 KAN 网络硬件优化，深度复盘 17 篇高效能 AI
-- 详情：[/202604/08/README](/202604/08/README)
+今日深度解析 17 篇前沿论文，聚焦类脑计算硬件适配与神经网络的高效压缩范式。
+重点推荐 YANA 框架对类脑仿真鸿沟的突破，以及 PQD 有序流水线在模型极致轻量化上的卓越表现。
+建议开发者关注低比特 MXFP 推理与 LLM 辅助代码优化，探索端侧部署的性能极限。
+- 详情：[/202604/09/README](/202604/09/README)
 
 ### 精读区论文标签
-1. [Edge Intelligence for Satellite-based Earth Observation: Scheduling Image Acquisition and Processing](/202604/08/2604.05937v1-edge-intelligence-for-satellite-based-earth-observation-scheduling-image-acquisition-and-processing)  
-   标签：评分：10.0/10、query:hwnas
-   evidence：低轨卫星星座在轨边缘计算的能量感知调度
-2. [Hardware-Oriented Inference Complexity of Kolmogorov-Arnold Networks](/202604/08/2604.03345v1-hardware-oriented-inference-complexity-of-kolmogorov-arnold-networks)  
+1. [YANA: Bridging the Neuromorphic Simulation-to-Hardware Gap](/202604/09/2604.03432v1-yana-bridging-the-neuromorphic-simulation-to-hardware-gap)  
    标签：评分：9.0/10、query:hwnas
-   evidence：KANs的硬件导向推理复杂度
-3. [Mambalaya: Einsum-Based Fusion Optimizations on State-Space Models](/202604/08/2604.03829v1-mambalaya-einsum-based-fusion-optimizations-on-state-space-models)  
+   evidence：基于FPGA的SNN加速器及软硬件协同设计框架
+2. [Prune-Quantize-Distill: An Ordered Pipeline for Efficient Neural Network Compression](/202604/09/2604.04988v1-prune-quantize-distill-an-ordered-pipeline-for-efficient-neural-network-compression)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对状态空间模型的可重构加速器与算子融合优化
-4. [NEURA: A Unified and Retargetable Compilation Framework for Coarse-Grained Reconfigurable Architectures](/202604/08/2604.04236v1-neura-a-unified-and-retargetable-compilation-framework-for-coarse-grained-reconfigurable-architectures)  
+   evidence：针对实测延迟而非FLOPs的流水线
+3. [CBM-Dual: A 65-nm Fully Connected Chaotic Boltzmann Machine Processor for Dual Function Simulated Annealing and Reservoir Computing](/202604/09/2604.06808v1-cbm-dual-a-65-nm-fully-connected-chaotic-boltzmann-machine-processor-for-dual-function-simulated-annealing-and-reservoir-computing)  
    标签：评分：9.0/10、query:hwnas
-   evidence：粗粒度可重构架构的编译框架
-5. [LOCALUT: Harnessing Capacity-Computation Tradeoffs for LUT-Based Inference in DRAM-PIM](/202604/08/2604.04523v1-localut-harnessing-capacity-computation-tradeoffs-for-lut-based-inference-in-dram-pim)  
+   evidence：边缘AI处理器的硬件软件协同设计
+4. [QNAS: A Neural Architecture Search Framework for Accurate and Efficient Quantum Neural Networks](/202604/09/2604.07013v1-qnas-a-neural-architecture-search-framework-for-accurate-and-efficient-quantum-neural-networks)  
    标签：评分：9.0/10、query:hwnas
-   evidence：DRAM-PIM中基于查找表推理的软硬件权衡
-6. [Taming the Exponential: A Fast Softmax Surrogate for Integer-Native Edge Inference](/202604/08/2604.02292v1-taming-the-exponential-a-fast-softmax-surrogate-for-integer-native-edge-inference)  
+   evidence：量子网络的硬件感知神经架构搜索
+5. [Biologically Realistic Dynamics for Nonlinear Classification in CMOS+X Neurons](/202604/09/2604.03187v1-biologically-realistic-dynamics-for-nonlinear-classification-in-cmosx-neurons)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于整数原生边缘推理的快速Softmax替代方案，减少计算开销
+   evidence：基于 CMOS+X 脉冲神经元的能效人工智能
+6. [Mestra: Exploring Migration on Virtualized CGRAs](/202604/09/2604.04694v1-mestra-exploring-migration-on-virtualized-cgras)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：高效利用CGRA阵列及动态调度
 
 ### 速读区论文标签
-1. [FluxMoE: Decoupling Expert Residency for High-Performance MoE Serving](/202604/08/2604.02715v1-fluxmoe-decoupling-expert-residency-for-high-performance-moe-serving)  
+1. [Zero-Shot Quantization via Weight-Space Arithmetic](/202604/09/2604.03420v1-zero-shot-quantization-via-weight-space-arithmetic)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过解耦专家驻留与GPU内存来最大化计算利用率
-2. [QAPruner: Quantization-Aware Vision Token Pruning for Multimodal Large Language Models](/202604/08/2604.02816v1-qapruner-quantization-aware-vision-token-pruning-for-multimodal-large-language-models)  
+   evidence：零样本量化，用于低成本硬件部署
+2. [Diagonal-Tiled Mixed-Precision Attention for Efficient Low-Bit MXFP Inference](/202604/09/2604.03950v1-diagonal-tiled-mixed-precision-attention-for-efficient-low-bit-mxfp-inference)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对多模态大模型减少内存和计算的量化感知剪枝
-3. [Factorized Multi-Resolution HashGrid for Efficient Neural Radiance Fields: Execution on Edge-Devices](/202604/08/2604.02836v1-factorized-multi-resolution-hashgrid-for-efficient-neural-radiance-fields-execution-on-edge-devices)  
+   evidence：注意力机制内核中的内存带宽优化与硬件级并行
+3. [Agentic Code Optimization via Compiler-LLM Cooperation](/202604/09/2604.04238v1-agentic-code-optimization-via-compiler-llm-cooperation)  
    标签：评分：8.0/10、query:hwnas
-   evidence：在边缘设备上高效执行神经辐射场
-4. [Collaborative Multi-Mode Pruning for Vision-Language Models](/202604/08/2604.02956v1-collaborative-multi-mode-pruning-for-vision-language-models)  
+   evidence：编译器与大模型协作进行代码优化
+4. [Don't Waste Bits! Adaptive KV-Cache Quantization for Lightweight On-Device LLMs](/202604/09/2604.04722v1-dont-waste-bits-adaptive-kv-cache-quantization-for-lightweight-on-device-llms)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限设备部署的联合参数与Token剪枝
-5. [TENT: A Declarative Slice Spraying Engine for Performant and Resilient Data Movement in Disaggregated LLM Serving](/202604/08/2604.00368v1-tent-a-declarative-slice-spraying-engine-for-performant-and-resilient-data-movement-in-disaggregated-llm-serving)  
+   evidence：针对端侧大模型推理的自适应KV缓存量化
+5. [IWP: Token Pruning as Implicit Weight Pruning in Large Vision Language Models](/202604/09/2604.00757v1-iwp-token-pruning-as-implicit-weight-pruning-in-large-vision-language-models)  
    标签：评分：7.0/10、query:hwnas
-   evidence：GPU集群中的拥塞控制与带宽优化
-6. [Adaptive Parallel Monte Carlo Tree Search for Efficient Test-time Compute Scaling](/202604/08/2604.00510v1-adaptive-parallel-monte-carlo-tree-search-for-efficient-test-time-compute-scaling)  
+   evidence：通过Token剪枝降低计算成本
+6. [A Hierarchical Importance-Guided Multi-objective Evolutionary Framework for Deep Neural Network Pruning](/202604/09/2604.01076v1-a-hierarchical-importance-guided-multi-objective-evolutionary-framework-for-deep-neural-network-pruning)  
    标签：评分：7.0/10、query:hwnas
-   evidence：重新分配回收的计算资源以减少资源竞争
-7. [Video Patch Pruning: Efficient Video Instance Segmentation via Early Token Reduction](/202604/08/2604.00827v1-video-patch-pruning-efficient-video-instance-segmentation-via-early-token-reduction)  
+   evidence：用于剪枝的多目标进化框架，旨在优化网络效率
+7. [Generative Profiling for Soft Real-Time Systems and its Applications to Resource Allocation](/202604/09/2604.01441v1-generative-profiling-for-soft-real-time-systems-and-its-applications-to-resource-allocation)  
    标签：评分：7.0/10、query:hwnas
-   evidence：通过早期令牌减少实现高效视频实例分割，便于实际部署
-8. [PixelPrune: Pixel-Level Adaptive Visual Token Reduction via Predictive Coding](/202604/08/2604.00886v1-pixelprune-pixel-level-adaptive-visual-token-reduction-via-predictive-coding)  
+   evidence：用于资源分配和计算利用率的生成式剖析
+8. [DWDP: Distributed Weight Data Parallelism for High-Performance LLM Inference on NVL72](/202604/09/2604.01621v1-dwdp-distributed-weight-data-parallelism-for-high-performance-llm-inference-on-nvl72)  
    标签：评分：7.0/10、query:hwnas
-   evidence：自适应视觉 Token 减少，以减轻视觉 Transformer 的计算负担
-9. [PolarQuant: Optimal Gaussian Weight Quantization via Hadamard Rotation for LLM Compression](/202604/08/2603.29078v1-polarquant-optimal-gaussian-weight-quantization-via-hadamard-rotation-for-llm-compression)  
+   evidence：通过消除同步最大化计算利用率
+9. [Is RISC-V Ready for Machine Learning? Portable Gaussian Processes Using Asynchronous Tasks](/202604/09/2604.00736v1-is-risc-v-ready-for-machine-learning-portable-gaussian-processes-using-asynchronous-tasks)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于大模型压缩和效率的权重量化
-10. [Software Vulnerability Detection Using a Lightweight Graph Neural Network](/202604/08/2603.29216v1-software-vulnerability-detection-using-a-lightweight-graph-neural-network)  
+   evidence：跨多种硬件架构的可移植性和架构效率
+10. [Using predefined vector systems to speed up neural network multimillion class classification](/202604/09/2604.00779v1-using-predefined-vector-systems-to-speed-up-neural-network-multimillion-class-classification)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于高效且可部署漏洞分析的轻量级图神经网络
-11. [Square Superpixel Generation and Representation Learning via Granular Ball Computing](/202604/08/2603.29460v1-square-superpixel-generation-and-representation-learning-via-granular-ball-computing)  
+   evidence：具有 O(1) 复杂度的极高效标签预测方法
+11. [EmbedPart: Embedding-Driven Graph Partitioning for Scalable Graph Neural Network Training](/202604/09/2604.01000v1-embedpart-embedding-driven-graph-partitioning-for-scalable-graph-neural-network-training)  
    标签：评分：6.0/10、query:hwnas
-   evidence：将超像素与深度学习流水线中的常规算子对齐
+   evidence：平衡计算负载并减少通信，以实现可扩展的 GNN 训练
 
 
 <div class="dpr-home-promo-card">
