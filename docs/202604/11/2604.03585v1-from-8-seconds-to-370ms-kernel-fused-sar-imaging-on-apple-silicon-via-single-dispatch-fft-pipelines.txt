@@ -1,0 +1,197 @@
+Title: From 8 Seconds to 370ms: Kernel-Fused SAR Imaging on Apple Silicon via Single-Dispatch FFT Pipelines
+
+URL Source: https://arxiv.org/pdf/2604.03585v1
+
+Published Time: Tue, 07 Apr 2026 00:22:31 GMT
+
+Number of Pages: 4
+
+Markdown Content:
+> 1
+
+# From 8 Seconds to 370 ms: Kernel-Fused SAR Imaging on Apple Silicon via Single-Dispatch FFT Pipelines 
+
+Mohamed Amine Bergach Illumina mbergach@illumina.com 
+
+Abstract —We present the first kernel-fused SAR Range Doppler pipeline on any GPU platform. By fusing FFT, matched-filter multiply, and IFFT into a single Metal compute dispatch— keeping all intermediate data in 32 KiB on-chip memory—we process a 4096 × 4096 complex SAR scene in 370 ms on an Apple M1 GPU, a 22 × speedup over the multi-dispatch baseline (8.16 s). We further report the first FFT to exploit Apple’s 
+
+simdgroup_matrix 8×8 hardware MMA, enabled by an in-place Cooley–Tukey decimation-in-frequency formulation that halves the memory footprint versus Stockham. Radar image quality is preserved: all five point targets show 0.0 dB SNR deviation from the unfused FP32 reference. 
+
+Index Terms —SAR, range Doppler algorithm, kernel fusion, FFT, Apple Silicon, Metal, GPU, simdgroup matrix 
+
+I. I NTRODUCTION 
+
+# SYNTHETIC Aperture Radar (SAR) imaging relies on compute-intensive frequency-domain operations— primarily batched FFT, matched-filter multiplication, and IFFT—repeated across thousands of range and azimuth lines [1], [2]. GPU acceleration of SAR has been studied extensively on NVIDIA hardware [3]–[5], with speedups of 40–270 × over CPU. However, all published GPU SAR im-plementations dispatch FFT, multiply, and IFFT as separate 
+
+kernel launches [6], incurring redundant device-memory traffic between stages. Moreover, no SAR implementation exists for Metal or Apple Silicon. Kernel fusion—combining multiple operations into a single GPU dispatch so that intermediate data stays in on-chip memory—has been demonstrated for general signal process-ing [7], [8] and neural operators [9], but never for SAR. The key enablers on NVIDIA are cuFFTDx (device-side FFT since 2020) [7] and custom shared-memory FFT kernels [8], [9]. No equivalent exists on Metal, where the only cross-platform FFT library (VkFFT [10]) does not support fusion. A companion paper [13] established a two-tier mem-ory model for FFT on Apple Silicon: 208 KiB registers (Tier 1) and 32 KiB threadgroup memory (Tier 2), achieving 138 GFLOPS with a radix-8 Stockham kernel at N = 4096 .This paper builds on that foundation with three contributions: 1) First kernel-fused SAR pipeline on any GPU : FFT 
+
+→ matched-filter multiply → IFFT in a single Metal dispatch, with data resident in 32 KiB threadgroup 
+
+Source code: https://github.com/aminems/AppleSiliconFFT 
+
+memory throughout. A 22 × end-to-end speedup over the unfused baseline on Apple M1. 2) First MMA-based FFT on Apple Silicon : An in-place Cooley-Tukey decimation-in-frequency (DIF) kernel us-ing simdgroup_matrix 8×8 MMA for the radix-8 DFT butterfly, achieving 128 GFLOPS (93% of the scalar baseline). 3) First SAR implementation on Metal/Apple GPU :Complete Range Doppler Algorithm with validated point-target quality (PSLR, ISLR, SNR). II. S YSTEM ARCHITECTURE 
+
+A. Apple Silicon Memory Hierarchy 
+
+Apple Silicon GPUs provide a two-tier on-chip storage hierarchy (detailed in [13]): a 208 KiB register file (private per thread, exchangeable within 32-thread SIMD groups via 
+
+simd_shuffle ) and 32 KiB threadgroup memory shared across all threads. Device memory is unified with the CPU— zero-copy access with hardware coherence. For N = 4096 complex float32, the working set is exactly 32 KiB ( 4096 ×8 bytes), filling the entire threadgroup memory. This makes N = 4096 the largest FFT computable in a single threadgroup without device-memory exchange—and is the typical range-line length in medium-resolution SAR systems [1]. 
+
+B. Kernel Fusion Design 
+
+The unfused SAR compression pipeline (Fig. 1, top) re-quires three separate dispatches per line: FFT, multiply, IFFT. Each dispatch reads from and writes to device memory, producing 6 device-memory transfers (3 reads + 3 writes) per range or azimuth line. Our fused kernel (Fig. 1, bottom) combines all three oper-ations into a single dispatch. Each threadgroup processes one line: 1) Load : Read N complex samples from device memory into the 32 KiB threadgroup buffer. 2) Forward FFT : Six radix-4 Stockham passes entirely in threadgroup memory (1024 threads, 4 elements/thread). 3) Multiply : Point-wise complex multiply with the pre-computed matched filter (loaded from a separate device buffer).                   
+
+> arXiv:2604.03585v1 [cs.PF] 4 Apr 2026 2
+> Unfused
+> RFFT WR×HWRIFFT W6 transfers
+> Fused RFFT →×H→IFFT W2 transfers
+> 32 KiB threadgroup mem
+> Fig. 1. Unfused (top) vs. fused (bottom) range compression. Red: device-memory I/O; blue: compute kernels; green: fused kernel. Dashed boxes are separate GPU dispatches. Dashed arrows are redundant device-memory round-trips eliminated by fusion.
+
+4) IFFT : Conjugate in-place, reuse the same forward FFT passes, final conjugate + 1/N scale on write to device memory. 5) Store : Write N compressed samples to device memory. Data transfers drop from 6 to 2 (one read, one write). The matched-filter read (step 3) hits the System Level Cache (SLC) because the same N -element filter is reused by every threadgroup. 
+
+C. IFFT via Conjugate-FFT-Conjugate 
+
+The inverse FFT is computed as IFFT (x) = 1 
+
+> N
+
+FFT (¯ x),where ¯· denotes complex conjugation. This reuses the for-ward FFT butterfly unchanged , requiring only two additional threadgroup-memory passes for conjugation (negating the imaginary component). The final conjugation and 1/N scaling are folded into the last Stockham pass’s device-memory store, adding zero extra cost. III. I N-P LACE COOLEY -T UKEY MMA FFT 
+
+A. Motivation: Stockham vs. Cooley-Tukey for MMA 
+
+The simdgroup_matrix API exposes 8 ×8 hardware MMA [17], [18], achieving ∼4× higher ALU utilization than scalar SIMD [19]. The radix-8 DFT maps naturally to an 8 ×8complex matrix multiply decomposed into four real MMA operations [14]: 
+
+Yre = F8,re · Xre − F8,im · Xim (1) 
+
+Yim = F8,re · Xim + F8,im · Xre (2) However, MMA requires a split real/imaginary layout (sep-arate float buffers for real and imaginary parts) rather than the interleaved float2 layout used by Stockham. On Apple GPU, each component buffer requires 16 KiB ( 4096 ×4 bytes), totaling 32 KiB—exactly filling threadgroup memory with no room for double-buffering. The out-of-place Stockham formulation requires two buffers (source and destination), which would need 64 KiB in split layout—exceeding the 32 KiB limit. We therefore adopt an 
+
+in-place Cooley-Tukey DIF formulation that overwrites input data in place, requiring only a single 32 KiB buffer pair. 
+
+B. Kernel Architecture 
+
+The MMA kernel ( fft_4096_ct_mma ) decomposes the 
+
+N = 4096 FFT as four radix-8 DIF stages ( 4096 = 8 4) with strides S ∈ { 512 , 64 , 8, 1}. Stages 0–2 use MMA; stage 3 uses scalar butterfly (stride 1, contiguous elements, no MMA benefit):                   
+
+> TABLE I MMA VS . S CALAR FFT ( N= 4096 , B ATCH 256, A PPLE M1)
+> Kernel GFLOPS μs/FFT Notes
+> Radix-8 Stockham (scalar) 138 1.78 Best overall CT MMA (stages 0–2) 128 1.92 93% of scalar CT scalar reference 120 2.04 Split layout only
+> •
+
+512 threads , 32 SIMD groups, 4 MMA tiles per SIMD group.  
+
+> •
+
+DFT 8 matrix loaded once into 
+
+simdgroup_float8x8 registers and reused across all stages.  
+
+> •
+
+Twiddle application via thread_elements() : we empirically determined the mapping between SIMD lane ID and matrix element position on Apple M1 (undocu-mented): row = ⌊lane /16 ⌋ · 4 + ⌊(lane mod 8) /2⌋ (3) col 0 = ( ⌊lane /8⌋ mod 2) · 4 + ( lane mod 2) · 2 (4) Element 0 resides at (row , col 0) and element 1 at 
+
+(row , col 0 +1) .The final stage fuses the scalar radix-8 butterfly with digit-reversal permutation and device-memory output, eliminating an extra barrier and threadgroup write. 
+
+C. Performance Analysis 
+
+Table I compares the MMA and scalar kernels. The MMA kernel achieves 128 GFLOPS—93% of the scalar Stockham baseline. The gap is explained by the split real/imaginary layout doubling the number of threadgroup memory transactions: each MMA load/store moves float 
+
+values (4 bytes) rather than float2 values (8 bytes), re-quiring twice as many operations for the same data volume. When compared against the CT scalar kernel using the same split layout, MMA delivers a 7% improvement, confirming the MMA hardware advantage when the memory layout is held constant. IV. SAR R ANGE DOPPLER PIPELINE 
+
+A. Algorithm Overview 
+
+The Range Doppler Algorithm [1] processes a Na × Nr
+
+complex data matrix (azimuth × range) in five steps: 1) Range compression : Per azimuth line, FFT → multiply by range matched filter Hr (f ) → IFFT. Fused: single dispatch. 
+
+2) Azimuth FFT : Column-wise FFT via transpose → row FFT → transpose. Unfused: standard Stockham kernel. 
+
+3) RCMC : Range cell migration correction via sinc inter-polation. Unfused: separate dispatch. 
+
+4) Azimuth compression : Per range bin, multiply by az-imuth filter Ha(fa, R 0) → IFFT. Data is already in frequency domain from step 2. Fused: multiply+IFFT single dispatch. 
+
+Steps 1 and 4 use the fused kernels; steps 2–3 remain as separate dispatches because the azimuth FFT requires a global transpose (data exceeds 32 KiB per column). 3                            
+
+> TABLE II END -TO -E ND RDA P ERFORMANCE (4096 ×4096 , A PPLE M1)
+> Pipeline Total Time Speedup
+> Unfused baseline 8.16 s 1.0 ×
+> Fused pipeline 0.37 s 22.3 ×
+> TABLE III FUSED PIPELINE STEP BREAKDOWN (4096 ×4096 , M1)
+> Step Time Type
+> Range compression 29 ms Fused (single dispatch) Azimuth FFT (transpose+FFT+transpose) 132 ms Unfused RCMC 37 ms Unfused Azimuth compression 129 ms Fused (multiply+IFFT)
+> Total 327 ms
+
+B. Dispatch Model 
+
+For a 4096 × 4096 scene:  
+
+> •
+
+Range compression : 4096 threadgroups × 1024 threads. Each threadgroup processes one azimuth line. Single dispatch.  
+
+> •
+
+Azimuth FFT : Transpose ( 4096 2 elements) → 4096 threadgroups × 1024 threads (row FFT) → transpose back.  
+
+> •
+
+RCMC : Element-wise interpolation kernel.  
+
+> •
+
+Azimuth compression : Transpose → 4096 threadgroups 
+
+× 1024 threads (fused multiply+IFFT) → transpose back. V. E XPERIMENTAL RESULTS 
+
+A. Setup 
+
+All measurements use an Apple M1 (8 GPU cores, 1278 MHz, 68 GB/s DRAM). The test scene is a 4096 × 4096 
+
+complex float32 SAR simulation with 5 point targets at various range/azimuth offsets, generated using a chirp signal model (B = 100 MHz, fc = 10 GHz X-band, v = 100 m/s, 
+
+R0 = 20 km). The simulation includes 20 dB additive Gaussian noise. 
+
+B. End-to-End Speedup 
+
+Table II presents the headline result. The 22 × speedup comes from two sources: (1) eliminat-ing redundant device-memory traffic via kernel fusion, and (2) replacing CPU-side conjugation and scaling operations in the unfused IFFT path with GPU-side in-threadgroup opera-tions. The unfused baseline performs conjugation on the CPU using storageModeShared buffers, which serializes these O( N 2) operations. 
+
+C. Per-Step Breakdown 
+
+Table III shows the time spent in each pipeline step. Range compression—the fully fused FFT+multiply+IFFT step—takes only 29 ms for all 4096 range lines (7.1 μs/line). This is remarkably efficient: the theoretical minimum for reading and writing 4096 ×4096 ×8 bytes at 68 GB/s is ∼4 ms, so the fused kernel runs at ∼7× the device-memory bandwidth                                            
+
+> TABLE IV RADAR IMAGE QUALITY : F USED VS . U NFUSED
+> Metric Value
+> L2 relative error 2.44 ×10 −7
+> Max absolute error 3.81 ×10 −4
+> SNR delta (all 5 targets) 0.0 dB
+> Per-target (fused / unfused):
+> Target 0 (center) SNR 47.3 / 47.3 dB Target 1 (range offset) SNR 46.8 / 46.8 dB Target 2 (azimuth offset) SNR 47.1 / 47.1 dB Target 3 (diagonal offset) SNR 46.5 / 46.5 dB Target 4 (far offset) SNR 45.2 / 45.2 dB TABLE V COMPARISON WITH PUBLISHED EMBEDDED GPU SAR S YSTEMS
+> Platform TDP Alg. Size Time Fused
+> Jetson Nano [5] 15 W CSA 8K 25.86 s No RTX 2060 [5] 160 W CSA 8K 20.96 s No Jetson Orin [5] 60 W CSA 8K 20.40 s No
+> Apple M1 (ours) 15 W RDA 4K 20.37 s Yes
+> Note: different algorithms and scene sizes; comparison is indicative, not direct.
+
+limit, confirming that data reuse in threadgroup memory is effective. The azimuth steps dominate (80% of total time) because they require global transposes. These are candidates for future optimization via tiled transpose or column-major kernels. 
+
+D. Radar Quality Validation 
+
+Table IV compares the fused and unfused outputs. The L2 relative error of 2.44 × 10 −7 is within FP32 round-off bounds ( εFP32 ≈ 1.2 × 10 −7, accumulated over ∼12 butterfly passes). All five point targets show identical SNR between fused and unfused pipelines, confirming that fusion introduces no quality degradation. The conj-FFT-conj IFFT approach is mathematically equivalent to the standard IFFT, producing bit-level-comparable results. 
+
+E. Comparison with Published GPU SAR 
+
+Table V places our results in the context of published embedded GPU SAR implementations. While a direct comparison is imprecise (different algo-rithms, data sizes, and hardware), our M1 result is competitive with Jetson AGX Orin—a 60 W discrete embedded GPU— despite M1’s lower power envelope (∼15 W GPU). The unified memory architecture benefits both platforms: Chen et al. [5] noted that Orin (unified memory) outperformed RTX 2060 (discrete) for SAR despite lower peak FLOPS, supporting our thesis that memory architecture matters more than raw compute for bandwidth-bound SAR pipelines. VI. C ONCLUSION 
+
+We demonstrated the first kernel-fused SAR Range Doppler Algorithm on any GPU platform and the first SAR imple-mentation on Apple Silicon. Fusing FFT+multiply+IFFT into single Metal dispatches yields a 22 × speedup over the unfused 4
+
+baseline on Apple M1, with radar image quality preserved at FP32 precision limits. We also presented the first MMA-based FFT on Apple GPU using the empirically characterized 
+
+simdgroup_matrix thread_elements() mapping. Future work includes: (1) mixed-precision fusion using Apple’s native FP16 with zero-cycle FP16 ↔FP32 conversion to double the throughput of the fused kernel while maintaining radar quality via FP32 accumulation; (2) M4 Max scaling 
+
+to exploit 40 GPU cores and 546 GB/s memory bandwidth for real-time 8K ×8K processing; and (3) tiled transpose to reduce the azimuth-step overhead that currently dominates the pipeline. 
+
+Reproducibility. All source code, Metal shaders, SAR simula-tor, and benchmark scripts are available under the MIT license at https://github.com/aminems/AppleSiliconFFT. 
+
+AI Disclosure. The author used AI-based tools (Claude, Anthropic) to assist with improving the clarity and presen-tation of the text. All technical content, experimental design, implementation, and analysis are the author’s own work. REFERENCES [1] I. G. Cumming and F. H. Wong, Digital Processing of Synthetic Aperture Radar Data: Algorithms and Implementation . Artech House, 2005. [2] A. Moreira, P. Prats-Iraola, M. Younis, G. Krieger, I. Hajnsek, and K. P. Papathanassiou, “A tutorial on synthetic aperture radar,” IEEE Geosci. Remote Sens. Mag. , vol. 1, no. 1, pp. 6–43, 2013. [3] “The challenge of onboard SAR processing: A GPU opportunity,” in 
+
+Computational Science – ICCS 2020 , ser. LNCS, vol. 12139, pp. 46– 59, 2020. [4] “Architecture exploration of a backprojection algorithm for real-time video SAR,” Electronics , vol. 10, no. 24, p. 3197, 2021. [5] “An embedded-GPU-based scheme for real-time imaging processing of UAV-borne video SAR,” Remote Sensing , vol. 16, no. 1, p. 191, 2024. [6] N. Esser, “CUDARangeDopplerProcessing,” GitHub repository, 2020. [Online]. Available: https://github.com/NiclasEsser1/ CUDARangeDopplerProcessing [7] NVIDIA Corporation, “cuFFTDx – CUDA FFT device extensions,” 2020. [Online]. Available: https://docs.nvidia.com/cuda/cufftdx/ [8] K. Ad´ amek, S. Dimoudi, M. Giles, and W. Armour, “GPU fast convo-lution via the overlap-and-save method in shared memory,” ACM Trans. Archit. Code Optim. , vol. 17, no. 3, pp. 18:1–18:20, 2020. [9] S. Wu et al. , “TurboFNO: High-performance Fourier neural operator with fused FFT-GEMM-iFFT on GPU,” in SC25 , 2025. [10] D. Tolmachev, “VkFFT – a performant, cross-platform and open-source GPU FFT library,” IEEE Access , vol. 11, pp. 12 039–12 058, 2023. [11] M. A. Bergach, “Adaptation du calcul de la Transform´ ee de Fourier Rapide sur une architecture mixte CPU/GPU int´ egr´ ee,” Ph.D. disserta-tion, Univ. Nice Sophia Antipolis, 2015. [12] M. A. Bergach, E. Kofman, R. de Simone, S. Tissot, and M. Syska, “Efficient FFT mapping on GPU for radar processing application: modeling and implementation,” arXiv:1505.08067 , 2015. [13] M. A. Bergach, “Beating vDSP: A 138 GFLOPS radix-8 Stockham FFT on Apple Silicon via two-tier register-threadgroup memory decomposi-tion,” submitted, 2026. [14] S. Li and Y. Cheng, “tcFFT: A fast half-precision FFT library for NVIDIA Tensor Cores,” in IEEE IPDPSW , 2021. [15] S. Wu et al. , “TurboFFT: Co-designed high-performance and fault-tolerant fast Fourier transform on GPUs,” in PPoPP ’25 , 2025. [16] N. K. Govindaraju, B. Lloyd, Y. Dotsenko, B. Smith, and J. Manferdelli, “High performance discrete Fourier transforms on graphics processors,” in SC ’08 , 2008. [17] Apple Inc., “Metal Shading Language Specification, Version 4,” 2024. [Online]. Available: https://developer.apple.com/metal/ Metal-Shading-Language-Specification.pdf [18] Stanford Hazy Research, “ThunderMittens for your ThunderKittens,” blog post, 2024. [Online]. Available: https://hazyresearch.stanford.edu/ blog/2024-11-28-tk-mlx [19] P. Turner, “metal-benchmarks: Apple GPU microarchitecture,” GitHub repository. [Online]. Available: https://github.com/philipturner/ metal-benchmarks [20] D. Johnson, “Apple G13 GPU architecture reference.” [Online]. Avail-able: https://dougallj.github.io/applegpu/docs.html [21] C. F. Van Loan, Computational Frameworks for the Fast Fourier Transform . SIAM, 1992. [22] Y. Zhao et al. , “MFFT: A GPU accelerated highly efficient mixed-precision large-scale FFT framework,” ACM Trans. Archit. Code Optim. ,2023. [23] Apple Inc., “Metal Feature Set Tables,” 2024. [Online]. Available: https: //developer.apple.com/metal/Metal-Feature-Set-Tables.pdf [24] “GPU accelerated interferometric SAR processing for Sentinel-1 TOPS data,” Comput. & Geosci. , 2019.
