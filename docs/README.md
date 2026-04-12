@@ -6,73 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-11
-- 运行时间：2026-04-11 19:26:54 UTC
+- 最新运行日期：2026-04-12
+- 运行时间：2026-04-12 19:27:56 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日精选 17 篇前沿论文，深度聚焦 Transformer 存算一体架构与嵌套循环程序的能效建模。
-重点推荐三线性存算一体架构及符号多面体分析法，展示了 AI 加速器在极低功耗下的性能突破。
-建议关注低功耗硬件设计与 3D 点云压缩技术，探索边缘侧 AI 在卫星监测等场景的落地可能。
-- 详情：[/202604/11/README](/202604/11/README)
+今日聚焦实时安全关键系统的异构加速与量子储备池计算效率，深度解析 17 篇前沿成果。
+重点推荐 PHAROS 架构对任务截止时间的严格保障，以及量化读取技术在量子硬件优化上的显著进展。
+建议从异构流水线设计与大模型推理瓶颈入手，探索高性能计算在安全及能源领域的应用。
+- 详情：[/202604/12/README](/202604/12/README)
 
 ### 精读区论文标签
-1. [Symbolic Polyhedral-Based Energy Analysis for Nested Loop Programs](/202604/11/2604.07287v1-symbolic-polyhedral-based-energy-analysis-for-nested-loop-programs)  
+1. [PHAROS: Pipelined Heterogeneous Accelerators for Real-time Safety-critical Systems With Deadline Compliance](/202604/12/2604.05308v1-pharos-pipelined-heterogeneous-accelerators-for-real-time-safety-critical-systems-with-deadline-compliance)  
    标签：评分：9.0/10、query:hwnas
-   evidence：加速器映射与调度的符号化能量分析
-2. [Trilinear Compute-in-Memory Architecture for Energy-Efficient Transformer Acceleration](/202604/11/2604.07628v1-trilinear-compute-in-memory-architecture-for-energy-efficient-transformer-acceleration)  
+   evidence：具有实时感知能力的异构加速器设计框架
+2. [Late Breaking Results: Hardware-Efficient Quantum Reservoir Computing via Quantized Readout](/202604/12/2604.06075v1-late-breaking-results-hardware-efficient-quantum-reservoir-computing-via-quantized-readout)  
    标签：评分：9.0/10、query:hwnas
-   evidence：用于高效Transformer加速的存内计算架构
-3. [Taming GPU Underutilization via Static Partitioning and Fine-grained CPU Offloading](/202604/11/2604.08451v1-taming-gpu-underutilization-via-static-partitioning-and-fine-grained-cpu-offloading)  
+   evidence：针对硬件高效量子水库架构的遗传搜索
+3. [The Hyperscale Lottery: How State-Space Models Have Sacrificed Edge Efficiency](/202604/12/2604.07935v1-the-hyperscale-lottery-how-state-space-models-have-sacrificed-edge-efficiency)  
    标签：评分：9.0/10、query:hwnas
-   evidence：通过分区和卸载解决GPU利用率不足的问题
-4. [InCoder-32B-Thinking: Industrial Code World Model for Thinking](/202604/11/2604.03144v1-incoder-32b-thinking-industrial-code-world-model-for-thinking)  
+   evidence：分析边缘效率以及针对边缘智能的架构变化
+4. [Shortest-Path FFT: Optimal SIMD Instruction Scheduling via Graph Search](/202604/12/2604.04311v1-shortest-path-fft-optimal-simd-instruction-scheduling-via-graph-search)  
    标签：评分：8.0/10、query:hwnas
-   evidence：对硬件约束、GPU优化和时序语义进行推理
-5. [From 8 Seconds to 370ms: Kernel-Fused SAR Imaging on Apple Silicon via Single-Dispatch FFT Pipelines](/202604/11/2604.03585v1-from-8-seconds-to-370ms-kernel-fused-sar-imaging-on-apple-silicon-via-single-dispatch-fft-pipelines)  
+   evidence：通过图搜索实现最优 SIMD 指令调度以提升硬件性能
+5. [Neuromorphic Computing for Low-Power Artificial Intelligence](/202604/12/2604.04727v1-neuromorphic-computing-for-low-power-artificial-intelligence)  
    标签：评分：8.0/10、query:hwnas
-   evidence：利用内核融合和硬件矩阵乘法器实现计算最大化
-6. [Beyond Accuracy: Unveiling Inefficiency Patterns in Tool-Integrated Reasoning](/202604/11/2604.05404v1-beyond-accuracy-unveiling-inefficiency-patterns-in-tool-integrated-reasoning)  
+   evidence：用于能效提升的类脑计算与存内计算
+6. [A comparative study on power delivery aspects of compute-in/near-memory approaches using DRAM](/202604/12/2604.04773v1-a-comparative-study-on-power-delivery-aspects-of-compute-innear-memory-approaches-using-dram)  
    标签：评分：8.0/10、query:hwnas
-   evidence：工具集成推理的硬件感知效率指标
+   evidence：存内计算中供电与硬件挑战的综述
 
 ### 速读区论文标签
-1. [TinyNina: A Resource-Efficient Edge-AI Framework for Sustainable Air Quality Monitoring via Intra-Image Satellite Super-Resolution](/202604/11/2604.04445v1-tinynina-a-resource-efficient-edge-ai-framework-for-sustainable-air-quality-monitoring-via-intra-image-satellite-super-resolution)  
+1. [Efficient Inference for Large Vision-Language Models: Bottlenecks, Techniques, and Prospects](/202604/12/2604.05546v1-efficient-inference-for-large-vision-language-models-bottlenecks-techniques-and-prospects)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于卫星监测的资源高效型边缘AI
-2. [DHFP-PE: Dual-Precision Hybrid Floating Point Processing Element for AI Acceleration](/202604/11/2604.04507v2-dhfp-pe-dual-precision-hybrid-floating-point-processing-element-for-ai-acceleration)  
+   evidence：涵盖内存带宽和计算瓶颈的效率技术分类
+2. [Constraint-Driven Warm-Freeze for Efficient Transfer Learning in Photovoltaic Systems](/202604/12/2604.05807v1-constraint-driven-warm-freeze-for-efficient-transfer-learning-in-photovoltaic-systems)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于AI加速和提高硬件利用率的双精度处理单元
-3. [LEAN-3D: Low-latency Hierarchical Point Cloud Codec for Mobile 3D Streaming](/202604/11/2604.04737v1-lean-3d-low-latency-hierarchical-point-cloud-codec-for-mobile-3d-streaming)  
+   evidence：针对资源受限边缘控制器的预算感知自适应
+3. [JZ-Tree: GPU friendly neighbour search and friends-of-friends with dual tree walks in JAX plus CUDA](/202604/12/2604.05885v1-jz-tree-gpu-friendly-neighbour-search-and-friends-of-friends-with-dual-tree-walks-in-jax-plus-cuda)  
    标签：评分：8.0/10、query:hwnas
-   evidence：面向移动系统的计算感知点云编解码器
-4. [LEAN-3D: Low-latency Hierarchical Point Cloud Codec for Mobile 3D Streaming](/202604/11/2604.04737v2-lean-3d-low-latency-hierarchical-point-cloud-codec-for-mobile-3d-streaming)  
+   evidence：针对 GPU 优化的层级结构，解决线程分歧和内存模式问题
+4. [Continual Visual Anomaly Detection on the Edge: Benchmark and Efficient Solutions](/202604/12/2604.06435v1-continual-visual-anomaly-detection-on-the-edge-benchmark-and-efficient-solutions)  
    标签：评分：8.0/10、query:hwnas
-   evidence：面向移动系统的计算感知点云编解码器
-5. [SkillRT: Compiling Skills for Efficient Execution Everywhere](/202604/11/2604.03088v1-skillrt-compiling-skills-for-efficient-execution-everywhere)  
+   evidence：边缘部署效率和内存约束下的最优骨干网络选择
+5. [GENSERVE: Efficient Co-Serving of Heterogeneous Diffusion Model Workloads](/202604/12/2604.04335v1-genserve-efficient-co-serving-of-heterogeneous-diffusion-model-workloads)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对异构处理器的编译器设计以实现高效执行
-6. [NativeTernary: A Self-Delimiting Binary Encoding with Unary Run-Length Hierarchy Markers for Ternary Neural Network Weights, Structured Data, and General Computing Infrastructure](/202604/11/2604.03336v1-nativeternary-a-self-delimiting-binary-encoding-with-unary-run-length-hierarchy-markers-for-ternary-neural-network-weights-structured-data-and-general-computing-infrastructure)  
+   evidence：异构工作负载的高效协同服务以优化服务效率
+6. [Integer-Only Operations on Extreme Learning Machine Test Time Classification](/202604/12/2604.04363v1-integer-only-operations-on-extreme-learning-machine-test-time-classification)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对三值神经网络的硬件友好型二进制编码
-7. [NativeTernary: A Self-Delimiting Binary Encoding with Unary Run-Length Hierarchy Markers for Ternary Neural Network Weights, Structured Data, and General Computing Infrastructure](/202604/11/2604.03336v2-nativeternary-a-self-delimiting-binary-encoding-with-unary-run-length-hierarchy-markers-for-ternary-neural-network-weights-structured-data-and-general-computing-infrastructure)  
+   evidence：仅整数运算和三值权重以降低计算成本
+7. [Training Transformers in Cosine Coefficient Space](/202604/12/2604.04440v2-training-transformers-in-cosine-coefficient-space)  
    标签：评分：7.0/10、query:hwnas
-   evidence：三值神经网络权重的二进制编码
-8. [DRIFT: Deep Restoration, ISP Fusion, and Tone-mapping](/202604/11/2604.03402v1-drift-deep-restoration-isp-fusion-and-tone-mapping)  
+   evidence：通过系数空间进行参数高效的Transformer训练
+8. [RAVEN: Radar Adaptive Vision Encoders for Efficient Chirp-wise Object Detection and Segmentation](/202604/12/2604.04490v1-raven-radar-adaptive-vision-encoders-for-efficient-chirp-wise-object-detection-and-segmentation)  
    标签：评分：7.0/10、query:hwnas
-   evidence：低计算成本的高效AI移动相机流水线
-9. [Accelerating Nonlinear Time-History Analysis with Complex Constitutive Laws via Heterogeneous Memory Management: From 3D Seismic Simulation to Neural Network Training](/202604/11/2604.02755v1-accelerating-nonlinear-time-history-analysis-with-complex-constitutive-laws-via-heterogeneous-memory-management-from-3d-seismic-simulation-to-neural-network-training)  
+   evidence：计算高效的架构，显著降低端到端延迟
+9. [KiToke: Kernel-based Interval-aware Token Compression for Video Large Language Models](/202604/12/2604.03414v1-kitoke-kernel-based-interval-aware-token-compression-for-video-large-language-models)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于大规模模拟和训练的异构内存管理
-10. [Activity-Dependent Plasticity in Morphogenetically-Grown Recurrent Networks](/202604/11/2604.03386v1-activity-dependent-plasticity-in-morphogenetically-grown-recurrent-networks)  
+   evidence：通过 Token 压缩降低推理成本和时空冗余
+10. [StableTTA: Training-Free Test-Time Adaptation that Improves Model Accuracy on ImageNet1K to 96%](/202604/12/2604.04552v1-stabletta-training-free-test-time-adaptation-that-improves-model-accuracy-on-imagenet1k-to-96)  
    标签：评分：6.0/10、query:hwnas
-   evidence：神经架构搜索的发展方法
-11. [Cost-Efficient Multi-Scale Fovea for Semantic-Based Visual Search Attention](/202604/11/2604.03836v2-cost-efficient-multi-scale-fovea-for-semantic-based-visual-search-attention)  
+   evidence：轻量化架构减少计算成本和参数量
+11. [LP-GEMM: Integrating Layout Propagation into GEMM Operations](/202604/12/2604.04599v1-lp-gemm-integrating-layout-propagation-into-gemm-operations)  
    标签：评分：6.0/10、query:hwnas
-   evidence：降低计算成本以实现实时部署
+   evidence：消除冗余打包以最大化计算利用率
 
 
 <div class="dpr-home-promo-card">
