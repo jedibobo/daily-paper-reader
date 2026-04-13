@@ -1,0 +1,1485 @@
+Title: Architecture-aware $h$-to-$p$ optimisation: spectral/$hp$ element operators for mixed-element meshes
+
+URL Source: https://arxiv.org/pdf/2604.04644v1
+
+Published Time: Tue, 07 Apr 2026 01:43:58 GMT
+
+Number of Pages: 28
+
+Markdown Content:
+# Architecture-aware ℎ-to-𝑝 optimisation: spectral/ ℎ𝑝 element operators for mixed-element meshes 
+
+## Jacques Y. Xing a,∗, Boyang Xia b,∗, Diego Renner a, Chris D. Cantwell a, David Moxey b, Robert M. Kirby c and Spencer J. Sherwin a
+
+> a
+
+Imperial College London, Exhibition Rd, South Kensington, London, SW7 2AZ, England, United Kingdom 
+
+> b
+
+King’s College London, Strand, WC2R 2LS, London, England, United Kingdom 
+
+> c
+
+University of Utah, 201 Presidents’ Cir, UT 84112, Salt Lake City, Utah, United States 
+
+A R T I C L E I N F O 
+
+Keywords :Spectral element methods tensor product unstructured domains heterogeneous computing performance optimisation SIMD 
+
+Abstract 
+
+We extend earlier international efforts to optimise hexahedral-based spectral element methods on GPUs and vectorised CPUs to mixed element meshes additionally involving prismatic, pyramidic, and tetrahedral shapes using tensorial expansions. We demonstrate that common finite element operators (such as the mass and Helmholtz matrices) benefit from alternative implementation strategies depending on the element shape, choice of polynomial order, and system architecture in order to achieve optimal performance. In addition, we introduce a new approach/interpretation to efficiently evaluate more complex operations involving inner products with the derivative of the expansions as part of the integrand such as the stiffness matrix. This approach seeks to maximise operations using the collocation properties of the nodal tensorial expansion associated with classical quadrature rules. Our GPU performance tests demonstrate that the throughput of the Helmholtz operator on tetrahedral elements is at most 2.5 times slower than on hexahedral elements, despite tetrahedra having a factor of six greater floating-point operations. 
+
+## 1. Introduction 
+
+High-order finite elements are increasingly being used to solve partial differential equations (PDEs) to model sophisticated physics in geometrically complex domains. There is a growing interest in their industrial application, particularly in the area of fluid dynamics where their beneficial numerical properties, such as low numerical diffusion and dispersion, allow transient dynamics to be accurately captured over long integration times. The high-order nature of the finite element expansion bases also readily aligns with modern architectures due to their higher arithmetic intensity, by allowing more floating-point operations (FLOPS) to be performed on each byte of data transferred onto the processor. This has also made these methods of particular interest for use on GPUs. Nektar++ [1] is traditionally a CPU-based framework for solving PDEs using spectral/ ℎ𝑝 element methods on mixed-element meshes. The support for simplex elements enables effective use of the tools on challenging industrial geometries which may be intractable to mesh using hexahedral elements alone. Furthermore, the use of algorithmic approaches such as sum-factorisation reduces the number of floating-point operations, while implementation optimisa-tions such as matrix-free techniques reduce memory bus contention. In introducing simplex element shapes, we have previously investigated, on CPUs, the performance trade-offs of these various algorithmic approaches [2, 3]. The code has recently been ported to GPUs and has been used to explore the impact of various mathematical and algorithmic design choices, such as our treatment of sum-factorisation per output point [4], on performance. Other codes that implement high-order finite element methods have also embraced GPUs, which we acknowledge here in order to give context to our work. Nek5000 [5] is one of the most widely known high-order spectral element codes for the solution of incompressible fluid dynamics. Initial attempts [6, 7] to port this Fortran-based software to heterogeneous computing platforms included the use of the directive-based OpenACC [8] programming model. However, those early efforts were more recently superseded by NekRS [9], relying on modern C++ and the OCCA [10] domain-specific language (DSL), with the support of CUDA, HIP, and OpenCL back-ends. The Neko [11] code is a recent high-order spectral element framework evolved from Nek5000 using modern Fortran and providing direct 
+
+> ∗
+
+Lead Co-authors 
+
+j.xing@imperial.ac.uk (J.Y. Xing); boyang.xia@kcl.ac.uk (B. Xia) 
+
+> ORCID
+
+(s): 
+
+J.Y. Xing et al.: Preprint submitted to Elsevier Page 1 of 19   
+
+> arXiv:2604.04644v1 [math.NA] 6 Apr 2026 Architecture-aware ℎ-to-𝑝 optimisation
+
+support for CUDA, HIP and OpenCL back-ends for GPUs, as well as support for general purpose and SX-Aurora vector processors. MFEM [12] is a general library for leveraging high-order finite-element methods with direct back-end support for CUDA, HIP, and OpenMP, as well as support through OCCA and RAJA [13], while the deal.II [14] general finite-element library provided initial GPU support [15] using CUDA with more recent efforts [16] through the use of the Kokkos library [17]. Additional high-order spectral-element method codes focusing on compressible flow, using either a flux-reconstruction [18] or discontinuous Galerkin [19, 20] approaches, are also available. Notably, PyFR [21, 22] relies on a Python front-end combined with a DSL based on Mako templating [23] to provide support for CUDA, HIP, OpenCL, OpenMP, and Metal back-ends, while GALÆXI [24] is a recent extension of the Fortran-based FLEXI [25] discontinuous Galerkin framework providing support for GPUs using CUDA. HORSES3D [26] also provides GPU support with OpenACC [27]. Of these codes, only PyFR, deal.II, MFEM, and more recently GALÆXI/FLEXI provide some support for simplex elements. A recent community effort to bring this class of algorithm to GPUs, thereby tackling the scientific need to run such simulations at the exascale, has been investigated through the Centre for Efficient Exascale Discretizations (CEED), a collaboration between some of the above projects, including Nek5000 and MFEM. Through this initiative, a number of benchmark problems have been defined, based on common operations required in finite element solvers. These provide a well-defined basis on which to compare different algorithms and implementations. We leverage these benchmarks in this study in order to draw comparisons with previous work. This paper presents our recent observations concerning the performance of high-order spectral/ ℎ𝑝 element methods on CPUs and GPUs, for different element shapes and implementation choices. In Section 2 we discuss the mathematical construction of the methods being considered, including the key finite element operators of interest and expansion bases used within each element. We also document an alternative implementation of the Helmholtz operator which can provide beneficial performance improvements on GPUs and other single instruction, multiple data (SIMD) architectures by reducing the number of inner-product operations. In Section 3, we summarise our generalised approach to managing the different algorithmic implementations within our framework and illustrate how they are efficiently mapped to different back-ends. Section 4 summarises our experiments performed on both CPU and GPU architectures across various element shapes and polynomial degrees and discusses the implications for achieving performance on these platforms. Finally, we conclude with a summary of our observations in Section 5. 
+
+## 2. Theory and background 
+
+In this section, we outline the mathematical framework used in this work by describing a high-order finite element discretisation of the Helmholtz equation. For more details on the method and notation, the reader should consult [28]. The starting point of our exposition is the weak form of the Helmholtz equation ∇2𝑢 − 𝜆𝑢 = 𝑓 , for an unknown scalar 𝑢 (𝒙 ) given a forcing function 𝑓 (𝒙 ) and the domain Ω. Using a Galerkin formulation with a condensed (e.g., with boundary conditions enforced) right-hand side this reads as 
+
+(∇ 𝑢, ∇𝑣 )Ω + 𝜆 (𝑢, 𝑣 )Ω = −( 𝑓 , 𝑣 )Ω , (1) where (𝑢, 𝑣 )Ω = ∫Ω 𝑢𝑣 dΩ represents the inner product over the domain (for a vector field, (𝒖 , 𝒗 )Ω = ∫Ω 𝒖 ⋅ 𝒗 dΩ). We first outline the basic formulations of spectral elements and then go into the details of the two-dimensional formulation to explain how it affects the computation in practice. 
+
+2.1. Spectral element discretisation 
+
+We adopt an expansion basis of the form {𝜙 𝑛 (𝒙 ); 𝑛 = 1 , … , 𝑁 𝑃 } on the domain Ω, where each basis function 𝜙 𝑛 
+
+represents a polynomial of up to degree 𝑃 . The total number of basis functions, 𝑁 𝑃 , depends on 𝑃 and element shape, such as 𝑁 𝑃 = ( 𝑃 + 1) 2 for the quadrilateral. A function on the element domain is consequently approximated as 
+
+𝑢 (𝒙 ) = ∑
+
+> 𝑛
+
+̂𝑢 𝑛 𝜙 𝑛 (𝒙 ), (2) where ̂𝑢 𝑛 is the coefficient of each 𝜙 𝑛 (𝒙 ), known as an elemental degree of freedom, while collectively the ̂𝑢 𝑛 are known as the coefficient space representation of 𝑢 (𝒙 ). The Galerkin formulation of the Helmholtz equation within an element, 
+
+Ω𝑒 , reads 
+
+∫Ω𝑒 
+
+> 𝑁 𝑃
+
+∑
+
+> 𝑛 =1
+
+(𝜆̂ 𝑢 𝑒 𝑛 𝜙 𝑒 𝑛 (𝒙 )𝜙 𝑒 𝑚 (𝒙 ) + ̂𝑢 𝑒 𝑛 ∇𝜙 𝑒 𝑛 (𝒙 ) ⋅ ∇𝜙 𝑒 𝑚 (𝒙 )) dΩ = − ∫Ω𝑒 
+
+𝑓 (𝒙 )𝜙 𝑒 𝑚 (𝒙 ) dΩ, 𝑚 = 1 , … , 𝑁 𝑃 . (3)     
+
+> J.Y. Xing et al.: Preprint submitted to Elsevier Page 2 of 19 Architecture-aware ℎ-to-𝑝 optimisation
+
+The superscript 𝑒 represents individual element, but for brevity, we will omit it in the basis notation 𝜙 𝑛 in the later context. We note that at this stage, we have not associated 𝜙 𝑛 (𝑥 ) with any particular set of collocating points; in other words, they are general-type functions and may be nodal, modal or even orthogonal [29]. Given a set of unique points in an element, we can build a Lagrange expansion that spans the same space to transform between modal and nodal representations. We will exploit this later in this work. Since the coefficients ̂𝑢 𝑒 𝑛 are independent of 𝒙 , we can factor them out and rewrite the equations as a matrix system 
+
+𝑯 𝑒 ̂ 𝒖 =̂ 𝒇 , (4) with the elemental Helmholtz operator 𝑯 𝑒 , the vector of solution coefficients ̂ 𝒖 , and the right-hand side vector ̂ 𝒇 . As a matter of practice, we define the polynomial basis on the reference element Ωst (as seen in the next section), so the inner product will be performed on the reference element with the knowledge of the one-to-one mapping 𝒙 = 𝜒 𝑒 (𝝃 )
+
+between global Cartesian coordinates 𝒙 to local Cartesian coordinate 𝝃 . Then we obtain 
+
+𝑯 𝑒 [𝑚 ][ 𝑛 ] = ∫Ωst 
+
+[𝜆𝜙 𝑛 (𝝃 )𝜙 𝑚 (𝝃 ) + ( 𝑱 𝑒 )−𝑇 ∇𝜙 𝑛 (𝝃 ) ⋅ (𝑱 𝑒 )−1 ∇𝜙 𝑚 (𝝃 )] |𝑱 𝑒 | dΩ . (5) Here we have applied the chain rule 
+
+∇𝜙 (𝒙 ) = 𝜕 𝝃 
+
+𝜕 𝒙 
+
+𝜕𝜙 𝜕 𝝃 = ( 𝑱 𝑒 )−1 ∇𝜙 (𝝃 ) , (6) where 𝑱 𝑒 = ∇𝜒 𝑒 (𝝃 ) is the Jacobian matrix of the mapping, which can be constant within an element if the mapping is affine or a polynomial of degree 𝑁 when accomplishing iso-parametric analysis. Separating the operator implementations for these two different types of mappings is crucial for achieving maximal performance. The integral in the above formulations is evaluated using Gaussian quadrature. With weights 𝑤 𝑙 and quadrature points 𝝃 𝑙 ∈ Ω st we can write the discrete elemental Helmholtz operator as 
+
+𝑯 𝑒 𝛿 [𝑚 ][ 𝑛 ] = ∑
+
+> 𝑙
+
+[𝜆𝑤 𝑙 𝜙 𝑛 (𝝃 𝑙 )𝜙 𝑚 (𝝃 𝑙 ) + 𝑤 𝑙 (𝑱 𝑒 𝑙 )−𝑇 ∇𝜙 𝑛 (𝝃 𝑙 ) ⋅ (𝑱 𝑒 𝑙 )−1 ∇𝜙 𝑚 (𝝃 𝑙 )] |𝑱 𝑒 𝑙 | . (7) The multi-dimensional quadrature is constructed using a tensor-product rule. We typically choose at least 𝑃 + 2 Gauss-Lobatto points along each coordinate for expansions of order 𝑃 in order to be able to exactly evaluate the product of two polynomial shape functions 𝜙 𝑝 (𝜉 )𝜙 𝑞 (𝜉 ) in the standard region. Using the matrix notation of [28], the discrete Helmholtz operator can be further split into the mass operator 𝑴 𝑒 𝛿 
+
+and the Laplacian operator 𝑳 𝑒 𝛿 yielding 
+
+𝑯 𝑒 𝛿 = 𝜆 𝑴 𝑒 𝛿 + 𝑳 𝑒 𝛿 . (8) 
+
+2.2. Two-dimensional formulation 
+
+For two-dimensional element quadrilaterals and triangles, the local Cartesian coordinates are denoted as 𝝃 =(𝜉 1, 𝜉 2). For quadrilateral regions we use a tensor-product expansion basis of the form {𝜙 𝑝𝑞 (𝜉 1, 𝜉 2) ; 𝑝 = 0 , … , 𝑃 ; 𝑞 =0, … , 𝑃 }. Triangular elements will be constructed using the tensor-product approximations as described in Section 2.3. The approximated function is then given by the summation 
+
+𝑢 (𝝃 ) = ∑
+
+> 𝑚 (𝑝,𝑞 )
+
+̂𝑢 𝑚 𝜙 𝑚 (𝜉 1, 𝜉 2) = 
+
+> 𝑃
+
+∑
+
+> 𝑝 =0
+> 𝑃
+
+∑
+
+> 𝑞 =0
+
+̂𝑢 𝑝𝑞 𝜙 𝑝𝑞 (𝜉 1, 𝜉 2), (9) where the indices 𝑚 (𝑝, 𝑞 ) are obtained as a linear combination of indices of 𝑝, 𝑞 depending on the type of element considered in the approximation. The two-dimensional discrete elemental Helmholtz operator now reads 
+
+𝑯 𝑒 𝛿 [𝑚 ][ 𝑛 ] = 𝜆 ∑
+
+> 𝑖
+
+∑
+
+> 𝑗
+
+𝑤 𝑖 𝑤 𝑗 𝜙 𝑝𝑞 (𝜉 1𝑖 , 𝜉 2𝑗 )𝜙 𝑟𝑠 (𝜉 1𝑖 , 𝜉 2𝑗 )|𝑱 𝑒 𝑖𝑗 |
+
++ ∑
+
+> 𝑖
+
+∑
+
+> 𝑗
+
+𝑤 𝑖 𝑤 𝑗 (𝑱 𝑒 𝑖𝑗 )−𝑇 ∇𝜙 𝑝𝑞 (𝜉 1𝑖 , 𝜉 2𝑗 ) ⋅ (𝑱 𝑒 𝑖𝑗 )−1 ∇𝜙 𝑟𝑠 (𝜉 1𝑖 , 𝜉 2𝑗 )|𝑱 𝑒 𝑖𝑗 | , (10)     
+
+> J.Y. Xing et al.: Preprint submitted to Elsevier Page 3 of 19 Architecture-aware ℎ-to-𝑝 optimisation
+
+where the indices 𝑖 and 𝑗 again span over the quadrature points, and the index 𝑛 (𝑟, 𝑠 ) is a linear combinations of the indices 𝑟 , and 𝑠 . For specific details of this calculation, the interested reader could consult [28] (Section 4.1.5). The mass operator can now be rewritten in matrix form as 
+
+𝑴 𝑒 𝛿 = 𝑩 𝑇 𝑾 𝑩 , (11) where the dense basis matrix 𝑩 contains terms of the form 𝜙 𝑝𝑞 (𝜉 1𝑖 , 𝜉 2𝑗 ), and the components of the diagonal matrix 
+
+𝑾 are the weights and the Jacobian 𝑤 𝑖 𝑤 𝑗 |𝑱 𝑒 𝑖𝑗 |. Two comments are in order: firstly, the matrix 𝑩 can be considered a basis evaluation matrix which yields a vector containing the expansion evaluated at the points (𝜉 1𝑖 , 𝜉 2𝑗 ) when acting upon a vector containing the expansion coefficients ̂ 𝒖 . As presented above, these points denote the quadrature points for evaluating the inner product. In nodal spectral elements, these (quadrature) points can also denote the positions at which a collocating Lagrange basis can be built when one restricts oneself to using the same points for the nodal expansion and the quadrature. It is then important to appreciate that the matrix 𝑩 can alternatively be viewed as a transformation from a modal, or a different nodal, basis to a nodal basis at the quadrature points over the local coordinate system constructed at the quadrature points. We will exploit this observation below to efficiently organise our computation. We now present three necessary building blocks. Firstly, the derivative of the basis functions with respect to the local coordinates for two-dimensional expansions is 
+
+∇𝜙 (𝜉 1𝑖 , 𝜉 2𝑗 ) = 
+
+⎛⎜⎜⎜⎝
+
+𝜕𝜙 𝜕𝜉 1
+
+𝜕𝜙 𝜕𝜉 2
+
+⎞⎟⎟⎟⎠(𝜉 1𝑖 ,𝜉 2𝑗 )
+
+. (12) Secondly, the inverse of the Jacobian matrix (𝑱 𝑒 𝑖𝑗 )−1 is given by: 
+
+(𝑱 𝑒 𝑖𝑗 )−1 =
+
+⎛⎜⎜⎜⎝
+
+𝜕𝜉 1
+
+𝜕𝑥 1
+
+𝜕𝜉 2
+
+𝜕𝑥 1
+
+𝜕𝜉 1
+
+𝜕𝑥 2
+
+𝜕𝜉 2
+
+𝜕𝑥 2
+
+⎞⎟⎟⎟⎠(𝜉 1𝑖 ,𝜉 2𝑗 )
+
+. (13) As noted in [28], when the elemental mapping function is not affine, the entries of this matrix represent non-polynomial, yet smooth functions. Higher quadrature order might be required to see spectral convergence when these terms deviate significantly from being polynomial [30]. The Laplacian operator can now be expanded as 
+
+𝑳 𝑒 𝛿 = ∑
+
+> 𝑖
+
+∑
+
+> 𝑗
+
+𝑤 𝑖 𝑤 𝑗 
+
+[( 𝜕𝜉 1
+
+𝜕𝑥 1
+
+𝜕𝜙 𝑝𝑞 
+
+𝜕𝜉 1
+
++ 𝜕𝜉 2
+
+𝜕𝑥 1
+
+𝜕𝜙 𝑝𝑞 
+
+𝜕𝜉 2
+
+)( 𝜕𝜉 1
+
+𝜕𝑥 1
+
+𝜕𝜙 𝑟𝑠 
+
+𝜕𝜉 1
+
++ 𝜕𝜉 2
+
+𝜕𝑥 1
+
+𝜕𝜙 𝑟𝑠 
+
+𝜕𝜉 2
+
+)
+
++
+
+( 𝜕𝜉 1
+
+𝜕𝑥 2
+
+𝜕𝜙 𝑝𝑞 
+
+𝜕𝜉 1
+
++ 𝜕𝜉 2
+
+𝜕𝑥 2
+
+𝜕𝜙 𝑝𝑞 
+
+𝜕𝜉 2
+
+)( 𝜕𝜉 1
+
+𝜕𝑥 2
+
+𝜕𝜙 𝑟𝑠 
+
+𝜕𝜉 1
+
++ 𝜕𝜉 2
+
+𝜕𝑥 2
+
+𝜕𝜙 𝑟𝑠 
+
+𝜕𝜉 2
+
+)]
+
+> 𝑖𝑗
+
+|𝑱 𝑒 𝑖𝑗 | .
+
+(14) Recall the basis matrix relation mentioned earlier. Any polynomial basis function can be represented as a Lagrange expansion ℎ𝑚 (𝑘,𝑙 )(𝜉 1, 𝜉 2) = ℎ𝑘 (𝜉 1)ℎ𝑙 (𝜉 2) of appropriate order based on the function values at the quadrature points: 
+
+𝜙 (𝜉 1, 𝜉 2) = ∑
+
+> 𝑚 (𝑘,𝑙 )
+
+ℎ𝑚 (𝜉 1, 𝜉 2)𝜙 (𝜉 1𝑘 , 𝜉 2𝑙 ) = ∑
+
+> 𝑘
+
+∑
+
+> 𝑙
+
+ℎ𝑘 (𝜉 1)ℎ𝑙 (𝜉 2)𝜙 (𝜉 1𝑘 , 𝜉 2𝑙 ) , (15) where ℎ𝑘 (𝜉 1) is the one-dimensional Lagrange polynomial corresponding to the nodal point 𝜉 1𝑘 and similarly for ℎ𝑙 (𝜉 2).The multi-dimensional Lagrange polynomial can always be constructed by the tensor product, regardless of element shape. Then we can rewrite the derivative of the basis functions into 
+
+𝜕𝜙 𝜕𝜉 1
+
+(𝜉 1, 𝜉 2
+
+) = ∑
+
+> 𝑚 (𝑘,𝑙 )
+
+dℎ𝑚 (𝜉 1, 𝜉 2)
+
+d𝜉 1
+
+𝜙 (𝜉 1𝑘 , 𝜉 2𝑙 ) = ∑
+
+> 𝑘
+
+∑
+
+> 𝑙
+
+dℎ𝑘 (𝜉 1)
+
+d𝜉 1
+
+ℎ𝑙 (𝜉 2)𝜙 (𝜉 1𝑘 , 𝜉 2𝑙 ) . (16)     
+
+> J.Y. Xing et al.: Preprint submitted to Elsevier Page 4 of 19 Architecture-aware ℎ-to-𝑝 optimisation
+
+The derivatives of functions at quadrature points can now be expressed as 
+
+[ 𝜕𝜙 𝑝𝑞 
+
+𝜕𝜉 1
+
+]
+
+> 𝑖𝑗
+
+= ∑
+
+> 𝑘
+
+dℎ𝑘 (𝜉 1𝑖 )
+
+d𝜉 1
+
+𝜙 𝑝𝑞 (𝜉 1𝑘 , 𝜉 2𝑗 ) = 𝑫 𝜉 1 𝑩 , (17) where we have applied the collocation property ℎ𝑙 (𝜉 2𝑗 ) = 𝛿 𝑙𝑗 , because there is an implicit assumption (made explicit here) that the points at which the basis matrix is evaluated are the same as the points at which the differentiation matrix is formed. 𝑫 𝜉 1 is actually a block-diagonal differentiation matrix with one-dimensional derivatives of Lagrange polynomials dℎ𝑘 (𝜉 1𝑖 )
+
+> d𝜉 1
+
+as entries, known as collocation differentiation [29] (p.65). The action of 𝑫𝑩 on an expansion vector ̂ 𝒖 can be interpreted (reading right to left) as the basis matrix transforming the expansion coefficients to the corresponding nodal coefficients of a Lagrange expansion, followed by the differentiation matrix action on the function at the nodal values. As acknowledged in [28] (p.178), through substitutions and rearrangement, you arrive at the following expression: 
+
+𝑳 𝑒 = 𝑩 𝑇 
+
+[
+
+𝑫 𝑇 𝜉 1 𝚲 
+
+( 𝜕𝜉 1
+
+𝜕𝑥 1
+
+)
+
++ 𝑫 𝑇 𝜉 2 𝚲 
+
+( 𝜕𝜉 2
+
+𝜕𝑥 1
+
+)] 
+
+𝑾 
+
+[
+
+𝚲 
+
+( 𝜕𝜉 1
+
+𝜕𝑥 1
+
+)
+
+𝑫 𝜉 1 + 𝚲 
+
+( 𝜕𝜉 2
+
+𝜕𝑥 1
+
+)
+
+𝑫 𝜉 2
+
+]
+
+𝑩 
+
++ 𝑩 𝑇 
+
+[
+
+𝑫 𝑇 𝜉 1 𝚲 
+
+( 𝜕𝜉 1
+
+𝜕𝑥 2
+
+)
+
++ 𝑫 𝑇 𝜉 2 𝚲 
+
+( 𝜕𝜉 2
+
+𝜕𝑥 2
+
+)] 
+
+𝑾 
+
+[
+
+𝚲 
+
+( 𝜕𝜉 1
+
+𝜕𝑥 2
+
+)
+
+𝑫 𝜉 1 + 𝚲 
+
+( 𝜕𝜉 2
+
+𝜕𝑥 2
+
+)
+
+𝑫 𝜉 2
+
+]
+
+𝑩 , (18) where 𝚲 (𝑓 ) represents a diagonal matrix with entries 𝑓 (𝜉 1𝑖 , 𝜉 2𝑗 ). This formulation also demonstrates that the symmetry of the local operator is maintained. 
+
+2.2.1. Alternate interpretations of the Helmholtz operator 
+
+Combining Equation (18) and Equation (11), we observe that we can factor out 𝑩 𝑇 and 𝑩 to obtain the discrete Helmholtz matrix: 
+
+𝑯 𝑒 𝛿 = 𝑳 𝑒 𝛿 + 𝜆 𝑴 𝑒 𝛿 = 𝑩 𝑇 
+
+{[ 
+
+𝑫 𝑇 𝜉 1 𝚲 
+
+( 𝜕𝜉 1
+
+𝜕𝑥 1
+
+)
+
++ 𝑫 𝑇 𝜉 2 𝚲 
+
+( 𝜕𝜉 2
+
+𝜕𝑥 1
+
+)] 
+
+𝑾 
+
+[
+
+𝚲 
+
+( 𝜕𝜉 1
+
+𝜕𝑥 1
+
+)
+
+𝑫 𝜉 1 + 𝚲 
+
+( 𝜕𝜉 2
+
+𝜕𝑥 1
+
+)
+
+𝑫 𝜉 2
+
+]
+
++
+
+[
+
+𝑫 𝑇 𝜉 1 𝚲 
+
+( 𝜕𝜉 1
+
+𝜕𝑥 2
+
+)
+
++ 𝑫 𝑇 𝜉 2 𝚲 
+
+( 𝜕𝜉 2
+
+𝜕𝑥 2
+
+)] 
+
+𝑾 
+
+[
+
+𝚲 
+
+( 𝜕𝜉 1
+
+𝜕𝑥 2
+
+)
+
+𝑫 𝜉 1 + 𝚲 
+
+( 𝜕𝜉 2
+
+𝜕𝑥 2
+
+)
+
+𝑫 𝜉 2
+
+]
+
++ 𝜆 𝑾 
+
+}
+
+𝑩 .(19) We observe that the matrix operator 𝑩 𝑇 is similar to the inner product with respect to the basis 𝜙 𝑝𝑞 (𝜉 1, 𝜉 2) operation, although the full operations also requires a diagonal matrix 𝑾 . However, in Equation (19), there is only one “inner product" type operation rather than two in Equation (18), one with respect to 𝜕𝜙 𝑝𝑞 
+
+> 𝜕𝜉 1
+
+(related to the matrix 𝑩 𝑇 𝑫 𝑇 𝜉 1 )and the other with respect to 𝜕𝜙 𝑝𝑞 
+
+> 𝜕𝜉 2
+
+(related to the matrix 𝑩 𝑇 𝑫 𝑇 𝜉 2 ). This seemingly rather trivial observation has an important implication on SIMD architectures since the inner product type operation can be quite costly, particularly for mixed shape expansions discussed in the next section. Even for quadrilateral and hexahedral modal expansions (or nodal expansions of a different polynomial degree than the order of the quadrature that is adopted), it means we can perform the operation within the curly brackets in Equation (19) as if we were using a nodal expansion with collocation properties but pre- and post-multiply by a 𝑩 𝑇 and 𝑩 matrix respectively. Indeed, in our implementation, basing our formulation on Equation (19) led to a percentage improvement of between 20% to 50%, depending on polynomial order, on hexahedral elements and 50% on tetrahedral elements (see Section 4.4). Consideration of Equation (19) highlights that the Helmholtz operator can be decomposed into a transformation from a modal basis (or indeed any other basis not at the quadrature points) to a tensor product Lagrange basis defined at a set of Gaussian quadrature points (represented by the matrix 𝑩 ), followed by a series of collocated or even point-wise operations at the quadrature points, and finally a “restriction" back to the modal basis (represented by the matrix 𝑩 𝑇 ). This is exact, as long as the span of the Lagrange polynomial basis is no less than the polynomial space or the original expansion 𝜙 𝑛 (𝜉 ), which is almost always true since it is common practice to adopt a quadrature order that is never lower than the basis order. This formulation can also be applied to any operator that is tested against the expansion basis or its derivatives, such as the linear advection-diffusion-reaction operator. Although it is quite straightforward to see what is happening at the discrete level, it is not immediately so obvious what is being evaluated at the analytical mathematical level initially outlined in Section 2.1.     
+
+> J.Y. Xing et al.: Preprint submitted to Elsevier Page 5 of 19 Architecture-aware ℎ-to-𝑝 optimisation
+
+Trasnsformation versus evaluation of the Basis 
+
+We observe that the terms in the curly brackets of Equation (19) is the discrete form of the weak Laplacian of the Lagrange basis through the quadrature points, i.e. (∇ ℎ𝑛 , ∇ℎ𝑚 ). This once again leads us to observe that the discrete (or continuous) weak Laplacian with respect to the expansion basis can be constructed as the weak Laplacian with respect to any Lagrange basis with an equivalent or larger span, pre- and post-multiplied by the associated expansion matrices 
+
+𝑩 𝑇 and 𝑩 .To show this relationship more explicitly, we once again start by representing our polynomial 𝜙 𝑚 (𝜉 1, 𝜉 2) in terms of a Lagrange tensor product expansion ℎ𝑛 (𝑖,𝑗 )(𝜉 1, 𝜉 2) = ℎ𝑖 (𝜉 1)ℎ𝑗 (𝜉 2) of larger span. As already shown in Equation (15), we can identify a set of coefficients 𝑏 𝑛 that relate the expansion basis, 𝜙 𝑚 to the Lagrange expansion, so that 
+
+𝜙 𝑚 (𝜉 1, 𝜉 2) = ∑
+
+> 𝑛
+
+ℎ𝑛 (𝜉 1, 𝜉 2) 𝑏 𝑛 . (20) For the specific case we have considered up to now, the Lagrange polynomial is defined through a set of quadrature points. Applying the collocation property of the Lagrange polynomial, it is evident that the entries of the columns of the matrix 𝑩 are the same as 𝑏 𝑛 , i.e. 𝑩 [𝑛, 𝑚 ] = 𝑏 𝑛 . However, we note that in Equation (20), 𝑏 𝑛 can be interpreted as the transformation of the expansion coefficients relating the Lagrange basis to 𝜙 𝑚 , instead of the basis values evaluated at the quadrature points. We recall that the Laplacian operator requires an inner product with respect to the local derivative of the basis 
+
+(∇ 𝜙 𝑚 , ∇𝜙 𝑛 ). Taking the gradient of Equation (20) we obtain 
+
+∇𝜙 𝑚 (𝜉 1, 𝜉 2) = ∑
+
+> 𝑛
+
+∇ℎ𝑛 (𝜉 1, 𝜉 2) 𝑏 𝑛 = ∑
+
+> 𝑛
+
+∇ℎ𝑛 (𝜉 1, 𝜉 2)𝑩 [𝑛, 𝑚 ] . (21) Finally, each component of the weak Laplacian matrix can then be expressed as 
+
+𝑳 [𝑚, 𝑛 ] = (∇ 𝜙 𝑚 , ∇𝜙 𝑛 ) = 
+
+(∑
+
+> 𝑟
+
+𝑩 [𝑟, 𝑚 ]∇ ℎ𝑟 , ∑
+
+> 𝑠
+
+𝑩 [𝑠, 𝑛 ]∇ ℎ𝑠 
+
+)
+
+= ( 𝑩 [∶ , 𝑚 ]) 𝑇 𝑳 ℎ𝑩 [∶ , 𝑛 ] (22) where 
+
+𝑳 ℎ[𝑚, 𝑛 ] = (∇ℎ𝑚 , ∇ℎ𝑛 
+
+) ,
+
+which leads us to Equation (19) when discretised and expressed in matrix form, but highlights the relationship between the continuous components of 𝑳 and 𝑳 ℎ. In Equation (19) we interpret 𝑩 𝑇 as an evaluation of the basis 𝜙 𝑚 at the quadrature points; however in Equation (22) we can interpret the role of the 𝑩 matrix as a transformation from the 𝜙 𝑚 
+
+expansion to the Lagrange basis, ℎ𝑛 , through the the quadrature points. 
+
+2.3. Extension to hybrid elements for unstructured meshes 
+
+For triangles in 2D and tetrahedra, pyramids, and prisms in 3D, to obtain a tensor-product construction of our local elemental operations, we employ the standard square-to-triangle Duffy transformation [31] to define two independent coordinate directions. In the case of triangles, only a single use of this transformation is needed. For the 3D shapes, multiple successive actions of the Duffy transformation are required as outlined in [28]. We will limit ourselves to describing things on a triangle as the other shapes follow quite naturally. Using a Duffy transformation allows us to define a basis on a tensor-product square with coordinates 𝜂 ∈ [−1 , 1] 2
+
+and map this to a triangle with reference coordinates 𝜉 ∈ Ω st = {( 𝜉 1, 𝜉 2) ; 𝜉 1,2 ∈ [−1 , 1] , 𝜉 1 + 𝜉 2 ≤ 0} . This transformation is illustrated in Figure 1. As previously mentioned, whereas tensor-product quadrature operations were previously accomplished in the standard element for quadrilaterals, tensor-product operations will now be accomplished on the collapsed coordinate system. Analytically, the Duffy mapping is defined as 
+
+𝜂 1 = 2 1 + 𝜉 1
+
+1 − 𝜉 2
+
+− 1 , 𝜂 2 = 𝜉 2 . (23)     
+
+> J.Y. Xing et al.: Preprint submitted to Elsevier Page 6 of 19 Architecture-aware ℎ-to-𝑝 optimisation
+
+For triangles, Equation (10) is solved on the collapsed coordinate space, instead of the Cartesian coordinate space. We hence require a partial derivative with respect to the Cartesian space, which is determined by the chain rule as 
+
+⎛⎜⎜⎜⎜⎝
+
+𝜕 𝜕𝜉 1
+
+𝜕 𝜕𝜉 2
+
+⎞⎟⎟⎟⎟⎠
+
+=
+
+⎛⎜⎜⎜⎜⎝
+
+21 − 𝜂 2
+
+02 1 + 𝜂 1
+
+1 − 𝜂 2
+
+1
+
+⎞⎟⎟⎟⎟⎠⎛⎜⎜⎜⎜⎝
+
+𝜕 𝜕𝜂 1
+
+𝜕 𝜕𝜂 2
+
+⎞⎟⎟⎟⎟⎠
+
+, (24) or in matrix notation as 
+
+∇𝜉 = 𝑮 ∇𝜂 . (25) As discussed in [28] when designing tensor products expansions for simplex shapes we use a more generalised form. So for triangles the generalised product is of the form: 
+
+𝜙 tri  
+
+> 𝑝𝑞
+
+(𝜂 𝑖 , 𝜂 2) = 𝜓 𝑎 𝑞 (𝜂 1)𝜓 𝑏 𝑝𝑞 (𝜂 2)
+
+where 0 ≤ 𝑝 ≤ 𝑃 and 0 ≤ 𝑝 + 𝑞 ≤ 𝑃 . The dependency of the second product on both 𝑝 and 𝑞 as well as the restriction that 𝑝 + 𝑞 ≤ 𝑃 makes the inner product operator more challenging to implement on a SIMD environment. The interpretation provided in section 2.2.1 is therefore even more relevant when we consider complex operators such as the Laplacian operator in hybrid elements. By using a Lagrange tensor product basis ℎ𝑝 (𝜂 1)ℎ𝑞 (𝜂 2), similar to the quadrilateral case, we restricted the cumbersome triangular space 𝜙 tri  
+
+> 𝑝𝑞
+
+within the matrix operation 𝑩 𝑇 .
+
+## 3. Implementation 
+
+In this section, we outline key design considerations that enable spectral/ ℎ𝑝 element methods to be made performant across host and accelerators. Through our investigations, three key concepts have been identified for the spectral/ ℎ𝑝 
+
+element operations in order to deliver a robust and performant implementation: (i) use of a memory space model, (ii) use of an execution space model, and (iii) support for multiple implementation strategies per operator. In the following section, we outline these concepts, focusing specifically on the implementation strategies considered in the results presented in Section 4. Implementation details, in the context of Nektar++, are given in Appendix A. 
+
+3.1. Memory space model 
+
+As high-performance computing systems have moved to architectures involving accelerator devices with discrete memory, appropriate memory management between the host CPU and the device has become an important factor impacting performance. The concept of a memory space represents the physical location of the memory in which the data reside. We note that a similar memory space model is also adopted by the Kokkos library [32]. Current computer architectures necessitate two memory spaces: 
+
+• HostSpace : Represents the memory accessed from the host, typically the CPU, including those with vector units. 
+
+• DeviceSpace : Represents the memory accessed from an accelerator device, typically a GPU with discrete memory. In a heterogeneous computing framework, the memory movement and synchronisation between a host and a device usually presents a significant challenge to the programmer. Incorporating memory access qualifiers enables the automated transfer of data between host and device as necessary, relieving the developer of much of this burden. In particular, the following types of access should be supported: 
+
+• ReadOnly : Requires that the memory has already been initialised in the requested memory space. Data will only be read from memory. Memory transfer occurs if the data in the current memory space was marked as invalid. 
+
+• WriteOnly : Memory is allocated if needed and marked as initialised. No memory transfer occurs. The data in the requested memory space is now marked as valid, while the data in the other memory space is marked as invalid.     
+
+> J.Y. Xing et al.: Preprint submitted to Elsevier Page 7 of 19 Architecture-aware ℎ-to-𝑝 optimisation
+
+• ReadWrite : Requires that the memory has already been initialised in the requested memory space. Memory transfer occurs if the data on the requested memory space was marked as invalid. The data in the requested memory space is then marked as valid, while the data in the other memory space is marked as invalid. Similar approaches based on a memory access qualifier model have been used by parallel programming frameworks such as OpenCL and SYCL or by parallel programming libraries such as MFEM [12] and StarPU [33]. More details on the implementation of memory access specifiers are given in Appendix A. 
+
+3.2. Execution space model 
+
+An execution space is an intermediate representation for a family of back-end models that exploit a common parallelisation strategy. In addition, each execution space is associated with a memory space in which the algorithm is executed. To illustrate this, the execution spaces used in Nektar++ are schematically outlined in Figure 2 and include: 
+
+• Serial : Represents the default execution space in Nektar++ and is associated with the Host memory space. 
+
+• AVX : Represents back-ends for explicit SIMD vectorisation, currently including support for SSE2, AVX2, AVX512, and SVE/SVE2. This execution space is also associated with a Host memory space. 
+
+• Device : Represents back-ends for offloading to GPU accelerators, currently including support for CUDA, HIP, and SYCL. This execution space is associated with a Device memory space. The AVX back-end maximises the potential of SIMD vectorisation, since in previous investigations [34] we observed that changing the data storage layout to cluster data entries from four to eight elements into a vector register improves cache reuse, which is crucial to boost the performance of AVX. However, similar to the xsimd [35] project, the various SIMD instruction sets are unified by defining wrappers for scalar and vector data types and by overloading arithmetic operators to use different SIMD intrinsics, which allows a unified formulation for the Serial and AVX back-ends. Similarly, the CUDA, HIP, and SYCL back-ends are unified into a single formulation by defining wrapper functions and types. The proposed strategy reduces the actual implementation into two coding descriptions, one for the Serial/AVX back-ends and one for the Device back-ends, which cover the eight back-ends shown in Figure 2. Within these, we also consider the different implementation strategies discussed in the next section. 
+
+3.3. Implementation strategies 
+
+The performance of code for a specific computing task can be improved primarily in two ways. The first is through better utilisation of the available hardware, which is managed through the selection of execution space . The second is through changes to the underlying algorithm of the task. For example, a spectral/ ℎ𝑝 element Helmholtz operator can be realised into multiple equivalent, but algorithmically different, formulations as already highlighted in Section 2.2. In a matrix-based implementation, we pre-assemble and store the dense block matrices for each element. Alternatively, in a matrix-free implementation, we do not assemble the elemental matrices, but rather compute the entries on-the-fly during operator evaluation. Similarly, we can exploit the operator structure induced by the tensor-product basis construction in two and three dimensions; rather than perform a single matrix operation on an element, we can instead perform a series of sub-operations along 1D coordinates. Different formulations exhibit different memory access patterns and operation costs. Furthermore, there are also opportunities for loop-level optimisations and kernel fusion. Meshing complex geometries necessitates the use of unstructured meshes with various element types. The properties of different workloads also affect the performance and should be considered in the implementation, including the shape of the elemental expansion (i.e. triangle, quadrilateral in 2D), the geometric deformation of the element (i.e. deformed or a regular affine transformation), the polynomial degree of the expansion and the integration/quadrature order, which may also vary in each elemental coordinate direction. As previously advocated in earlier work [36], providing multiple implementations for the same operation allows improved performance to be achieved across different architectures. This study also highlights the performance benefits of treating groups of identically structured elements together where they have the same shape, polynomial degree, quadrature order, coordinate mapping type (i.e. deformed or affine), in terms of memory organisation, data access patterns and computational efficiency; in this work, we use the term block to describe such a grouping of elemental data, in reference to its organisation, with constant stride, in memory. Different implementation choices may be made per block for a given operation.     
+
+> J.Y. Xing et al.: Preprint submitted to Elsevier Page 8 of 19 Architecture-aware ℎ-to-𝑝 optimisation
+
+In previous work ([2] and [37]) we have explored these aspects and identified several beneficial implementation strategies which we discuss in the remainder of this section, and illustrate through the backward transform operator which maps elemental coefficients to physical-space quadrature points within an element, or equivalently interpolates a nodal expansion to a set of quadrature points that are not at the node points of the expansion. The operation is commonly denoted as 𝒖 = 𝑩̂𝒖 , and is described in Section 2.2. We now present four different, but equivalent in action, backward transform operation implementations (Algorithms-1–4) and their performance characteristics, and then subsequently present two different, but equivalent in action, Helmholtz operators as outlined in Section 2.2.1 and their performance characteristics. 
+
+3.3.1. Standard matrix (StdMat): with and without element grouping 
+
+This approach performs the target operation by evaluating a matrix operation with reference-element matrices on multiple elements together within a block. This approach is possible for all execution spaces. Elements of the same block are first mapped back to the reference element where the operator is identical for all elements. Element-wise vector operations are used to apply any element-specific geometric scaling, followed by a single matrix-matrix multiplication to evaluate the operator on the reference element. The second operand consists of columns, each corresponding to degrees of freedom of a single element. This approach is matrix-free in that it does not involve creating a global matrix system over many elements. It is commonly adopted in nodal spectral/ ℎ𝑝 element implementations, especially for triangles and tetrahedra, where further factorisation is impossible to achieve if the nodal expansions does not utilise a tensor product structure. For the StdMat implementation of the backward transform, we perform a general matrix-matrix multiplication (GEMM) as shown in Algorithm 1. No element-wise scaling is required for this operator. 𝑁 𝑃 is the total number of degrees of freedom in an element and 𝑁 𝑄 is the total number of quadrature points in an element. 𝑁 𝑒 is the number of elements in a block. The GEMM can be performed by using a suitable BLAS implementations, such as the LIBXSMM [38], cuBLAS, hipBLAS, and oneMath [39] libraries for the AVX, CUDA, HIP, and SYCL back-ends, respectively. 
+
+Algorithm 1 Standard matrix implementation of the backward transform. 
+
+Input: ̂ 𝒖 [𝑁 𝑃 × 𝑁 𝑒 ]; 𝑩 [𝑁 𝑄 × 𝑁 𝑃 ].
+
+Output: 𝒖 [𝑁 𝑄 × 𝑁 𝑒 ] 
+
+> 1:
+
+GEMM: 𝒖 ← 𝑩 ̂ 𝒖 
+
+For GPUs, larger values of 𝑁 𝑒 are preferred in order to hide memory latency and saturate the processor, so we process all elements in one GEMM call. However, for CPUs, we only process a small group of elements in each GEMM call when fusing other kernels in order to restrict the intermediate data size and improve data locality. The LIBXSMM library is optimised for small matrix-matrix multiplication ( 𝑀𝑁𝐾 ≤ 64 3 where 𝑀 , 𝐾 and 𝑁 are the dimensions of the matrices) and good performance is expected at lower polynomial degree. Therefore, in this approach, we operate on small sets of 𝑊 𝑣 elements, as illustrated in Algorithm 2. We add padding where necessary, when 𝑁 𝑒 is not divisible by 𝑊 𝑣 . We found that using SIMD width of the processor as the group size 𝑊 𝑉 is often a good choice to achieve better performance. To ensure data locality and efficient memory access, the data are interleaved so that consecutive lanes within a vector group (i.e. a SIMD register) are accessing contiguous data during memory load and store. These extra data movements take time and compromise performance. To minimise the impact of interleaving, data are left in an interleaved state to avoid unnecessary deinterleaving and re-interleaving between multiple vectorised operations. This can also be considered as a vectorised Standard matrix implementation. 
+
+Algorithm 2 Standard matrix implementation of the backwards-transform operator with element grouping. 
+
+Input: ̂ 𝒖 [𝑁 𝑃 × 𝑁 𝑒 ]; 𝑩 [𝑁 𝑄 × 𝑁 𝑃 ].
+
+Output: 𝒖 [𝑁 𝑄 × 𝑁 𝑒 ] 
+
+> 1:
+
+for group id 𝑔 from 1 to 𝑁 𝑒 ∕𝑊 𝑉 do  
+
+> 2:
+
+Interleave ̂ 𝒖 of 𝑊 𝑉 elements in the group g into ̂ 𝒖 𝑔 [𝑊 𝑉 × 𝑁 𝑃 ] (if required)  
+
+> 3:
+
+GEMM: 𝒖 𝑔 ←̂ 𝒖 𝑔 𝑩 𝑇  
+
+> 4:
+
+De-interleave 𝒖 𝑔 back to original ordering (if required)  
+
+> 5:
+
+end for     
+
+> J.Y. Xing et al.: Preprint submitted to Elsevier Page 9 of 19 Architecture-aware ℎ-to-𝑝 optimisation
+
+3.3.2. Sum-factorisation (SumFac) 
+
+If the elemental basis is constructed as a tensor product of one-dimensional bases, one can exploit sum-factorisation to reduce the operation cost from 𝑂 (𝑃 2𝑑 ) to 𝑂 (𝑃 𝑑 +1 ) and also reduce the matrix size from 𝑂 (𝑃 2𝑑 ) to 𝑂 (𝑃 2) [28], where 𝑑 is the space-dimension of the problem. This is particularly beneficial for higher-order spectral/ ℎ𝑝 elements. Sum-factorisation decomposes the elemental operation into a series of 1D operations, performing the target operation in each coordinate direction separately. Therefore we have that 𝑁 𝑃 = 𝑃 1 ×𝑃 2 and 𝑁 𝑄 = 𝑄 1 ×𝑄 2, where 𝑃 𝑑 and 𝑄 𝑑 are the number of polynomial coefficients and quadrature values, respectively, in direction 𝑑 . As with the standard-matrix implementation, this approach is also possible for all execution spaces. The vectorised sum-factorisation approach is a variant of the sum-factorisation algorithm, supporting both Serial/AVX and Device back-ends. The Device back-ends introduce an additional level of parallelisation over multiple vector groups (i.e. via CUDA/HIP Grid). The pseudo-code of the sum-factorisation algorithm on quadrilateral elements is given in Algorithm 3 and its implementation on GPU is illustrated in Figure 3. It is important to note that line 3 and 4 perform GEMM-like tasks, but they do not follow the standard GEMM interfaces. For elements involving simplices, such as triangles or tetrahedrons, line 4 becomes a triangular matrix multiplication rather than GEMM. In Nektar++, these operations are manually coded rather than utilising BLAS routines, which also allows us to fuse additional pre and post operations if required. 
+
+Algorithm 3 Sum-factorisation (SumFac) algorithm for the backwards-transform on quadrilateral elements. 
+
+Input: ̂ 𝒖 [𝑁 𝑃 × 𝑁 𝑒 ]; 𝑩 𝑑 [𝑄 𝑑 × 𝑃 𝑑 ], 𝑑 = 1 , 2.
+
+Output: 𝒖 [𝑁 𝑄 × 𝑁 𝑒 ]. 
+
+> 1:
+
+for group id 𝑔 from 1 to 𝑁 𝑒 ∕𝑊 𝑉 do ⊳ Parallel processing multiple groups if possible  
+
+> 2:
+
+Interleave ̂ 𝒖 of 𝑊 𝑉 elements in the group g into ̂ 𝒖 𝑔 [𝑊 𝑉 × 𝑃 1 × 𝑃 2] (if required)  
+
+> 3:
+
+GEMM and transpose: 𝒘 𝑔 [𝑊 𝑉 × 𝑄 1 × 𝑃 2] ← 𝑩 1̂ 𝒖 𝑔 ⊳ Parallel processing 𝑊 𝑉 entries  
+
+> 4:
+
+GEMM and transpose: 𝒖 𝑔 [𝑊 𝑉 × 𝑄 1 × 𝑄 2] ← 𝒘 𝑔 𝑩 𝑇  
+
+> 2
+
+⊳ Parallel processing 𝑊 𝑉 entries  
+
+> 5:
+
+De-interleave 𝒖 𝑔 back to original ordering (if required)  
+
+> 6:
+
+end for 
+
+3.3.3. Sum-factorisation: Threaded on Output-Point (SumFacTOP) 
+
+This is a variant of the sum-factorisation implementation designed for threading type operations that are used in the Device execution space. In the sum-factorisation approach of Section 3.3.2, each element is processed by a single thread on the device. In SumFacTOP, each element is processed by one work group (i.e. CUDA/HIP thread block) to exploit the multi-level hierarchical parallelism of GPUs as previously outlined in [4]. Each thread within a work group processes one output degree-of-freedom, resulting in an algorithm that exploits parallelism both across and within each spectral/ ℎ𝑝 element. The pseudo-code of the SumFacTOP algorithm is given in Algorithm 4 and its implementation on GPU is illustrated in Figure 4. In this algorithm we use the percent symbol to denote modulus operator. To ensure efficient memory access, the appropriate part of the input vector, ̂ 𝒖 𝑒 [𝑃 1 × 𝑃 2], and the basis data, 𝑩 1 and 𝑩 2, should be first loaded into shared memory. This should also be used to store intermediate results, such as 𝒘 𝑒 [𝑄 1 ×𝑃 2]. The innermost level of parallelism exposes sufficient work when elements have a medium to high polynomial degree. For instance, a quadrilateral element of degree six, which has 72 DOFs and 82 quadrarture points, or a hexahedral element of degree two, which has 33
+
+DOFs and 43 quadrature points, has enough output quadrature points to fill several CUDA/HIP warps/wavefronts, each of which contains 32/64 threads, respectively. 
+
+3.3.4. Alternative implementations of the Helmholtz operator 
+
+Section 2.2.1 outlined two mathematically equivalent formulations for the Helmholtz operator. These lead to different implementations in the code and consequently result in different performance. From Equation (10) and Equation (19), we can derive two distinct designs as shown in Algorithm 5 and Algorithm 6. In these algorithms, we have used the following shorthand: BwdTrans to denote a backwards transform from the coefficient space of the polynomial expansion to the quadrature points; StdDeriv denotes the derivative in the standard element; SumStdDeriv is a StdDeriv using sum-factorisation; IProductWRTBase denotes an inner product with respect to the expansion space and IProductWRTDerivBase denote the inner product with respect to the derivative of the expansion space.   
+
+> J.Y. Xing et al.: Preprint submitted to Elsevier Page 10 of 19
+
+Architecture-aware ℎ-to-𝑝 optimisation 
+
+Algorithm 4 Sum-factorisation threaded on output point (SumFacTOP) implementation of the backwards-transform on quadrilateral elements. 
+
+Input: ̂ 𝒖 [𝑁 𝑃 × 𝑁 𝑒 ]; 𝑩 𝑑 [𝑄 𝑑 × 𝑃 𝑑 ], 𝑑 = 1 , 2.
+
+Output: 𝒖 [𝑁 𝑄 × 𝑁 𝑒 ]. 
+
+> 1:
+
+for element id 𝑒 from 1 to 𝑁 𝑒 do ⊳ Parallel processing multiple elements via multiple GPU work groups  
+
+> 2:
+
+Retrieve input of element e ̂ 𝒖 𝑒 [𝑃 1 × 𝑃 2] from ̂ 𝒖  
+
+> 3:
+
+for value 𝑖𝑑𝑥 from 1 to 𝑄 1 × 𝑃 2 do ⊳ Parallel process entries in 𝒘 𝑒 over GPU threads  
+
+> 4:
+
+𝑖 = 𝑖𝑑𝑥 ∕𝑃 2, 𝑞 = 𝑖𝑑𝑥 % 𝑃 2 
+
+> 5:
+
+DOT: 𝒘 𝑒 [𝑖 × 𝑃 2 + 𝑞 ] ← 𝑩 1[𝑖 ][∶] ⋅̂ 𝒖 𝑒 [∶][ 𝑞 ] 
+
+> 6:
+
+end for  
+
+> 7:
+
+for value 𝑖𝑑𝑥 from 1 to 𝑄 1 × 𝑄 2 do ⊳ Parallel process entries in 𝒖 𝑒 over GPU threads  
+
+> 8:
+
+𝑗 = 𝑖𝑑𝑥 % 𝑄 2, 𝑖 = 𝑖𝑑𝑥 ∕𝑄 2 
+
+> 9:
+
+DOT: 𝒖 𝑒 [𝑖 × 𝑄 2 + 𝑗 ] ← 𝒘 𝑒 [𝑖 ][∶] ⋅ 𝑩 𝑇  
+
+> 2
+
+[∶][ 𝑗 ] 
+
+> 10:
+
+end for  
+
+> 11:
+
+Write output of element e 𝒖 𝑒 [𝑄 1 × 𝑄 2] back to 𝒖  
+
+> 12:
+
+end for Algorithm 5 Helmholtz implementation by non-collocated approach 
+
+Input: ̂ 𝒖 , 𝑫 𝜉 𝑑 𝑩 , 𝜆 , 𝜕𝜉 𝑖 
+
+> 𝜕𝑥 𝑗
+
+and 𝜔𝐽 at quadrature points. 
+
+Output: LHS results.  
+
+> 1:
+
+BwdTrans: 𝒖 ← 𝑩 ̂ 𝒖  
+
+> 2:
+
+BwdTrans & StdDeriv: 𝒗 1 ← (𝑫 𝜉 1 𝑩 )̂ 𝒖 , 𝒗 2 ← (𝑫 𝜉 2 𝑩 )̂ 𝒖  
+
+> 3:
+
+ApplyMetric: 𝒗 ′1 ← 𝚲 11 𝒗 1 + 𝚲 12 𝒗 2, 𝒗 ′2 ← 𝚲 21 𝒗 1 + 𝚲 22 𝒗 2, ⊳ 𝚲 consists of 𝜕𝜉 𝑖 
+
+> 𝜕𝑥 𝑗
+
+. See Equation (19).  
+
+> 4:
+
+IProductWRTDerivBase: LHS ← (𝑫 𝜉 1 𝑩 )𝑇 𝑾 𝒗 ′1 + ( 𝑫 𝜉 2 𝑩 )𝑇 𝑾 𝒗 ′2 
+
+> 5:
+
+IProductWRTBase: LHS ← LHS + 𝜆 𝑩 𝑇 𝑾 𝒖 
+
+Algorithm 6 Helmholtz implementation by collocated approach 
+
+Input: ̂ 𝒖 , 𝑩 , 𝑫 𝜉 𝑑 , 𝜆 , 𝜕𝜉 𝑖 
+
+> 𝜕𝑥 𝑗
+
+and 𝜔𝐽 at quadrature points. 
+
+Output: LHS results.  
+
+> 1:
+
+BwdTrans: 𝒖 ← 𝑩 ̂ 𝒖  
+
+> 2:
+
+StdDeriv: 𝒗 1 ← 𝑫 𝜉 1 𝒖 , 𝒗 2 ← 𝑫 𝜉 2 𝒖  
+
+> 3:
+
+ApplyMetric: 𝒗 ′1 ← 𝑾 (𝚲 11 𝒗 1 + 𝚲 12 𝒗 2), 𝒗 ′2 ← 𝑾 (𝚲 21 𝒗 1 + 𝚲 22 𝒗 2), ⊳ 𝚲 consists of 𝜕𝜉 𝑖 
+
+> 𝜕𝑥 𝑗
+
+. See Equation (19).  
+
+> 4:
+
+SumStdDeriv: 𝒖 ′ ← 𝑫 𝑇 𝜉 1 𝒗 ′1 + 𝑫 𝑇 𝜉 2 𝒗 ′2 + 𝜆 𝑾 𝒖  
+
+> 5:
+
+Restrict: LHS ← 𝑩 𝑇 𝒖 ′
+
+We observe that for a quadrilateral element 𝑩 and 𝑫 𝜉 𝑑 𝑩 are dense matrices of the same shape 𝑄 2 × 𝑃 2, but can be optimised by sum-factorisation, reducing the matrix-vector multiplication cost from 𝑄 2𝑃 2 to 𝑃 2𝑄 + 𝑃 𝑄 2.The reduction is even more substantial in three dimensions. 𝑫 𝜉 𝑑 in its most general form is a square matrix of size 
+
+𝑄 2 ×𝑄 2, but with the collocation and sum-factorisation properties of tensor Lagrange product bases, it can be regarded as a blocked matrix with a matrix-vector multiplication cost of 𝑄 3. In the SumFac/SumFacTOP implementation, the non-collocated approach requires six sum-factorisation operations, while the collocated approach requires two sum-factorisation operations and four blocked-matrix operations, which may have lower floating-point operation cost. Our benchmark results given in the next section confirm that the collocated approach indeed notably outperforms the non-collocated approach in the case 𝑄 = 𝑃 + 1 for all the tested orders and element types. However, for the StdMat implementation, the 𝑫 𝜉 𝑑 𝑩 matrix is dense but the dimension is typically smaller than the 𝑫 𝜉 𝑑 matrix and so the non-collocated approach almost always has lower floating point cost and data loads, and is therefore adopted in the StdMat implementation. 
+
+J.Y. Xing et al.: Preprint submitted to Elsevier Page 11 of 19 Architecture-aware ℎ-to-𝑝 optimisation 
+
+We next explore the performance of the different implementation approaches outlined above across different three-dimensional element shapes and polynomial orders. 
+
+## 4. Results 
+
+In benchmarking the different implementation strategies discussed in Section 3, we have leveraged some of the benchmark test cases proposed under the CEED project [40]. In the following, we present measurements for the BK1 and BK3 cases which consider the throughput of the mass matrix and stiffness/Helmholtz matrix operations as a function of the total number of elemental degrees of freedom on different nodes, with either GPU and AVX acceleration. Considering the action 𝒇 = 𝑴𝒗 , these tests therefore measure how many output degrees of freedom of 
+
+𝒇 can be computed per second when calculating the action of a matrix 𝑴 (i.e. the mass or Helmholtz matrix) on an input vector 𝒗 .In the following tests, we consider performance on an NVIDIA GH200 Grace Hopper Superchip and an Intel Xeon 6526Y CPU with 32 cores and AVX-512 instructions. Additional results for a larger CPU (AMD EPYC 9554) can be found in Appendix B.2. For different polynomial degrees, we have tested the standard matrix (StdMat) approach, the sum-factorisation (SumFac) using a vectorised approach, and the sum-factorisation approach threaded on output point (SumFacTOP). We first highlight some general observations relating to these tests: 
+
+• Consistent with the paper by the CEED team [41], all tests were performed assuming the elements were curvilinear, approximated by the same degree of polynomial as the solution with iso-parametric mappings and were not allowed to exploit the global tensor-product structure of the element layout in the mesh. Similarly to [41], we have also precomputed the geometric matrices. 
+
+• In the CEED project, we are aware of results for hexahedral elements, but we have not been able to find published measurements for high-order prismatic, pyramidic and tetrahedral elements that we present below. 
+
+• The complexity of different operations gives rise to different optimal performance from the three implementation strategies outlined in Section 3.3. In general, the algorithmically simpler mass matrix operation benefits from the StdMat implementation, whereas the more algorithmically complex Helmholtz matrix operation benefits from the SumFac or SumFacTOP type implementation, depending on the architecture. For the latter, we observe a reduction in throughput as we move from hexahedral to tetrahedral elements, which is likely to be predominantly caused by the larger memory requirement for the basis data in tetrahedra. For example, on the NVIDIA GH200 Grace Hopper Superchip, we observe a reduction of at most a factor of 2.5, whereas the computational cost of the operator is around a factor of six higher, owing to the tensor-product collapsed coordinate system used in tetrahedral elements. 
+
+4.1. NVIDIA GH200 Grace Hopper Superchip 
+
+The results obtained with the CUDA back-end on a NVIDIA GH200 Grace Hopper Superchip are shown in Figures 5(a) and 6(a). In these plots we show the throughput performance for the mass and Helmholtz matrix operations, as a function of the elemental degrees of freedom, on hexahedral (Hex), prismatic (Prism), pyramidic (Pyr), and tetrahedral (Tet) elements for a range of polynomial degrees (P). In these plots we compare three implementation strategies namely: the standard matrix (StdMat) approach (denoted in red), outlined in section 3.3.1; the vectorised sum-factorisation (SumFac) approach (denoted in blue), outlined in section 3.3.2, and; the sum-factorisation threaded-on-output-point (SumFacTOP) (denoted in green), outlined in section 3.3.3. First considering the less algorithmically intensive mass operator in Figure 5(a) we first observe that the StdMat (red lines) and SumFacTOP (green lines) tend to provide improved throughput performance for the higher polynomial degree above 𝑃 = 2 . However, the vectorised sum-factorisation (SumFac) implementation, highlighted by blue lines, shows excellent performance for shapes involving simplexes faces (i.e. prisms, pyramids, and tetrahedra) for low polynomial degree with 𝑃 = 1 and 𝑃 = 2 . This is likely due to the small number of degrees of freedom per element, which allows efficient use of registers. Nevertheless, the performance of this SumFac implementation quickly drops as the polynomial degree increases, with a markedly lower performance beyond 𝑃 = 4 . However, the SumFacTOP implementation shows better performance compared to the StdMat implementation for hexahedral elements, while the opposite is observed for simplex elements. Finally, SumFacTOP typically shows low performance for 𝑃 = 1 as for such a low-degree polynomial, there are insufficient degrees of freedom per element to fully utilise a CUDA warp of 32 lanes.     
+
+> J.Y. Xing et al.: Preprint submitted to Elsevier Page 12 of 19 Architecture-aware ℎ-to-𝑝 optimisation
+
+For the high-arithmetic intensity Helmholtz operator in Figure 6(a), the SumFacTOP implementation outperforms the StdMat implementation across all polynomial degrees, shapes, and degrees of freedom. This implementation notably allows the use of shared memory for intermediate calculations, allowing efficient kernel fusing and data re-use on an element basis by exploiting the hierarchical parallelism characteristics of GPUs. On the other hand, both the SumFac and StdMat implementations involve multiple load/store from global memory. The results also indicate that elements with simplex faces (prisms, pyramids, and tetrahedra) offer lower performance compared to hexahedral elements for both operators due to the cost of integrating using one-dimensional quadrature based on the Duffy transformation (see Figure 1). This tensor product integration approach notably introduces additional degrees of freedom in the quadrature space compared to the number of expansion degrees of freedom. Furthermore, building the expansion basis requires larger basis data for the warped tensor product in these elements [28]. Nevertheless, whilst there is a six-fold increase in the number of quadrature points relative to the number of expansion coefficients in tetrahedral elements compared to the hexahedral elements, there is only, at most, a reduction by a factor of 2.5 in the throughput for the Helmholtz operator in Figure 6(a). Finally, to compare against the performance achieved in the CEED project [40] we have compiled the MFEM code on the same hardware and performed the same operation on hexahedral elements. For the mass matrix operator utilising the SumFacTOP approach on a GH200 we observe a peak throughput of 2.5 × 10 10 with MFEM. This is similar to our SumFacTOP performance shown in Figure 5(a) although we do observe a maximum performance of 
+
+3.5×10 10 . Similarly for the Helmholtz operator, the MFEM stiffness operator achieves a peak performance of 1.1×10 10 
+
+throughput, which is very similar to our peak performance shown in Figure 6(a). 
+
+4.2. Intel Xeon 6526Y CPU 
+
+Figures 5(b) and 6(b) show the throughput performance we obtained on an Intel Xeon 6526Y dual-socket CPU node with a total of 32 cores. Once again in these plots we show the throughput performance for the mass and Helmholtz matrix operations as a function of the elemental degrees of freedom on hexahedral (Hex), prismatic (Prism), pyramidic (Pyr) and tetrahedral (Tet) elements, and for a range of polynomial degrees (P). In these plots we compare only the two relevant implementation strategies namely: the standard matrix (StdMat) approach and the vectorised sum-factorisation (SumFac) approach. The sum-factorisation threaded-on-output-point (SumFacTop) algorithm is not possible on this architecture. Considering first the lower algorithmic intensity mass matrix operator in Figure 5(b) we observe that at lower polynomial degrees the StdMat (red lines) implementation performs better on all elemental shapes. However, as we increase the polynomial degree, the performance of this implementation drops off dramatically and the vectorised SumFac (blue lines) algorithm performs better for 𝑃 > 3. This drop-off of performance is expected, both from the fact that the LIBXSMM library is specifically optimized from small matrix multiplication, as well as the better algorithmic efficiency of the SumFac approach at higher polynomial degree. However, the small number of degrees of freedom in the tetrahedral expansion leads to the StdMat approach remaining competitive for all polynomial degrees investigated. For higher number of degrees of freedom at a fixed polynomial degree, which corresponds to increasing the number of elements, there is a peak in throughput performance followed by a reduction as we continue to increase the number of elements/degrees of freedom. This can be attributed to saturation of the processor cache. Next, considering the higher algorithmic intensity Helmholtz matrix operators shown in Figure 6(b), the vectorised sum-factorisation (SumFac) approach (blue lines) is markedly superior to the standard matrix (StdMat) implementation (red lines) for almost all polynomial degrees and elemental shapes. For this operator we observe a much more noticeable performance drop-off at high numbers of degrees of freedom which, as with the mass matrix, is likely explained by cache saturation. However, in this case there is a substantial increase in memory movement involving six geometric factors as well as the Jacobian, the later is also required for the mass matrix operator. Finally, we once again observe relatively consistent performance over all the element shapes, unlike the performance in the GH200 GPU tests. 
+
+4.3. Affine versus deformed elements 
+
+Although the CEED test cases we have so far presented require that the discretisation be equivalent to a fully deformed curvilinear geometry, in our investigation it was also possible to consider the case where the elements can be geometrically described by an affine transformation. An affine transformation in a hexahedral element would mean that it maintains a parallelepiped shape where opposite faces are parallel. In this case the Jacobian and geometrical factors are independent of spatial coordinate allowing for fewer loads of geometrical information when applying the operators. For the case of a straight-edged tetrahedron, the geometry always has an affine mapping, which implies that     
+
+> J.Y. Xing et al.: Preprint submitted to Elsevier Page 13 of 19 Architecture-aware ℎ-to-𝑝 optimisation
+
+such an optimization can have a significant effect in a general unstructured mesh. In our context, we differentiate these two cases using the terms Regular and Deformed , and provide slightly different implementations for them. Repeating the previous tests under this affine-mapping assumption, the mass matrix operator, where there is only the Jacobian information that is now treated as a single scalar per element, exhibits a relatively consistent throughput behaviour for the Xeon nodes as shown in Figure 7. As the number of degrees of freedom increases, the deformed element cases the throughput drops off before that of the affine element cases, while virtually no difference is observed between the deformed and affine cases on the GH200 (see additional results in Appendix B.1, Figure 12). For the Helmholtz matrix operator the large size of geometrical data have a pronounced effect on whether the element is curvilinearly deformed or affine. On the GH200 GPU node, we observe quite notable throughput benefits, where the lower polynomial degrees can have up to twice the throughput (see additional results in Appendix B.1, Figure 13). However, for the higher polynomial degrees tested ( 𝑃 = 5 , 6, 7) the performance was relatively similar across all elemental shapes. For the Xeon node we observe quite different performance over a range of polynomial degrees as shown in Figure 8. For all elemental shapes, when exploiting the affine mapping, their performance does not suffer from the notable drop-off at higher degrees of freedom, which is consistent with being able to maintain a better memory bandwidth to cache size. Indeed, the Xeon processor has an L3 cache of 1.5 MB per core whereas the GH200 node has 144GB fast HBM3e memory which is probably better able to keep the cores supplied with data. For the Xeon node the throughput performance is roughly twice as high for the regular/affine elements as compared to the curvilinearly deformed elements. 
+
+4.4. Maximising collocation-based operations 
+
+As detailed in section 2.2.1 and section 3.3.4, it is possible to re-interpret operations such as the inner product with respect to the derivative of the expansion basis, that arises in the weak Laplacian operator, such that we can maximally perform operations at the quadrature points. We recall that the modal expansions we adopted in all shapes can be expressed in terms of Lagrange polynomials through the quadrature points where we can maximally make use of the collocation property of the Lagrange polynomial. We then finalise the operation by restricting the evaluation back to the modal expansion. Figure 9 shows the results of the Helmholtz operator on all shapes on the Intel Xeon 6526Y processor. For this case, we have considered regular elements to remove the influence of the data movement associated with the geometric factors. The solid lines in this figure indicate the new approach where we are maximally using the collocated property (coll) and the dashed lines denote the previous approach where we are not maximally using the collocation property (non-coll). For all element shapes and polynomial degrees we observe an improvement in the throughput from adopting this collocation maximisation approach. Even for the hexahedral elements, we achieve between a 25%-50% percent improvement as we move from 𝑃 = 1 to 𝑃 = 7 . For the tetrahedral elements we observe a more consistent improvement of approximately 50% because sum-factorisation operations on non-standard tensorial elements have lower performance and better performance is expected if they can be replaced by collocated operations on standard tensorial structures. 
+
+## 5. Summary 
+
+Leveraging previous efforts [40] to optimise spectral element/high order finite element methods on GPUs and vectorised CPUs, we have extended this work to mixed-shaped element meshes involving not only hexahedral, but also prismatic, pyramidic, and tetrahedral shapes using tensorial expansions. Consideration of the basis in which we construct these operations highlights that the use of tensor product Lagrange base expansions can be efficiently utilized in elements of all shape types. Such an approach can maximise operations using the collocation properties of the nodal tensorial expansion associated with classical quadrature rules. Our study, corresponding to the BK1 and BK3 test cases of the CEED project [40], has demonstrated that different operators, such as the mass and Helmholtz matrices, require alternate implementation strategies depending on the element-shape, polynomial order, and architecture type to achieve optimal performance. Three different implementation strategies were considered including: StdMat, utilising matrix operators in and standard element region; SumFac, utilising sum-factorisation with vectorisation, or; SumFacTOP, also utilising sum-factorisation but threaded on the output point. In general, the algorithmically simpler mass matrix operation benefits from the StdMat implementation, whereas the more algorithmically complex Helmholtz matrix operation benefits from the SumFac or SumFacTOP implementations, depending on the architecture.     
+
+> J.Y. Xing et al.: Preprint submitted to Elsevier Page 14 of 19 Architecture-aware ℎ-to-𝑝 optimisation
+
+Our GPU performance tests demonstrate that the throughput of the Helmholtz operator on tetrahedral elements is at most 2.5 times slower than on hexahedral elements, despite a ratio of six when comparing a tetrahedral element to a hexahedral element in terms of floating-point operations (flops). The present work has also outlined the redesign strategy proposed to extend the original Nektar++ [1, 37] from a purely CPU framework with some support of SIMD acceleration to a new comprehensive framework supporting both CPUs with SIMD vectorization and heterogeneous architectures with discrete GPU devices. The redesign effort notably addressed memory management, data structure, and architecture-specific optimization strategies. 
+
+## 6. Acknowledgements 
+
+We would like to acknowledge insightful conversations with Edward Erasmie-Jones, Henrik Wüstenberg and Junjie Ye. This work was funded under the embedded CSE programme of the ARCHER UK National Supercomputing Service (http://www.archer.ac.uk), grant GPU-eCSE01-48, Achieving high-fidelity continuum modelling on GPUs with Nektar++ . DM acknowledges support from the Royal Academy of Engineering under their Research Chair scheme. 
+
+## A. Architecture-aware implementation in Nektar++ 
+
+A.1. MemoryRegion class 
+
+A new MemoryRegion class has been introduced containing a dual pointer which is designed to ensure proper memory synchronisation for a contiguous block of memory with minimal data movement between host/device. Inside the class, a pair of Boolean variables are used to indicate where the latest data is located. On the user side, they are controlled by three memory access qualifiers, ReadOnly , WriteOnly and ReadWrite . We provide further implementation details here to supplement the definitions given in Section 3.1. 
+
+• ReadOnly : The API returns an error message if the data has not been previously initialised by using a WriteOnly 
+
+memory access. Memory transfer occurs if the data in the current memory space was marked as invalid. A constant pointer is returned by the API and the data in the requested memory space is now marked as valid. The data in the other memory space remain valid. 
+
+• WriteOnly : Memory is allocated and marked as initialised, if not yet filled. No memory transfer occurs and a non-constant pointer is returned by the API. The data in the requested memory space is now marked as valid, while the data in the other memory space is marked as invalid. 
+
+• ReadWrite : The API returns an error message if the data has not been previously initialised by using a WriteOnly 
+
+memory access. Memory transfer occurs if the data on the requested memory space was marked as invalid and a non-constant pointer is returned by the API. The data in the requested memory space is now marked as valid, while the data in the other memory space is marked as invalid. From the users’ perspective, the memory can be accessed by simply calling GetPtr<MemSpace, MemAccess> , where  
+
+> MemSpace
+
+and MemAccess are, respectively, the desired memory space and memory access qualifier, regardless where the live data is actually located. The memory within an instance of a MemoryRegion class is allocated lazily the first time when a WriteOnly access is called, and deallocated automatically when the variable goes out of its scope. 
+
+A.2. Data structure and storage layout 
+
+Based on the properties of spectral element data, a Field/Block data structure is introduced to allow flexibility of implementation and kernel optimisation for performance-critical spectral element operators. We define a high-level class, Field , to represent a dataset associated with spectral elements within a parallel partition. The Field class supports various data types through a template parameter TData allowing for support for both single and double precision calculation. In Nektar++, there also exist two frequently-used concepts: coefficient state, which represents the space of all expansion basis coefficients (or degrees of freedom, DOFs), and; physical state, which represents the space of all quadrature points. Appropriate use of the coefficient and physical states is reinforced through an additional template parameter when declaring the Field class. The syntax is shown as follow;       
+
+> 1// Initialize a Field object in coefficient space.
+> 2auto FieldIn = Field<TData, FieldState::Coeff>(...);
+> 3// Initialize a Field object in physical space.
+> 4auto FieldOut = Field<TData, FieldState::Phys>(...);
+> J.Y. Xing et al.: Preprint submitted to Elsevier Page 15 of 19
+
+Architecture-aware ℎ-to-𝑝 optimisation 
+
+The Field class contains a vector of Block objects. Each Block includes an instance of a MemoryRegion object and represents a collection of elements of the same "type" (same shape, basis, quadrature, and deformation type). A schematic representation of the Field/Block data structure is presented in Figure 10. Each individual Block instance of a Field object can then be accessed using an index-based loop of the form:  
+
+> 1
+
+for (unsigned int blk = 0; blk < field.GetBlocks().size(); ++blk)  
+
+> 2
+
+{ 
+
+> 3
+
+// Fetch pointer from current block.  
+
+> 4
+
+auto ptr = field.GetBlocks()[blk].template GetPtr<DeviceSpace, WriteOnly>;  
+
+> 5
+
+...  
+
+> 6
+
+// Initialize data on a Device backend.  
+
+> 7
+
+...  
+
+> 8
+
+}
+
+Conceptually, we can reshape each block into a multi-dimensional array. The default storage layout (from leading dimension to the last dimension) is quadrature points/modal coefficients, followed by elements, and finally components (i.e. components of a vector field), for example:  
+
+> 1
+
+auto inptr = inblock.template GetPtr<HostSpace, ReadOnly>;  
+
+> 2
+
+auto outptr = outblock.template GetPtr<HostSpace, WriteOnly>;  
+
+> 3
+
+for (unsigned int n = 0; n < block.GetNumComponents(); ++n)  
+
+> 4
+
+{ 
+
+> 5
+
+for (size_t e = 0; e < block.GetNumElementsWithPadding(); ++e)  
+
+> 6
+
+{ 
+
+> 7
+
+for (unsigned int p = 0; p < block.GetNumData(); ++p)  
+
+> 8
+
+{ 
+
+> 9
+
+// Access each data point sequentially.  
+
+> 10
+
+auto point = *inptr;  
+
+> 11
+
+...  
+
+> 12
+
+// Write each data point sequentially.  
+
+> 13
+
+*outptr = ...  
+
+> 14 15
+
+// Increment pointers.  
+
+> 16
+
+inptr++;  
+
+> 17
+
+outptr++;  
+
+> 18
+
+} 
+
+> 19
+
+} 
+
+> 20
+
+} 
+
+> 21
+
+// Set block interleave parameter.  
+
+> 22
+
+outblock.template SetInterleaveWidth<TData>(1); 
+
+where block.GetNumData() returns the number of degrees of freedom or quadrature points within one element. As previously mentioned, different algorithms may require different storage layouts for optimal performance. For example, for the AVX execution space, we cluster points from four to eight elements into the same SIMD register. Loading them takes minimum overhead if they are stored contiguously in a so-called interleaved data layout. A sample code to access interleaved data is given below:  
+
+> 1
+
+auto inptr = inblock.template GetPtr<HostSpace, ReadOnly>;  
+
+> 2
+
+auto outptr = outblock.template GetPtr<HostSpace, WriteOnly>;  
+
+> 3
+
+for (unsigned int n = 0; n < block.GetNumComponents(); ++n)  
+
+> 4
+
+{ 
+
+> 5
+
+for (size_t e = 0; e < block.GetNumElmtGroups(simd_type::width); ++e)  
+
+> 6
+
+{ 
+
+> 7
+
+for (unsigned int p = 0; p < block.GetNumData(); ++p)  
+
+> 8
+
+{ 
+
+> 9
+
+// Load data into simd_type.  
+
+> 10
+
+// inptr[0] : the p-th point of the (e * width + 0)-th element  
+
+> 11
+
+// inptr[1] : the p-th point of the (e * width + 1)-th element  
+
+> 12
+
+// inptr[2] : the p-th point of the (e * width + 2)-th element  
+
+> 13
+
+// ...  
+
+> 14
+
+simd_type point(inptr);  
+
+> 15
+
+...  
+
+> 16
+
+// Store data using simd_type.  
+
+> 17
+
+*((simd_type *)outptr) = ...  
+
+> 18 19
+
+// Increment pointers by vector width. 
+
+J.Y. Xing et al.: Preprint submitted to Elsevier Page 16 of 19 Architecture-aware ℎ-to-𝑝 optimisation        
+
+> 20 inptr += simd_type::width;
+> 21 outptr += simd_type::width;
+> 22 }
+> 23 }
+> 24 }
+> 25 // Set block interleave parameter.
+> 26 outblock.template SetInterleaveWidth<TData>(simd_type::width);
+
+where block.GetNumElmtGroups(simd_type::width) returns the number of element (vector) groups associated with a SIMD vector width of simd_type::width elements. 
+
+A.2.1. Operator class hierarchy 
+
+The Field/Block data structure described above allows the use of different implementation (i.e. StdMat, SumFac, or SumFacTOP) for each Block. For this purpose, a templated Operator base class has been introduced, where each instance of an Operator class contains a vector of instances of the BlockOperator base class, allowing implementation specialisation for each Block. An example of implementation for the BwdTrans operator would take the following form:                     
+
+> 1template <typename TData>
+> 2class BwdTransOp : public ElmtOp<FieldState::Coeff, FieldState::Phys, TData>
+> 3{
+> 4void Apply(Field<TData, FieldState::Coeff> &in,
+> 5Field<TData, FieldState::Phys> &out) override
+> 6{
+> 7// Loop over the blocks.
+> 8for (unsigned int blk = 0; blk < this->m_blockOp.size(); ++blk)
+> 9{
+> 10 // Fetch Block from Field objects.
+> 11 auto &inblock = in.GetBlocks()[blk];
+> 12 auto &outblock = out.GetBlocks()[blk];
+> 13 14 // Use Block-specific implementation.
+> 15 this->m_blockOp[blk]->Apply(inblock, outblock);
+> 16 }
+> 17 }
+> 18 19 ...
+> 20 21 // Vector of Block-specific BwdTransBlockOp implementations.
+> 22 std::vector<std::shared_ptr<BwdTransBlockOp<TData>>> m_blockOp;
+> 23 };
+
+Specific operators, with different implementation or execution, can then be derived from the base class. Figure 11 outlines the Operator class hierarchy with a verbose expansion on BwdTrans operator. 
+
+## B. Additional results 
+
+B.1. Affine versus deformed elements on GH200 
+
+Figure 12 shows performance of mass operator on affine elements and curvilinear elements. Minimal differences are observed between the two cases. Figure 13 shows performance of Helmholtz operator on affine elements and curvilinear elements. This operator requires geometric factors at each quadrature point increasing data transfer costs. At low polynomial orders there is increased throughput when using regular affine elements; at higher polynomial orders, the benefit is limited. 
+
+B.2. Performance on AMD EPYC 9554 
+
+Figure 14 highlights throughput results on a dual-socket AMD EPYC 9554 processor, which has a significantly increased number of cores (64 per socket) and L3 cache per core (256MB total, 4MB/core) compared to the Intel Xeon 6526Y (16 per socket, 37.5MB total or 2.3MB/core). 
+
+J.Y. Xing et al.: Preprint submitted to Elsevier Page 17 of 19 Architecture-aware ℎ-to-𝑝 optimisation 
+
+## References 
+
+[1] Chris D. Cantwell, David Moxey, Andrew Comerford, Alessandro Bolis, Gabriele Rocco, Gianmarco Mengaldo, Daniele De Grazia, Sergey Yakovlev, Jean-Eloi Lombard, Dirk Ekelschot, Bastien Jordi, Hui Xu, Yumnah Mohamied, Claus Eskilsson, Blake Nelson, Peter Vos, Cristian Biotto, Robert M. Kirby, and Spencer J. Sherwin. Nektar++: An open-source spectral/hp element framework. Computer Physics Communications , 192:205–219, 2015. [2] Chris D. Cantwell, Spencer J. Sherwin, Roberty M. Kirby, and Paul H. J. Kelly. From h to p efficiently: Strategy selection for operator evaluation on hexahedral and tetrahedral elements. Computers and Fluids , 43(1):23–28, 2011. [3] Chris D. Cantwell, Spencer J. Sherwin, Robert M. Kirby, and Paul H. J. Kelly. From h to p efficiently: Selecting the optimal spectral/hp discretisation in three dimensions. Mathematical Modelling of Natural Phenomena , 6(3):84–96, 2011. [4] Jan Eichstädt, Martin Vymazal, David Moxey, and Joaquim Peiró. A comparison of the shared-memory parallel programming models OpenMP, OpenACC and Kokkos in the context of implicit solvers for high-order FEM. Computer Physics Communications , page 107245, 2020. [5] Paul Fischer, James Lottes, and Henry Tufo. Nek5000. Technical report, Argonne National Laboratory (ANL), Argonne, IL (United States), 2007. [6] Stefano Markidis, Jing Gong, Michael Schliephake, Erwin Laure, Alistair Hart, David Henty, Katherine Heisey, and Paul Fischer. Openacc acceleration of the nek5000 spectral element code. The International Journal of High Performance Computing Applications , 29(3):311–319, 2015. [7] Jonathan Vincent, Jing Gong, Martin Karp, Adam Peplinski, Niclas Jansson, Artur Podobas, Andreas Jocksch, Jie Yao, Fazle Hussain, Stefano Markidis, et al. Strong scaling of openacc enabled nek5000 on several gpu based hpc systems. In International Conference on High Performance Computing in Asia-Pacific Region , pages 94–102, 2022. [8] Sandra Wienke, Paul Springer, Christian Terboven, and Dieter an Mey. Openacc—first experiences with real-world applications. In European Conference on Parallel Processing , pages 859–870. Springer, 2012. [9] Paul Fischer, Stefan Kerkemeier, Misun Min, Yu-Hsiang Lan, Malachi Phillips, Thilina Rathnayake, Elia Merzari, Ananias Tomboulides, Ali Karakus, Noel Chalmers, et al. Nekrs, a gpu-accelerated spectral element navier–stokes solver. Parallel Computing , 114:102982, 2022. [10] David S Medina, Amik St-Cyr, and Tim Warburton. Occa: A unified approach to multi-threading languages. arXiv preprint arXiv:1403.0968 ,2014. [11] Niclas Jansson, Martin Karp, Artur Podobas, Stefano Markidis, and Philipp Schlatter. Neko: A modern, portable, and scalable framework for high-fidelity computational fluid dynamics. Computers & Fluids , 275:106243, 2024. [12] Robert Anderson, Julian Andrej, Andrew Barker, Jamie Bramwell, Jean-Sylvain Camier, Jakub Cerveny, Veselin Dobrev, Yohann Dudouit, Aaron Fisher, Tzanio Kolev, et al. Mfem: A modular finite element methods library. Computers & Mathematics with Applications , 81:42–74, 2021. [13] David A. Beckingsale, Jason Burmark, Rich Hornung, Holger Jones, William Killian, Adam J. Kunen, Olga Pearce, Peter Robinson, Brian S. Ryujin, and Thomas R. W. Scogland. Raja: Portable performance for large-scale scientific applications. In 2019 ieee/acm international workshop on performance, portability and productivity in hpc (p3hpc) , pages 71–81. IEEE, 2019. [14] Wolfgang Bangerth, Ralf Hartmann, and Guido Kanschat. deal. ii—a general-purpose object-oriented finite element library. ACM Transactions on Mathematical Software (TOMS) , 33(4):24–es, 2007. [15] Daniel Arndt, Wolfgang Bangerth, Denis Davydov, Timo Heister, Luca Heltai, Martin Kronbichler, Matthias Maier, Jean-Paul Pelteret, Bruno Turcksin, and David Wells. The deal. ii finite element library: Design, features, and insights. Computers & Mathematics with Applications ,81:407–422, 2021. [16] Daniel Arndt, Wolfgang Bangerth, Maximilian Bergbauer, Marco Feder, Marc Fehling, Johannes Heinz, Timo Heister, Luca Heltai, Martin Kronbichler, Matthias Maier, et al. The deal. ii library, version 9.5. Journal of Numerical Mathematics , 31(3):231–246, 2023. [17] H. Carter Edwards, Christian R. Trott, and Daniel Sunderland. Kokkos: Enabling manycore performance portability through polymorphic memory access patterns. Journal of Parallel and Distributed Computing , 74(12):3202–3216, 2014. [18] Hung T Huynh. A flux reconstruction approach to high-order schemes including discontinuous galerkin methods. In 18th AIAA computational fluid dynamics conference , page 4079, 2007. [19] Jan S. Hesthaven and Tim Warburton. Nodal Discontinuous Galerkin Methods . Springer, 2008. [20] Bernardo Cockburn, George E Karniadakis, and Chi-Wang Shu. The development of discontinuous galerkin methods. In Discontinuous Galerkin methods: theory, computation and applications , pages 3–50. Springer, 2000. [21] Freddie D Witherden, Antony M Farrington, and Peter E Vincent. Pyfr: An open source framework for solving advection–diffusion type problems on streaming architectures using the flux reconstruction approach. Computer Physics Communications , 185(11):3028–3040, 2014. [22] Freddie D Witherden, Peter E Vincent, Will Trojak, Yoshiaki Abe, Amir Akbarzadeh, Semih Akkurt, Mohammad Alhawwary, Lidia Caros, Tarik Dzanic, Giorgio Giangaspero, et al. Pyfr v2. 0.3: Towards industrial adoption of scale-resolving simulations. Computer Physics Communications , 311:109567, 2025. [23] Michael Bayer. Mako templates for python. BibSonomy www. bibsonomy. org/bibtex/aa47d818a1c2f889b7456117003b3d42 , 2012. [24] Marius Kurz, Daniel Kempf, Marcel P Blind, Patrick Kopper, Philipp Offenhäuser, Anna Schwarz, Spencer Starr, Jens Keim, and Andrea Beck. Galæxi: Solving complex compressible flows with high-order discontinuous galerkin methods on accelerator-based systems. Computer Physics Communications , 306:109388, 2025. [25] Nico Krais, Andrea Beck, Thomas Bolemann, Hannes Frank, David Flad, Gregor Gassner, Florian Hindenlang, Malte Hoffmann, Thomas Kuhn, Matthias Sonntag, et al. Flexi: A high order discontinuous galerkin framework for hyperbolic–parabolic conservation laws. Computers & Mathematics with Applications , 81:186–219, 2021. [26] Esteban Ferrer, Gonzalo Rubio, Gerasimos Ntoukas, Wojciech Laskowski, Oscar A Mariño, Stefano Colombo, Andrés Mateo-Gabín, H Marbona, F Manrique de Lara, David Huergo, et al. Horses3d: A high-order discontinuous galerkin solver for flow simulations and multi-physics applications. Computer Physics Communications , 287:108700, 2023. 
+
+J.Y. Xing et al.: Preprint submitted to Elsevier Page 18 of 19 Architecture-aware ℎ-to-𝑝 optimisation 
+
+[27] Hatem Kessasra, Marta Cordero-Gracia, Mariola Gómez, Eusebio Valero, Gonzalo Rubio, and Esteban Ferrer. A comparison of h-and p-refinement to capture wind turbine wakes. Physics of Fluids , 36(12), 2024. [28] George Karniadakis and Spencer Sherwin. Spectral/hp Element Methods for Computational Fluid Dynamics . Oxford University Press, second edition, 2005. [29] George Karniadakis and Spencer Sherwin. Spectral/ ℎ𝑝 Element Methods for Computational Fluid Dynamics . Oxford University Press, 2013. [30] Gianmarco Mengaldo, Daniele De Grazia, David Moxey, Peter E. Vincent, and Spencer J. Sherwin. Dealiasing techniques for high-order spectral element methods on regular and irregular grids. Journal of Computational Physics , 299:56–81, 2015. [31] Michael G. Duffy. Quadrature over a pyramid or cube of integrands with a singularity at a vertex. SIAM Journal on Numerical Analysis ,19(6):1260–1262, 1982. [32] H Carter Edwards, Christian R Trott, and Daniel Sunderland. Kokkos: Enabling manycore performance portability through polymorphic memory access patterns. Journal of parallel and distributed computing , 74(12):3202–3216, 2014. [33] Cédric Augonnet, Samuel Thibault, Raymond Namyst, and Pierre-André Wacrenier. Starpu: a unified platform for task scheduling on heterogeneous multicore architectures. In European Conference on Parallel Processing , pages 863–874. Springer, 2009. [34] David Moxey, Roman Amici, and Mike Kirby. Efficient matrix-free high-order finite element evaluation for simplicial elements. SIAM Journal on Scientific Computing , 42(3):C97–C123, 2020. [35] xtensor-stack. xsimd: C++ wrappers for simd intrinsics and parallelized, optimized mathematical functions. https://github.com/ xtensor-stack/xsimd , 2025. [36] David Moxey, Chris D. Cantwell, Robert M. Kirby, and Spencer J. Sherwin. Optimizing the performance of the spectral/hp element method with collective linear algebra operations. Computer Methods in Applied Mechanics and Engineering , 310:628–645, 2016. [37] David Moxey, Chris D. Cantwell, Yan Bao, Andrea Cassinelli, Giacomo Castiglioni, Sehun Chun, Emilia Juda, Ehsan Kazemi, Kilian Lack-hove, Julian Marcon, Gianmarco Mengaldo, Douglas Serson, Michael Turner, Hui Xu, Joaquim Peiró, Robert M. Kirby, and Spencer J. Sherwin. Nektar++: Enhancing the capability and application of high-fidelity spectral/hp element methods. Computer Physics Communications ,249:107110, 2020. [38] Alexander Heinecke, Greg Henry, Maxwell Hutchinson, and Hans Pabst. Libxsmm: accelerating small matrix multiplications by runtime code generation. In SC’16: Proceedings of the International Conference for High Performance Computing, Networking, Storage and Analysis , pages 981–991. IEEE, 2016. [39] UXL Unified Acceleration Foundation. oneapi math library (onemath). https://github.com/uxlfoundation/oneMath .[40] Jed Brown, Ahmad Abdelfattah, Valeria Barra, Natalie Beams, Jean-Sylvain Camier, Veselin Dobrev, Yohann Dudouit, Leila Ghaffari, Tzanio Kolev, David Medina, et al. libCEED: Fast algebra for high-order element-based discretizations. Journal of Open Source Software , 6(63):2945, 2021. [41] Paul Fischer, Misun Min, Thilina Rathnayake, Som Dutta, Tzanio Kolev, Veselin Dobrev, Jean-Sylvain Camier, Martin Kronbichler, Tim Warburton, Kasia Świrydowicz, et al. Scalability of high-performance pde solvers. The International Journal of High Performance Computing Applications , 34(5):562–586, 2020. 
+
+J.Y. Xing et al.: Preprint submitted to Elsevier Page 19 of 19 Architecture-aware ℎ-to-𝑝 optimisation 
+
+𝜂 = ( 𝜂 1, 𝜂 2) ∈ [−1 , 1] 2
+
+collapsed element Duffy 
+
+𝜉 = ( 𝜉 1, 𝜉 2) ∈ Ω tri st 
+
+standard element 
+
+> 𝑥  = 𝜒 𝑒 (𝜉 )
+> 𝑥  = 𝜒 𝑒 (𝜉 )
+
+𝑥 = ( 𝑥 1, 𝑥 2) ∈ Ω 𝑒 
+
+curvilinear element 
+
+𝑥 = ( 𝑥 1, 𝑥 2) ∈ Ω 𝑒 
+
+regular element 
+
+Figure 1: Representation of a high-order triangular element with three different coordinate systems. Elements may be curvilinear or benefit from reduced geometric information if regular straight-sided. The distribution of quadrature points is illustrated with equispaced lines. 
+
+Execution Space 
+
+Serial AVX 
+
+SSE2 AVX2 AVX512 SVE/SVE2 
+
+Device 
+
+CUDA HIP SYCL 
+
+CUDA HIP OpenCL 
+
+Figure 2: Nektar++ execution space model hierarchy. Execution spaces are shown in green, while specific backends are shown in blue. Availability of backends depends on the host and/or device architecture. J.Y. Xing et al.: Preprint submitted to Elsevier Page 20 of 19 Architecture-aware ℎ-to-𝑝 optimisation Work group g=1 
+
+Elements 1-4 
+
+# ← ×←
+
+Threads 1-4      
+
+> [WV×P1×P2]
+
+B1̂ ug   
+
+> [Q1×P1]
+
+Threads 1-4 
+
+wg     
+
+> [WV×Q1×P2]
+
+BT
+
+2    
+
+> [P2×Q2]
+
+ug     
+
+> [WV×Q1×Q2]
+
+wg     
+
+> [WV×Q1×P2]
+
+# ×
+
+Work group g=2 
+
+Elements 5-8 
+
+# ← ×←
+
+Threads 1-4      
+
+> [WV×P1×P2]
+
+B1̂ ug   
+
+> [Q1×P1]
+
+Threads 1-4 
+
+wg     
+
+> [WV×Q1×P2]
+
+BT
+
+2    
+
+> [P2×Q2]
+
+ug     
+
+> [WV×Q1×Q2]
+
+# ×
+
+wg     
+
+> [WV×Q1×P2]
+
+Figure 3: Diagram showing the SumFac implementation on GPU. The four grey dots are stored contiguously in the memory and accessed by different threads. For illustrative purposes, we suppose there are 4 threads in each work group. Each work group processes a different element group. Work group e=1 
+
+element 1 
+
+# ←
+
+Threads 1-4 
+
+# ×←
+
+Threads 1-4 
+
+# ×    
+
+> [P1×P2]
+
+B1wê ue       
+
+> [Q1×P1][Q1×P2]
+
+we    
+
+> [Q1×P2]
+
+BT
+
+2    
+
+> [P2×Q2]
+
+ue    
+
+> [Q1×Q2]
+
+Work group e=2 
+
+element 2 
+
+# ←
+
+Threads 1-4 
+
+# ×←
+
+Threads 1-4 
+
+# ×    
+
+> [P1×P2]
+
+B1wê ue       
+
+> [Q1×P1][Q1×P2]
+
+we    
+
+> [Q1×P2]
+
+BT
+
+2    
+
+> [P2×Q2]
+
+ue    
+
+> [Q1×Q2]
+
+Figure 4: Diagram showing the SumFacTOP implementation on GPU. The four grey dots are stored contiguously in memory and accessed by different threads. For illustrative purposes, we suppose there are four threads in each work group. Each work group processes a different element. J.Y. Xing et al.: Preprint submitted to Elsevier Page 21 of 19 Architecture-aware ℎ-to-𝑝 optimisation 
+
+Figure 5: (a) NVIDIA GH200 Grace Hopper Superchip and (b) Intel Xeon 6526Y throughput performance versus elemental degrees of freedom for the mass operator for hexahedral (Hex), prismatic (Prism), pyramidic (Pyr) and tetrahedral (Tet) elements. For different polynomial degree (P) the standard matrix (StdMat) approach is labelled in red, the vectorised sum-factorisation (SumFac) is labelled in blue and the sum-factorisation threaded on output point (SumFacTOP) is labelled in green. J.Y. Xing et al.: Preprint submitted to Elsevier Page 22 of 19 Architecture-aware ℎ-to-𝑝 optimisation 
+
+Figure 6: (a) NVIDIA GH200 Grace Hopper Superchip and (b) Intel Xeon 6526Y throughput performance versus elemental degrees of freedom for the Helmholtz operator for hexahedral (Hex), prismatic (Prism), pyramidic (Pyr), and tetrahedral (Tet) elements. For different polynomial degree (P) the standard matrix (StdMat) approach is labelled in red, the vectorised sum-factorisation (SumFac) is labelled in blue and the sum-factorisation threaded on output point (SumFacTOP) is labelled in green. J.Y. Xing et al.: Preprint submitted to Elsevier Page 23 of 19 Architecture-aware ℎ-to-𝑝 optimisation 
+
+Figure 7: Intel Xeon 6526Y throughput performance versus elemental degrees of freedom on mass operator for hexahedral (Hex), prismatic (Prism), pyramidic (Pyr) and tetrahedral (Tet) elements using the vectorised sum-factorisation (SumFac) implementation. The solid lines indicate throughput assuming regular (Regular) elements that have an affine transformation where as the dashed lines indicate the throughput for curvlinear (Deformed) elements. 
+
+Figure 8: Intel Xeon 6526Y throughput performance versus elemental degrees of freedom on Helmholtz operator for hexahedral (Hex), prismatic (Prism), pyramidic (Pyr) and tetrahedral (Tet) elements using the vectorised sum-factorisation (SumFac) implementation. The solid lines indicate throughput assuming regular (Regular) elements that have an affine transformation where as the dashed lines indicate the throughput for curvlinear (Deformed) elements. J.Y. Xing et al.: Preprint submitted to Elsevier Page 24 of 19 Architecture-aware ℎ-to-𝑝 optimisation 
+
+Figure 9: Intel Xeon 6526Y throughput performance versus elemental degrees of freedom on Helmholtz operator for hexahedral (Hex), prismatic (Prism), pyramidic (Pyr), and tetrahedral (Tet) elements using the vectorised sum-factorisation (SumFac) implementation. The solid lines indicate throughput assuming collocated (coll) approach on regular elements where as the dashed lines indicate the throughput for the traditional non-collocated (non-coll) approach. Block 0  Block 1  Block 2  Block 3  Block 4 
+
+## Field 
+
+## MR 0  MR 1  MR 2  MR 3  MR 4 
+
+## GPU 
+
+Figure 10: Field and Block data structure association. Field contains a series of blocks representing similar properties of elements that are associated with a contiguous block of memory on the device (i.e. GPU). J.Y. Xing et al.: Preprint submitted to Elsevier Page 25 of 19 Architecture-aware ℎ-to-𝑝 optimisation    
+
+> Operator ⟨TData ⟩
+> ElmtOp ⟨TFieldIn, TFieldOut, TData ⟩
+> BwdTransOp IProductWRTBaseOp PhysDerivOp HelmholtzOp
+> BlockOperator ⟨TData ⟩
+> ElmtBlockOp ⟨TFieldIn, TFieldOut, TData ⟩
+> BwdTransBlockOp
+> BwdTransBlockOp
+> BwdTransBlockOp
+> ...
+> BwdTransBlockOp
+> BwdTransDeviceSumFac
+> BwdTransDeviceStdMat
+> BwdTransSerialStdMat
+> ...
+> BwdTransSerialSumFac
+> Operates on Field objects Operates on Block objects
+> Specialised templated kernels
+
+Figure 11: Schematic representation of Operator class hierarchy 
+
+Figure 12: NVIDIA GH200 Grace Hopper Superchip throughput performance versus elemental degrees of freedom on mass operator for hexahedral (Hex), prismatic (Prism), pyramidic (Pyr) and tetrahedral (Tet) elements using the sum-factorisation threaded on output-point (SumFacTOP) implementation. The solid lines indicate throughput assuming regular (Regular) elements that have an affine transformation where as the dashed lines indicate the throughput for curvilinear (Deformed) elements. J.Y. Xing et al.: Preprint submitted to Elsevier Page 26 of 19 Architecture-aware ℎ-to-𝑝 optimisation 
+
+Figure 13: NVIDIA GH200 Grace Hopper Superchip throughput performance versus elemental degrees of freedom on Helmholtz operator for hexahedral (Hex), prismatic (Prism), pyramidic (Pyr) and tetrahedral (Tet) elements using the sum-factorisation threaded on output-point (SumFacTOP) implementation. The solid lines indicate throughput assuming regular (Regular) elements that have an affine transformation where as the dashed lines indicate the throughput for curvilinear (Deformed) elements. J.Y. Xing et al.: Preprint submitted to Elsevier Page 27 of 19 Architecture-aware ℎ-to-𝑝 optimisation 
+
+Figure 14: Throughput results for the AMD EPYC 9554 processor for (a) deformed and (b) regular elements for the Helmholtz operator on all element types using the SumFac and StdMat implementation strategies. J.Y. Xing et al.: Preprint submitted to Elsevier Page 28 of 19
