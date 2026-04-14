@@ -6,73 +6,85 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-13
-- 运行时间：2026-04-13 20:02:51 UTC
+- 最新运行日期：2026-04-14
+- 运行时间：2026-04-14 20:08:51 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
+- 本次总论文数：21
+- 精读区：10
 - 速读区：11
 
 ### 今日简报（AI）
-今日精选17篇前沿论文，重点聚焦视觉语言模型（VLM）的效率飞跃与类脑计算的能效突破。
-Fast-dVLM 实现了自回归向扩散模型的高效转换，而 Ge²mS-T 则通过多维分组将 Spiking Transformer 的能效推向极致。
-建议关注边缘端 LLM 适配与 AI 原生硬件描述语言，探索软硬结合的低功耗智能部署方案。
-- 详情：[/202604/13/README](/202604/13/README)
+今日聚焦 21 篇 AI 顶尖成果，深度解析了可穿戴血压监测与机器人操控中的端到端神经网络自动化优化方案。
+满分论文展示了 NAS 技术在 PPG 信号处理与跨设备机器人适配中的卓越性能，同时 Blink 架构实现了 CPU-free 的大模型推理突破。
+推荐关注硬件感知型架构设计，通过软硬协同进一步提升边缘计算与实时预测的能效比。
+- 详情：[/202604/14/README](/202604/14/README)
 
 ### 精读区论文标签
-1. [Fast-dVLM: Efficient Block-Diffusion VLM via Direct Conversion from Autoregressive VLM](/202604/13/2604.06832v1-fast-dvlm-efficient-block-diffusion-vlm-via-direct-conversion-from-autoregressive-vlm)  
+1. [End-to-end Automated Deep Neural Network Optimization for PPG-based Blood Pressure Estimation on Wearables](/202604/14/2604.10117v1-end-to-end-automated-deep-neural-network-optimization-for-ppg-based-blood-pressure-estimation-on-wearables)  
+   标签：评分：10.0/10、query:hwnas
+   evidence：结合硬件感知NAS、剪枝和混合精度搜索的自动DNN设计流水线
+2. [Device-Conditioned Neural Architecture Search for Efficient Robotic Manipulation](/202604/14/2604.10170v1-device-conditioned-neural-architecture-search-for-efficient-robotic-manipulation)  
+   标签：评分：10.0/10、query:hwnas
+   evidence：针对机器人操作的硬件约束神经架构搜索
+3. [SatReg: Regression-based Neural Architecture Search for Lightweight Satellite Image Segmentation](/202604/14/2604.10306v1-satreg-regression-based-neural-architecture-search-for-lightweight-satellite-image-segmentation)  
+   标签：评分：10.0/10、query:hwnas
+   evidence：针对边缘平台卫星图像分割的硬件感知NAS
+4. [EdgeCIM: A Hardware-Software Co-Design for CIM-Based Acceleration of Small Language Models](/202604/14/2604.11512v1-edgecim-a-hardware-software-co-design-for-cim-based-acceleration-of-small-language-models)  
+   标签：评分：10.0/10、query:hwnas
+   evidence：基于存内计算的小语言模型加速软硬件协同设计
+5. [A Full-Stack Performance Evaluation Infrastructure for 3D-DRAM-based LLM Accelerators](/202604/14/2604.08044v1-a-full-stack-performance-evaluation-infrastructure-for-3d-dram-based-llm-accelerators)  
    标签：评分：9.0/10、query:hwnas
-   evidence：解决边缘设备上的内存带宽受限和硬件并行度利用不足问题
-2. [Ge$^\text{2}$mS-T: Multi-Dimensional Grouping for Ultra-High Energy Efficiency in Spiking Transformer](/202604/13/2604.08894v1-getext2ms-t-multi-dimensional-grouping-for-ultra-high-energy-efficiency-in-spiking-transformer)  
+   evidence：基于3D-DRAM硬件加速器的全栈性能评估
+6. [DRIFT: Harnessing Inherent Fault Tolerance for Efficient and Reliable Diffusion Model Inference](/202604/14/2604.09073v1-drift-harnessing-inherent-fault-tolerance-for-efficient-and-reliable-diffusion-model-inference)  
    标签：评分：9.0/10、query:hwnas
-   evidence：脉冲Transformer中内存、精度和能耗的并发优化
-3. [EdgeFlow: Fast Cold Starts for LLMs on Mobile Devices](/202604/13/2604.09083v1-edgeflow-fast-cold-starts-for-llms-on-mobile-devices)  
+   evidence：针对能效扩散模型推理的算法-架构协同优化
+7. [SMART: When is it Actually Worth Expanding a Speculative Tree?](/202604/14/2604.09731v1-smart-when-is-it-actually-worth-expanding-a-speculative-tree)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对移动设备LLM推理的NPU感知自适应精度
-4. [MATCHA: Efficient Deployment of Deep Neural Networks on Multi-Accelerator Heterogeneous Edge SoCs](/202604/13/2604.09124v1-matcha-efficient-deployment-of-deep-neural-networks-on-multi-accelerator-heterogeneous-edge-socs)  
+   evidence：旨在最大化端到端加速的硬件感知优化
+8. [Towards Green Wearable Computing: A Physics-Aware Spiking Neural Network for Energy-Efficient IMU-based Human Activity Recognition](/202604/14/2604.10458v1-towards-green-wearable-computing-a-physics-aware-spiking-neural-network-for-energy-efficient-imu-based-human-activity-recognition)  
    标签：评分：9.0/10、query:hwnas
-   evidence：优化内存分配与调度以提高加速器利用率
-5. [FaceLiVTv2: An Improved Hybrid Architecture for Efficient Mobile Face Recognition](/202604/13/2604.09127v1-facelivtv2-an-improved-hybrid-architecture-for-efficient-mobile-face-recognition)  
+   evidence：面向低功耗边缘可穿戴设备的无乘法器脉冲神经网络架构。
+9. [COREY: A Prototype Study of Entropy-Guided Operator Fusion with Hadamard Reparameterization for Selective State Space Models](/202604/14/2604.10597v1-corey-a-prototype-study-of-entropy-guided-operator-fusion-with-hadamard-reparameterization-for-selective-state-space-models)  
    标签：评分：9.0/10、query:hwnas
-   evidence：适用于移动和边缘设备的高效混合架构
-6. [Probabilistic Tree Inference Enabled by FDSOI Ferroelectric FETs](/202604/13/2604.05115v1-probabilistic-tree-inference-enabled-by-fdsoi-ferroelectric-fets)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：针对内存瓶颈的机器学习模型硬件实现
+   evidence：针对SSM模型的内存感知算子融合与运行时调度
+10. [L-PCN: A Point Cloud Accelerator Exploiting Spatial Locality through Octree-based Islandization](/202604/14/2604.10716v1-l-pcn-a-point-cloud-accelerator-exploiting-spatial-locality-through-octree-based-islandization)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：点云加速器的算法-硬件协同设计
 
 ### 速读区论文标签
-1. [Arch: An AI-Native Hardware Description Language for Register-Transfer Clocked Hardware Design](/202604/13/2604.05983v1-arch-an-ai-native-hardware-description-language-for-register-transfer-clocked-hardware-design)  
+1. [FILCO: Flexible Composing Architecture with Real-Time Reconfigurability for DNN Acceleration](/202604/14/2604.07523v2-filco-flexible-composing-architecture-with-real-time-reconfigurability-for-dnn-acceleration)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于微架构设计的AI原生硬件描述语言
-2. [CodecSight: Leveraging Video Codec Signals for Efficient Streaming VLM Inference](/202604/13/2604.06036v3-codecsight-leveraging-video-codec-signals-for-efficient-streaming-vlm-inference)  
+   evidence：高效匹配多样化工作负载以实现最优存储和计算
+2. [Blink: CPU-Free LLM Inference by Delegating the Serving Stack to GPU and SmartNIC](/202604/14/2604.07609v1-blink-cpu-free-llm-inference-by-delegating-the-serving-stack-to-gpu-and-smartnic)  
    标签：评分：8.0/10、query:hwnas
-   evidence：利用视频编解码信号进行高效VLM推理的软硬件协同设计
-3. [Beyond End-to-End: Dynamic Chain Optimization for Private LLM Adaptation on the Edge](/202604/13/2604.06819v1-beyond-end-to-end-dynamic-chain-optimization-for-private-llm-adaptation-on-the-edge)  
+   evidence：通过从推理路径中移除CPU来最大化计算利用率
+3. [Auto-Configured Networks for Multi-Scale Multi-Output Time-Series Forecasting](/202604/14/2604.07610v1-auto-configured-networks-for-multi-scale-multi-output-time-series-forecasting)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过逐层优化突破边缘设备的内存瓶颈
-4. [Fast-dVLM: Efficient Block-Diffusion VLM via Direct Conversion from Autoregressive VLM](/202604/13/2604.06832v2-fast-dvlm-efficient-block-diffusion-vlm-via-direct-conversion-from-autoregressive-vlm)  
+   evidence：平衡预测误差与模型复杂度的自动配置框架
+4. [PanoSAM2: Lightweight Distortion- and Memory-aware Adaptions of SAM2 for 360 Video Object Segmentation](/202604/14/2604.07901v1-panosam2-lightweight-distortion--and-memory-aware-adaptions-of-sam2-for-360-video-object-segmentation)  
    标签：评分：8.0/10、query:hwnas
-   evidence：最大化硬件并行性并解决受内存带宽限制的自回归解码问题
-5. [AutoLALA: Automatic Loop Algebraic Locality Analysis for AI and HPC Kernels](/202604/13/2604.05066v1-autolala-automatic-loop-algebraic-locality-analysis-for-ai-and-hpc-kernels)  
+   evidence：针对资源受限设备上视频对象分割的内存感知适配
+5. [Cross-Stage Attention Propagation for Efficient Semantic Segmentation](/202604/14/2604.05431v1-cross-stage-attention-propagation-for-efficient-semantic-segmentation)  
    标签：评分：7.0/10、query:hwnas
-   evidence：数据移动与存储层级瓶颈分析
-6. [MegaTrain: Full Precision Training of 100B+ Parameter Large Language Models on a Single GPU](/202604/13/2604.05091v1-megatrain-full-precision-training-of-100b-parameter-large-language-models-on-a-single-gpu)  
+   evidence：降低计算成本以实现高效的语义分割
+6. [MPM: Mutual Pair Merging for Efficient Vision Transformers](/202604/14/2604.05718v1-mpm-mutual-pair-merging-for-efficient-vision-transformers)  
    标签：评分：7.0/10、query:hwnas
-   evidence：流水线执行引擎实现持续GPU执行并最大化计算利用率
-7. [An Ultra-Low-Power Synthesizable Asynchronous AER Encoder for Neuromorphic Edge Devices](/202604/13/2604.05313v1-an-ultra-low-power-synthesizable-asynchronous-aer-encoder-for-neuromorphic-edge-devices)  
+   evidence：在现代加速器上实现高效的视觉Transformer加速
+7. [CodecFlow: Codec-Guided End-to-End Optimization for Streaming Video Analytics](/202604/14/2604.06036v2-codecflow-codec-guided-end-to-end-optimization-for-streaming-video-analytics)  
    标签：评分：7.0/10、query:hwnas
-   evidence：使用EDA工作流的类脑边缘设备硬件设计
-8. [DAT: Dual-Aware Adaptive Transmission for Efficient Multimodal LLM Inference in Edge-Cloud Systems](/202604/13/2604.05375v1-dat-dual-aware-adaptive-transmission-for-efficient-multimodal-llm-inference-in-edge-cloud-systems)  
+   evidence：针对流媒体视频分析的编解码器引导端到端优化
+8. [KD-MARL: Resource-Aware Knowledge Distillation in Multi-Agent Reinforcement Learning](/202604/14/2604.06691v1-kd-marl-resource-aware-knowledge-distillation-in-multi-agent-reinforcement-learning)  
    标签：评分：7.0/10、query:hwnas
-   evidence：通过大小模型级联在边云系统中实现高效的多模态大模型推理
-9. [SARES-DEIM: Sparse Mixture-of-Experts Meets DETR for Robust SAR Ship Detection](/202604/13/2604.04127v1-sares-deim-sparse-mixture-of-experts-meets-detr-for-robust-sar-ship-detection)  
+   evidence：边缘设备的资源感知执行
+9. [Hybrid Fourier Neural Operator for Surrogate Modeling of Laser Processing with a Quantum-Circuit Mixer](/202604/14/2604.04828v1-hybrid-fourier-neural-operator-for-surrogate-modeling-of-laser-processing-with-a-quantum-circuit-mixer)  
    标签：评分：6.0/10、query:hwnas
-   evidence：利用稀疏门控机制的领域感知SAR舰船检测框架
-10. [Training Transformers in Cosine Coefficient Space](/202604/13/2604.04440v1-training-transformers-in-cosine-coefficient-space)  
+   evidence：针对实时部署的紧凑型神经算子协同设计
+10. [HI-MoE: Hierarchical Instance-Conditioned Mixture-of-Experts for Object Detection](/202604/14/2604.04908v1-hi-moe-hierarchical-instance-conditioned-mixture-of-experts-for-object-detection)  
    标签：评分：6.0/10、query:hwnas
-   evidence：通过DCT域表示减少参数以实现高效Transformer
-11. [Architecture-aware $h$-to-$p$ optimisation: spectral/$hp$ element operators for mixed-element meshes](/202604/13/2604.04644v1-architecture-aware-h-to-p-optimisation-spectralhp-element-operators-for-mixed-element-meshes)  
+   evidence：利用MoE进行条件计算以实现高效目标检测
+11. [Neural Network Pruning via QUBO Optimization](/202604/14/2604.05856v1-neural-network-pruning-via-qubo-optimization)  
    标签：评分：6.0/10、query:hwnas
-   evidence：针对架构感知的算子优化以实现最佳性能
+   evidence：通过组合优化进行神经网络剪枝
 
 
 <div class="dpr-home-promo-card">
