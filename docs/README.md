@@ -6,73 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-15
-- 运行时间：2026-04-15 20:09:35 UTC
+- 最新运行日期：2026-04-16
+- 运行时间：2026-04-16 20:02:22 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日聚焦点云加速与编译器自动化，深度解析 L-PCN 与 CODO 等 17 篇软硬协同前沿成果。
-重点关注利用八叉树空间局部性的点云加速方案，以及实现全维度数据流自动优化的编译器技术。
-建议优先研读高分论文中的硬件加速思路，并关注 LLM 嵌入在 HLS 性能预测中的跨界应用。
-- 详情：[/202604/15/README](/202604/15/README)
+今日聚焦 17 篇前沿成果，深度解析 NPU 推理优化与 3D 渲染硬件加速。
+重点推荐 A-IO 架构对内存受限 NPU 的性能重塑，以及 3D 高斯泼溅实现 129FPS 全高清实时渲染的突破。
+建议关注光子计算与电光非线性技术在提升 Transformer 能效比上的跨界应用。
+- 详情：[/202604/16/README](/202604/16/README)
 
 ### 精读区论文标签
-1. [L-PCN: A Point Cloud Accelerator Exploiting Spatial Locality through Octree-based Islandization](/202604/15/2604.10716v2-l-pcn-a-point-cloud-accelerator-exploiting-spatial-locality-through-octree-based-islandization)  
+1. [A-IO: Adaptive Inference Orchestration for Memory-Bound NPUs](/202604/16/2604.09752v1-a-io-adaptive-inference-orchestration-for-memory-bound-npus)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对点云加速器的算法-硬件协同设计以减少运算量
-2. [CODO: An Automated Compiler for Comprehensive Dataflow Optimization](/202604/15/2604.12618v1-codo-an-automated-compiler-for-comprehensive-dataflow-optimization)  
+   evidence：NPU计算图编译与内存受限编排
+2. [A 129FPS Full HD Real-Time Accelerator for 3D Gaussian Splatting](/202604/16/2604.10223v1-a-129fps-full-hd-real-time-accelerator-for-3d-gaussian-splatting)  
    标签：评分：9.0/10、query:hwnas
-   evidence：用于FPGA数据流加速器的自动化编译器
-3. [Rethinking Satellite Image Restoration for Onboard AI: A Lightweight Learning-Based Approach](/202604/15/2604.12807v1-rethinking-satellite-image-restoration-for-onboard-ai-a-lightweight-learning-based-approach)  
+   evidence：针对3D高斯泼溅的硬件友好型压缩与加速器设计
+3. [Strix: Re-thinking NPU Reliability from a System Perspective](/202604/16/2604.10484v1-strix-re-thinking-npu-reliability-from-a-system-perspective)  
    标签：评分：9.0/10、query:hwnas
-   evidence：适用于卫星环境星上AI的轻量级学习方法
-4. [TCL: Enabling Fast and Efficient Cross-Hardware Tensor Program Optimization via Continual Learning](/202604/15/2604.12891v1-tcl-enabling-fast-and-efficient-cross-hardware-tensor-program-optimization-via-continual-learning)  
+   evidence：跨越微架构和指令集的完整NPU可靠性框架
+4. [Tensor Memory Engine: On-the-fly Data Reorganization for Ideal Locality](/202604/16/2604.13319v1-tensor-memory-engine-on-the-fly-data-reorganization-for-ideal-locality)  
    标签：评分：9.0/10、query:hwnas
-   evidence：跨多样硬件进行快速张量程序优化的可迁移编译框架
-5. [POS-ISP: Pipeline Optimization at the Sequence Level for Task-aware ISP](/202604/15/2604.06938v1-pos-isp-pipeline-optimization-at-the-sequence-level-for-task-aware-isp)  
+   evidence：用于数据重组和内存局部性的软硬件协同设计方法
+5. [Cross-Layer Co-Optimized LSTM Accelerator for Real-Time Gait Analysis](/202604/16/2604.13543v1-cross-layer-co-optimized-lstm-accelerator-for-real-time-gait-analysis)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：面向边缘计算的跨层协同优化LSTM加速器
+6. [Quantization Impact on the Accuracy and Communication Efficiency Trade-off in Federated Learning for Aerospace Predictive Maintenance](/202604/16/2604.08474v1-quantization-impact-on-the-accuracy-and-communication-efficiency-trade-off-in-federated-learning-for-aerospace-predictive-maintenance)  
    标签：评分：8.0/10、query:hwnas
-   evidence：与NAS相比，用于模块化ISP优化的序列级强化学习
-6. [HiFloat4 Format for Language Model Pre-training on Ascend NPUs](/202604/15/2604.08826v1-hifloat4-format-for-language-model-pre-training-on-ascend-npus)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：NPU上提高计算吞吐量和内存效率的低精度格式
+   evidence：量化对轻量级航空航天模型准确性与通信效率的影响
 
 ### 速读区论文标签
-1. [Pruning Extensions and Efficiency Trade-Offs for Sustainable Time Series Classification](/202604/15/2604.07953v1-pruning-extensions-and-efficiency-trade-offs-for-sustainable-time-series-classification)  
+1. [Integrated electro-optic attention nonlinearities for transformers](/202604/16/2604.09512v1-integrated-electro-optic-attention-nonlinearities-for-transformers)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过剪枝在模型和硬件之间进行效率权衡
-2. [Modality-Aware Zero-Shot Pruning and Sparse Attention for Efficient Multimodal Edge Inference](/202604/15/2604.08971v1-modality-aware-zero-shot-pruning-and-sparse-attention-for-efficient-multimodal-edge-inference)  
+   evidence：用于Softmax的电光硬件替代方案，以降低Transformer推理延迟
+2. [A-IO: Adaptive Inference Orchestration for Memory-Bound NPUs](/202604/16/2604.09752v2-a-io-adaptive-inference-orchestration-for-memory-bound-npus)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对功耗预算下高效多模态边缘推理的零样本剪枝
-3. [DiffHLS: Differential Learning for High-Level Synthesis QoR Prediction with GNNs and LLM Code Embeddings](/202604/15/2604.09240v1-diffhls-differential-learning-for-high-level-synthesis-qor-prediction-with-gnns-and-llm-code-embeddings)  
+   evidence：解决 NPU 上的内核同步和计算图编译问题
+3. [Sustainable Transformer Neural Network Acceleration with Stochastic Photonic Computing](/202604/16/2604.09759v1-sustainable-transformer-neural-network-acceleration-with-stochastic-photonic-computing)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于软硬件协同设计的HLS QoR预测
-4. [UHD Low-Light Image Enhancement via Real-Time Enhancement Methods with Clifford Information Fusion](/202604/15/2604.09321v1-uhd-low-light-image-enhancement-via-real-time-enhancement-methods-with-clifford-information-fusion)  
+   evidence：用于Transformer推理优化的硅光子加速器
+4. [Aging Aware Adaptive Voltage Scaling for Reliable and Efficient AI Accelerators](/202604/16/2604.09994v1-aging-aware-adaptive-voltage-scaling-for-reliable-and-efficient-ai-accelerators)  
    标签：评分：8.0/10、query:hwnas
-   evidence：旨在克服边缘设备存储墙的实时增强网络
-5. [Top-K Retrieval with Fixed-Size Linear-Attention Completion: Backbone- and KV-Format-Preserving Attention for KV-Cache Read Reduction](/202604/15/2604.05438v1-top-k-retrieval-with-fixed-size-linear-attention-completion-backbone--and-kv-format-preserving-attention-for-kv-cache-read-reduction)  
+   evidence：针对高效AI加速器的老化感知自适应电压调节
+5. [Extraction of linearized models from pre-trained networks via knowledge distillation](/202604/16/2604.06732v1-extraction-of-linearized-models-from-pre-trained-networks-via-knowledge-distillation)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对内存带宽受限解码的KV缓存读取减少技术
-6. [Efficient Inference for Large Vision-Language Models: Bottlenecks, Techniques, and Prospects](/202604/15/2604.05546v2-efficient-inference-for-large-vision-language-models-bottlenecks-techniques-and-prospects)  
+   evidence：针对光子硬件线性操作定制的架构设计
+6. [StructKV: Preserving the Structural Skeleton for Scalable Long-Context Inference](/202604/16/2604.06746v1-structkv-preserving-the-structural-skeleton-for-scalable-long-context-inference)  
    标签：评分：7.0/10、query:hwnas
-   evidence：解决内存带宽和计算瓶颈的效率技术分类
-7. [Efficient Quantization of Mixture-of-Experts with Theoretical Generalization Guarantees](/202604/15/2604.06515v1-efficient-quantization-of-mixture-of-experts-with-theoretical-generalization-guarantees)  
+   evidence：KV缓存压缩以解决内存容量和带宽瓶颈
+7. [Flux Attention: Context-Aware Hybrid Attention for Efficient LLMs Inference](/202604/16/2604.07394v1-flux-attention-context-aware-hybrid-attention-for-efficient-llms-inference)  
    标签：评分：7.0/10、query:hwnas
-   evidence：基于理论的混合精度策略，用于内存高效的MoE推理
-8. [AudioKV: KV Cache Eviction in Efficient Large Audio Language Models](/202604/15/2604.06694v1-audiokv-kv-cache-eviction-in-efficient-large-audio-language-models)  
+   evidence：上下文感知混合注意力以优化硬件加速
+8. [MonoUNet: A Robust Tiny Neural Network for Automated Knee Cartilage Segmentation on Point-of-Care Ultrasound Devices](/202604/16/2604.07780v1-monounet-a-robust-tiny-neural-network-for-automated-knee-cartilage-segmentation-on-point-of-care-ultrasound-devices)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对高效音频语言模型的硬件友好型KV缓存剔除
-9. [GTaP: A GPU-Resident Fork-Join Task-Parallel Runtime with a Pragma-Based Interface](/202604/15/2604.05982v1-gtap-a-gpu-resident-fork-join-task-parallel-runtime-with-a-pragma-based-interface)  
+   evidence：针对手持便携式超声设备的超紧凑U-Net设计
+9. [SL-FAC: A Communication-Efficient Split Learning Framework with Frequency-Aware Compression](/202604/16/2604.07316v1-sl-fac-a-communication-efficient-split-learning-framework-with-frequency-aware-compression)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于任务并行工作负载的GPU驻留运行时，以利用硬件并行性
-10. [Distributed Interpretability and Control for Large Language Models](/202604/15/2604.06483v1-distributed-interpretability-and-control-for-large-language-models)  
+   evidence：针对资源受限边缘设备的高效通信拆分学习
+10. [Networking-Aware Energy Efficiency in Agentic AI Inference: A Survey](/202604/16/2604.07857v1-networking-aware-energy-efficiency-in-agentic-ai-inference-a-survey)  
    标签：评分：6.0/10、query:hwnas
-   evidence：在多GPU硬件上减少内存并提高吞吐量的设计选择
-11. [Efficient Learned Data Compression via Dual-Stream Feature Decoupling](/202604/15/2604.07239v1-efficient-learned-data-compression-via-dual-stream-feature-decoupling)  
+   evidence：边缘计算与通信中的能效综述
+11. [ParkSense: Where Should a Delivery Driver Park? Leveraging Idle AV Compute and Vision-Language Models](/202604/16/2604.07912v1-parksense-where-should-a-delivery-driver-park-leveraging-idle-av-compute-and-vision-language-models)  
    标签：评分：6.0/10、query:hwnas
-   evidence：采用浅层并行流替代深层串行堆叠以提升系统效率
+   evidence：复用汽车硬件上的空闲计算资源
 
 
 <div class="dpr-home-promo-card">
