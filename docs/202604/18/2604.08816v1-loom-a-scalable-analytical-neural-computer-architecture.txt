@@ -1,0 +1,432 @@
+Title: Loom: A Scalable Analytical Neural Computer Architecture
+
+URL Source: https://arxiv.org/pdf/2604.08816v1
+
+Published Time: Mon, 13 Apr 2026 00:20:53 GMT
+
+Number of Pages: 17
+
+Markdown Content:
+# Loom: A Scalable Analytical Neural Computer Architecture 
+
+## Mehmet Kerem Turkcan Columbia University 
+
+mkt2126@columbia.edu 
+
+Abstract 
+
+We present Loom, a computer architecture that executes programs compiled from C inside a looped transformer whose weights are derived analytically. The architecture implements a 22-opcode instruction set in 8 transformer layers. Each forward pass executes one instruction; the model is applied iteratively until the program counter reaches zero. The full machine state resides in a single tensor X ∈ Rd×n of fixed size, and every step has fixed cost for fixed d
+
+and n, independent of program length or execution history. The default configuration uses 
+
+d = 155 and n = 1024, yielding 4.7 million parameters and 928 instruction slots. A compact configuration at d = 146 and n = 512 suffices for a 9 ×9 Sudoku solver (284 instructions). The weights are program-independent: programs live in the state tensor, and the same fixed-weight model executes any compiled program. We make Loom source code publicly available at 
+
+https://github.com/mkturkcan/Loom .
+
+# 1 Introduction 
+
+Giannou et al. [3] showed that a looped transformer with analytically constructed weights can execute the SUBLEQ instruction, a subtract-and-branch-if-nonpositive operation that is Turing complete on its own. Their construction uses 10 transformer layers for this single instruction. We extend this result from 1 opcode in 10 layers to 22 opcodes in 8 layers. The core technique is opcode-as-operand-routing : all 22 operations are mapped to operand preparation for a shared subtract core, so the architecture needs only one arithmetic layer regardless of how many opcodes it supports. A single-layer direct subtraction method replaces the classical three-layer approach. Branch-flag computation and program counter (PC) increment are merged into one layer. Scratch-pad correction is folded into the indirect-access layer. Together, these changes reduce the layer count while expanding the instruction set. A key instruction set architecture (ISA) optimization is the STORE instruction, which provides indirect memory write and complements the existing LOAD for indirect read. Without STORE, variable-index array writes require an O(m) dispatch tree with one branch per array element. Adding STORE reduces the 9 ×9 Sudoku solver from 1,085 to 284 instructions, enabling it to fit in the compact 146 × 512 configuration instead of the larger 164 × 2048. A C compiler translates a subset of C to the ISA. The compiler is implemented in both Python and JavaScript; the JavaScript version enables in-browser compilation and execution with no server. We demonstrate the architecture on programs including a sorting visualizer, a playable Snake game (210 instructions), a raycasting game (531 instructions on 155 ×1024), and a 9 ×9 Sudoku solver (284 instructions on 146 × 512). Beyond standalone execution, a Loom-style architecture could embed deterministic algorithmic logic such as state machines, decision trees and constraint checks directly into the attention layers of a perception model, guaranteeing correct execution of safety-critical rules without relying on learned approximations. 1
+
+> arXiv:2604.08816v1 [cs.LG] 9 Apr 2026
+
+Contributions. 
+
+1. A 22-opcode ISA (21 extended opcodes plus SUBLEQ) realized in 8 analytically weighted transformer layers. 2. Opcode-as-operand-routing: all operations reduce to operand preparation for a shared sub-tract core, avoiding per-opcode execution layers. 3. Single-layer direct subtraction via a 6-threshold-per-bit rectified linear unit (ReLU) pattern with built-in carry propagation. 4. Indirect memory write (STORE) via L2 address rewriting: the feedforward network (FFN) overwrites the write-address field in the scratchpad with a resolved pointer, redirecting L5’s write attention to the dereferenced target. This reduces compiled code size by up to 75% for programs with variable-index array writes. 5. A C compiler targeting the ISA, with both offline and in-browser execution paths. 6. Scale-independent design: the same 8-layer architecture, compiler, and ISA work at 146 ×512, 155 × 1024, and 164 × 2048. Programs are recompiled for each configuration but the source code is unchanged. 7. Field-programmable gate array (FPGA) synthesis on a Xilinx Alveo U200 with argmax at-tention (no n × n matrix). 
+
+# 2 Related Work 
+
+The programmable-computer framework. Giannou et al. [3] showed that a fixed-depth transformer can execute SUBLEQ with analytically constructed weights. Subsequent work has extended this framework in several directions. Liang et al. [10] show that a 23-layer ReLU-MLP can also serve as a programmable computer without attention. Back de Luca and Fountoulakis [1] extend the original construction with a dual-memory SUBLEQ variant for graph algorithms. Huang et al. [5] generalize looped transformer algorithmic reasoning to hypergraphs. Xu and Sato [17] establish formal approximation rates for looped transformers and introduce timestep encoding. All of these remain single-instruction. Our work adds 21 extended opcodes (22 total with SUBLEQ) and reduces the layer count. 
+
+Exact neural computation. Back de Luca et al. [2] prove that two-layer networks can learn to execute binary addition, multiplication, and Subtract-and-Branch-if-Negative exactly, using the NTK framework. Saldyt and Kambhampati [12] augment LLaMA3 with memory, registers, and basic operations, compiling algorithms into differentiable libraries. Tzamos [15] implements a WebAssembly interpreter inside a 7-layer autoregressive transformer with d = 36 and 18 two-dimensional attention heads. Programs are supplied as input tokens and executed as a growing trace at O(log t) per step via HullKVCache. Their approach is architecturally distinct: execution logic lives in the weights, programs are input tokens, and state grows with execution time. In Loom, the weights are program-independent, programs live in the state tensor, and state is fixed. 2Analytical weight construction. Tracr [11] compiles RASP programs [16] to transformer weights for interpretability research. ALTA [14] extends RASP with loops and compiles to Univer-sal Transformers. Zhai et al. [18] show that trained transformers can perform compilation. Zhang et al. [19] extract executable programs from trained transformer weights, working in the reverse direction. 
+
+Transformer Turing completeness. Schuurmans et al. [13] show that autoregressive decod-ing realizes universal computation via Lag systems. Li and Wang prove Turing completeness for constant-parameter transformers [8] and construct efficient TM simulations with sparse atten-tion [9]. Jiang et al. [6] settle the question for softmax attention. These results establish theoretical universality; our work demonstrates a concrete, executable architecture. 
+
+Program execution and simulation. Hou et al. [4] construct RASP programs that simulate arbitrary Turing machines by decomposing algorithms into TM steps. La Malfa et al. [7] study LLMs simulating code execution as a reasoning proxy. 
+
+# 3 Architecture 
+
+## 3.1 State Matrix 
+
+The computer operates on a state matrix X ∈ Rd×n. The mutable data entries (memory values, PC bits, scratchpad registers) are bipolar, taking values in {− 1, +1 }. Two metadata regions use fixed non-bipolar values: the indicator row is +1 in scratchpad columns and 0 elsewhere, and column 0’s position encoding is all zeros; see Section 4. L8’s error correction operates only on the persistent bipolar state (memory and PC) and leaves these fixed entries unchanged. Each column represents a location: columns 0 through s − 1 form a scratchpad for internal routing ( s = 32 in all reported configurations), columns s through s + m − 1 hold data memory, and columns s + m through n − 1hold instructions. The rows are partitioned into functional regions described in Section 4. One forward pass through the 8 layers executes one instruction. The program terminates when the program counter reaches column 0. 
+
+## 3.2 Attention Mechanism 
+
+Each layer consists of multi-head attention followed by a feedforward network, both with residual connections: 
+
+A = X +
+
+> H
+
+X
+
+> h=1
+
+VhX · softmax 
+
+
+
+λ · X⊤K⊤ 
+
+> h
+
+QhX
+
+
+
+(1) 
+
+Y = A + W2 · ReLU( W1A + b1) + b2 (2) where Qh, K h ∈ RrQ×d are the query and key projection matrices, Vh ∈ Rd×d is the value matrix, 
+
+W1 ∈ RrFFN ×d, W2 ∈ Rd×rFFN , and b1 ∈ RrFFN ×n, b2 ∈ Rd×n are biases. All weight matrices are set analytically; none are learned. The softmax is applied column-wise, the standard convention: each column of the attention matrix sums to one, so each target column independently selects which source columns to read from. Two aspects differ from a typical language-model transformer. First, there is no causal mask: every column can attend to every other column, enabling the program counter in the scratchpad to 3attend to any instruction column. Second, the softmax temperature λ = 10 sharpens the attention distribution, approximating a hard argmax that selects the single best-matching column. All attention heads in Loom use symmetric Q = K, so the score between columns i and j is the inner product ( QX i)⊤ (QX j ). This symmetry is deliberate: it allows a column to match against another by extracting the same features from both, such as matching a program counter against a position encoding. Four of the eight layers have Qh = Kh = Vh = 0 for all heads and perform pure FFN computa-tion without attention. These are L4, L6, L7, and L8. 
+
+## 3.3 Bipolar Encoding 
+
+All values use bipolar encoding: binary 0 maps to −1 and binary 1 maps to +1. An N -bit signed integer v with two’s complement representation b0b1 · · · bN −1 is stored as ˆv = (2 b0 − 1, . . . , 2bN −1 − 1) ∈ {− 1, +1 }N ,
+
+where b0 is the most significant bit. Addresses are encoded identically using ℓ = log 2 n bits. Bipolar encoding is essential for the ReLU-based gating throughout the architecture. A gate that must fire when bit bi = 1 simply reads the bipolar value ˆbi with a positive weight: ReLU 
+
+ˆbi − ϵ
+
+
+
+is nonzero only when ˆbi = +1 .
+
+Multi-bit pattern matching sums the bipolar values with a threshold equal to the pattern length minus a small offset. 
+
+# 4 State Layout 
+
+The d rows of the state matrix are partitioned as follows. Let ℓ = log 2 n and N denote the integer precision in bits. Region Rows Size Commands 0 to 3 ℓ − 1 3ℓ
+
+Memory 3ℓ to 3 ℓ + N − 1 N
+
+Scratchpad 3ℓ + N to 6 ℓ + 3 N − 1 3ℓ + 2 N
+
+Program counter 6ℓ + 3 N to 7 ℓ + 3 N − 1 ℓ
+
+Position encoding 7ℓ + 3 N to 8 ℓ + 3 N − 1 ℓ
+
+Buffer 8ℓ + 3 N to 8 ℓ + 7 N + ℓ − 1 4N + ℓ
+
+Address tags 8ℓ + 7 N + ℓ to 9 ℓ + 8 N − 1 N
+
+Indicator 9ℓ + 8 N 1Table 1: Row layout of the state matrix. d = 9 ℓ + 8 N + 1. For ℓ = 10, N = 8: d = 155. The commands region stores the three operand addresses a, b, c of the current instruction, each encoded in ℓ bipolar bits. The scratchpad contains two N -bit ALU operand registers, scr sub 
+
+and scr min , followed by the decoded operand addresses addr a , addr b , addr c , each of width ℓ.The buffer holds three fetched memory operands buf a , buf b , buf c of width N each, temporary storage find temp of width N for the FIND instruction, and load temp of width ℓ for the LOAD instruction. FIND and LOAD require separate temporary buffers because both L3 attention heads 4fire on every step; shared storage would cause cross-head interference. The address tags store each memory column’s own index in N bipolar bits, enabling content-addressable lookup by the FIND instruction. The indicator row equals +1 in scratchpad columns 0 , . . . , s − 1 and 0 elsewhere, gating FFN rows that must operate only on the scratchpad. The position encoding rows store the bipolar representation of each column’s index, serving as the target for attention-based address matching. Column 0 has its position encoding set to all zeros rather than the bipolar encoding of zero. This prevents L1’s symmetric attention from matching column 0’s position against the program counter when the PC points elsewhere, since the all-zero vector contributes no correlation in the Q = K dot product. 
+
+# 5 Pipeline 
+
+The eight transformer layers form the following pipeline. Layer Stage Function Attn. heads L1 Fetch Read instruction at PC 1L2 Decode + Read Read operands, opcode-gated routing 3L3 Indirect access LOAD/FIND, scratchpad snap 2L4 Execute Direct borrow-chain subtraction 0L5 Write Store result to memory 2L6 Branch + PC+1 Condition flag, PC increment 0L7 Branch select Choose branch target or PC+1 0L8 Error correction Snap persistent state (memory, PC) to ±1 0Table 2: The 8-layer pipeline. Layers 4, 6, 7, and 8 have Q = K = V = 0 and use FFN-only computation. 
+
+## 5.1 L1: Instruction Fetch 
+
+L1 reads the instruction at the current program counter. Its single attention head uses symmetric 
+
+Q = K that extract both the program counter and the position encoding: 
+
+Q[i, idx pc + i] = 1 , Q[i, idx pos + i] = 1 for i = 0 , . . . , ℓ − 1. For the scratchpad column, QX 0 yields the PC bits plus the all-zero position encoding of column 0, giving just the PC. For an instruction column j, QX j yields the zero PC plus the position encoding of j. The score ( QX 0)⊤ (QX j ) is thus PC · pos j , maximized when column j’s position matches the PC. The value matrix copies the instruction encoding from the matched column into the buffer. The FFN transfers these buffer values into the scratchpad command registers using sign-detection gates. Each command bit gets two ReLU rows that detect whether the buffer value is positive or negative and write ±1 to the corresponding scratchpad position. The buffer values arrive scaled by approximately 0 .5 from attention normalization, so the W1 weights use a factor of 4 .0 and the W2
+
+weights use ±0.5. The FFN also clears stale values. Total FFN size: 6 × 3ℓ rows. 55.2 L2: Operand Read and Opcode Decode 
+
+Three attention heads read col[ a], col[ b], and col[ c] into buf a , buf b , and buf c respectively. Each head uses symmetric Q = K matching the corresponding operand address against position encod-ings. The value matrix of Head 1 additionally copies the memory value into scr sub , and the value matrix of Head 2 additionally copies into scr min , pre-loading default operand values that the FFN then corrects per opcode. The FFN performs opcode-gated routing. Two execution modes exist: 
+
+SUBLEQ mode. When a ≥ s, i.e. a ≥ 32 in the default configuration, the instruction is a classical SUBLEQ. Mode detection examines the most significant bit of the a address that dis-tinguishes the scratchpad range from memory. In bipolar encoding, SUBLEQ mode fires when 
+
+addr a [ℓ − 6] = +1, i.e. the bit representing value 32 is set. Each gating row reads this single bit with weight 1 .0 and bias −0.5, so the ReLU fires only when the bit is +1. The FFN copies buf a 
+
+into scr sub using 4 N rows gated on this condition. A separate block of 4 N rows copies buf b into 
+
+scr min ; this copy is ungated and runs in both modes. 
+
+Extended mode. When a < s , i.e. a < 32, the value of a encodes one of 21 extended opcodes (HALT through STORE, numbered 0 to 20). Together with SUBLEQ, this gives 22 distinct opera-tions. Each opcode k has dedicated FFN rows that fire only when the ℓ-bit bipolar address pattern matches. A gating row for opcode k sets its W1 weights to the bipolar encoding of k on the address dimensions with bias −ℓ + 0 .5, causing the ReLU to fire when all ℓ bits match. After L2, the scratchpad contains two N -bit operands whose subtraction in L4 produces the correct result for any of the 22 opcodes. The FFN allocates 80 N rows. For N = 8, this is 640 rows. 
+
+## 5.3 L3: Indirect Access and Scratchpad Correction 
+
+Two attention heads implement indirect memory access. 
+
+Head 1: LOAD. L2 copies the pointer value col[ c] into load temp , converting the N -bit memory value to an ℓ-bit column address. Head 1 uses symmetric Q = K on load temp and pos enc ,matching the pointer against column positions. The value matrix copies the matched column’s memory value into scr min with weight 2 .0, overriding the default value placed there by L2. 
+
+Head 2: FIND. L2 copies the search value col[ c] into find temp . Head 2 uses symmetric Q =
+
+K on find temp and the memory rows, matching against memory contents. The value matrix copies the matched column’s address tag into scr min , yielding the index of the matching entry. The compiler assumes FIND targets arrays with unique values at runtime; it does not verify this property. Duplicate matches produce a weighted mixture of tags with no defined semantics; see Section 7. 
+
+Scratchpad snap. The FFN clears temporary buffers and snaps scr sub and scr min to exact bipolar values using six ReLU thresholds per bit. The 3-head attention routing in L2 produces out-puts that deviate further from ±1 than the single-instruction case, making this correction necessary for numerical stability before the ALU stage. 65.4 L4: Direct Subtraction 
+
+L4 has no attention. It computes scr min ← scr min − scr sub using a single-layer borrow-chain subtraction. This is the sole arithmetic layer; all 22 opcodes share it. For each output bit position i (0 ≤ i ≤ N − 1, most significant bit (MSB) first), define the weighted partial difference 
+
+Di = 
+
+> N−1
+
+X
+
+> j=i
+
+ ˆaj − ˆbj
+
+ · 2N −2−j
+
+where ˆ aj , ˆbj ∈ {− 1, +1 } are the bipolar values of scr min [j] and scr sub [j]. The weight 2 N −2−j
+
+is half the positional value of bit j; the halving absorbs the bipolar scale factor so that the sum ranges over integers when inputs are exact. Six ReLU units, arranged in three pairs with alternating input sign, extract the result bit. Let 
+
+P = 2 N −1−i. The six pre-activations are: 
+
+z1 = Di + P + 1 , z2 = Di + P, z3 = −Di, z4 = −Di − 1,z5 = Di − P + 1 , z6 = Di − P. 
+
+The result bit is 
+
+ri = 2 ReLU( z1) − ReLU( z2) + ReLU( z3) − ReLU( z4) + ReLU( z5) − ReLU( z6) − 3.
+
+Proposition 1. For all N -bit two’s complement inputs, ri ∈ {− 1, +1 } and equals the bipolar encoding of bit i of a − b.Proof. For exact bipolar inputs, Di is an integer in [ −(2 P − 1) , 2P − 1]. We use the identity ReLU( t + 1) − ReLU( t) = 1[t ≥ 0] for integer t. Applying it to the three ReLU pairs: ReLU( z1) − ReLU( z2) = 1[Di ≥ − P ],
+
+ReLU( z3) − ReLU( z4) = 1[Di ≤ − 1] ,
+
+ReLU( z5) − ReLU( z6) = 1[Di ≥ P ].
+
+Therefore 
+
+ri = 2  1[Di ≥ − P ] + 1[Di ≤ − 1] + 1[Di ≥ P ] − 3,
+
+which yields four intervals over the range of Di:
+
+Di ∈ [−(2 P − 1) , −P − 1]: ri = 2(0 + 1 + 0) − 3 = −1, 
+
+Di ∈ [−P, −1]: ri = 2(1 + 1 + 0) − 3 = +1, 
+
+Di ∈ [0 , P − 1]: ri = 2(1 + 0 + 0) − 3 = −1, 
+
+Di ∈ [P, 2P − 1]: ri = 2(1 + 0 + 1) − 3 = +1. These four intervals partition the full range of Di, and the resulting ri ∈ {− 1, +1 } matches the bipolar encoding of bit i of a − b in two’s complement. As a sanity check: when a = b, Di = 0, which falls in the third interval, giving ri = −1, the bipolar encoding of bit 0. This is correct for 
+
+a − b = 0. Correctness has also been verified exhaustively for N = 8 across all 2 16 input pairs. The classical approach requires three layers: one to flip the subtrahend bits, one to increment for two’s complement, and one to add. The 6-threshold pattern folds all three operations into a single layer by observing that the borrow-chain structure of subtraction maps directly to a piecewise-linear function of the partial bit sums, which ReLU can represent exactly with six thresholds per bit. Total FFN: 6 N rows for the borrow chain plus 4 N rows for clearing the operand registers, giving 10 N rows. 75.5 L5: Memory Write 
+
+L5 uses two attention heads. Head 1 matches the b-operand address against position encodings and writes scr min to the matched memory column. This head handles all opcodes. Head 2 matches the c-operand address and writes buf c to the matched column. For non-SWAP opcodes, buf c is cleared at memory columns by indicator-gated rows in L2, so the Head 2 write reduces to an identity. For SWAP, L2 loads buf b into buf c , so Head 2 writes col[ b] to position c
+
+while Head 1 simultaneously writes col[ c] to position b.FFN: 10 N rows. 
+
+## 5.6 L6–L7: Conditional Branching 
+
+Both layers have no attention. 
+
+L6. Two independent FFN computations share a single layer. The first computes a branch flag from the subtraction result and the opcode. The second computes PC+1 using the same 6-threshold pattern as L4. These computations read disjoint state and can share a layer. The branch flag accumulates contributions from multiple row groups: the sign bit of the sub-traction result, a zero check over all result bits, a SUBLEQ mode gate, unconditional jump rows for JMP and HALT, conditional jump rows for JZ and JNZ, a CMP zero-correction row, and per-opcode suppress rows for non-branching opcodes. 
+
+L7. Selects between the branch target c and PC + 1 based on the sign of the flag. Positive flag selects c; non-positive selects PC + 1. 
+
+## 5.7 L8: Error Correction 
+
+L8 has no attention. The FFN applies error correction to the persistent bipolar state (memory and PC), clamping values back to {− 1, +1 } using a 6-threshold snap pattern with deadzone ϵ = 0 .1. Any value within [ ±1 − ϵ, ±1 + ϵ] is snapped to the nearest bipolar value. The indicator row and column 0’s zero position encoding are not modified by L8, since their rows are excluded from the correction: PC rows are gated by the indicator, and memory rows operate only at the correct columns. This corrects accumulated floating-point drift from attention normalization and FFN rounding across the preceding seven layers. 
+
+# 6 Layer Reduction from the Baseline 
+
+Giannou et al. [3] use 10 layers for SUBLEQ: 1 for fetch, 2 for operand read, 3 for subtraction, 1 for write, and 3 for branching. Three techniques reduce this to 8 layers while expanding to 22 opcodes: 1. Direct borrow-chain subtraction. The three-layer pipeline of bit-flip, increment, and addition is replaced by a single-layer 6-threshold pattern. Three ReLU pairs per bit, with alternating input sign and thresholds at ±P and 0 / − 1 (Section 5.4), jointly implement complement and carry propagation. This saves 2 layers. 2. Merged branch and PC increment. The branch condition and PC + 1 computation read disjoint state and share one FFN. This saves 1 layer. 83. Folded scratchpad correction. The snap-to-bipolar correction, originally a separate layer, is merged into L3’s FFN after LOAD/FIND attention. This saves 1 layer. 
+
+# 7 Instruction Set 
+
+Each instruction occupies one column and consists of three ℓ-bit addresses a, b, c . When a ≥ s, the instruction is SUBLEQ. When a < s , the value of a selects one of 21 extended opcodes (numbered 0 through 20). Together with SUBLEQ, this gives 22 distinct operations. In the default configuration with s = 32, SUBLEQ mode is detected by a single bipolar bit: addr a [ℓ − 6] = +1, the bit representing value 32. 
+
+Address convention. Two address spaces coexist. Instruction operands a, b, c and the PC are 
+
+absolute column indices in {0, . . . , n − 1}. Memory slots are identified by logical indices x ∈{0, . . . , m − 1}, occupying column s + x. We write col[ u] := N -bit contents of absolute column u, M [x] := col[ s + x].
+
+Instruction operands address columns directly: col[ b], col[ c]. LOAD, STORE, and FIND consume or produce logical memory indices; the + s translation to absolute column addresses is performed by L2’s FFN (for LOAD’s load temp and STORE’s addr b rewrite). The compiler emits absolute addresses for a given ( s, m, n ). Indirect pointers consumed by LOAD, STORE, and FIND are interpreted as raw unsigned N -bit memory indices, even though arithmetic values use signed two’s-complement semantics. With N = 8, this permits m up to 255. 
+
+## 7.1 SUBLEQ: Subtract and Branch if Nonpositive 
+
+Semantics. col[ b] ← col[ b] − col[ a]; if col[ b] ≤ 0 then PC ← c, else PC ← PC + 1. 
+
+L2 routing. scr sub = buf a , scr min = buf b . Uses 4 N gated FFN rows. The L6 branch flag naturally produces the SUBLEQ branch condition. 
+
+## 7.2 HALT 
+
+Semantics. PC ← 0. 
+
+L2 routing. scr sub = 0; 1 row. L6 sets an unconditional branch flag, and L7 selects c = 0. 
+
+## 7.3 MOV: Move 
+
+Semantics. col[ b] ← col[ c]. 
+
+L2 routing. scr sub = 0, scr min = buf c . Corrects the default buf b to buf c using 2 N
+
+per-bit correction rows plus 1 row to zero the subtrahend. Total: 2 N + 1 rows. 
+
+## 7.4 INC and DEC 
+
+Semantics. col[ b] ← col[ b] ± 1. 
+
+L2 routing. scr min retains buf b . scr sub is set to the bipolar encoding of −1 for INC or +1 for DEC. L4 computes col[ b] − (−1) = col[ b] + 1 or col[ b] − 1. Each: 1 FFN row. 97.5 ADD 
+
+Semantics. col[ b] ← col[ b] + col[ c]. 
+
+L2 routing. scr min = buf b , scr sub = −buf c . L4 computes col[ b] − (−col[ c]) = col[ b] + col[ c]. The two’s complement negation of buf c requires 2 N rows for the one’s complement and 2N rows for the carry chain. Total: 4 N rows. 
+
+## 7.6 SUB 
+
+Semantics. col[ b] ← col[ b] − col[ c]. 
+
+L2 routing. scr sub = buf c ; 2 N rows. 
+
+## 7.7 SHL and SHR 
+
+Semantics. col[ b] ← col[ b] ≪ 1 and col[ b] ← col[ b] ≫ 1 respectively. SHR is arithmetic and preserves the sign bit. 
+
+L2 routing. scr sub = 0. The minuend is corrected from buf b to the shifted value by per-bit delta rows. SHL: 2 N rows. SHR: 2 N − 1 rows. 
+
+## 7.8 AND, OR, XOR 
+
+Semantics. col[ b] ← col[ b] ⊙ col[ c]. 
+
+L2 routing. All three set scr sub = 0 and correct scr min from buf b to the bitwise result. L4 with scr sub = 0 passes scr min through unchanged. In bipolar encoding, a ∧ b = +1 iff both are +1, so AND corrects when buf b = +1 and 
+
+buf c = −1, requiring N rows. OR corrects when buf b = −1 and buf c = +1, also N rows. XOR requires corrections in both directions: 2 N rows. Each opcode adds 1 row to zero scr sub .
+
+## 7.9 JMP, JZ, JNZ, CMP 
+
+Semantics. JMP: PC ← c. JZ: if col[ b] = 0 then PC ← c. JNZ: if col[ b]̸ = 0 then PC ← c. CMP: if col[ b] < 0 then PC ← c.
+
+L2 routing. All set scr sub = 0; 1 row each. Branch logic is entirely in L6. JNZ uses a weight of 10 .0 on the opcode gate to dominate the zero-check contribution. CMP adds a zero-correction row that converts branch-if-nonpositive to branch-if-negative. 
+
+## 7.10 LOAD: Indirect Read 
+
+Semantics. col[ b] ← M [col[ c]]. 
+
+Precondition. col[ c] must be a valid memory index in {0, . . . , m − 1}. Out-of-range pointers cause the attention to match an unintended column, producing undefined results. 
+
+L2 routing. scr sub = 0; the FFN converts the pointer value buf c to the ℓ-bit position encoding of the absolute column s + col[ c] and writes it into load temp . L3 Head 1 then matches 
+
+load temp against column position encodings and copies the dereferenced value into scr min .
+
+## 7.11 FIND: Content-Addressable Search 
+
+Semantics. col[ b] ← i where M [i] = col[ c] and 0 ≤ i < m .
+
+Precondition. The search value col[ c] must occur exactly once among memory slots M [0] through M [m − 1]. If no exact match exists, the attention selects the nearest bipolar match or a 10 weighted mixture of near matches, producing a tag with no defined semantics. If multiple exact matches exist, the result is the weighted average of their address tags, not a valid index. The current compiler assumes FIND targets arrays whose values are unique at runtime; it does not verify this property. 
+
+L2 routing. scr sub = 0; buf c is copied into find temp . L3 Head 2 matches find temp against memory contents and copies the matched column’s address tag into scr min .
+
+## 7.12 SWAP 
+
+Semantics. Atomically exchanges col[ b] and col[ c]. 
+
+L2 routing. Three operations: zero scr sub , correct scr min from buf b to buf c , and copy 
+
+buf b into buf c for the L5 second write head. Total: 4 N + 1 rows. L5 Head 1 writes col[ c] to position b; Head 2 simultaneously writes col[ b] to position c.
+
+## 7.13 CMOV: Conditional Move 
+
+Semantics. If col[ b] < 0 then col[ b] ← col[ c]. 
+
+L2 routing. scr sub = 0. Correction from buf b to buf c is gated on buf b [0] = +1, which indicates a negative value since bit 0 is the MSB. The MSB serves as both the sign gate and a destination bit, so the W1 weight for bit 0 is 4 .0 instead of 2 .0. Total: 2 N rows. 
+
+## 7.14 MULACC: Multiply-Accumulate Step 
+
+Semantics. col[ b] ← (col[ b] ≪ 1) + 
+
+(
+
+col[ c] if MSB(col[ b]) = 1 0 otherwise One step of the shift-and-add multiplication algorithm. Applying MULACC N times with col[ b] initialized to the multiplier and col[ c] holding the multiplicand computes the product for non-negative multipliers. 
+
+L2 routing. Combines the SHL and ADD patterns with conditional gating on the sign bit 
+
+buf b [0]: 1 row to clear scr sub , 2 N −1 rows for the SHL correction, and 3 N rows for the conditional negation of buf c into scr sub . Total: 5 N rows. For signed operands, the compiler emits a wrapper that computes XOR( a, b ) for the sign, takes absolute values, multiplies, and conditionally negates. The mul builtin emits 22 instructions and executes in 24 steps for N = 8. 
+
+## 7.15 STORE: Indirect Memory Write 
+
+STORE( b, c ): M [col[ c]] ← col[ b]. The instruction complements LOAD, which provides indirect read, with an indirect write. 
+
+Precondition. col[ c] must be a valid memory index in {0, . . . , m − 1}. Out-of-range pointers redirect L5’s write attention to an unintended column. The implementation reuses L5’s existing write-attention mechanism. The key insight is that L5 Head 1 writes to the column addressed by addr b in the scratchpad. By overwriting addr b with the position encoding of the dereferenced pointer address during L2’s FFN, L5 writes to M [col[ c]] instead of col[ b]. The L2 FFN rows for STORE: 1. Set scr sub = 0, ensuring a pass-through in L4: 1 row. 11 2. Clear old addr b : detect and subtract each bit’s current value, gated by STORE opcode and indicator. 2 ℓ rows. 3. Write new addr b : convert the raw unsigned pointer col[ c] from buf c to the ℓ-bit position encoding of the absolute memory column s + col[ c]. The implementation uses a fixed-width constant-add network whose exact row count depends on the bit overlap between the N -bit pointer and the ℓ-bit column address for a given s.The always-copy mechanism sets scr min = col[ b], the value to write, so no additional rows are needed for the source operand. L3 is not involved; the pointer resolution happens entirely via L2’s address rewriting. L4 passes through: scr min − 0 = scr min . L5 writes the value to the dereferenced address. Without STORE, the compiler must generate an O(m) dispatch tree for each variable-index array write, one branch per array element. For an 81-element array (as in Sudoku), each write costs 
+
+∼400 instructions. Adding STORE replaces this with 4 instructions (compute pointer, STORE), reducing the 9 ×9 Sudoku solver from 1,085 to 284 instructions. 
+
+# 8 L2 FFN Row Budget 
+
+Group Rows SUBLEQ gated copy 4N
+
+buf b → scr min 4N
+
+buf c clear 2N
+
+INC, DEC, JZ, JNZ, JMP, HALT, CMP 7MOV 2N + 1 ADD 4N
+
+SUB 2N
+
+SHL, SHR 2N , 2 N − 1AND, OR N + 1 each XOR 2N + 1 LOAD, FIND varies SWAP 4N + 1 CMOV 2N
+
+MULACC 5N
+
+STORE varies Total ∼ 340 of 640 Table 3: L2 FFN row usage for N = 8, ℓ = 10. 
+
+# 9 Model Properties 
+
+Proposition 2. The model dimension is d = 9 ℓ + 8 N + 1 . For n = 1024 , N = 8 : d = 155 with approximately 4.7 × 10 6 parameters. 
+
+The weight matrices are extremely sparse. In the 155 × 1024 configuration, 99.9% of all weight entries are zero, and the nonzero entries take only 27 distinct values. The sparsity and discrete value 12 structure are direct consequences of the analytical construction: every nonzero weight corresponds to a specific routing, gating, or threshold operation. 
+
+## 9.1 Scaling 
+
+The ISA is independent of the substrate dimensions. The same 8-layer design and compiler work across three configurations; binaries are recompiled for each ( s, m, n ): 
+
+• 146 × 512 ( ℓ = 9, m = 160, 320 instruction slots): compact configuration for programs using STORE. 
+
+• 155 × 1024 ( ℓ = 10, m = 64, 928 instruction slots): default for most demos. 
+
+• 164 × 2048 ( ℓ = 11, m = 224, 1,792 instruction slots): large-memory programs. The dimension increase reflects the larger ℓ needed for wider position encodings. Addresses in compiled programs are absolute column indices (e.g. memory address 0 is column s, instruction 0 is column s + m). The compiler emits addresses relative to a given s and m. When these parameters change across configurations, the program must be recompiled; but the source code, the compiler, and the 8-layer weight construction are identical across all three configurations. In this sense, the 
+
+architecture is portable; the compiled binaries are not. 
+
+# 10 C Compiler 
+
+A compiler translates a subset of C to the extended ISA. The supported language includes integer variables with N -bit signed arithmetic, comparisons, logical operators, if /else , while , for , arrays with constant size, and single-level function inlining. Builtin functions abs, min, max, mul, and swap generate inline instruction sequences. The front end consists of a lexer and a recursive-descent parser producing an AST. The code generator emits instruction triples ( op , b, c ) and resolves labels in a final pass. The compiler performs constant folding and comparison strength reduction. For n = 1024 with s = 32 and m = 64, the instruction budget is n − s − m = 928 slots and the data budget is m = 64 slots. For n = 512 with m = 160, the budget is 320 instruction slots. Variable-index array writes compile to a single STORE instruction; without STORE, they require an O(m) dispatch tree of branches. 
+
+# 11 Deployment 
+
+The model is exported to Open Neural Network Exchange (ONNX) format. Each forward pass executes one instruction, and the model is applied in a loop until PC = 0. The ONNX model runs entirely client-side via ONNX Runtime Web, using WebGPU when available and falling back to WebAssembly. An optimized export applies onnxsim 1 graph simplification and precomputes K⊤Q
+
+per attention head, fusing two matrix multiplications into one. The 146 × 512 optimized model is 7.4 MB; the 155 × 1024 model is approximately 16 MB; the 164 × 2048 model is approximately 29 MB. An ISA interpreter that executes the compiled instructions directly, bypassing the transformer, serves as a verification tool: both execution paths produce identical results on all tested programs. 
+
+> 1https://github.com/daquexian/onnx-simplifier
+
+13 The interpreter also provides a fast execution mode for interactive applications. A sparse argmax engine in JavaScript exploits the 99.9% weight sparsity and argmax attention to execute the trans-former step using only the ∼8,000 nonzero weight entries, avoiding dense matrix operations. This engine passes the same 111-test validation suite as the ONNX path. 
+
+## 11.1 FPGA Implementation 
+
+The transformer has been synthesized and executed on a Xilinx Alveo U200 FPGA with 6,840 DSP48E2 slices and 44 MB of on-chip block RAM (BRAM) and ultra RAM (URAM). The FPGA kernel uses the 155 × 1024 configuration with two key optimizations: 
+
+Argmax attention. The softmax attention is replaced with a streaming top-2 argmax per key row. For each key column i, the kernel scans all query columns j and tracks the two highest-scoring entries. If the gap between them is less than 1.0 (a tie), the V contribution is split 50/50; otherwise the winner receives full weight. This eliminates the n × n attention matrix entirely: the 155 × 1024 design uses 4 MB of on-chip memory instead of the 16+ MB required by softmax. The argmax produces bit-identical results to softmax on all tested programs because the λ = 10 temperature makes the softmax effectively one-hot except at the designed 50/50 tie points. With argmax, the kernel requires no hls::expf hardware, no normalization pass, and no n × n storage. 
+
+Halt detection. The kernel checks the program counter between transformer steps and exits early when PC = 0, avoiding wasted computation on halted programs. 
+
+Resource usage. The synthesized design uses approximately 160 of 960 URAM blocks (state, weights, and compute buffers), 224 of 2,160 BRAM blocks, 38K LUTs, and 24K flip-flops. The de-sign meets timing at 300 MHz. No DSP slices are used in the current floating-point implementation; all arithmetic is mapped to LUT logic. 
+
+Results. The INC test (mem[0] = 5 → 6, PC = 192 → 193) passes on real hardware. The kernel processes columns sequentially, yielding approximately 0.3 seconds per transformer step. For comparison, the same model runs at ∼10 ms/step on an NVIDIA RTX 4080 via ONNX Runtime WebGPU. The sequential column processing and all-LUT floating point explain the 30 × gap. The kernel is program-independent: weights encode the universal ISA, and different programs are loaded via DDR without FPGA recompilation. 
+
+# 12 Demonstrations 
+
+We evaluate the architecture on four programs of increasing complexity. 
+
+Sorting. Bubble sort on an 8-element array. Each comparison and swap is a sequence of trans-former forward passes. The program compiles to approximately 50 instructions. 
+
+Snake. A playable Snake game where movement, collision detection, and food spawning are com-puted by the transformer. The program compiles to 210 instructions and executes approximately 84 steps per game tick on the 155 × 1024 model. 14 Raycasting. A Wolfenstein-style raycasting game with wall rendering, sprite enemies, and com-bat mechanics. The program compiles to 531 instructions and executes approximately 500 steps per tick on the 155 × 1024 model. 
+
+Sudoku. A 9 ×9 Sudoku solver using iterative backtracking. With the STORE opcode, the program compiles to 284 instructions on the 146 × 512 model with 160 memory slots. Without STORE, the same program requires 1,085 instructions (75% of which are dispatch trees for variable-index array writes) and the 164 × 2048 model. All programs are written in C, compiled to the ISA, and executed as iterated matrix multipli-cations through the fixed-weight transformer. 
+
+## 12.1 Validation 
+
+Correctness is tested at three levels: 
+
+Opcode tests (42 tests). We ran 42 opcode-level unit tests covering all 22 opcodes. Arith-metic opcodes are tested on positive, negative, zero, overflow, and boundary cases; branch opcodes on taken and not-taken paths; and indirect-memory opcodes on valid-pointer cases. Multi-step SUBLEQ countdown loops are included. All 42 tests pass. 
+
+Cross-head writeback tests (19 tests). We ran 19 tests covering SWAP and other multi-write or cross-head interactions, including adjacent and non-adjacent operands, self-swap, double-swap identity, and combined operations. All 19 tests pass. 
+
+Compiled C tests (50 tests). We ran 50 end-to-end compiled-program tests including Fi-bonacci, GCD by subtraction, array minimum, nested conditionals, variable-index LOAD/STORE round-trips, and multi-iteration loops (up to 1000 ISA steps). All 50 tests pass. An ISA interpreter that executes compiled instructions directly, bypassing the transformer, serves as an independent verification oracle: both execution paths produce identical results on all tested programs. The interpreter also provides a fast execution mode for interactive demos. 
+
+# 13 Conclusion 
+
+Loom executes a 22-opcode ISA inside an 8-layer transformer with analytically derived weights. The central insight is that all operations can be mapped to operand preparation for a shared sub-tract core, so the architecture needs only one arithmetic layer regardless of the opcode count. Direct borrow-chain subtraction reduces this arithmetic stage to a single layer. The STORE instruction demonstrates that ISA design has cascading effects on the physical realization: one opcode re-duced compiled code by 75%, shrunk the transformer from 164 × 2048 to 146 × 512, and reduced the ONNX model from 29 MB to 7.4 MB. The architecture has been verified on three software paths and one hardware platform: an ONNX model in the browser via WebGPU or WebAssem-bly, a sparse JavaScript argmax engine exploiting 99.9% weight sparsity, and an ISA interpreter that bypasses the transformer for fast verification. All three pass the same 111-test validation suite. Across that suite, the top-2 argmax rule matched the softmax path exactly. The result is a fixed-size programmable computer that runs C programs as iterated matrix multiplications, from browser to silicon. More broadly, embedding analytically constructed computational layers within learned models could provide provably correct algorithmic reasoning for safety-critical applications 15 such as real-time situational awareness in urban environments, where deterministic enforcement of traffic rules, pedestrian safety zones, and anomaly detection thresholds must not depend on learned approximations. 
+
+# Acknowledgements 
+
+This work was supported by the NSF Engineering Research Center for Smart Streetscapes under Award EEC-2133516. FPGA experiments were conducted on the NSF PAWR COSMOS wireless testbed in West Harlem, NYC. 
+
+# References 
+
+[1] Artur Back de Luca and Kimon Fountoulakis. Simulation of graph algorithms with looped transformers. In Proceedings of the 41st International Conference on Machine Learning , volume 235 of Proceedings of Machine Learning Research , pages 2319–2363. PMLR, 2024. [2] Artur Back de Luca, George Giapitzakis, and Kimon Fountoulakis. Learning to add, multiply, and execute algorithmic instructions exactly with neural networks. In Advances in Neural Information Processing Systems , 2025. NeurIPS 2025 poster. [3] Angeliki Giannou, Shashank Rajput, Jy-Yong Sohn, Kangwook Lee, Jason D. Lee, and Dim-itris Papailiopoulos. Looped transformers as programmable computers. In Proceedings of the 40th International Conference on Machine Learning , volume 202 of Proceedings of Machine Learning Research , pages 11398–11442. PMLR, 2023. [4] Kaiying Hou, David Brandfonbrener, Sham M. Kakade, Samy Jelassi, and Eran Malach. Uni-versal length generalization with Turing programs. In Proceedings of the 42nd International Conference on Machine Learning , volume 267 of Proceedings of Machine Learning Research ,pages 23873–23893. PMLR, 2025. [5] Zekai Huang, Yingyu Liang, Zhenmei Shi, Zhao Song, and Zhen Zhuang. Neural algorithmic reasoning for hypergraphs with looped transformers. arXiv preprint arXiv:2501.10688 , 2025. [6] Hongjian Jiang, Michael Hahn, Georg Zetzsche, and Anthony Widjaja Lin. Softmax trans-formers are Turing-complete. In International Conference on Learning Representations , 2026. ICLR 2026 oral. [7] Emanuele La Malfa, Christoph Weinhuber, Orazio Torre, Fangru Lin, X. Angelo Huang, Samuele Marro, Anthony Cohn, Nigel Shadbolt, and Michael Wooldridge. Code simulation as a proxy for high-order tasks in large language models. arXiv preprint arXiv:2502.03568 , 2025. [8] Qian Li and Yuyi Wang. Constant bit-size transformers are Turing complete. In Advances in Neural Information Processing Systems , 2025. NeurIPS 2025 poster. [9] Qian Li and Yuyi Wang. Efficient Turing machine simulation with transformers. In Interna-tional Conference on Learning Representations , 2026. ICLR 2026 poster. [10] Yingyu Liang, Zhizhou Sha, Zhenmei Shi, Zhao Song, and Yufa Zhou. Looped ReLU MLPs may be all you need as practical programmable computers. In Proceedings of The 28th In-ternational Conference on Artificial Intelligence and Statistics , volume 258 of Proceedings of Machine Learning Research , pages 2647–2655. PMLR, 2025. 16 [11] David Lindner, J´ anos Kram´ ar, Sebastian Farquhar, Matthew Rahtz, Thomas McGrath, and Vladimir Mikulik. Tracr: Compiled transformers as a laboratory for interpretability. In Ad-vances in Neural Information Processing Systems , 2023. NeurIPS 2023. [12] Lucas Saldyt and Subbarao Kambhampati. Algorithmic language models with neurally com-piled libraries. arXiv preprint arXiv:2407.04899 , 2024. [13] Dale Schuurmans, Hanjun Dai, and Francesco Zanini. Autoregressive large language models are computationally universal. arXiv preprint arXiv:2410.03170 , 2024. [14] Peter Shaw, James Cohan, Jacob Eisenstein, Kenton Lee, Jonathan Berant, and Kristina N. Toutanova. ALTA: Compiler-based analysis of transformers. Transactions on Machine Learn-ing Research , 2025. [15] Christos Tzamos. Can LLMs be computers? Percepta blog post, 2026. Published March 11, 2026. [16] Gail Weiss, Yoav Goldberg, and Eran Yahav. Thinking like transformers. In Proceedings of the 38th International Conference on Machine Learning , volume 139 of Proceedings of Machine Learning Research , pages 11080–11090. PMLR, 2021. [17] Kevin Xu and Issei Sato. On expressive power of looped transformers: Theoretical analysis and enhancement via timestep encoding. In Proceedings of the 42nd International Conference on Machine Learning , volume 267 of Proceedings of Machine Learning Research , pages 69613– 69646. PMLR, 2025. [18] Xiyu Zhai, Runlong Zhou, Liao Zhang, and Simon Shaolei Du. Transformers are efficient compilers, provably. In Conference on Language Modeling , 2025. COLM 2025. [19] Yifan Zhang, Wei Bi, Kechi Zhang, Dongming Jin, Jie Fu, and Zhi Jin. Weights to code: Extracting interpretable algorithms from the discrete transformer. arXiv preprint arXiv:2601.05770 , 2026. 17

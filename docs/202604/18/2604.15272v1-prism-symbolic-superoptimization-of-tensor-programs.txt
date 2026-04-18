@@ -1,0 +1,990 @@
+Title: Prism: Symbolic Superoptimization of Tensor Programs
+
+URL Source: https://arxiv.org/pdf/2604.15272v1
+
+Published Time: Fri, 17 Apr 2026 01:18:33 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# Prism: Symbolic Superoptimization of Tensor Programs 
+
+## Mengdi Wu 
+
+Carnegie Mellon University USA 
+
+mengdiwu@andrew.cmu.edu 
+
+## Xiaoyu Jiang 
+
+Tsinghua University China 
+
+jiangxia22@mails.tsinghua.edu.cn 
+
+## Oded Padon 
+
+Weizmann Institute of Science Israel 
+
+oded.padon@weizmann.ac.il 
+
+## Zhihao Jia 
+
+Carnegie Mellon University USA 
+
+zhihao@cmu.edu 
+
+## Abstract 
+
+This paper presents Prism, the first symbolic superoptimizer 
+
+for tensor programs. The key idea is sGraph, a symbolic, hier-archical representation that compactly encodes large classes of tensor programs by symbolically representing some execu-tion parameters. Prism organizes optimization as a two-level search: it constructs symbolic graphs that represent families of programs, and then instantiates them into concrete imple-mentations. This formulation enables structured pruning of provably suboptimal regions of the search space using sym-bolic reasoning over operator semantics, algebraic identities, and hardware constraints. We develop techniques for efficient symbolic graph gen-eration, equivalence verification via e-graph rewriting, and parameter instantiation through auto-tuning. Together, these components allow Prism to bridge the rigor of exhaustive search with the scalability required for modern ML work-loads. Evaluation on five commonly used LLM workloads shows that Prism achieves up to 2.2× speedup over best su-peroptimizers and 4.9× over best compiler-based approaches, while reducing end-to-end optimization time by up to 3.4×.
+
+## 1 Introduction 
+
+Efficient execution of ML models on GPUs is fundamental to modern AI applications. Today’s ML systems generally ex-press computations as tensor programs , typically represented as directed acyclic graphs (DAGs), where nodes correspond to tensor operators and edges denote tensors (i.e., multi-dimensional arrays). Most existing ML systems optimize tensor programs through transformation rules and sched-uling templates manually designed by domain experts. Sys-tems such as TensorFlow, TensorRT, and TVM incorporate hand-crafted graph rewrite rules and operator fusion heuris-tics [ 5 , 9 , 27 ], while vendor-provided kernel libraries such as cuDNN and cuBLAS offer highly optimized implementa-tions for a fixed set of operators [ 11 , 12 ]. Although effective for widely used operations and models, this paradigm has two fundamental limitations. First, it requires substantial engineering effort to support new operators or hardware targets. For example, adapting optimized kernels such as FlashAttention [ 13 ] to a new GPU architecture generally requires months of manual tuning and engineering. Second, manually designed rules explore only a limited portion of the optimization space. Human intuition is inherently insuf-ficient to capture the combinatorial interactions among alge-braic transformations, data layouts, and hardware-specific scheduling decisions. 
+
+Superoptimization has emerged as a promising paradigm for automatically discovering fast tensor programs without relying on manually specified rules. Originating from the compiler literature, superoptimization explores (exhaustively or heuristically) a search space of candidate programs and retains those that are both functionally equivalent to the original and empirically faster. TASO [ 17 ] pioneered this approach for tensor programs by automatically generating graph substitutions and then applying them to optimize ten-sor programs: it enumerates small computation subgraphs over a predefined operator set, identifies equivalent pairs via a combination of random testing and formal verification, and applies the generated transformation to optimize the tar-get program using a cost-guided search. Mirage [ 34 ] applies superoptimization across multiple levels of the GPU execu-tion hierarchy through 𝜇 Graphs, a unified representation that captures optimizations at the kernel, thread-block, and thread levels. This multi-level search enables coordinated algebraic and scheduling transformations, including the syn-thesis of entirely new custom kernels beyond the reach of single-level approaches. Recently, large language models (LLMs) have been used to generate optimized GPU kernels [ 30 , 31 ]. More broadly, AlphaEvolve has been proposed as a general-purpose super-optimizer that leverages LLMs to guide the search [ 22 ]. It uses an evolutionary framework in which LLMs iteratively propose and refine code candidates that are validated by auto-mated evaluators. In a variety of well-defined tasks, AlphaE-volve demonstrates that LLM-guided search can discover optimizations surpassing both human-engineered and prior 
+
+> 1
+> arXiv:2604.15272v1 [cs.PL] 16 Apr 2026 Mengdi Wu, Xiaoyu Jiang, Oded Padon, and Zhihao Jia
+
+automated solutions. However, its applicability to optimizing tensor programs has not been explored yet. While enumeration -based superoptimizers like TASO and Mirage achieve strong performance, their reliance on ex-haustive search introduces a fundamental scalability bot-tleneck: the number of candidate programs grows combi-natorially with the number of operators and levels in the execution hierarchy, making exhaustive enumeration im-practical for large or deeply nested programs. On the other hand, sampling -based superoptimizers such as AlphaEvolve use learned priors to guide the search, enabling exploration over substantially larger spaces. However, these methods treat the optimization landscape as largely unstructured, which can lead to unstable search behavior and provides lim-ited guarantees on coverage or completeness of the explored program space. We introduce Prism, the first symbolic superoptimizer for tensor programs. Rather than enumerating concrete can-didate programs via brute-force enumeration or stochastic sampling, Prism organizes the search space into a two-level hierarchy. At the upper level, it constructs a symbolic graph representation, called sGraph, which compactly encodes en-tire families of tensor programs; at the lower level, each sGraph is instantiated into many concrete implementations. This symbolic formulation enables Prism to explore sub-stantially larger search spaces and discover higher-quality optimizations compared to prior enumeration- and sampling-based approaches for two key reasons. First, sGraph encodes operator semantics, algebraic identities, and hardware con-straints as symbolic expressions, allowing Prism to prune provably suboptimal regions of the search space before ma-terializing concrete programs. This structured pruning en-ables scalability to optimization problems that are intractable for exhaustive enumeration. Second, Prism preserves opti-mality guarantees: the pruning process is sound and does not eliminate optimal solutions. This property fundamen-tally distinguishes symbolic superoptimization from prior sampling-based approaches. Overall, Prism bridges the rigor of exhaustive search and formal verification with the scala-bility requirements of modern ML workloads. 
+
+Symbolic graph representation. A key idea of Prism is sGraphs, a symbolic, hierarchical graph representation of tensor programs. Unlike conventional representations that fix execution parameters (e.g., grid dimensions, block dimen-sions, and tensor-to-thread mappings) to concrete values, Prism encodes these attributes symbolically while instantiat-ing only the high-level computational structure. This design allows a single sGraph to represent a large class of related programs, enabling symbolic reasoning over the optimiza-tion space and more efficient exploration. 
+
+sGraph generation. Given an input tensor program, Prism enumerates candidate sGraphs whose instantiations may be functionally equivalent to the target program. A key challenge is to prune the search space both effectively (i.e., eliminating a large fraction of invalid candidates) and ef-ficiently (i.e., with minimal overhead). To this end, we in-troduce two complementary pruning techniques. Symbolic dimension matching ensures compatibility of operator di-mensions when expressed as symbolic expressions, while 
+
+symbolic expression pruning extends the abstract expression checking from previous work [ 34 ] to the symbolic setting. Together, these techniques significantly reduce the search space and enable Prism to scale to workloads where concrete enumeration becomes intractable (§3). 
+
+sGraph verification. For each candidate sGraph, Prism must verify functional equivalence with the input program without committing to concrete parallelization parameters. Prior work relies on random testing, which requires fixed tensor shapes and is therefore incompatible with symbolic representations. Instead, Prism encodes both the input pro-gram and the candidate sGraph as expressions over a set of predefined operators and performs equivalence checking using e-graphs [ 32 ] under a set of algebraic axioms. These axioms capture the mathematical properties of supported operators and their interaction with parallelization, enabling verification of symbolic graphs independent of concrete pa-rameter values (§4). 
+
+sGraph instantiation. For each verified sGraph, Prism instantiates the remaining symbolic parameters to produce optimized GPU kernels for a given target configuration. We employ random sampling with GPU profiling to tune these parameters, leveraging the effectiveness of auto-tuning tech-niques that have been extensively studied for tensor pro-grams (§5). 
+
+Evaluation. We evaluate Prism on five workloads com-monly used in modern LLM architectures, including fused normalization-linear layers, gated MLPs, and group-query at-tention. Across these workloads, Prism outperforms existing systems by up to 2.2× over the state-of-the-art superopti-mizers and 4.9× over traditional compiler-based approaches, by discovering optimizations that require exploring a sub-stantially larger space of parallelization strategies than prior approaches can handle. Meanwhile, Prism reduces end-to-end optimization time by up to 3.4×.
+
+## 2 Symbolic Graph Representation 
+
+Prism uses sGraph to compactly encode large classes of ten-sor programs by symbolically representing selected execu-tion parameters. This section first reviews the GPU program-ming model, then formalizes symbolic parallelization param-eters, mappings, and tensor shapes, and finally expresses correctness constraints over symbolic variables. 
+
+GPU programming model. GPU computation is orga-nized as kernels, where a function is executed in parallel 
+
+> 2Prism : Symbolic Superoptimization of Tensor Programs
+
+across many threads following the single-program-multiple-data (SPMD) paradigm. Each kernel launch defines a grid of thread blocks, with each block scheduled onto a streaming multiprocessor and containing a group of threads that oper-ate on distinct data elements. Threads maintain private state in registers, while threads within the same block coordinate through low-latency shared memory to support collective op-erations. Data exchanged between kernels, including inputs and outputs, resides in GPU global memory. 
+
+Concrete graph representation. Mirage [ 34 ] introduces the 𝜇 Graph representation for tensor programs, a hierar-chical abstraction that specifies tensor programs across the kernel, thread-block, and thread levels of the GPU execu-tion hierarchy. In a 𝜇 Graph, each graph-defined operator in the kernel graph is associated with a block graph (short for thread-block graph) that defines its computation at the block level, and block-level operators may further expand into thread graphs . At each level, the graph specifies how input tensors are partitioned via imap , how output tensors are assembled via omap , and how loop bodies iterate over reduction dimensions via fmap . In Mirage, these mappings, along with grid, block, and for-loop dimensions, are instan-tiated as concrete values during search (e.g., imap : {𝑟 ↔𝑥 },grid_dim: {𝑥 =64 }). As a result, each distinct assignment of mappings and dimensions yields a separate 𝜇 Graph candi-date that must be independently generated, verified, and potentially profiled, leading to a combinatorial explosion that limits search scalability. 
+
+Symbolic graph representation. Prism introduces sym-bolic graphs (sGraphs), which generalize 𝜇 Graphs by replac-ing concrete dimensions and mappings with symbolic vari-ables. An sGraph retains the same hierarchical structure—a kernel graph whose operators expand into block graphs, which may further expand into thread graphs—but repre-sents grid and block dimensions using symbolic integer variables and mappings ( imap , fmap , omap ) using symbolic Boolean variables. As a result, a single sGraph compactly rep-resents a family of 𝜇 Graphs parameterized by the variables, enabling symbolic reasoning over the entire family without explicitly enumerating individual candidates. Figure 1 illus-trates this process: (a) shows the computation graph of a Softmax followed by a matrix multiplication, (b) shows a concrete 𝜇 Graph for a fused kernel with fixed mappings and dimensions, and (c) shows the corresponding sGraph where the same structure is expressed symbolically. 
+
+Symbolic parallelization parameters. Figure 1(b) shows a concrete 𝜇 Graph, where grid dimensions (e.g., 𝑥 =64 ), block dimensions, and for-loop dimensions (e.g., 𝑖 =64 ) are fixed in-tegers that determine how computation is distributed across parallel execution units. We collectively refer to these as 
+
+parallelization dimensions . For a block graph, we denote the set of parallelization dimensions as P =P𝑔 ∪ P 𝑓 , where P𝑔 
+
+and P𝑓 are the sets of grid and for-loop dimensions, respec-tively. The same formalism applies to thread graphs, where 
+
+P𝑔 consists of block dimensions and P𝑓 is empty. Each par-allelization dimension 𝑝 ∈ P has an associated size 𝑑 𝑝 , and we denote the vector of all sizes as d = (𝑑 𝑝 )𝑝 ∈ P .In an sGraph, these sizes are left symbolic, allowing a single sGraph to represent a family of 𝜇 Graphs with different parallelization granularities. Currently, we assume a single for-loop dimension (i.e., so |P 𝑓 | =1), which is sufficient for the optimizations we consider; extending the framework to multiple loop dimensions is straightforward. 
+
+Symbolic mappings. At each level of a 𝜇 Graph, the map-pings (i.e., imap , fmap , omap ) specify how tensors are par-titioned or replicated across parallelization dimensions. In an sGraph, we symbolically encode these mappings using Boolean variables. For each tensor 𝑇 and each pair of data di-mension 𝑑 and parallelization dimension 𝑝 ∈ P , we introduce a variable 𝑚 𝑇 ,𝑑,𝑝 ∈ { 0, 1}, where 𝑚 𝑇 ,𝑑,𝑝 =1 indicates that 𝑑 is partitioned along 𝑝 . If a parallelization dimension 𝑝 does not partition any data dimension of 𝑇 , then 𝑇 is replicated along 
+
+𝑝 . For input tensors, these variables encode the imap and 
+
+fmap mappings. For output tensors, only grid dimensions appear in omap , as reductions along loop dimensions are handled explicitly by accumulator operators. These variables must satisfy two families of constraints: 
+
+Í𝑑 ∈dims (𝑇 ) 𝑚 𝑇 ,𝑑,𝑝 ≤ 1, ∀ 𝑝 ∈ P (1) 
+
+Í𝑝 ∈ P 𝑔 𝑚 𝑇 ,𝑑,𝑝 ≤ 1, ∀𝑑 ∈ dims (𝑇 ) (2) Constraint (1) requires that each parallelization dimension partitions at most one data dimension of 𝑇 . Constraint (2) re-quires that each data dimension is partitioned by at most one grid dimension in P𝑔 . Note that a corresponding constraint is unnecessary for P𝑓 since we assume a single for-loop dimen-sion. A grid dimension in P𝑔 and the for-loop dimension in 
+
+P𝑓 may partition the same data dimension, as they operate independently. Figure 1(c) illustrates a block graph with one grid dimen-sion 𝑥 and one for-loop dimension 𝑖 , where each tensor has a row dimension 𝑟 and column dimension 𝑐 . In this example, the imap and fmap of InputLoader1 (tensor 𝑋 )are encoded as [𝑚 𝑋 ,𝑟,𝑥 , 𝑚 𝑋 ,𝑐,𝑥 ] and [𝑚 𝑋 ,𝑟,𝑖 , 𝑚 𝑋 ,𝑐,𝑖 ], respec-tively. The concrete 𝜇 Graph in Figure 1(b), where imap :𝑟 ↔𝑥 
+
+and fmap : 𝑐 ↔𝑖 , corresponds to the assignment 𝑚 𝑋 ,𝑟,𝑥 = 1,
+
+𝑚 𝑋 ,𝑐,𝑥 =0, 𝑚 𝑋 ,𝑟,𝑖 =0, and 𝑚 𝑋 ,𝑐,𝑖 =1. Replication is represented by all mapping variables being zero for a given paralleliza-tion dimension; for example, InputLoader2 (tensor 𝑊 ) has 
+
+imap : ∅, corresponding to 𝑚 𝑊 ,𝑟,𝑥 =𝑚 𝑊 ,𝑐,𝑥 =0.
+
+Symbolic tensor shapes. Given symbolic mappings and symbolic parallelization parameters, tensor shapes become symbolic expressions. Consider an input tensor 𝑇 of a block 
+
+> 3
+
+Mengdi Wu, Xiaoyu Jiang, Oded Padon, and Zhihao Jia 
+
+Kernel Graph 
+
+X[4096, 4096] 
+
+W[4096, 128] 
+
+Softmax 
+
+Matmul O [4096, 128] 
+
+(a) Computation Graph 
+
+Kernel Graph 
+
+X
+
+> [4096, 4096]
+
+W
+
+> [4096, 128]
+
+CustomOp O
+
+> [4096, 128]
+
+ThreadBlock Graph grid_dim : { 𝑥 =64} forloop_dim : { 𝑖 =64}        
+
+> imap: {𝑟 ↔𝑥 }
+> fmap: {𝑐 ↔𝑖 }
+> imap: {∅}
+> fmap: {𝑟 ↔𝑖 }
+
+Input Loader1 
+
+Input Loader2 
+
+> [64, 64]
+> [64, 128]
+
+Exp 
+
+> [64, 64]
+
+Accum 
+
+> [64]
+
+Matmul 
+
+> [64, 128]
+
+Accum 
+
+> [64, 128]
+
+Div 
+
+> [64, 128]
+
+Output Saver  
+
+> [64, 128]
+> omap: {𝑟 ↔𝑥, 𝑐 ↔∅}
+
+(b) Concrete 𝜇 Graph 
+
+Kernel Graph 
+
+X
+
+> [4096, 4096]
+
+W
+
+> [4096, 128]
+
+CustomOp O
+
+> [4096, 128]
+
+ThreadBlock Graph grid_dim : { 𝑥 =𝑑 𝑥 } forloop_dim : { 𝑖 =𝑑 𝑖 }    
+
+> imap:
+> h𝑚 𝑋 ,𝑟,𝑥 𝑚 𝑋 ,𝑐,𝑥
+> i
+> fmap:
+> h𝑚 𝑋 ,𝑟,𝑖 𝑚 𝑋 ,𝑐,𝑖
+> i
+> imap:
+> h𝑚 𝑊 ,𝑟,𝑥 𝑚 𝑊 ,𝑐,𝑥
+> i
+> fmap:
+> h𝑚 𝑊 ,𝑟,𝑖 𝑚 𝑊 ,𝑐,𝑖
+> i
+
+Input Loader1 
+
+Input Loader2               
+
+> h4096
+> 𝜎 (𝑋 ,𝑟 ),4096
+> 𝜎 (𝑋 ,𝑐 )
+> i
+> h4096
+> 𝜎 (𝑊 ,𝑟 ),128
+> 𝜎 (𝑊 ,𝑐 )
+> i
+
+Exp        
+
+> h4096
+> 𝜎 (𝑋 ,𝑟 ),4096
+> 𝜎 (𝑋 ,𝑐 )
+> i
+
+Accum    
+
+> h4096
+> 𝜎 (𝑋 ,𝑟 )
+> i
+
+Matmul        
+
+> h4096
+> 𝜎 (𝑋 ,𝑟 ),128
+> 𝜎 (𝑊 ,𝑐 )
+> i
+
+Accum        
+
+> h4096
+> 𝜎 (𝑋 ,𝑟 ),128
+> 𝜎 (𝑊 ,𝑐 )
+> i
+
+Div        
+
+> h4096
+> 𝜎 (𝑋 ,𝑟 ),128
+> 𝜎 (𝑊 ,𝑐 )
+> i
+
+Output Saver                   
+
+> h4096
+> 𝜎 (𝑂,𝑟 ),128
+> 𝜎 (𝑂,𝑐 )
+> i
+> omap:
+> h𝑚 𝑂,𝑟,𝑥 𝑚 𝑂,𝑐,𝑥
+> i
+> 𝜎 (𝑇 , 𝑑 )=Î𝑝 ∈P (𝑚 𝑇 ,𝑑,𝑝 ·𝑑 𝑝 +1−𝑚 𝑇 ,𝑑,𝑝 )
+
+(c) Symbolic graph (sGraph) 
+
+Figure 1. Graph representations of a fused Softmax-Matmul operation. (a) The input computation graph. (b) A concrete 𝜇 Graph with specific mappings and parallelization parameters. (c) Our symbolic graph (sGraph), where mappings and dimensions are represented as symbolic variables. graph with a data dimension 𝑑 of original size 𝐷 . The per-block, per-iteration size of 𝑑 is: 
+
+𝐷 𝜎 (𝑇 , 𝑑 ) , where 𝜎 (𝑇 , 𝑑 ) = Î𝑝 ∈ P 
+
+ 𝑚 𝑇 ,𝑑,𝑝 · 𝑑 𝑝 + 1 − 𝑚 𝑇 ,𝑑,𝑝 
+
+
+
+(3) Each factor in the product evaluates to 𝑑 𝑝 when 𝑚 𝑇 ,𝑑,𝑝 =1
+
+(i.e., dimension 𝑑 is partitioned along 𝑝 ) and to 1 otherwise. Since Constraint (2) ensures that at most one grid dimension in P𝑔 and at most one for-loop dimension partition 𝑑 , the product reduces to the sizes of the active parallelization dimensions. The shapes of intermediate tensors are then derived from operator semantics (e.g., a matrix multiplication of tensors with shapes [𝑎, 𝑏 ] and [𝑏, 𝑐 ] produces a tensor of shape [𝑎, 𝑐 ]). For example, in Figure 1(c), the block graph has one grid dimension 𝑥 and one loop dimension 𝑖 , so 𝜎 (𝑇 , 𝑑 ) = (𝑚 𝑇 ,𝑑,𝑥 ·
+
+𝑑 𝑥 + 1 − 𝑚 𝑇 ,𝑑,𝑥 ) · ( 𝑚 𝑇 ,𝑑,𝑖 · 𝑑 𝑖 + 1 − 𝑚 𝑇 ,𝑑,𝑖 ). The shape of In-putLoader1 (tensor 𝑋 with original shape [4096 , 4096 ]) in the block graph is [ 4096    
+
+> 𝜎 (𝑋 ,𝑟 )
+
+, 4096    
+
+> 𝜎 (𝑋 ,𝑐 )
+
+]. Under the concrete as-signment in Figure 1(b), where 𝑚 𝑋 ,𝑟,𝑥 =1 and 𝑚 𝑋 ,𝑐,𝑖 =1, we get 𝜎 (𝑋, 𝑟 ) =𝑑 𝑥 · 1 =64 and 𝜎 (𝑋, 𝑐 ) =1 · 𝑑 𝑖 =64 , so the shape evaluates to [64 , 64 ].
+
+Symbolic shape matching. For a 𝜇 Graph to be valid, ten-sor shapes at each operator must be compatible—for example, a matrix multiplication requires matching contracting dimen-sions. In an sGraph, tensor shapes are symbolic expressions over mapping variables m and parallelization parameters 
+
+d, therefore shape compatibility is enforced through con-straints over these symbolic variables. As an example, consider the Matmul operator in Figure 1(c), which multiplies the output of Exp (shape inherited from InputLoader1) with InputLoader2 (tensor 𝑊 , original shape 
+
+[4096 , 128 ]). For the contracting dimensions to match, the 
+
+𝑐 -dimension of Exp must be equivalent to the 𝑟 -dimension of InputLoader2:    
+
+> 4096
+> 𝜎 (𝑋 ,𝑐 )
+
+= 4096    
+
+> 𝜎 (𝑊 ,𝑟 )
+
+(4) This equality holds when both dimensions are partitioned identically, i.e., 𝑚 𝑋 ,𝑐,𝑝 =𝑚 𝑊 ,𝑟,𝑝 for all 𝑝 ∈ P . Together with the linear constraints from Equations (1) – (2) (e.g., 𝑚 𝑋 ,𝑟,𝑥 +
+
+4Prism : Symbolic Superoptimization of Tensor Programs 
+
+𝑚 𝑋 ,𝑐,𝑥 ≤ 1, ensuring at most one dimension of 𝑋 is parti-tioned along 𝑥 ), these shape-matching constraints restrict the space of valid assignments to the symbolic mappings and parallelization parameters for a given sGraph. 
+
+Correct mappings and feasible sGraphs. Given the symbolic representation above, we formalize when an sGraph correctly implements a given input program. A key design choice is to require correctness to hold for all values of the parallelization parameters, rather than for specific assign-ments. This requirement ensures that a mapping remains correct regardless of the chosen parallelization granularity, which is important because different hardware configura-tions or input sizes may call for different parameter values. It also cleanly decouples correctness verification from pa-rameter tuning: once a mapping is verified to be correct, the parallelization parameters can be tuned for performance without re-validating equivalence. 
+
+Definition 2.1 (Correct Mapping) . Given an input tensor program 𝐺 in and an sGraph 𝑆 , a correct mapping is an as-signment ˆm of the mapping variables m such that for every assignment ˆd of the parallelization parameters d, the instan-tiated graph 𝑆 ˆm, ˆd computes the same function as 𝐺 in .
+
+Definition 2.2 (Feasible sGraph) . Given an input tensor program 𝐺 in , a feasible sGraph is an sGraph that has at least one correct mapping. 
+
+## 3 sGraph Generation 
+
+3.1 Generator Overview 
+
+The goal of the sGraph generator is to efficiently search for feasible sGraphs and their corresponding correct mappings for a given input program. The generator uses an iterative ap-proach similar to prior work: it constructs candidate graphs by incrementally adding operators and checking validity at each step. Unlike prior approaches that enumerate concrete mapping assignments during graph construction, the sGraph genera-tor introduces symbolic mapping variables (§2) and performs symbolic shape matching to determine whether an operator can be validly added. This design allows the generator to explore the space of graph structures without committing to specific mappings, thereby avoiding early combinatorial blowup. The enumeration of concrete mappings is deferred to a later verification stage, while parallelization parameters are instantiated only after correctness has been established (§3.4). 
+
+Search space comparison. In concrete superoptimizers, the generator must enumerate all combinations of graph structures, concrete mappings, and parallelization parameter values, leading to a search space of 𝑂 (|G||M||D|) where 
+
+|G| is the number of graph structures, |M| is the average number of mapping assignments per graph, and |D| is the average number of parallelization parameter configurations. In contrast, the sGraph generator decouples structure search from both mapping enumeration and parameter tun-ing. It explores graph structures once with symbolic map-pings and symbolic parallelization parameters ( 𝑂 (|G|) ), prunes invalid candidates via expression-guided pruning (§3.3), and defers the enumeration of concrete mappings to a mapping instantiation phase (§3.4) and the tuning of parallelization parameters to a subsequent parameter instantiation phase (§5). Since pruning eliminates a large fraction of candidates early, the overall search cost is significantly reduced. 
+
+3.2 Symbolic Dimension Matching 
+
+As described in §2, shape compatibility in an sGraph im-poses constraints on both the mapping variables m and the parallelization parameters d (Equation 4). By the definition of correct mapping, shape compatibility must hold for all 
+
+values of d. Therefore, the matched dimension expressions must be identical as functions of d, reducing shape match-ing to constraints purely over m. In particular, we equate the mapping variables so that the two symbolic expressions become identical with respect to d.When adding an operator to a partial sGraph, the gener-ator performs two tasks: (1) it collects equality constraints over the mapping variables, which are enforced later during mapping instantiation (§3.4), and (2) it checks whether the resulting dimension expressions are compatible, immediately pruning partial sGraphs that fail this check. As a concrete example, consider adding the Matmul oper-ator in Figure 1(c). Its contracting dimensions must match: the column dimension of the left input (from Exp, inherited from InputLoader1) has symbolic size 4096    
+
+> 𝜎 (𝑋 ,𝑐 )
+
+, and the row dimension of the right input (InputLoader2 for tensor 𝑊 )has symbolic size 4096    
+
+> 𝜎 (𝑊 ,𝑟 )
+
+.
+
+Equality constraints on mapping variables. In general, identifying the appropriate mapping variables to equate can be complex for arbitrary expressions. In our setting, however, symbolic dimension expressions are sufficiently structured that coefficient matching is effective. Specifically, we group mapping variables by the parallelization parameters they are associated with and equate those that appear as coefficients of the same parameter. In the Matmul example, 𝜎 (𝑋, 𝑐 ) con-tains terms 𝑚 𝑋 ,𝑐,𝑥 · 𝑑 𝑥 and 𝑚 𝑋 ,𝑐,𝑖 · 𝑑 𝑖 , while 𝜎 (𝑊 , 𝑟 ) contains 
+
+𝑚 𝑊 ,𝑟,𝑥 · 𝑑 𝑥 and 𝑚 𝑊 ,𝑟,𝑖 · 𝑑 𝑖 . Matching coefficients of 𝑑 𝑥 and 𝑑 𝑖 
+
+yields the constraints 𝑚 𝑋 ,𝑐,𝑥 =𝑚 𝑊 ,𝑟,𝑥 and 𝑚 𝑋 ,𝑐,𝑖 =𝑚 𝑊 ,𝑟,𝑖 .
+
+Compatibility check. After applying these equality con-straints, we check whether the resulting dimension expres-sions, composed of basic arithmetic operations ( +, −, ×, ÷), are symbolically equivalent. If they are not, the operator is deemed incompatible and the partial sGraph is pruned. 
+
+> 5Mengdi Wu, Xiaoyu Jiang, Oded Padon, and Zhihao Jia
+
+sGraph Generation (§3) · · · 
+
+Partial sGraph 𝐺 
+
+𝐺 + op 1 𝐺 + op 2 𝐺 + op 3
+
+Dim mismatch × Not subexpr × Dim match, expr check ✓
+
+· · · 
+
+Input tensor program 
+
+Mapping Instantiation (§3.4) 
+
+Symbolic mappings: 
+
+𝑚 𝑋 = 𝑚 𝑋 ,𝑟,𝑥 𝑚 𝑋 ,𝑟,𝑖  
+
+> 𝑚 𝑋 ,𝑐,𝑥 𝑚 𝑋 ,𝑐,𝑖
+
+
+
+𝑚 𝑊 = 𝑚 𝑊 ,𝑟,𝑥 𝑚 𝑊 ,𝑟,𝑖  
+
+> 𝑚 𝑊 ,𝑐,𝑥 𝑚 𝑊 ,𝑐,𝑖
+
+
+
+𝑚 𝑂 = 𝑚 𝑂,𝑟,𝑥 
+
+> 𝑚 𝑂,𝑐,𝑥
+
+
+
+Constraints: 
+
+(1) mapping def.: 𝑚 𝑋 ,𝑟,𝑥 +𝑚 𝑋 ,𝑐,𝑥 ≤1, . . . (2) dim match: 𝑚 𝑋 ,𝑐,𝑥 =𝑚 𝑊 ,𝑟,𝑥 , 𝑚 𝑋 ,𝑐,𝑖 =𝑚 𝑊 ,𝑟,𝑖 
+
+(3) symmetry: lexicographically smallest 
+
+Enumerate: 
+
+ˆ𝑚 𝑋 = 1 0 0 1 
+
+, ˆ𝑚 𝑊 = 0 1 0 0 
+
+, ˆ𝑚 𝑂 = 10
+
+ ✓
+
+ˆ𝑚 𝑋 = 1 0 1 0 
+
+, ˆ𝑚 𝑊 = 1 0 0 0 
+
+, ˆ𝑚 𝑂 = 10
+
+ × violates (1) 
+
+ˆ𝑚 𝑋 = 1 0 0 1 
+
+, ˆ𝑚 𝑊 = 1 1 0 0 
+
+, ˆ𝑚 𝑂 = 10
+
+ × violates (2) 
+
+sGraphs 
+
+sGraph Verification (§4) 
+
+Input: 𝐸 input =matmul (div (exp (𝑣 𝑋 ), sum (exp (𝑣 𝑋 ))) , 𝑣 𝑊 )
+
+Candidate: 𝐸 cand =comb (div (matmul (exp (part (𝑣 𝑋 , 𝑟, 𝑥 )) , part (𝑣 𝑊 , 𝑐, 𝑥 )) , red (exp (part (𝑣 𝑋 , 𝑟, 𝑥 )) , 𝑥 )) , 𝑟, 𝑥 )
+
+Check equivalent (𝐸 input , 𝐸 cand ) using axioms in Table 1 ✓ Equivalent ⇒ Verified 
+
+sGraphs with concrete ˆm
+
+Parameter Instantiation (§5) 
+
+Symbolic graph 
+
+Concrete graph 
+
+Random sample 
+
+d=(𝑑 𝑥 , 𝑑 𝑖 )
+
+Profile: 
+
+𝑑 𝑥 =32 , 𝑑 𝑖 =64 → 0.089ms 
+
+𝑑 𝑥 =64 , 𝑑 𝑖 =64 → 0.059ms 
+
+𝑑 𝑥 =64 , 𝑑 𝑖 =32 → 0.042ms ✓ ⇒ Optimized tensor program 
+
+𝑑 𝑥 =128 , 𝑑 𝑖 =32 → 0.056ms 
+
+Verified sGraphs with concrete ˆm
+
+Figure 2. Overview of the Prism pipeline. sGraph Generation (§3): exhaustive search builds sGraphs with symbolic mappings; dimension matching and expression-guided pruning eliminate invalid branches. Mapping Instantiation (§3.4): enumerates candidate concrete mapping assignments satisfying all constraints. sGraph Verification (§4): equivalence checking using rewrite axioms. Parameter Instantiation (§5): random sampling with GPU profiling tunes parallelization parameters. 
+
+3.3 Expression-Guided Pruning 
+
+In symbolic graphs, tensor shapes and expressions depend on both the mapping variables m and the parallelization pa-rameters d, so standard expression-based pruning—which operates on concrete tensor shapes—cannot be applied di-rectly. Our key observation is that any completion of a partial sGraph into a feasible sGraph must satisfy the expression check for all values of ˆd. Therefore, checking the condition under a single concrete assignment yields a necessary condi-tion for feasibility. We choose ˆd =1, under which 𝜎 (𝑇 , 𝑑 ) =1
+
+for all tensors and dimensions, making tensor shapes in-dependent of m. This reduces the partial sGraph to a non-symbolic graph with concrete tensor shapes, to which we apply the abstract expression checking from Mirage [ 34 ]: we check whether the abstract expression of each intermediate tensor is a subexpression of the final output expression, and prune partial graphs that fail this condition. By design, this check is under-pruning : it never discards a partial graph that could lead to a feasible sGraph, but may retain some infeasible candidates, which are subsequently fil-tered out during mapping instantiation and verification (§3.4, §4). In practice, this inexpensive check prunes a substantial portion of the search space. 
+
+3.4 Mapping Instantiation 
+
+After generating candidate sGraphs that pass the pruning check, we partially instantiate each sGraph by enumerating assignments to the mapping variables m, while keeping the parallelization parameters d symbolic (to be tuned in a later phase). For each candidate mapping, we verify correctness using the e-graph-based equivalence checking from §4. 
+
+Enumerating candidate mappings. A valid mapping must satisfy two classes of constraints: 
+
+• Linear constraints (Equations (1) – (2) ): each paral-lelization dimension maps to at most one data dimen-sion, and each data dimension is mapped to at most one grid dimension in P𝑔 .
+
+• Equality constraints from symbolic dimension match-ing (§3.2): matched dimensions must be partitioned identically. We enumerate candidate mappings by exploring all combi-nations of imap , fmap , and omap , and filtering out those that violate any of these constraints. 
+
+> 6Prism : Symbolic Superoptimization of Tensor Programs
+
+𝑚 (data) 
+
+𝑛 (data) 
+
+𝑥 (parallel) 𝑎 02 𝑎 03 
+
+𝑎 12 𝑎 13 
+
+𝑎 00 𝑎 01 
+
+𝑎 10 𝑎 11 
+
+Figure 3. Tensor representation with parallelization dimen-sions 
+
+Symmetry breaking. Different mapping assignments may yield functionally identical 𝜇 Graphs when they differ only by a permutation of dimensions in P𝑔 . To eliminate redun-dant verification, Prism retains only the lexicographically smallest assignment within each equivalence class, reducing the number of candidates by up to a factor of 𝑘 ! for 𝑘 = |P 𝑔 |.
+
+## 4 sGraph Verification 
+
+After mapping instantiation (§3.4), each candidate sGraph has concrete mappings but symbolic parallelization param-eters. To verify that such a partially-instantiated sGraph is functionally equivalent to the input computation graph, we encode both as expressions and check their equivalence. We define a set of equivalence axioms (Table 1) that capture the mathematical properties of the operators, and use e-graphs [ 32 ] to check whether two expressions are equivalent under these axioms. This section describes the expression language and the axioms; the practical details of converting axioms to e-graph rewrite rules are discussed in §6. 
+
+Tensor representation. We represent how the final out-put tensors are computed from the input tensors using ex-pressions. Each intermediate tensor computed in a kernel is parallelized across SMs. We use parallelization dimensions to represent how the tensors are partitioned. Figure 3 shows a tensor with two data dimensions and one parallelization dimension 𝑥 .
+
+Parallelization operators. Encoding mappings directly at tensor granularity is hard, so we instead decouple them into per-dimension operators. We introduce four paralleliza-tion operators (illustrated in Figure 4): 
+
+• part (𝑡, 𝑚, 𝑥 ) (partition ): Splits data dimension 𝑚 of tensor 𝑡 into equal chunks and distributes them across parallel dimension 𝑥 .
+
+• comb (𝑡, 𝑚, 𝑥 ) (combine ): Concatenates the chunks of data dimension 𝑚 of tensor 𝑡 across parallel dimension 
+
+𝑥 , reconstructing the full dimension. Inverse of part .
+
+• red (𝑡, 𝑥 ) (reduce ): Performs element-wise sum reduc-tion of tensor 𝑡 across parallel dimension 𝑥 .
+
+• repl (𝑡, 𝑥 ) (replicate ): Replicates tensor 𝑡 across parallel dimension 𝑥 , making identical copies available to each block. 
+
+Encoding sGraphs. We compute the expression of each tensor by traversing the graph in topological order. For each 
+
+𝑎 00 𝑎 01 𝑎 02 𝑎 03 
+
+𝑎 10 𝑎 11 𝑎 12 𝑎 13 
+
+𝑚 
+
+𝑛 part( 𝑡 , 𝑚 , 𝑥 ) 𝑎 02 𝑎 03 
+
+𝑎 12 𝑎 13 
+
+𝑎 00 𝑎 01 
+
+𝑎 10 𝑎 11 
+
+𝑚 
+
+𝑛 
+
+𝑥 
+
+𝑎 02 𝑎 03 
+
+𝑎 12 𝑎 13 
+
+𝑎 00 𝑎 01 
+
+𝑎 10 𝑎 11 
+
+𝑚 
+
+𝑛 
+
+𝑥 
+
+comb( 𝑡 , 𝑚 , 𝑥 ) 𝑎 00 𝑎 01 𝑎 02 𝑎 03 
+
+𝑎 10 𝑎 11 𝑎 12 𝑎 13 
+
+𝑚 
+
+𝑛 
+
+𝑎 02 𝑎 03 
+
+𝑎 12 𝑎 13 
+
+𝑎 00 𝑎 01 
+
+𝑎 10 𝑎 11 
+
+𝑚 
+
+𝑛 
+
+𝑥 
+
+red( 𝑡 , 𝑥 ) 𝑎 00 +𝑎 02 𝑎 01 +𝑎 03    
+
+> 𝑎 10 +𝑎 12 𝑎 11 +𝑎 13
+
+𝑚 
+
+𝑛 
+
+𝑎 00 𝑎 01 𝑎 02 𝑎 03 
+
+𝑎 10 𝑎 11 𝑎 12 𝑎 13 
+
+𝑚 
+
+𝑛 repl( 𝑡 , 𝑥 ) 𝑎 00 𝑎 01 𝑎 02 𝑎 03 
+
+𝑎 10 𝑎 11 𝑎 12 𝑎 13 
+
+𝑎 00 𝑎 01 𝑎 02 𝑎 03 
+
+𝑎 10 𝑎 11 𝑎 12 𝑎 13 
+
+𝑚 
+
+𝑛 
+
+𝑥 
+
+Figure 4. Parallel operators used in sGraph verification operator, we derive its output expression from its input ex-pressions and the operator semantics. For most operators (e.g., elementwise or matmul), this is straightforward. The key operators are the InputLoader and OutputSaver in the block graph: the InputLoader applies part or repl accord-ing to the imap (partitioning the tensor along the mapped dimension, or replicating it if the mapping is 𝜙 ), and the Out-putSaver applies comb according to the omap (concatenating the per-block results along the mapped dimension). Figure 5 shows an example. The kernel graph has a single CustomOp that applies elementwise exponentiation with 
+
+imap : {𝑟 ↔ 𝑥 } and omap : {𝑟 ↔ 𝑥 }. The Input operator par-titions the input variable 𝑣 𝐼 along the row dimension over parallel dimension 𝑥 , yielding part (𝑣 𝐼 , 𝑟, 𝑥 ). After applying Exp, the OutputSaver combines the result, producing the final expression comb (exp (part (𝑣 𝐼 , 𝑟, 𝑥 )) , 𝑟, 𝑥 ).
+
+> Kernel Graph
+
+I
+
+> 𝑣 𝐼
+
+CustomOp O   
+
+> comb (exp (part (𝑣 𝐼 , 𝑟, 𝑥 ) ) , 𝑟, 𝑥 )
+> Block Graph
+
+Input Loader     
+
+> imap: {𝑟 ↔𝑥 }
+> part (𝑣 𝐼 , 𝑟, 𝑥 )
+
+Exp   
+
+> exp (part (𝑣 𝐼 , 𝑟, 𝑥 ) )
+
+Output Saver   
+
+> omap: {𝑟 ↔𝑥 }
+
+Figure 5. Encoding an sGraph as expressions. Each tensor is annotated with its expression; the InputLoader applies part 
+
+according to the imap , and the OutputSaver applies comb 
+
+according to the omap .
+
+> 7Mengdi Wu, Xiaoyu Jiang, Oded Padon, and Zhihao Jia
+
+Equivalence axioms. Table 1 lists selected equivalence axioms. The axioms capture algebraic properties of par-allelized tensor computation. We implement equivalence checking using e-graphs [ 32 ], which requires converting the axioms to directional rewrite rules. Some cases require spe-cial treatment in the conversion, as discussed further in §6. Our axioms are intended to be sound—that is, any sGraph equivalence derived from the axioms should hold. We note that soundness depends not only on the axioms in isolation but on the entire pipeline, including structural constraints imposed during graph construction. A formal soundness proof is beyond the scope of this paper. Instead, we rely on careful manual review of the ∼ 70 axioms, and also subject all generated kernels to random equivalence testing (which all of them pass). We do not aim for completeness of the axioms, and known gaps exist, but we do aim to cover all important optimizations. In some cases, this requires instantiating axiom schemata based on some graph features. For example, parallelizing summation across 𝑘 parallelization dimensions requires depth-
+
+𝑘 axioms (e.g., the compound parallelized sum axioms in Table 1); we enumerate such axioms up to the number of parallelization dimensions in the sGraph. However, there are still cases that our axioms do not aim to cover; for example, computing 𝑇 + 𝑇 is the same as multiplying 𝑇 by the scalar 
+
+2, but this is not covered by our axioms. The question of whether there exists a recursively enumerable set of axioms that is complete for sGraph equivalence is beyond the scope of this paper. 
+
+## 5 sGraph Instantiation 
+
+After verification (§4), we obtain a set of verified sGraphs, each with concrete mappings but symbolic parallelization parameters d = (𝑑 𝑥 , 𝑑 𝑖 , . . . ). The final step is to instantiate these parameters with concrete values that maximize kernel performance for a given input configuration. This is a stan-dard autotuning problem: given a set of parameterized kernel templates and a target hardware platform, find the template and parameter values that minimize execution time. Autotuning for tensor programs and GPU kernels has been extensively studied, with prior work employing a range of strategies including learned cost models [ 10 , 21 ], evolu-tionary search [ 36 ], simulated annealing [ 10 ], and ensemble methods [ 6]. In our setting, the search space consists of the valid values for each parallelization parameter—grid di-mension sizes and for-loop iteration counts—subject to the constraint that the resulting tensor dimensions fit within GPU shared memory. Since kernel compilation dominates the tuning cost, we want to maximize compilation parallelism. To avoid the long dependency chains of iterative methods (e.g., evolutionary search), we adopt random sampling: we uniformly sample valid parameter assignments across all templates, compile and profile them in parallel, and return the best-performing configuration. Integrating more sophisticated tuning strate-gies is left as future work. 
+
+## 6 Implementation 
+
+We implement Prism on top of the Mirage [ 34 ] codebase. The symbolic search components—including the sGraph genera-tor, symbolic dimension matching, expression-guided prun-ing, and mapping instantiation—are implemented in approx-imately 6,000 lines of C++ (for the symbolic graph represen-tation, search, and verification modules). The e-graph-based equivalence checking for both dimension matching and ver-ification is implemented in approximately 550 lines of Rust using the egg library (version 0.10.0) [ 32 ]. For kernel code generation, we reuse Mirage’s transpiler, which lowers veri-fied 𝜇 Graphs into executable CUDA kernels. The symbolic search runs on two Intel Xeon Platinum 8275CL CPUs (48 cores, 96 threads), and discovered kernels are profiled on NVIDIA A100 GPUs. 
+
+Adapting axioms for e-graph rewriting. E-graph rewrit-ing requires that each rewrite rule 𝑙 → 𝑟 only introduces variables on the right-hand side that already appear on the left-hand side. This means that bidirectional axioms from Table 1 can only be applied as rewrite rules in the direction that satisfies this constraint. This constraint poses a challenge when parallelizing mul-tiple operators. For example, the following equivalence for consecutive parallelized matrix multiplications: 
+
+comb (comb (matmul (matmul (repl (part (𝐴, 𝑟, 𝑥 ), 𝑦 ),
+
+repl (repl (𝐵, 𝑥 ), 𝑦 )) , part (𝐶, 𝑐, 𝑦 )) , 𝑟, 𝑥 ), 𝑐, 𝑦 )
+
+=matmul (matmul (𝐴, 𝐵 ), 𝐶 )
+
+cannot be verified using only the parallelized matmul axioms (applied left-to-right): 
+
+comb (matmul (part (𝑡 0, 𝑟, 𝑥 ), repl (𝑡 1, 𝑥 )) , 𝑟, 𝑥 ) → matmul (𝑡 0, 𝑡 1)
+
+comb (matmul (repl (𝑡 0, 𝑥 ), part (𝑡 1, 𝑐, 𝑥 )) , 𝑐, 𝑥 ) → matmul (𝑡 0, 𝑡 1)
+
+because the nested operators cannot be peeled off one at a time. To address this, for matmul-related axioms of the form 
+
+op 2 (matmul (op 0 (𝑡 0), op 1 (𝑡 1))) =matmul (𝑡 0, 𝑡 1) (where op 0, op 1, op 2
+
+are parallelization operators), we additionally introduce the “inverse” rewrite rule: 
+
+matmul (op 0 (𝑡 0), op 1 (𝑡 1)) → op −12 (matmul (𝑡 0, 𝑡 1)) 
+
+where op −12 denotes the inverse parallelization operator (e.g., 
+
+part for comb and vice versa). This rule satisfies the variable subset constraint and enables the e-graph to establish equiv-alences by pushing parallelization operators outward. We apply the same technique to other computation operators that interact with parallelization operators in similar ways. 
+
+> 8
+
+Prism : Symbolic Superoptimization of Tensor Programs 
+
+Table 1. Selected equivalence axioms used in sGraph equivalence verification. Notation: 𝑡 for tensors, 𝑣 for (batched) vectors, 
+
+𝑑 for data dimensions, 𝑝 for parallelization dimensions. 
+
+Axiom Description 
+
+Matrix multiplication 
+
+∀ 𝑡 0, 𝑡 1, 𝑡 2 : matmul (𝑡 0, matmul (𝑡 1, 𝑡 2)) =matmul (matmul (𝑡 0, 𝑡 1), 𝑡 2) matmul is associative 
+
+∀ 𝑡 0, 𝑡 1, 𝑡 2 : matmul (add (𝑡 0, 𝑡 1), 𝑡 2) =add (matmul (𝑡 0, 𝑡 2), matmul (𝑡 1, 𝑡 2)) matmul left-distributes over add 
+
+∀ 𝑡 0, 𝑡 1, 𝑡 2 : matmul (𝑡 0, add (𝑡 1, 𝑡 2)) =add (matmul (𝑡 0, 𝑡 1), matmul (𝑡 0, 𝑡 2)) matmul right-distributes over add 
+
+∀ 𝑡 0, 𝑡 1, 𝑣 : matmul (mul (𝑡 0, 𝑣 ), 𝑡 1) =mul (matmul (𝑡 0, 𝑡 1), 𝑣 ) matmul commutes with mul 
+
+∀ 𝑡 0, 𝑡 1, 𝑣 : matmul (𝑡 0, mul (𝑡 1, 𝑣 )) =mul (matmul (𝑡 0, 𝑡 1), 𝑣 ) matmul commutes with mul 
+
+∀ 𝑡 0, 𝑡 1, 𝑣 : matmul (div (𝑡 0, 𝑣 ), 𝑡 1) =div (matmul (𝑡 0, 𝑡 1), 𝑣 ) matmul commutes with div denominator 
+
+Commutativity of parallelization operators 
+
+∀ 𝑡 0, 𝑑 0, 𝑝 0, 𝑝 1, 𝑝 0 ≠𝑝 1 : part (repl (𝑡 0, 𝑝 0), 𝑑 0, 𝑝 1) =repl (part (𝑡 0, 𝑑 0, 𝑝 1), 𝑝 0) part and repl commute 
+
+∀ 𝑡 0, 𝑑 0, 𝑝 0, 𝑝 1, 𝑝 0 ≠𝑝 1 : comb (repl (𝑡 0, 𝑝 0), 𝑑 0, 𝑝 1) =repl (comb (𝑡 0, 𝑑 0, 𝑝 1), 𝑝 0) comb and repl commute 
+
+∀ 𝑡 0, 𝑑 0, 𝑝 0, 𝑝 1, 𝑝 0 ≠𝑝 1 : red (part (𝑡 0, 𝑑 0, 𝑝 1), 𝑝 0) =part (red (𝑡 0, 𝑝 0), 𝑑 0, 𝑝 1) red and part commute 
+
+∀ 𝑡 0, 𝑑 0, 𝑝 0, 𝑝 1, 𝑝 0 ≠𝑝 1 : comb (red (𝑡 0, 𝑝 0), 𝑑 0, 𝑝 1) =red (comb (𝑡 0, 𝑑 0, 𝑝 1), 𝑝 0) comb and red commute 
+
+∀ 𝑡 0, 𝑑 0, 𝑑 1, 𝑝 0, 𝑝 1, 𝑑 0 ≠𝑑 1, 𝑝 0 ≠𝑝 1 : part (part (𝑡 0, 𝑑 0, 𝑝 0), 𝑑 1, 𝑝 1) =part (part (𝑡 0, 𝑑 1, 𝑝 1), 𝑑 0, 𝑝 0) Nested part operators commute 
+
+∀ 𝑡 0, 𝑑 0, 𝑑 1, 𝑝 0, 𝑝 1, 𝑑 0 ≠𝑑 1, 𝑝 0 ≠𝑝 1 : comb (comb (𝑡 0, 𝑑 0, 𝑝 0), 𝑑 1, 𝑝 1) =comb (comb (𝑡 0, 𝑑 1, 𝑝 1), 𝑑 0, 𝑝 0) Nested comb operators commute 
+
+Cancellation identities 
+
+∀ 𝑡 0, 𝑑 0, 𝑝 0 : comb (part (𝑡 0, 𝑑 0, 𝑝 0), 𝑑 0, 𝑝 0) =𝑡 0 comb cancels part 
+
+Parallelized matrix multiplication 
+
+∀ 𝑡 0, 𝑡 1, 𝑝 0 : red (matmul (part (𝑡 0, col , 𝑝 0), part (𝑡 1, row , 𝑝 0)) , 𝑝 0) =matmul (𝑡 0, 𝑡 1) Parallelized matmul (reduction) 
+
+∀ 𝑡 0, 𝑡 1, 𝑑 0, 𝑝 0 : comb (matmul (part (𝑡 0, 𝑑 0, 𝑝 0), repl (𝑡 1, 𝑝 0)) , 𝑑 0, 𝑝 0) =matmul (𝑡 0, 𝑡 1) Parallelized matmul (row partition) 
+
+∀ 𝑡 0, 𝑡 1, 𝑑 0, 𝑝 0 : comb (matmul (repl (𝑡 0, 𝑝 0), part (𝑡 1, 𝑑 0, 𝑝 0)) , 𝑑 0, 𝑝 0) =matmul (𝑡 0, 𝑡 1) Parallelized matmul (column partition) 
+
+∀ 𝑡 0, 𝑡 1, 𝑑 0, 𝑝 0, 𝑑 0 ≠ row , 𝑑 0 ≠ col : comb (matmul (part (𝑡 0, 𝑑 0, 𝑝 0), part (𝑡 1, 𝑑 0, 𝑝 0)) , 𝑑 0, 𝑝 0) =matmul (𝑡 0, 𝑡 1) Parallelized matmul (leading dim) 
+
+Parallelized sum 
+
+∀ 𝑡 0, 𝑑 0, 𝑑 1, 𝑝 0, 𝑑 0 ≠𝑑 1 : sum (part (𝑡 0, 𝑑 1, 𝑝 0), 𝑑 0) =part (sum (𝑡 0, 𝑑 0), 𝑑 1, 𝑝 0) sum and part commute 
+
+∀ 𝑡 0, 𝑑 0, 𝑑 1, 𝑝 0, 𝑑 0 ≠𝑑 1 : sum (comb (𝑡 0, 𝑑 1, 𝑝 0), 𝑑 0) =comb (sum (𝑡 0, 𝑑 0), 𝑑 1, 𝑝 0) sum and comb commute 
+
+∀ 𝑡 0, 𝑑 0, 𝑝 0 : sum (repl (𝑡 0, 𝑝 0), 𝑑 0) =repl (sum (𝑡 0, 𝑑 0), 𝑝 0) sum and repl commute 
+
+∀ 𝑡 0, 𝑑 0, 𝑝 0 : sum (red (part (𝑡 0, 𝑑 0, 𝑝 0), 𝑝 0), 𝑑 0) =sum (𝑡 0, 𝑑 0) Compound parallelized sum (form 1) 
+
+∀ 𝑡 0, 𝑑 0, 𝑝 0 : sum (comb (sum (part (𝑡 0, 𝑑 0, 𝑝 0), 𝑑 0), 𝑑 0, 𝑝 0), 𝑑 0) =sum (𝑡 0, 𝑑 0) Compound parallelized sum (form 2) 
+
+∀ 𝑡 0, 𝑑 0, 𝑝 0, 𝑝 1 : sum (comb (red (part (part (𝑡 0, 𝑑 0, 𝑝 0), 𝑑 0, 𝑝 1), 𝑝 1), 𝑑 0, 𝑝 0), 𝑑 0) =sum (𝑡 0, 𝑑 0) Compound parallelized sum (form 3) 
+
+∀ 𝑡 0, 𝑑 0, 𝑝 0, 𝑝 1 : sum (comb (red (part (part (𝑡 0, 𝑑 0, 𝑝 0), 𝑑 0, 𝑝 1), 𝑝 0), 𝑑 0, 𝑝 1), 𝑑 0) =sum (𝑡 0, 𝑑 0) Compound parallelized sum (form 4) 
+
+∀ 𝑡 0, 𝑑 0, 𝑝 0, 𝑝 1 : sum (red (comb (part (part (𝑡 0, 𝑑 0, 𝑝 0), 𝑑 0, 𝑝 1), 𝑑 0, 𝑝 0), 𝑝 1), 𝑑 0) =sum (𝑡 0, 𝑑 0) Compound parallelized sum (form 5) 
+
+∀ 𝑡 0, 𝑑 0, 𝑝 0, 𝑝 1 : red (part (red (part (𝑡 0, 𝑑 0, 𝑝 0), 𝑝 0), 𝑑 0, 𝑝 1), 𝑝 1) =red (part (𝑡 0, 𝑑 0, 𝑝 0), 𝑝 0) Compound parallelized sum (form 6) 
+
+∀ 𝑡 0, 𝑑 0, 𝑝 0, 𝑝 1 : red (red (part (part (𝑡 0, 𝑑 0, 𝑝 0), 𝑑 0, 𝑝 1), 𝑝 0), 𝑝 1) =red (part (𝑡 0, 𝑑 0, 𝑝 0), 𝑝 0) Compound parallelized sum (form 7) 
+
+∀ 𝑡 0, 𝑑 0, 𝑝 0, 𝑝 1 : red (red (part (part (𝑡 0, 𝑑 0, 𝑝 0), 𝑑 0, 𝑝 1), 𝑝 1), 𝑝 0) =red (part (𝑡 0, 𝑑 0, 𝑝 0), 𝑝 0) Compound parallelized sum (form 8) 
+
+Parallelized elementwise unary operators op unary 
+
+∀ 𝑡 0, 𝑑 0, 𝑝 0 : part (op unary (𝑡 0), 𝑑 0, 𝑝 0) =op unary (part (𝑡 0, 𝑑 0, 𝑝 0)) Unary op commutes with part 
+
+∀ 𝑡 0, 𝑑 0, 𝑝 0 : comb (op unary (𝑡 0), 𝑑 0, 𝑝 0) =op unary (comb (𝑡 0, 𝑑 0, 𝑝 0)) Unary op commutes with comb 
+
+∀ 𝑡 0, 𝑝 0 : repl (op unary (𝑡 0), 𝑝 0) =op unary (repl (𝑡 0, 𝑝 0)) Unary op commutes with repl 
+
+Parallelized elementwise binary operators op binary 
+
+∀ 𝑡 0, 𝑡 1, 𝑑 0, 𝑝 0 : part (op binary (𝑡 0, 𝑡 1), 𝑑 0, 𝑝 0) =op binary (part (𝑡 0, 𝑑 0, 𝑝 0), part (𝑡 1, 𝑑 0, 𝑝 0)) Binary op commutes with part 
+
+∀ 𝑡 0, 𝑡 1, 𝑑 0, 𝑝 0 : comb (op binary (𝑡 0, 𝑡 1), 𝑑 0, 𝑝 0) =op binary (comb (𝑡 0, 𝑑 0, 𝑝 0), comb (𝑡 1, 𝑑 0, 𝑝 0)) Binary op commutes with comb 
+
+∀ 𝑡 0, 𝑡 1, 𝑝 0 : repl (op binary (𝑡 0, 𝑡 1), 𝑝 0) =op binary (repl (𝑡 0, 𝑝 0), repl (𝑡 1, 𝑝 0)) Binary op commutes with repl 
+
+9Mengdi Wu, Xiaoyu Jiang, Oded Padon, and Zhihao Jia 
+
+## 7 Evaluation 
+
+7.1 Experimental Setup 
+
+We evaluate Prism by comparing against Mirage’s concrete superoptimizer and three additional baselines. PyTorch Ea-ger is standard PyTorch 2.5.1 execution without compilation. 
+
+PyTorch Compiled uses torch.compile with max-autotune 
+
+mode, which generates and auto-tunes Triton 3.1.0 kernels. 
+
+TVM (Ansor) [ 36 ] uses Apache TVM 0.18.0 with the Ansor auto-scheduler (1000 tuning trials per workload). For each benchmark, we measure (1) the kernel execution time of the best discovered kernel (compared against all baselines), and (2) the total optimization time (compared against Mirage and TVM, which both involve a search or auto-tuning process). All benchmarks use half-precision floating point. Each kernel is profiled 1,000 times and we report the average execution time. We evaluate on five workloads commonly found in mod-ern LLMs: 
+
+• RMSNorm : 𝑂 = matmul (rms _norm (𝑋 ),𝑊 ), fusing normalization with a linear layer. 
+
+• RMSNorm-MLP : 𝑂 =rms _norm (𝑋 )× 𝑊 up ·rms _norm (𝑋 )× 
+
+𝑊 gate , a GLU-style gated MLP with fused normaliza-tion. 
+
+• SwiGLU : 𝑂 = silu (𝑋 × 𝑊 gate ) · ( 𝑋 × 𝑊 up ), a gated activation used in LLaMA-style models. 
+
+• Attention : 𝑂 = softmax (𝑄 × 𝐾 𝑇 ) × 𝑉 , group-query attention (GQA) in the decode setting. 
+
+• QK-Attention : 𝑂 =softmax (rms _norm (𝑄 ) × 𝐾 𝑇 ) × 𝑉 ,GQA with query-key normalization. For each workload, we evaluate two input configurations with different tensor sizes. For RMSNorm, we vary the hidden dimension 𝑑 and batch size 𝑛 . For RMSNorm-MLP, we fix 
+
+𝑑 =1024 and vary 𝑛 . For SwiGLU, we fix 𝑛 =8 and vary 𝑑 . For attention workloads, we fix batch size 𝑏 =2, number of heads 
+
+𝑔 =8, query sequence length of 1, and head dimension 𝑑 =128 ,and vary the key-value sequence length ℎ.For Mirage, the optimization time consists of (1) graph gen-eration, which enumerates graph structures with concrete mappings, and (2) profiling, which compiles and benchmarks each discovered kernel on the GPU. For Prism, the optimiza-tion time consists of (1) symbolic graph generation, which searches graph structures with symbolic mappings, and (2) instantiation, which enumerates valid concrete mapping as-signments, verifies each via e-graph equivalence checking, and profiles the best candidates. Note that Prism’s graph gen-eration runs once for all input configurations of a workload, while Mirage must search separately for each configuration. 
+
+7.2 Kernel Performance 
+
+Figure 6 compares the kernel execution time and total opti-mization time of Prism against all baselines. Prism achieves the best kernel time on all 10 configurations, outperform-ing PyTorch Eager, PyTorch Compiled (torch.compile), TVM (Ansor), and Mirage. For example, on RMSNorm-MLP ( 𝑑 =
+
+1024 , 𝑛 =8), Prism achieves 4.9× speedup over PyTorch Com-piled and 5.4× over TVM. The advantage of superoptimization-based approaches over these baselines comes from discover-ing novel fused kernels that combine multiple operators into a single GPU kernel, reducing memory traffic and kernel launch overhead. Compared to the existing superoptimizer (Mirage), Prism finds strictly better kernels on 8 configurations and matches on 2 (SwiGLU). The largest improvements are on the at-tention workloads. Attention involves 3D tensors (batch, sequence, head) that admit many possible parallelization strategies—Mirage uses heuristics to explore only a subset of these mappings and parallelization parameters, while Prism explores the entire mapping and parallelization parameter space symbolically. On QK-Attention, Prism achieves 1.8×
+
+(ℎ=1024 ) and 2.2× (ℎ=2048 ) speedups over Mirage. On stan-dard attention, the speedups are 1.2× (ℎ=1024 ) and 1.3×
+
+(ℎ=2048 ). QK-Attention benefits more because the additional normalization operator further expands the space of useful parallelization strategies. On RMSNorm-MLP, Prism achieves 1.2× (𝑛 =16 ) and 1.9×
+
+(𝑛 =8) speedups over Mirage—notably, both are configurations where Mirage’s concrete search timed out after one hour. On RMSNorm, Prism achieves 1.2× (𝑑 =4096 ) and 1.1× (𝑑 =1024 )speedups. On SwiGLU, both Prism and Mirage find identical kernels, as the simpler graph structure has fewer mapping choices. 
+
+7.3 Total Optimization Time 
+
+The lower panel of Figure 6 shows the total optimization time. Prism’s total time includes the symbolic search (shared across configurations)—which covers graph generation, map-ping enumeration, and verification—plus per-configuration instantiation (parallelization parameter tuning and profiling). Mirage’s total time includes per-configuration search plus profiling. TVM’s time is the Ansor auto-tuning time with 1000 trials per configuration. Prism achieves the largest reduction over Mirage on RMSNorm-MLP: Mirage’s search times out at one hour (3,713s and 3,632s total), while Prism completes in 1,111s and 1,180s— 3.1×–3.4×
+
+faster, while also discovering 1.2×–1.9× faster kernels. On QK-Attention ( ℎ=1024 ), Prism takes 128s vs. Mirage’s 199s and TVM’s 276s, with a 1.8× and 2.8× kernel speedup over Mirage and TVM respectively. On some configurations, Prism’s total time is higher than Mirage’s. For RMSNorm ( 𝑑 =4096 ), Prism takes 135s vs. 52s; for attention ( ℎ=2048 ) and QK-Attention ( ℎ=2048 ), Prism takes ∼152s vs. 13s. This is because Prism’s instantiation phase has a fixed overhead from compiling and profiling all discovered graph templates, which dominates when Mirage’s per-configuration search is already fast. However, Prism still finds better kernels in these cases ( 1.2× for RMSNorm, 1.3×
+
+> 10
+
+Prism : Symbolic Superoptimization of Tensor Programs 0.00                          
+
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> 1.25
+> 1.50
+> 1.75
+> 2.00
+> Relative Performance
+> (normalized to best baseline,
+> higher is better)
+> 1.2x 1.1x 1.2x
+> 1.9x
+> 1.0x 1.0x
+> 1.2x 1.3x
+> 1.8x
+> 1.4x
+> PyTorch Eager
+> PyTorch Compiled
+> TVM
+> Mirage
+> Prism
+> rms_norm
+> d=4096,n=8
+> rms_norm
+> d=1024,n=16
+> rmsnorm_mlp
+> d=1024,n=16
+> rmsnorm_mlp
+> d=1024,n=8
+> swiglu
+> d=2048,n=8
+> swiglu
+> d=4096,n=8
+> attn
+> b=2,g=8
+> h=1024,d=128
+> attn
+> b=2,g=8
+> h=2048,d=128
+> qk_attn
+> b=2,g=8
+> h=1024,d=128
+> qk_attn
+> b=2,g=8
+> h=2048,d=128
+> 0
+> 1000
+> 2000
+> 3000
+> 4000
+> Optimization Time (s)
+> 130s 52s 135s 120s 55s 116s 187s
+> 3713s
+> 1111s
+> 186s
+> 3632s
+> 1180s
+> 153s 72s 72s 163s 88s 149s 203s 84s 133s 215s 13s 152s 276s 199s 128s 268s 13s 153s
+> TVM AutoTune
+> Mirage Graph Generation
+> Mirage Profile
+> Prism Graph Generation
+> Prism Instantiation
+
+Figure 6. Kernel performance and optimization time across 5 workloads. Upper : relative kernel execution time. Lower : total optimization time breakdown—Mirage’s time includes graph generation and profiling; Prism’s time includes symbolic graph generation and instantiation; TVM’s time is the Ansor auto-tuning time (1000 trials). 
+
+Table 2. Search-only time comparison (seconds). Prism’s search runs once per workload (shared across all configura-tions), while Mirage searches per configuration. “ ×” indicates the search was still running at the 1-hour timeout. 
+
+Workload Mirage Prism 
+
+Config 1 Config 2 (shared) RMSNorm 11.6s 13.0s 0.3s 
+
+RMSNorm-MLP 3600s × 3600s × 871s 
+
+SwiGLU 45.6s 27.0s 1.0s 
+
+Attention 42.4s 10.0s 41s 
+
+QK-Attention 154.5s 10.1s 42s 
+
+and 2.2× for attention and QK-Attention), so the additional optimization time translates into faster end-to-end inference. 
+
+7.4 Search Time Breakdown 
+
+To better understand the optimization time, Table 2 breaks down the search-only time for Prism and Mirage. For Prism, this includes symbolic graph generation, mapping enumera-tion, and verification (§3–§4). For Mirage, this includes con-crete graph generation with mapping enumeration. Prism’s search runs once per workload and covers all input con-figurations, whereas Mirage searches separately for each configuration. For RMSNorm and SwiGLU, the symbolic search is dramat-ically faster: 0.3s and 1.0s respectively, compared to Mirage’s 11–46s per configuration. The speedup comes from decou-pling graph structure search from mapping enumeration— the symbolic search avoids the combinatorial blowup of try-ing every possible imap , fmap , and omap assignment at each step. On RMSNorm-MLP, Mirage’s concrete search hits the one-hour timeout on both configurations without completing, while Prism finishes in 871s. RMSNorm-MLP fuses two ma-trix multiplications with normalization and gated multipli-cation, yielding multiple valid operator orderings that each must be explored for every mapping assignment in the con-crete search. For attention workloads, the search times tell a different story. Attention has a constrained graph structure but a large mapping space due to its 3D tensor structure (batch, sequence, head). Mirage uses heuristics to explore only a sub-set of the possible mappings and parallelization parameters, resulting in fast per-configuration search (10–42s for atten-tion, 10–155s for QK-Attention). Prism’s symbolic search takes 41–42s once for all configurations and explores the full space, which explains why it discovers better kernels (§7.2) despite comparable search times. 
+
+7.5 Graph Diversity 
+
+By exploring the entire mapping and parallelization parame-ter space symbolically, Prism discovers more unique graphs than Mirage. We consider two graphs unique if they differ in operator sequence or mapping assignments; graphs that differ only in parallelization parameter values are considered the same. Table 3 summarizes the results. Prism discovers 9–23 unique graphs per workload from a single symbolic search, compared to 1–14 per configuration 
+
+11 Mengdi Wu, Xiaoyu Jiang, Oded Padon, and Zhihao Jia 
+
+Table 3. Number of unique graphs discovered by Prism and Mirage (higher is better). Two graphs are unique if they differ in operator sequence or mappings.                    
+
+> Workload Mirage Prism
+> Config 1 Config 2 (shared) RMSNorm 189RMSNorm-MLP 12 14 23 SwiGLU 1112 Attention 4314 QK-Attention 4414
+
+for Mirage. These graphs vary along multiple axes: different numbers of active grid dimensions (1, 2, or 3), different for-loop partitioning strategies, and different operator orderings within the fused kernel. The difference is most striking on SwiGLU, where Mirage finds only 1 unique structure per configuration while Prism discovers 12, and on attention workloads, where the 3D ten-sor structure (batch, sequence, head) admits up to 3 grid dimensions. Prism explores all valid combinations of grid and for-loop partitioning across these dimensions, discover-ing 14 unique graphs for both attention and QK-Attention. Mirage’s heuristic-based mapping exploration finds only 3–4 structures per configuration, missing many strategies that Prism discovers. This broader coverage directly translates to the kernel performance improvements observed on attention workloads. 
+
+7.6 Ablation: Impact of Symbolic Maps 
+
+Prism symbolizes three types of mapping variables during search: input maps ( imap ), for-loop maps ( fmap ), and output maps ( omap ). To understand which variables contribute most to the search time reduction, we selectively make individual map types concrete (i.e., enumerated during search) while keeping the rest symbolic. Grid dimension sizes and for-loop range are always deferred to instantiation. Table 4 reports search-only time for RMSNorm ( 𝑑 =4096 , 𝑛 =8), which has 2 input tensors and 2 data dimensions. Since the mapping search space grows exponentially with the number of parallelization dimensions and data dimen-sions, symbolizing maps is critical for scalability. When all three map types are enumerated concretely, the search takes 312s; symbolizing all maps reduces this to 0.3s. Among the three map types, imap contributes the most: enumer-ating imap alone yields 20.5s, while enumerating fmap or 
+
+omap alone yields 5.5s and 2.5s respectively. Enumerating multiple map types together further compounds the cost— enumerating all three yields 312s, far exceeding the sum of their individual costs (28.5s). 
+
+Table 4. Ablation study on RMSNorm: search time when selectively enumerating map variables during search. “S” = symbolic (deferred to instantiation), “C” = concrete (enumer-ated during search).                         
+
+> imap fmap omap Search Time
+> SSS0.3s
+> SSC2.5s SCS5.5s CSS20.5s SCC5.5s CSC22.5s CCC312s
+
+## 8 Related Work 
+
+Expert-crafted kernels. A large body of existing systems, including TensorFlow XLA [ 1, 5 ], PyTorch [ 24 ], and Ten-sorRT [ 27 ], depend heavily on kernels engineered by do-main specialists for individual ML operators. In recent years, extensive engineering effort has been invested in refining GPU kernels for widely deployed DNN workloads, espe-cially foundation models [ 8 ]. Attention mechanisms [ 33 ], for instance, have seen a sequence of highly tuned implementa-tions derived from FlashAttention [ 2 , 3, 13 , 14 ]. However, the rapid evolution of GPU architectures (e.g., the introduction of tensor cores in A100 GPUs [ 19 ], thread block clusters in H100 GPUs [ 4 ], and tensor memory in B200 GPUs) substan-tially enlarges the optimization space. As a result, manually engineered kernels are increasingly prone to overlooking non-obvious performance opportunities that are difficult to identify through human-driven design alone. 
+
+Superoptimization-based methods. Superoptimization was originally proposed to derive optimal instruction se-quences automatically [ 7 , 20 , 25 ], and has since been ex-tended to tensor program optimization [ 15 –18 , 28 , 29 , 35 , 37 ]. Systems such as TASO [ 17 ] enumerate equivalent subgraphs with correctness validated via testing and formal methods, while Mirage [ 34 ] expands the search to multiple levels of the GPU execution hierarchy. More recent approaches, such as AlphaEvolve [ 22 ], leverage LLM-guided evolutionary search to explore larger optimization spaces. These methods fall into two categories: enumeration-based techniques (e.g., TASO, Mirage), which provide structured but poorly-scalable search, and sampling-based techniques (e.g., AlphaEvolve), which scale but lack coverage guarantees. In contrast, Prism introduces a symbolic superoptimization framework that compactly represents families of tensor pro-grams and enables sound pruning of the search space while preserving optimal solutions. 
+
+Symbolic graph representations. Prior work has intro-duced methods to represent tensor programs using multi-level graph representations. For example, Welder [ 26 ] and 
+
+> 12
+
+Prism : Symbolic Superoptimization of Tensor Programs 
+
+ASPEN [ 23 ] use a tile-based, multi-level graph to represent tensor programs. Mirage [ 34 ] introduces a multi-level graph representation to capture the GPU hierarchy. Unlike these approaches that represent concrete tensor programs, Prism leverages a symbolic, hierarchical representation of tensor programs to compactly encode large equivalence classes of tensor programs to reduce the search space. 
+
+## 9 Conclusion 
+
+We presented Prism, the first symbolic superoptimizer for tensor programs. The key idea behind Prism is sGraphs, a symbolic graph representation that compactly encodes large families of tensor programs by abstracting mappings and par-allelization parameters as symbolic variables. This enables Prism to decouple graph structure search from mapping enu-meration and parameter tuning, significantly reducing the search space compared to concrete enumeration. We intro-duced symbolic dimension matching and expression-guided pruning to efficiently navigate this space, and developed an axiom-based verification framework to check functional equivalence of symbolic graphs. Our evaluation on work-loads from modern LLMs shows that Prism outperforms existing systems by up to 2.2× over state-of-the-art superop-timizers while reducing optimization time by up to 3.4×.
+
+## Acknowledgments 
+
+This research is partially supported by NSF awards CNS-2211882 and CNS-2239351, a Sloan research fellowship, and research awards from Amazon, Cisco, Google, Jane Street, Meta, NVIDIA, Oracle, Qualcomm, and Samsung. Mengdi Wu is supported by the Amazon AI Fellowship. This research is partially supported by Israel Science Foundation research grant (ISF’s No. 4136/25) and the Maimonides Fund’s Future Scientists Center, a research grant from the Center for New Scientists at the Weizmann Institute of Science, and a grant from the Azrieli Foundation. 
+
+## References 
+
+[1] 2017. XLA: Optimizing Compiler for TensorFlow. https : //www. tensorflow.org/xla .[2] 2020. Transformer related optimizations. https : //github.com/NVIDIA/ FasterTransformer .[3] 2023. Flash-Decoding for long-context inference. https : //crfm. stanford.edu/2023/10/12/flashdecoding.html .[4] 2023. NVIDIA H100 Tensor Core GPU. https : //www.nvidia.com/en -us/data - center/h100/ .[5] Martín Abadi, Paul Barham, Jianmin Chen, Zhifeng Chen, Andy Davis, Jeffrey Dean, Matthieu Devin, Sanjay Ghemawat, Geoffrey Irv-ing, Michael Isard, Manjunath Kudlur, Josh Levenberg, Rajat Monga, Sherry Moore, Derek G. Murray, Benoit Steiner, Paul Tucker, Vijay Va-sudevan, Pete Warden, Martin Wicke, Yuan Yu, and Xiaoqiang Zheng. 2016. TensorFlow: A System for Large-Scale Machine Learning.. In 
+
+Proceedings of the 12th USENIX Conference on Operating Systems Design and Implementation (OSDI) .[6] Jason Ansel, Shoaib Kamil, Kalyan Veeramachaneni, Jonathan Ragan-Kelley, Jeffrey Bosboom, Una-May O’Reilly, and Saman Amarasinghe. 2014. OpenTuner: An Extensible Framework for Program Autotun-ing. In Proceedings of the 23rd International Conference on Parallel Architectures and Compilation (PACT) . ACM. [7] Sorav Bansal and Alex Aiken. 2006. Automatic Generation of Peephole Superoptimizers. In Proceedings of the 12th International Conference on Architectural Support for Programming Languages and Operating Systems (San Jose, California, USA) (ASPLOS XII) .[8] Rishi Bommasani, Drew A. Hudson, Ehsan Adeli, Russ Altman, Simran Arora, Sydney von Arx, Michael S. Bernstein, Jeannette Bohg, Antoine Bosselut, Emma Brunskill, Erik Brynjolfsson, Shyamal Buch, Dal-las Card, Rodrigo Castellon, Niladri Chatterji, Annie Chen, Kathleen Creel, Jared Quincy Davis, Dora Demszky, Chris Donahue, Moussa Doumbouya, Esin Durmus, Stefano Ermon, John Etchemendy, Kawin Ethayarajh, Li Fei-Fei, Chelsea Finn, Trevor Gale, Lauren Gillespie, Karan Goel, Noah Goodman, Shelby Grossman, Neel Guha, Tat-sunori Hashimoto, Peter Henderson, John Hewitt, Daniel E. Ho, Jenny Hong, Kyle Hsu, Jing Huang, Thomas Icard, Saahil Jain, Dan Juraf-sky, Pratyusha Kalluri, Siddharth Karamcheti, Geoff Keeling, Fereshte Khani, Omar Khattab, Pang Wei Koh, Mark Krass, Ranjay Krishna, Rohith Kuditipudi, Ananya Kumar, Faisal Ladhak, Mina Lee, Tony Lee, Jure Leskovec, Isabelle Levent, Xiang Lisa Li, Xuechen Li, Tengyu Ma, Ali Malik, Christopher D. Manning, Suvir Mirchandani, Eric Mitchell, Zanele Munyikwa, Suraj Nair, Avanika Narayan, Deepak Narayanan, Ben Newman, Allen Nie, Juan Carlos Niebles, Hamed Nilforoshan, Ju-lian Nyarko, Giray Ogut, Laurel Orr, Isabel Papadimitriou, Joon Sung Park, Chris Piech, Eva Portelance, Christopher Potts, Aditi Raghu-nathan, Rob Reich, Hongyu Ren, Frieda Rong, Yusuf Roohani, Camilo Ruiz, Jack Ryan, Christopher Ré, Dorsa Sadigh, Shiori Sagawa, Keshav Santhanam, Andy Shih, Krishnan Srinivasan, Alex Tamkin, Rohan Taori, Armin W. Thomas, Florian Tramèr, Rose E. Wang, William Wang, Bohan Wu, Jiajun Wu, Yuhuai Wu, Sang Michael Xie, Michi-hiro Yasunaga, Jiaxuan You, Matei Zaharia, Michael Zhang, Tianyi Zhang, Xikun Zhang, Yuhui Zhang, Lucia Zheng, Kaitlyn Zhou, and Percy Liang. 2022. On the Opportunities and Risks of Foundation Models. arXiv:2108.07258 [cs.LG] [9] Tianqi Chen, Thierry Moreau, Ziheng Jiang, Haichen Shen, Eddie Q. Yan, Leyuan Wang, Yuwei Hu, Luis Ceze, Carlos Guestrin, and Arvind Krishnamurthy. 2018. TVM: End-to-End Optimization Stack for Deep Learning. CoRR abs/1802.04799 (2018). http : //arxiv.org/abs/1802. 04799 
+
+[10] Tianqi Chen, Lianmin Zheng, Eddie Yan, Ziheng Jiang, Thierry Moreau, Luis Ceze, Carlos Guestrin, and Arvind Krishnamurthy. 2018. Learning to Optimize Tensor Programs. In Advances in Neural Infor-mation Processing Systems 31 .[11] Sharan Chetlur, Cliff Woolley, Philippe Vandermersch, Jonathan Co-hen, John Tran, Bryan Catanzaro, and Evan Shelhamer. 2014. cuDNN: Efficient Primitives for Deep Learning. CoRR abs/1410.0759 (2014). 
+
+http : //arxiv.org/abs/1410.0759 
+
+[12] cuBLAS 2016. Dense Linear Algebra on GPUs. https : //developer. nvidia.com/cublas .[13] Tri Dao, Daniel Haziza, Francisco Massa, and Grigory Sizov. 2023. Flash-Decoding for Long-Context Inference. [14] Ke Hong, Guohao Dai, Jiaming Xu, Qiuli Mao, Xiuhong Li, Jun Liu, Kangdi Chen, Yuhan Dong, and Yu Wang. 2024. FlashDe-coding++: Faster Large Language Model Inference on GPUs. arXiv:2311.01282 [cs.LG] [15] Muyan Hu, Ashwin Venkatram, Shreyashri Biswas, Balamurugan Marimuthu, Bohan Hou, Gabriele Oliaro, Haojie Wang, Liyan Zheng, Xupeng Miao, Jidong Zhai, and Zhihao Jia. 2024. Optimal Kernel Orchestration for Tensor Programs with Korch. In Proceedings of the 29th ACM International Conference on Architectural Support for Pro-gramming Languages and Operating Systems, Volume 3 (La Jolla, CA, USA) (ASPLOS ’24) . Association for Computing Machinery, New York, NY, USA, 755–769. doi: 10.1145/3620666.3651383 
+
+13 Mengdi Wu, Xiaoyu Jiang, Oded Padon, and Zhihao Jia 
+
+[16] Byungsoo Jeon, Mengdi Wu, Shiyi Cao, Sunghyun Kim, Sunghyun Park, Neeraj Aggarwal, Colin Unger, Daiyaan Arfeen, Peiyuan Liao, Xupeng Miao, Mohammad Alizadeh, Gregory R. Ganger, Tianqi Chen, and Zhihao Jia. 2025. GraphPipe: Improving Performance and Scalabil-ity of DNN Training with Graph Pipeline Parallelism. In Proceedings of the 30th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 1 (Rotterdam, Netherlands) (ASPLOS ’25) . Association for Computing Machinery, New York, NY, USA, 557–571. doi: 10.1145/3669940.3707220 
+
+[17] Zhihao Jia, Oded Padon, James Thomas, Todd Warszawski, Matei Za-haria, and Alex Aiken. 2019. TASO: Optimizing Deep Learning Com-putation with Automatic Generation of Graph Substitutions. In Pro-ceedings of the 27th ACM Symposium on Operating Systems Principles 
+
+(Huntsville, Ontario, Canada) (SOSP ’19) . Association for Computing Machinery, New York, NY, USA, 47–62. doi: 10.1145/3341301.3359630 
+
+[18] Zhihao Jia, Matei Zaharia, and Alex Aiken. 2019. Beyond Data and Model Parallelism for Deep Neural Networks. In Proceedings of the 2nd Conference on Systems and Machine Learning (SysML’19) .[19] Stefano Markidis, Steven Wei Der Chien, Erwin Laure, Ivy Bo Peng, and Jeffrey S. Vetter. 2018. NVIDIA Tensor Core Programmabil-ity, Performance & Precision. In 2018 IEEE International Parallel and Distributed Processing Symposium Workshops (IPDPSW) . IEEE. doi: 10.1109/ipdpsw.2018.00091 
+
+[20] Henry Massalin. 1987. Superoptimizer: a look at the smallest program. In ACM SIGARCH Computer Architecture News , Vol. 15. [21] Ravi Teja Mullapudi, Andrew Adams, Dillon Sharlet, Jonathan Ragan-Kelley, and Kayvon Fatahalian. 2016. Automatically Scheduling Halide Image Processing Pipelines. ACM Trans. Graph. 35, 4 (2016). [22] Alexander Novikov, Ngân V ˜u, Marvin Eisenberger, Emilien Dupont, Po-Sen Huang, Adam Zsolt Wagner, Sergey Shirobokov, Borislav Ko-zlovskii, Francisco JR Ruiz, Abbas Mehrabian, et al . 2025. Alphaevolve: A coding agent for scientific and algorithmic discovery. arXiv preprint arXiv:2506.13131 (2025). [23] Jongseok Park, Kyungmin Bin, Gibum Park, Sangtae Ha, and Kyung-han Lee. 2023. ASPEN: Breaking Operator Barriers for Efficient Paral-lelization of Deep Neural Networks. In Advances in Neural Information Processing Systems , A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt, and S. Levine (Eds.), Vol. 36. Curran Associates, Inc., 68625– 68638. https : //proceedings.neurips.cc/paper_files/paper/2023/file/ d899a31938c7838965b589d9b14a5ca6 - Paper - Conference.pdf 
+
+[24] PyTorch 2017. Tensors and Dynamic neural networks in Python with strong GPU acceleration. https : //pytorch.org .[25] Eric Schkufza, Rahul Sharma, and Alex Aiken. 2013. Stochastic super-optimization. In ACM SIGPLAN Notices , Vol. 48. [26] Yining Shi, Zhi Yang, Jilong Xue, Lingxiao Ma, Yuqing Xia, Zim-ing Miao, Yuxiao Guo, Fan Yang, and Lidong Zhou. 2023. Welder: Scheduling Deep Learning Memory Access via Tile-graph. In 17th USENIX Symposium on Operating Systems Design and Implementa-tion (OSDI 23) . USENIX Association, Boston, MA, 701–718. https : //www.usenix.org/conference/osdi23/presentation/shi 
+
+[27] TensorRT 2017. NVIDIA TensorRT: Programmable Inference Acceler-ator. https : //developer.nvidia.com/tensorrt .[28] Colin Unger, Zhihao Jia, Wei Wu, Sina Lin, Mandeep Baines, Carlos Efrain Quintero Narvaez, Vinay Ramakrishnaiah, Nirmal Prajapati, Patrick S. McCormick, Jamaludin Mohd-Yusof, Xi Luo, Dheevatsa Mudigere, Jongsoo Park, Misha Smelyanskiy, and Alex Aiken. 2022. Unity: Accelerating DNN Training Through Joint Optimization of Algebraic Transformations and Parallelization. In 16th USENIX Sym-posium on Operating Systems Design and Implementation, OSDI 2022, Carlsbad, CA, USA, July 11-13, 2022 . USENIX Association, 267–284. 
+
+https : //www.usenix.org/conference/osdi22/presentation/unger 
+
+[29] Haojie Wang, Jidong Zhai, Mingyu Gao, Zixuan Ma, Shizhi Tang, Liyan Zheng, Yuanzhi Li, Kaiyuan Rong, Yuanyong Chen, and Zhihao Jia. 2021. PET: Optimizing Tensor Programs with Partially Equivalent Transformations and Automated Corrections. In 15th USENIX Sym-posium on Operating Systems Design and Implementation (OSDI 21) .USENIX Association, 37–54. https : //www.usenix.org/conference/ osdi21/presentation/wang 
+
+[30] Anjiang Wei, Tianran Sun, Yogesh Seenichamy, Hang Song, Anne Ouyang, Azalia Mirhoseini, Ke Wang, and Alex Aiken. 2025. Astra: A Multi-Agent System for GPU Kernel Performance Optimization. arXiv:2509.07506 [cs.DC] https : //arxiv.org/abs/2509.07506 
+
+[31] Nina Wiedemann, Quentin Leboutet, Michael Paulitsch, Diana Wofk, and Benjamin Ummenhofer. 2026. KernelFoundry: Hardware-aware evolutionary GPU kernel optimization. arXiv:2603.12440 [cs.DC] 
+
+https : //arxiv.org/abs/2603.12440 
+
+[32] Max Willsey, Chandrakana Nandi, Yisu Remy Wang, Oliver Flatt, Zachary Tatlock, and Pavel Panchekha. 2021. egg: Fast and Extensible Equality Saturation. Proc. ACM Program. Lang. 5, POPL, Article 23 (Jan. 2021), 29 pages. doi: 10.1145/3434304 
+
+[33] Thomas Wolf, Lysandre Debut, Victor Sanh, Julien Chaumond, Clement Delangue, Anthony Moi, Pierric Cistac, Tim Rault, Rémi Louf, Morgan Funtowicz, Joe Davison, Sam Shleifer, Patrick von Platen, Clara Ma, Yacine Jernite, Julien Plu, Canwen Xu, Teven Le Scao, Syl-vain Gugger, Mariama Drame, Quentin Lhoest, and Alexander M. Rush. 2022. Transformers: State-of-the-art Machine Learning for Pytorch, TensorFlow, and JAX. https : //github.com/huggingface/transformers .[34] Mengdi Wu, Xinhao Cheng, Shengyu Liu, Chunan Shi, Jianan Ji, Kit Ao, Praveen Velliengiri, Xupeng Miao, Oded Padon, and Zhihao Jia. 2025. Mirage: A Multi-Level Superoptimizer for Tensor Programs. In Proceedings of the 19th USENIX Symposium on Operating Systems Design and Implementation (OSDI) . USENIX Association. [35] Yichen Yang, Phitchaya Phothilimthana, Yisu Wang, Max Willsey, Sudip Roy, and Jacques Pienaar. 2021. Equality Saturation for Ten-sor Graph Superoptimization. Proceedings of Machine Learning and Systems 3 (March 2021), 255–268. [36] Lianmin Zheng, Chengfan Jia, Minmin Sun, Zhao Wu, Cody Hao Yu, Ameer Haj-Ali, Yida Wang, Jun Yang, Danyang Zhuo, Koushik Sen, Joseph E. Gonzalez, and Ion Stoica. 2020. Ansor : Generat-ing High-Performance Tensor Programs for Deep Learning. CoRR 
+
+abs/2006.06762 (2020). arXiv:2006.06762 https : //arxiv.org/abs/2006. 06762 
+
+[37] Liyan Zheng, Haojie Wang, Jidong Zhai, Muyan Hu, Zixuan Ma, Tuowei Wang, Shuhong Huang, Xupeng Miao, Shizhi Tang, Kezhao Huang, and Zhihao Jia. 2023. EINNET: Optimizing Tensor Pro-grams with Derivation-Based Transformations. In 17th USENIX Sym-posium on Operating Systems Design and Implementation (OSDI 23) .USENIX Association, Boston, MA, 739–755. https : //www.usenix.org/ conference/osdi23/presentation/zheng 
+
+14

@@ -6,73 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-17
-- 运行时间：2026-04-17 19:59:54 UTC
+- 最新运行日期：2026-04-18
+- 运行时间：2026-04-18 19:26:21 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日深度解析 17 篇前沿成果，聚焦 Flash Attention 优化与加速器语义自动抽象等底层架构突破。
-VFA 通过预计算全局最大值显著缓解向量操作压力，ATLAAS 则实现了张量级硬件语义的自动化建模。
-建议关注大模型推理的能效基准与边缘端实时深度伪造检测，探索软硬协同的 AI 落地最优解。
-- 详情：[/202604/17/README](/202604/17/README)
+今日精选 17 篇前沿论文，深度聚焦类脑计算鲁棒性与边缘 AI 硬件优化。
+重点推荐应对硬件非线性的类脑表征学习，以及利用“早期退出”机制提升边缘端 CNN 推理效率的研究。
+建议关注 BFP 架构 NPU 与长文本 LLM 缓存管理，以应对移动端高效部署的实际挑战。
+- 详情：[/202604/18/README](/202604/18/README)
 
 ### 精读区论文标签
-1. [VFA: Relieving Vector Operations in Flash Attention with Global Maximum Pre-computation](/202604/17/2604.12798v1-vfa-relieving-vector-operations-in-flash-attention-with-global-maximum-pre-computation)  
+1. [Robust Reasoning and Learning with Brain-Inspired Representations under Hardware-Induced Nonlinearities](/202604/18/2604.12079v1-robust-reasoning-and-learning-with-brain-inspired-representations-under-hardware-induced-nonlinearities)  
    标签：评分：9.0/10、query:hwnas
-   evidence：减少注意力机制内核中矢量受限延迟的硬件友好方法
-2. [ATLAAS: Automatic Tensor-Level Abstraction of Accelerator Semantics](/202604/17/2604.13523v1-atlaas-automatic-tensor-level-abstraction-of-accelerator-semantics)  
+   evidence：针对存算一体架构的硬件感知优化
+2. [A Comparative Study of CNN Optimization Methods for Edge AI: Exploring the Role of Early Exits](/202604/18/2604.14789v1-a-comparative-study-of-cnn-optimization-methods-for-edge-ai-exploring-the-role-of-early-exits)  
    标签：评分：9.0/10、query:hwnas
-   evidence：从加速器语义自动生成编译器后端
-3. [Pushing the Limits of On-Device Streaming ASR: A Compact, High-Accuracy English Model for Low-Latency Inference](/202604/17/2604.14493v1-pushing-the-limits-of-on-device-streaming-asr-a-compact-high-accuracy-english-model-for-low-latency-inference)  
+   evidence：在真实边缘设备上平衡准确率、延迟和资源约束
+3. [Prism: Symbolic Superoptimization of Tensor Programs](/202604/18/2604.15272v1-prism-symbolic-superoptimization-of-tensor-programs)  
    标签：评分：9.0/10、query:hwnas
-   evidence：在资源受限硬件上优化准确度、延迟和内存占用
-4. [ELMoE-3D: Leveraging Intrinsic Elasticity of MoE for Hybrid-Bonding-Enabled Self-Speculative Decoding in On-Premises Serving](/202604/17/2604.14626v1-elmoe-3d-leveraging-intrinsic-elasticity-of-moe-for-hybrid-bonding-enabled-self-speculative-decoding-in-on-premises-serving)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对内存受限MoE模型的软硬件协同设计框架
-5. [Nautilus: An Auto-Scheduling Tensor Compiler for Efficient Tiled GPU Kernels](/202604/17/2604.14825v1-nautilus-an-auto-scheduling-tensor-compiler-for-efficient-tiled-gpu-kernels)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：用于GPU算子优化的自动调度张量编译器
-6. [Breaking the KV Cache Bottleneck: Fan Duality Model Achieves O(1) Decode Memory with Superior Associative Recall](/202604/17/2604.07716v2-breaking-the-kv-cache-bottleneck-fan-duality-model-achieves-o1-decode-memory-with-superior-associative-recall)  
+   evidence：考虑硬件约束和算子语义的符号超优化
+4. [Mosaic: Cross-Modal Clustering for Efficient Video Understanding](/202604/18/2604.10060v1-mosaic-cross-modal-clustering-for-efficient-video-understanding)  
    标签：评分：8.0/10、query:hwnas
-   evidence：序列建模中的O(1)解码内存架构
+   evidence：流媒体视频的KVCache管理与内存开销优化
+5. [Tessera: Unlocking Heterogeneous GPUs through Kernel-Granularity Disaggregation](/202604/18/2604.10180v1-tessera-unlocking-heterogeneous-gpus-through-kernel-granularity-disaggregation)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：内核粒度的解耦以使计算与硬件能力对齐
+6. [Architectural Trade-offs in the Energy-Efficient Era: A Comparative Study of power-capping NVIDIA H100 and H200](/202604/18/2604.11391v1-architectural-trade-offs-in-the-energy-efficient-era-a-comparative-study-of-power-capping-nvidia-h100-and-h200)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：针对能效计算的硬件特性与内存功耗分析
 
 ### 速读区论文标签
-1. [DeFakeQ: Enabling Real-Time Deepfake Detection on Edge Devices via Adaptive Bidirectional Quantization](/202604/17/2604.08847v1-defakeq-enabling-real-time-deepfake-detection-on-edge-devices-via-adaptive-bidirectional-quantization)  
+1. [FastSHADE: Fast Self-augmented Hierarchical Asymmetric Denoising for Efficient inference on mobile devices](/202604/18/2604.10275v1-fastshade-fast-self-augmented-hierarchical-asymmetric-denoising-for-efficient-inference-on-mobile-devices)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过量化在资源受限的边缘设备上实现实时推理
-2. [Watt Counts: Energy-Aware Benchmark for Sustainable LLM Inference on Heterogeneous GPU Architectures](/202604/17/2604.09048v1-watt-counts-energy-aware-benchmark-for-sustainable-llm-inference-on-heterogeneous-gpu-architectures)  
+   evidence：专为移动GPU实时推理定制的轻量级网络
+2. [From Characterization to Microarchitecture: Designing an Elegant and Reliable BFP-Based NPU](/202604/18/2604.10494v1-from-characterization-to-microarchitecture-designing-an-elegant-and-reliable-bfp-based-npu)  
    标签：评分：8.0/10、query:hwnas
-   evidence：异构硬件上LLM推理的能效感知基准测试
-3. [FlexVector: A SpMM Vector Processor with Flexible VRF for GCNs on Varying-Sparsity Graphs](/202604/17/2604.10113v1-flexvector-a-spmm-vector-processor-with-flexible-vrf-for-gcns-on-varying-sparsity-graphs)  
+   evidence：为边缘效率设计可靠的基于BFP的NPU微架构
+3. [IceCache: Memory-efficient KV-cache Management for Long-Sequence LLMs](/202604/18/2604.10539v1-icecache-memory-efficient-kv-cache-management-for-long-sequence-llms)  
    标签：评分：8.0/10、query:hwnas
-   evidence：基于向量处理器的GCN推理加速架构
-4. [RF-LEGO: Modularized Signal Processing-Deep Learning Co-Design for RF Sensing via Deep Unrolling](/202604/17/2604.10183v1-rf-lego-modularized-signal-processing-deep-learning-co-design-for-rf-sensing-via-deep-unrolling)  
+   evidence：针对资源受限硬件的内存高效KV缓存管理
+4. [Harnessing Photonics for Machine Intelligence](/202604/18/2604.10841v1-harnessing-photonics-for-machine-intelligence)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过深度展开进行信号处理与深度学习协同设计
-5. [AsyncTLS: Efficient Generative LLM Inference with Asynchronous Two-level Sparse Attention](/202604/17/2604.07815v1-asynctls-efficient-generative-llm-inference-with-asynchronous-two-level-sparse-attention)  
+   evidence：AI加速的跨层系统分析和全栈设计自动化
+5. [BEACON: Benefit-Aware Early-Exit for Automatic Modulation Classification via Recoverability Prediction](/202604/18/2604.08783v1-beacon-benefit-aware-early-exit-for-automatic-modulation-classification-via-recoverability-prediction)  
    标签：评分：7.0/10、query:hwnas
-   evidence：异步卸载引擎将KV缓存传输与计算重叠
-6. [Initialisation Determines the Basin: Efficient Codebook Optimisation for Extreme LLM Quantization](/202604/17/2604.08118v1-initialisation-determines-the-basin-efficient-codebook-optimisation-for-extreme-llm-quantization)  
+   evidence：在计算资源有限的物联网设备上部署CNN模型
+6. [StreamMeCo: Long-Term Agent Memory Compression for Efficient Streaming Video Understanding](/202604/18/2604.09000v1-streammeco-long-term-agent-memory-compression-for-efficient-streaming-video-understanding)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对高效边缘部署的极端大模型量化
-7. [Alloc-MoE: Budget-Aware Expert Activation Allocation for Efficient Mixture-of-Experts Inference](/202604/17/2604.08133v1-alloc-moe-budget-aware-expert-activation-allocation-for-efficient-mixture-of-experts-inference)  
+   evidence：针对流式视频理解的智能体内存压缩技术
+7. [TinyNeRV: Compact Neural Video Representations via Capacity Scaling, Distillation, and Low-Precision Inference](/202604/18/2604.09220v1-tinynerv-compact-neural-video-representations-via-capacity-scaling-distillation-and-low-precision-inference)  
    标签：评分：7.0/10、query:hwnas
-   evidence：资源受限场景下高效推理的预算感知专家激活
-8. [FlowEqProp: Training Flow Matching Generative Models with Gradient Equilibrium Propagation](/202604/17/2604.08150v1-floweqprop-training-flow-matching-generative-models-with-gradient-equilibrium-propagation)  
+   evidence：针对受限环境和高效部署的紧凑型神经视频表示
+8. [OASIS: Online Activation Subspace Learning for Memory-Efficient Training](/202604/18/2604.09406v1-oasis-online-activation-subspace-learning-for-memory-efficient-training)  
    标签：评分：7.0/10、query:hwnas
-   evidence：神经形态实现的硬件可行性
-9. [SAT: Balancing Reasoning Accuracy and Efficiency with Stepwise Adaptive Thinking](/202604/17/2604.07922v1-sat-balancing-reasoning-accuracy-and-efficiency-with-stepwise-adaptive-thinking)  
+   evidence：用于内存高效训练的在线激活子空间学习
+9. [New Deep Learning Data Analysis Method for PROSPECT using GAPE: Genetic Algorithm Powered Evolution](/202604/18/2604.08814v1-new-deep-learning-data-analysis-method-for-prospect-using-gape-genetic-algorithm-powered-evolution)  
    标签：评分：6.0/10、query:hwnas
-   evidence：大推理模型中的逐步自适应剪枝以提高效率
-10. [Wattlytics: A Web Platform for Co-Optimizing Performance, Energy, and TCO in HPC Clusters](/202604/17/2604.08182v1-wattlytics-a-web-platform-for-co-optimizing-performance-energy-and-tco-in-hpc-clusters)  
+   evidence：用于神经网络架构优化的遗传算法
+10. [Loom: A Scalable Analytical Neural Computer Architecture](/202604/18/2604.08816v1-loom-a-scalable-analytical-neural-computer-architecture)  
    标签：评分：6.0/10、query:hwnas
-   evidence：在GPU加速系统中协同优化性能与能耗
-11. [SMC-AI: Scaling Monte Carlo Simulation to Four Trillion Atoms with AI Accelerators](/202604/17/2604.08250v1-smc-ai-scaling-monte-carlo-simulation-to-four-trillion-atoms-with-ai-accelerators)  
+   evidence：在Transformer内部执行从C语言编译的程序的计算机架构
+11. [Beyond Silicon: Materials, Mechanisms, and Methods for Physical Neural Computing](/202604/18/2604.09833v1-beyond-silicon-materials-mechanisms-and-methods-for-physical-neural-computing)  
    标签：评分：6.0/10、query:hwnas
-   evidence：在包括NPU在内的AI加速器上进行高效模拟
+   evidence：超越硅基硬件的物理神经网络计算
 
 
 <div class="dpr-home-promo-card">

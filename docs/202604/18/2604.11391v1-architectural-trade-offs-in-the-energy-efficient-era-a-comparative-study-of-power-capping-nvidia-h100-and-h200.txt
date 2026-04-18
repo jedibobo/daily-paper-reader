@@ -1,0 +1,403 @@
+Title: Architectural Trade-offs in the Energy-Efficient Era: A Comparative Study of power-capping NVIDIA H100 and H200
+
+URL Source: https://arxiv.org/pdf/2604.11391v1
+
+Published Time: Tue, 14 Apr 2026 02:12:27 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# Architectural Trade-offs in the Energy-Efficient Era: A Comparative Study of power-capping NVIDIA H100 and H200 
+
+Aditya Ujeniya 1[0009 −0000 −1670 −4131] , Jan Eitzinger 1[0009 −0000 −3350 −3841] ,Georg Hager 1[0000 −0002 −8723 −2781] , and Gerhard Wellein 1[0000 −0001 −7371 −3026] 
+
+Friedrich-Alexander University of Erlangen–Nuremberg, 91058 Erlangen, Germany 
+
+{aditya.ujeniya, jan.eitzinger, georg.hager, gerhard.wellein}@fau.de 
+
+Abstract. Modern NVIDIA GPUs like the H100 (HBM2e) and H200 (HBM3e) share similar compute characteristics but differ significantly in memory interface technology and bandwidth. By isolating memory bandwidth as a key variable, the power distribution between the mem-ory and Streaming Multiprocessors (SM) changes notably between the two architectures. In the era of energy-efficient computing, analyzing how these hardware characteristics impact performance per watt is crit-ical. This study investigates how the H100 and H200 manage memory power consumption at various power-cap levels. By a regression analy-sis, we study the memory power limit and uncover outliers consuming more memory power. To evaluate efficiency, we employ compute-bound (DGEMM) and memory-bound (TheBandwidthBenchmark) workloads, representing the two extremes of the Roofline model. Our observations indicate that across varying power caps, the H100 remains the slightly better choice for strictly compute-bound workloads, whereas the H200 demonstrates superior efficiency for memory-bound applications. 
+
+Keywords: Regression · GEMM · Triad · compute-bound · memory-bound · power-cap · frequency · throttling · NVIDIA · outlier 
+
+1 Introduction 
+
+Power consumption in High-Performance Computing (HPC) and Artificial Intel-ligence (AI) has become a primary bottleneck for data centers. To manage these power demands, administrators frequently use deterministic hardware power-capping to limit GPU power draw. However, predicting performance under these power caps is difficult because modern GPUs employ complex Dynamic Voltage and Frequency Scaling (DVFS) algorithms to arbitrate power internally. Power consumption generally varies with arithmetic intensity. Synthetic benchmarks representing instruction throughput- and memory bandwidth-limited scenarios can systematically probe Roofline model corner cases under different power caps. This study investigates the performance and energy efficiency of the NVIDIA H100 and H200 GPUs under different power caps. Although both GPUs are built on the Hopper architecture and share similar compute capabilities, they differ  
+
+> arXiv:2604.11391v1 [cs.PF] 13 Apr 2026 2A. Ujeniya et al.
+
+significantly in memory bandwidth (HBM2e vs. HBM3e). By evaluating these GPUs using compute-bound (DGEMM) and memory-bound (TheBandwidth-Benchmark) workloads, we isolate the impact of memory bandwidth on power distribution between the Streaming Multiprocessors (SM) and the memory sub-system. Our goal is to provide an empirical analysis of how varying power limits affect performance, frequency stability, and overall efficiency across these two architectures. We start by introducing the GPU configuration in Section 3.1. We can see that the peak performance numbers of the NVIDIA H100 and H200 are identical. The only difference is the amount of memory and the memory bandwidth. Sec-tions 3.2 and 3.3 also describe briefly the synthetic benchmarks used to perform the regression analysis. They reflect the two different corner cases in the Roof-line model—DGEMM for the compute-bound regime and Triad for the memory-bound regime. Section 3.4 covers the methodology for performing measurements, which is the basis for collecting different metrics and discussing valid assump-tions for this study. Section 4 explores the GPU power and memory power draw, frequency throt-tling effects, and their impact on the benchmark score under different power-cap settings. The regression of the benchmarks also allow us to pinpoint outliers among specimens as well as understand the maximum memory power draw, which is not officially documented by NVIDIA. Section 5 presents an energy ef-ficiency analysis in terms of performance per Watt, comparing the power break-down side by side for both the GPUs. 
+
+2 Related Work 
+
+Prior work on power-capping GPUs shows that enforcing power limits saves en-ergy more reliably than reducing clock speeds, as demonstrated on NVIDIA Volta hardware [6]. With the rise of large-scale AI workloads, recent research has fo-cused on energy efficiency under strict power budgets [8], finding that maximum throughput does not always minimize energy consumption. In heterogeneous CPU-GPU systems, proper workload balance is critical, as CPU bottlenecks can undermine power-capping effectiveness [2,4]. GROMACS simulations on A100 and L4 GPUs show that performance is rather independent of power caps, degrading only under severe limits [3]. To-gether, these findings confirm that high-end GPUs can sustain near-peak appli-cation performance at substantially reduced power levels. While older GPUs are well studied, the Hopper generation remains under-explored, with no direct H100/H200 comparison under strict power caps. How their differing memory technologies (HBM2e vs. HBM3e) affect energy efficiency under power constraints remains unclear. This study addresses that gap by iso-lating memory bandwidth to assess its impact on performance-per-watt across power cap settings. Architectural Trade-offs in the Energy-Efficient Era 3
+
+Table 1: Characteristics of the NVIDIA H100 and H200 used for benchmarks                       
+
+> Metric H100 H200
+> Power Draw 700 W 700 W Memory Capacity 94 GiB 144 GiB Memory technology HBM2e HBM3e Base SM Frequency 1665 MHz 1665 MHz Boost SM Frequency 1980 MHz 1980 MHz Memory Frequency 1593 MHz 3201 MHz TF64 Peak 67 TFlop/s 67 TFlop/s Mem BW 2.41 TB/s 4.89 TB/s Nodes used 4GPUs per node 4Performance Mode P0 Software Stack NVHPC SKD 24.11 and CUDA 12.9
+
+3 Testbed and Benchmarks 
+
+In this section, we outline the hardware characteristics of the NVIDIA GPUs and detail our benchmarking methodology. To ensure statistical reliability, we exe-cute 50 complete benchmark runs for every power-cap setting on each individual GPU. Across our testing environment of four nodes (each equipped with four GPUs), this yields 800 discrete measured data points per benchmark for each specific power cap. The specific performance and hardware metrics captured during these iterations are detailed in Section 3.4. 
+
+3.1 System Characteristics of the Helma cluster 
+
+As shown in Table 1, the two GPU variants are very similar except for the mem-ory characteristics. The H200 has clearly better memory technology: HBM3e with more stacks and higher memory frequency. More information on the node configuration can be found in the vendor documentation for the compute node. 1
+
+3.2 General Matrix Multiplication (GEMM) 
+
+The NVIDIA Hopper architecture (H100 and H200) uses fourth-generation Ten-sor Cores, which provide native FP64 support to drastically speed up double-precision math operations rather than relying purely on standard CUDA cores. We used the cuBLAS 2 library to perform double-precision general matrix-matrix multiplications (DGEMM), C = αAB +βC . We use DGEMM to mimic compute-bound codes. For all the DGEMM benchmarks on H100 and H200, we use square   
+
+> 1https://lenovopress.lenovo.com/lp1613-thinksystem-sd665-n-v3-server
+> 2https://developer.nvidia.com/cublas
+
+4 A. Ujeniya et al. Init 
+
+> Copy
+> Update
+> Triad
+> Daxpy
+> STriad
+> SDaxpy
+> Kernel
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> Bandwidth [TB/s]
+> Limit: 2.41 TB/s
+> H100 HBM2e 2.41 TB/s
+> Init
+> Copy
+> Update
+> Triad
+> Daxpy
+> STriad
+> SDaxpy
+> Kernel
+> 0
+> 1
+> 2
+> 3
+> 4
+> 5
+> Bandwidth [TB/s]
+> Limit: 4.89 TB/s
+> H200 HBM3e 4.89 TB/s
+
+Fig. 1: Effective bandwidth for different kernels on NVIDIA H100 and H200 input and output matrices of dimension 32768. The optimal thread-block size is automatically determined by the cuBLAS library. 
+
+3.3 TheBandwidthBenchmark (TBB) 
+
+TheBandwidthBenchmark 3 is a flexible benchmarking suite designed to measure the sustained effective main memory bandwidth on both CPU and GPU archi-tectures. It is inspired by the McCalpin STREAM benchmark but adds more kernels to evaluate memory performance across various data access patterns (not that s is a scalar value): 
+
+Init : a[i] = s Daxpy : a[i] = a[i] + b[i] * s 
+
+Copy : a[i] = b[i] STriad : a[i] = b[i] + c[i] * d[i] 
+
+Update : a[i] = a[i] * s SDaxpy : a[i] = a[i] + b[i] * c[i] 
+
+Triad : a[i] = b[i] + c[i] * s 
+
+Figure 1 shows the effective bandwidths for different kernels on NVIDIA H100 and H200. For our purposes, we will focus on the double-precision Schönauer Triad (STriad) kernel performance. For all STriad benchmarks on H100 and H200, we use a total data set size of 80 GB. The optimal thread-block size is automatically determined by TBB. 
+
+3.4 Methodology 
+
+We executed the two benchmarks independently across all GPUs on four nodes. For each execution, we capture the benchmark throughput (in TFlop/s or TB/s), along with average metrics for total power draw (W), memory power draw (W),  
+
+> 3
+
+https://github.com/HPC-Dwarfs/TheBandwidthBenchmark Architectural Trade-offs in the Energy-Efficient Era 5
+
+SM frequency (MHz), and memory frequency (MHz). On NVIDIA architectures, the overall power consumption WTotal is additive: 
+
+WTotal = WGPU + WMemory (1) Both WTotal and WMemory are recorded using nvidia-smi -q with a 10-second polling interval. WGPU is the power draw combining power draw from SM units, L2 cache unit and the memory controller. At the end of each benchmark run, the collected values are time-averaged to generate one consolidated data point per benchmark run. Because there is no inter-GPU communication during these runs, communication-related power draw is excluded from our analysis. We evaluated both the NVIDIA H100 and H200 across a power-capping range from 200 W to their maximum Thermal Design Power (TDP) of 700 W in increments of 100 W. Across all tested GPU power limits, the memory frequency remained strictly static: 1593 MHz for the H100 and 3201 MHz for the H200. All experiments use random data initialization to maximize GPU power draw. Randomly initialized data causes more dynamic power due to more frequent switching [1,5]; we experimented with different array initialization techniques like constant and random data and found up to 100 W difference in power draw. This is in line with similar recent studies on recent CPUs and GPUs [7,2], but it is not within the scope of this study to go into detail of this behavior. More data on this topic is available online. 4.
+
+4 Power-capping analysis for different benchmarks 
+
+We begin by analyzing the compute-bound DGEMM. For each benchmark we show power vs. performance across different power-cap settings. Then we analyze the observed behavior with split violin plots for SM frequency and memory power draw. All charts include regression data (repeated measurements and GPU specimens). There is interesting spatial (cross-specimens) behavior which is not covered since extensive regression analysis is not in the scope of this study. We have excluded baseline power draw, such as CPU power or other components beyond the GPUs. Note that if we had enforced a power limit on the entire node instead of just the GPU, the results would look different. 
+
+4.1 DGEMM 
+
+Figure 2 reveals that while the DGEMM benchmark consistently saturates the power cap (showing minimal variance on the power draw axis), its performance fluctuates significantly. The most stable performance zones occur at 400 W for the H100 and 500 W for the H200. Scaling the total power cap from 200 W to 400 W yields substantial performance gains, whereas the 500 W to 700 W range exhibits diminishing returns, offering only a 10% performance increase at  
+
+> 4https://blogs.fau.de/adityauj/2025/11/15/power-frequency-characteristics/
+
+6 A. Ujeniya et al. 200 300 400 500 600 700 
+
+> Average Power Draw [W]
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 70
+> Benchmark Score [TFlop/s]  67 TFlop/s
+> PowerCap [W]
+> 200
+> 300
+> 400
+> 500
+> 600
+> 700
+
+(a) NVIDIA H100 200 300 400 500 600 700  
+
+> Average Power Draw [W]
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 70
+> Benchmark Score [TFlop/s]  67 TFlop/s
+> PowerCap [W]
+> 200
+> 300
+> 400
+> 500
+> 600
+> 700
+
+(b) NVIDIA H200 
+
+Fig. 2: DGEMM: relationship between performance throughput and average power draw across different power-cap settings. 200 300 400 500 600 700 
+
+> Power Cap [W]
+> 0
+> 500
+> 1000
+> 1500
+> 2000
+> Average SM Frequency [MHz]
+> GPU Type
+> NVIDIA H100
+> NVIDIA H200
+> 1980 MHz
+
+(a) Average SM Frequency 200 300 400 500 600 700  
+
+> Power Cap [W]
+> 0
+> 25
+> 50
+> 75
+> 100
+> 125
+> 150
+> 175
+> 200
+> Avg Mem Power Draw [W]
+> GPU Type
+> NVIDIA H100
+> NVIDIA H200
+
+(b) Average Memory Power Draw 
+
+Fig. 3: DGEMM: split violin plots detailing average SM frequency and memory power draw. each power-cap step. Notably, the H100 slightly outperforms the H200 at identi-cal power limits. This advantage stems from the H200’s higher average memory power draw (see Figure 3b), which reduces the available power budget for the SMs. Consequently, the H200 experiences more aggressive SM frequency throt-tling, which disproportionately degrades the performance of compute-bound workloads like DGEMM. Figure 3 further illustrates this inverse relationship between memory power draw and SM frequency. This inverse relation is observed when GPUs are throt-tling. Because the H200 operates at a higher memory frequency, it inherently draws more memory power. Interestingly, while the H100’s average memory power draw plateaus between 100 W and 110 W, the H200’s memory power draw continues to scale concurrently with the total power cap. A notable excep-tion occurs precisely at the 300 W power-cap setting, where both GPUs exhibit nearly identical memory power consumption and average SM frequencies. Architectural Trade-offs in the Energy-Efficient Era 7200 225 250 275 300 325 350 
+
+> Average Power Draw [W]
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> Benchmark Score [TB/s]  2.41 TB/s
+> PowerCap [W]
+> 200
+> 300
+> 400
+> 500
+> 600
+> 700
+
+(a) NVIDIA H100 250 300 350 400 450 500 550  
+
+> Average Power Draw [W]
+> 0
+> 1
+> 2
+> 3
+> 4
+> 5
+> Benchmark Score [TB/s]  4.89 TB/s
+> PowerCap [W]
+> 200
+> 300
+> 400
+> 500
+> 600
+> 700
+
+(b) NVIDIA H200 
+
+Fig. 4: Relationship between performance throughput and power draw across different power-cap settings for the Schönauer Triad benchmark. 200 300 400 500 600 700 
+
+> Power Cap [W]
+> 0
+> 500
+> 1000
+> 1500
+> 2000
+> Average SM Frequency [MHz]
+> GPU Type
+> NVIDIA H100
+> NVIDIA H200
+> 1980 MHz
+
+(a) Average SM Frequency 200 300 400 500 600 700  
+
+> Power Cap [W]
+> 0
+> 50
+> 100
+> 150
+> 200
+> 250
+> Avg Mem Power Draw [W]
+> GPU Type
+> NVIDIA H100
+> NVIDIA H200
+
+(b) Average Memory Power Draw 
+
+Fig. 5: Schönauer Triad performance metrics comparing the NVIDIA H100 (left halves) and H200 (right halves) via split scattered and violin plots. 
+
+4.2 Schönauer Triad 
+
+In contrast to compute-bound workloads, memory-bound loops such as STriad do not fully saturate the GPU’s TDP. To achieve peak effective memory band-width, the NVIDIA H100 requires only around 350 W. Conversely, the H200 demands a significantly higher average power draw of at least 550 W to sus-tain its larger memory bandwidth. Notably, the H100 maintains peak effective bandwidth even under a strict 200 W power cap, whereas the H200 exhibits bandwidth degradation at limits of 300 W and below. Furthermore, Figure 4b reveals anomalous behavior for the H200 at the 200 W setting: the actual average power draw hovers around 250 W. Unlike compute-bound scenarios (Figure 2b), the H200 fails to strictly enforce the 200 W limit during memory-bound execution, a phenomenon further explored in Section 5.2. Notably, SM frequency throttling reduces effective memory bandwidth as the GPU approaches its base clock limit. As shown in Figure 5a, the H200 experi-8 A. Ujeniya et al. 200 300 400 500 600 700 
+
+> PowerCap [W]
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> 120
+> 140
+> 160
+> Efficiency [GFlop/s / W]
+> NVIDIA H100
+> NVIDIA H200
+
+(a) Efficiency Analysis 200 300 400 500 600 700     
+
+> PowerCap [W]
+> 0
+> 200
+> 400
+> 600
+> 800
+> Average Power Draw [W]
+> 52W 148W
+> 90W  210W
+> 100W  298W
+> 89W  410W
+> 87W  512W
+> 96W  603W
+> 56W 143W
+> 78W 222W
+> 116W  283W
+> 130W  369W
+> 139W  460W
+> 152W  546W
+> NVIDIA H100 Mem power draw
+> NVIDIA H100 GPU power draw
+> NVIDIA H200 Mem power draw
+> NVIDIA H200 GPU power draw
+
+(b) Power Breakdown 
+
+Fig. 6: DGEMM benchmark analysis: (a) Energy efficiency comparison between the NVIDIA H100 and H200, including min/max deviations, and (b) the corre-sponding power consumption breakdown between memory and GPU power. ences severe throttling down to its 345 MHz base frequency, a state the H100 never reaches. This aggressive throttling in the H200 is driven by its higher mem-ory power requirements. Figure 5b illustrates that the H100’s average memory power draw saturates at approximately 125 W, while the H200 saturates much higher at roughly 220 W. Examining regressions also reveals hardware outliers within the power met-rics. For example, Figure 5b shows a distinct secondary distribution near 240 W for the H200 across all power caps, indicating a specific GPU unit consistently drawing more memory power than other GPUs. This hardware-level variance (second distribution created by one GPU consistently drawing more power) is also visible in the compute-bound results in Figure 3b. 
+
+5 Efficiency and Power Breakdown Comparison 
+
+This section evaluates GPU performance in terms of energy efficiency (perfor-mance per Watt). To contextualize the efficiency trends, we provide a compara-tive power breakdown, analyzing the SM and memory power draw for both the H100 and H200. 
+
+5.1 DGEMM 
+
+Figure 6a shows that both GPUs generally achieve higher energy efficiency un-der stricter power caps. A notable exception occurs at the 200 W limit for the H200, where disproportionately high memory power draw forces aggressive SM frequency throttling, severely degrading performance. Additionally, both archi-tectures exhibit a pronounced efficiency variance at power caps at or below 300 W, driven by memory power fluctuations that destabilize GPU power draw and amplify SM frequency variability, as evident from Figure 3. Architectural Trade-offs in the Energy-Efficient Era 9200 300 400 500 600 700 
+
+> PowerCap [W]
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> 12
+> 14
+> 16
+> Efficiency [GB/s / W]
+> NVIDIA H100
+> NVIDIA H200
+
+(a) Efficiency Analysis 200 300 400 500 600 700  
+
+> PowerCap [W]
+> 0
+> 200
+> 400
+> 600
+> 800
+> Average Power Draw [W]
+> 103W 95W
+> 114W  184W
+> 115W  217W
+> 115W  218W
+> 115W  218W
+> 115W  218W
+> 133W  123W
+> 154W  146W
+> 186W  209W
+> 203W  291W
+> 209W  328W
+> 209W  327W
+> NVIDIA H100 Mem power draw
+> NVIDIA H100 GPU power draw
+> NVIDIA H200 Mem power draw
+> NVIDIA H200 GPU power draw
+
+(b) Power Breakdown 
+
+Fig. 7: Schönauer Triad benchmark analysis: (a) Energy efficiency comparison between the NVIDIA H100 and H200, including min/max deviations, and (b) the corresponding power consumption breakdown. Figure 6b shows that the H200’s memory power consumption continues to scale with the total power limit, correspondingly reducing the power budget available to the SMs. Notably, despite a substantial gap in GPU power draw between the two GPUs up to the 500 W cap, the resulting efficiency differences (Figure 6a) remain marginal, suggesting that SMs can sustain near-optimal op-erating frequencies provided a sufficient baseline GPU power threshold is met. 
+
+5.2 Schönauer Triad 
+
+Figure 7a reveals a clear energy efficiency advantage for the H200 across all power caps for the memory-bound benchmark. Notably, the H200 at a 400 W limit outperforms the H100 at full TDP in overall efficiency. As observed previously, efficiency variance is pronounced at power caps at or below 300 W, reflecting the underlying performance instability. The comparative power breakdown in Figure 7b reveals that the H200 draws significantly more power across both its memory and SMs. This increased SM power consumption is a direct consequence of the H200’s superior memory bandwidth: The faster data delivery sustains a higher sustained flop/s through-put, thereby demanding more compute power. Furthermore, the H200’s doubled memory frequency relative to the H100 results in proportionally doubled memory power draw, provided total consumption remains within the power cap. This power breakdown also explains the unusual 200 W case where the H200 fails to stay under the power limit, unlike the H100. Despite identical compute units, the H200’s higher memory power draw significantly reduces the power budget available for computation. The result can be seen in Figure 5a: The H200’s SMs drop to their lowest supported SM frequency to stay within its power cap. Still, performing more flop/s (due to higher memory bandwidth) at lowest operating SM frequency draws more power and combining with memory power draw together, it breaches the 200 W power-cap setting. We saw earlier 10 A. Ujeniya et al. 
+
+in Figure 6b that the H200 can successfully stay under a 200 W cap during compute-heavy workloads like DGEMM. However, the massive memory power required by the memory-bound code makes it impossible for the H200 to obey the same 200 W limit in this case. 
+
+6 Conclusion 
+
+Our analysis shows that the NVIDIA H100 slightly outperforms the H200 in compute-bound tasks (DGEMM) at the same power limits. This is because the H200 requires more power for its memory, which then leaves less room for SM power draw, resulting in lower operating SM frequency. We also see that the performance for both GPUs is directly proportional to the SM frequency. The performance will scale according to the SM frequency scaling. For both GPUs, increasing the power cap from 200 W to 400 W provides the best performance boost, while anything above 500 W offers diminishing returns. Conversely, the H200’s superior memory bandwidth more than compensates for its higher power draw on memory-bound tasks, yielding substantially better energy efficiency. Operating the H200 at a restricted 400 W limit surpasses the H100 at full TDP in efficiency, though reaching peak memory bandwidth still requires 550 W versus the H100’s 350 W. However, higher memory bandwidth does not automatically guarantee better energy efficiency. It significantly in-creases the power consumption of both the memory and the SMs. Most notably, the H200 fails to respect a strict 200 W cap under memory-intensive loads, draw-ing approximately 250 W instead: Its high baseline memory power consumption leaves insufficient headroom for the SMs, forcing them to their lowest supported SM frequency. Additionally, our regression testing successfully uncovered undocumented hardware properties (like memory power draw) and highlighted distinct hard-ware outliers, proving that individual GPUs of the exact same model can consis-tently draw measurably more memory power than the other GPUs. We observe maximum memory power draw of 120 W for H100 and maximum memory power draw of 220 W for H200 (except the outliers at 240 W). Architectural Trade-offs in the Energy-Efficient Era 11 
+
+Acknowledgments. The authors gratefully acknowledge the scientific support and HPC resources provided by the Erlangen National High Performance Computing Cen-ter (NHR@FAU) of the Friedrich-Alexander-Universität Erlangen-Nürnberg (FAU) un-der the BayernKI project v111dc. BayernKI funding is provided by Bavarian state au-thorities. The authors gratefully acknowledge the scientific support and HPC resources provided by NHR@FAU of the FAU under the NHR project b104dc. NHR funding is provided by federal and Bavarian state authorities. NHR@FAU hardware is partially funded by the German Research Foundation (DFG) – 440719683. 
+
+References 
+
+1. Anantha, C., Samuel, S., Robert, B.: A JSSC classic paper: Low-power CMOS digital design. IEEE Solid-State Circuits Society Newsletter 8(2), 6–6 (2003). https:// doi.org/10.1109/N-SSC.2003.6499960 
+
+2. Antepara, O., Zhao, Z., Austin, B., Ding, N., Oliker, L., Wright, N.J., Williams, S.: Benchmark-driven models for energy analysis and attribution of GPU-accelerated supercomputing. In: Proceedings of the International Conference for High Perfor-mance Computing, Networking, Storage and Analysis. p. 888–904. SC ’25, Associa-tion for Computing Machinery, New York, NY, USA (2025). https://doi.org/10. 1145/3712285.3759815 
+
+3. Ayesha, A., Anna, K., Georg, H., Gerhard, W.: GROMACS unplugged: How power capping and frequency shapes performance on GPUs. Distributed, Parallel, and Cluster Computing 0, 0 (2025). https://doi.org/10.48550/arXiv.2510.06902 
+
+4. Krzywaniak, A., Czarnul, P., Proficz, J.: Dynamic GPU power capping with online performance tracing for energy efficient GPU computing using DEPO tool. Future Generation Computer Systems 145 , 396–414 (2023). https://doi.org/10.1016/j. future.2023.03.041 
+
+5. Najm, F.: A survey of power estimation techniques in VLSI circuits. IEEE Trans-actions on Very Large Scale Integration (VLSI) Systems 2(4), 446–455 (1994). 
+
+https://doi.org/10.1109/92.335013 
+
+6. Patki, T., Frye, Z., Bhatia, H., Di Natale, F., Glosli, J., Ingolfsson, H., Rountree, B.: Comparing GPU power and frequency capping: A case study with the MuMMI work-flow. In: 2019 IEEE/ACM Workflows in Support of Large-Scale Science (WORKS). pp. 31–39 (2019). https://doi.org/10.1109/WORKS49585.2019.00009 
+
+7. Schöne, R., Ilsche, T., Bielert, M., Gocht, A., Hackenberg, D.: Energy efficiency features of the Intel Skylake-SP processor and their impact on performance. In: 2019 International Conference on High Performance Computing & Simulation (HPCS). pp. 399–406 (2019). https://doi.org/10.1109/HPCS48598.2019.9188239 
+
+8. Yuan, M., Srinivasan, S., Wang, X.: Power capping of GPU servers for machine learning inference optimization. Association for Computing Machinery 0, 449–459 (2025). https://doi.org/10.1145/3754598.3754670
