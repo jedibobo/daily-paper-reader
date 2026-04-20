@@ -1,0 +1,670 @@
+Title: MemExplorer: Navigating the Heterogeneous Memory Design Space for Agentic Inference NPUs
+
+URL Source: https://arxiv.org/pdf/2604.16007v1
+
+Published Time: Mon, 20 Apr 2026 00:51:16 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# MemExplorer: Navigating the Heterogeneous Memory Design Space for Agentic Inference NPUs 
+
+Haoran Wu * Zeyu Cao * Yao Lai * Binglei Lou † Jiayi Nie * Can Xiao † Timi Adeniran * Przemyslaw Forys †
+
+Kauser Johar ‡ Catriona Wright ‡ Junyi Liu § Kai Shi § Nicholas D. Lane * Rika Antonova *
+
+Jianyi Cheng ¶ Timothy Jones * Aaron Zhao † Robert Mullins **University of Cambridge, †Imperial College London, ‡Chipletti, §Microsoft, ¶ University of Edinburgh 
+
+## Abstract 
+
+Emerging agentic LLM workloads are driving the rapidly growing demand on both memory capacity and bandwidth, with different phases of inference (e.g., prefill and decode) imposing distinct re-quirements. Industry is responding by composing heterogeneous accelerators into single interconnected systems, as exemplified by NVIDIA’s Vera Rubin platform, where each device brings its own memory architecture. This heterogeneity is compounded by a widening landscape of memory technologies available: high-density on-chip SRAM, HBM, LPDDR, GDDR, and emerging options such as high-bandwidth flash (HBF), each offering different capacity, bandwidth, and power trade-offs. Identifying the right memory ar-chitecture for next-generation inference accelerators thus requires navigating a vast and rapidly evolving design space, one where the interplay between workload characteristics, NPU design dimen-sions, and memory system designs remains largely under-explored. To address this challenge, we present MemExplorer , a new memory system synthesizer for heterogeneous NPU systems. Mem-Explorer provides a unified abstraction for modeling diverse mem-ory technologies across the different hierarchies (e.g., on-chip and off-chip) and automatically determines an efficient heterogeneous memory system together with NPU design choices (e.g., matrix engine size) to balance the throughput and power between the prefilling and decoding devices in a multi-device NPU system. Experimental results show that, under the same power budget for agentic workloads, MemExplorer achieves up to 2.3× higher energy efficiency than the baseline NPU and 3.23 × over H100 in the prefill-only setting. Under equivalent performance targets in the decode setting, it further delivers up to 1.93 × and 2.72 × higher power efficiency over the baseline NPU and H100, respectively. 
+
+## 1 Introduction 
+
+Large language models (LLMs) have fueled a surge in applications that require highly efficient inference systems. In particular, re-cent advances in agentic applications such as computer-use agents (CUAs) [ 2 , 53 ], autonomous coding agents [ 5, 32 , 37 ], and web-use agents (WUAs) [ 6, 53 ] introduce highly dynamic and unpredictable memory access patterns. Unlike conventional chatbot inference, where session lengths and sequence patterns are relatively pre-dictable, agentic systems interact with external environments: this dynamic interaction leads to rapid context growth and extremely long traces from tool-calling and reasoning.     
+
+> 1The agentic workload trace is obtained on the LLaMA 3.3 70B model on H100.
+> 2The bandwidth and capacity experiments are conducted using input/output sequence lengths of (1.4K, 0.2K) and (90K, 2K) on the LLaMA 3.3 70B model with the base configuration in Table 6 under weight-stationary execution. 10 310 410 5
+> Tokens
+> Chatbot
+> WUA
+> CUA
+> Prefill Decode
+> 10 110 2
+> Time (s)
+
+(a) Agentic workloads exhibit significantly larger token processing requirements, particularly during the prefill stage. 11 10 100 1K 10K 
+
+Bandwidth (GB/s) 
+
+0.01 
+
+0.1 
+
+1
+
+10 
+
+100 
+
+> Capacity (GB)
+> Off-Chip
+> Memory
+> On-Chip
+> Memory
+> SRAM
+> 3D-Stacked SRAM
+> HBF
+> HBM
+> DDR
+> LPDDR
+> GDDR
+
+(b) Heterogeneous Memory Design Space. Contour blobs clearly de-marcate distinct technology zones across capacity, bandwidth, and access latency parameters. Act (Prefill) KV Cache Weight   
+
+> 10 2
+> 10 0
+> 10 2
+> Memory (GB)
+> Memory Capacity Breakdown
+> Normal Agentic
+> On-chip
+> Prefill
+> Off-chip
+> Prefill
+> On-chip
+> Decode
+> Off-chip
+> Decode
+> 0
+> 50
+> 100
+> Bandwidth Util (%)  Memory Bandwidth Utilization
+
+(c) Agentic workloads significantly increase memory capacity re-quirements for activations and KV cache. Meanwhile, bandwidth uti-lization increases moderately and exhibits distinct behaviors across the prefill and decode stages. 2
+
+Figure 1: Heterogeneous memory design opportunities for agentic LLM inference. 
+
+In addition, existing LLM models with agentic capabilities [ 16 ,31 , 44 ] have been scaled to millions of tokens in context window size, which natively demands massive memory capacity (e.g., of-ten exceeding 500GB for the KV cache alone). Concurrently, this dynamic interaction creates intense, rapidly changing memory pres-sure: sudden bursts of agentic interaction result in volatile memory access patterns and bandwidth requirements. These patterns expose a key limitation of today’s accelerators: constrained by a single, homogeneous memory architecture (typically HBM), they struggle to simultaneously meet the dynamic bandwidth needs and varying        
+
+> 1
+> arXiv:2604.16007v1 [cs.AR] 17 Apr 2026 Package Substrate
+> HBM
+> ME
+> VE
+> 3D Stacked SRAM
+> LPDDR LPDDR
+> Interposer
+> Package Substrate
+> HBM
+> Interposer
+> HBF
+> ME
+> VE
+> SRAM
+> Prefill Configured Accelerator Decode Configuration Accelerator
+> DDR Type, #DDR Stack #HBF Stack HBM Type, #HBM Stack HBM Type, #HBM Stack
+> VLEN VLEN
+> # 3D Stack
+> SRAM
+> PE Array Dim
+> PE Array Dim
+
+Figure 2: NPU designs optimized for prefill-only and decode-only workloads. The black edges represent all possible data movements between the compute and memory. The parameters listed in the figure define the design space of the NPU system. 
+
+memory capacity demands of long-context agentic workloads at different inference serving phases. To address these limitations, emerging inference systems are shifting toward heterogeneous memory architectures across dis-aggregated accelerators. A prominent example is NVIDIA’s recent Vera Rubin platform [ 35 ], which introduces a purpose-built het-erogeneous architecture to support these disparate workloads at different phases of LLM serving. In this design, high-throughput prefill processing is handled by conventional Rubin GPUs utiliz-ing HBM4, providing immense capacity (288 GB per node) and massive bandwidth (up to 22 TB/s). In contrast, critical portions of latency-sensitive decode workloads are offloaded to a specialized architecture such as the Groq 3 LPX. This hardware employs a dataflow processor with 128 GB of aggregated on-chip SRAM with-out co-packaged DDR memory, delivering 40 PB/s of aggregated bandwidth. These two accelerators, Rubin GPUs and Groq LPXs, use distinct memory architectures yet collaborate on the same serv-ing task. Furthermore, Other major industry players, such as AWS, also partner with Cerebras to implement a similar disaggregation serving recipe with Trainium and Cerebras WSE [ 50 ]. These ad-vances illustrate a broader trend: future LLM serving systems will progress into heterogeneous devices with fundamentally different memory systems rather than relying on uniformed designs. To further investigate the opportunity space for a heterogeneous, disaggregated accelerator system, we first need to understand its problem space. As illustrated in Figure 1c, agentic workloads exhibit vastly different memory requirements compared to conventional inference: their longer sequence lengths amplify both activation and KV cache sizes, driving significantly greater memory capacity demands. Moreover, the bandwidth requirements for both on-chip and off-chip differ significantly between prefill and decode. This difference is further illustrated in Figure 1a, where the trace reveals disproportionate resource usage across stages: the decode stage typically generates only a small number of tokens compared to prefilling yet contributes significantly to the end-to-end latency. This suggested that a single accelerator optimized for a single case would be inevitably limited, further supporting the idea that an effi-cient agentic LLM serving system should account for heterogeneity in disaggregated serving. Meanwhile, Figure 1b shows that existing and emerging memory technologies span a wide spectrum, from ultra-high-bandwidth on-chip SRAM to high-capacity off-chip stor-age. Given their varied costs and constraints, an effective memory system must organize these technologies into a structured hierar-chy. This naturally introduces two dimensions to the design space: 1) memory hierarchy , the vertical arrangement of tiers within a single device, and 2) memory heterogeneity , the diversity of mem-ory architectures across devices in a disaggregated system. Our research question then naturally arises: How can we systematically explore this memory design space to identify optimal configurations of emerging memory technologies for next-generation agentic LLM inference systems with heterogeneous NPUs? 
+
+To address this, we propose MemExplorer , an end-to-end archi-tecture exploration framework tailored to systematically explore emerging memory systems in heterogeneous NPU systems. The framework is driven by our primary design goals: systematic explo-ration through tightly coupled co-design on software scheduling, hardware architecture, and memory system. To achieve this, we 1) integrate common abstractions of various memory technologies; 2) implement an exploration space for heterogeneous disaggregated serving; and 3) enable algorithm-aware co-design via design space exploration. This holistic design capability enabled us to rapidly identify the Pareto frontier for disaggregated serving and to provide optimal design choices for the NPUs in such a system, balancing energy efficiency and performance. The main contributions of this paper are as follows: 
+
+• We propose MemExplorer , a framework that captures the in-trinsic relationship between compute and multi-level memory hierarchies in LLM inference NPUs. The framework supports both existing and emerging memory technologies, including HBM, LPDDR, HBF, and 3D-stacked SRAM, enabling systematic exploration of bandwidth, capacity, and power trade-offs. 
+
+• MemExplorer unifies software optimizations, including dataflow strategy and storage scheduling, with NPU compute and memory configurations into a single co-design space. MemExplorer en-ables joint optimization across the NPU architecture, its memory hierarchy, and software execution strategies. To the best of our knowledge, we are the first to incorporate this level of co-design on an agentic LLM disaggregated serving system. 
+
+• Using MemExplorer, we systematically analyze the memory re-quirements of the prefill and decode stages under agentic work-loads. MemExplorer finds that prefill benefits the most from large, 
+
+> 2MemExplorer: Navigating the Heterogeneous Memory Design Space for Agentic Inference NPUs
+
+Table 1: Technology parameters of different memory devices. Values marked with ∗ denote experiment data. Values marked with † denote values computed using the provided scaling factors.                                                                                                                                               
+
+> Memory Type Latency Capacity Bandwidth Shoreline 𝑝 bg (mW/GB) 𝑒 read (pJ/bit) 𝑒 write (pJ/bit) Note
+> On-Chip Memory
+> SRAM 1 Die ∼1.5𝑛𝑠 256 MB 4TB/s —∼10 𝑘 −50 𝑘 ∗∼0.1∗∼0.1∗Obtained by Experiments
+> Off-Chip Memory
+> HBM3E 8H 1 Stack ∼100 𝑛𝑠 24 GB 1 TB/s ∼11 𝑚𝑚 ∼50 −100 ∗∼3∗∼3.6∗Obtained by Experiments HBM4 12H 1 Stack ∼100 𝑛𝑠 36 GB 2 TB/s ∼15 𝑚𝑚 ∼50 −100 †∼2.2†∼2.4†40% energy efficiency than HBM3e [42]. LPDDR5X 1 Pkg[29] ∼50 𝑛𝑠 16 GB 76.8 GB/s ∼4.1𝑚𝑚 ∼7.65 ∗∼5∗∼6.5∗Obtained by Experiments LPDDR6 1 Pkg[22] ∼50 𝑛𝑠 16 GB 172.8 GB/s ∼4.5𝑚𝑚 ∼6.12 †∼3.75 †∼4.87 †20% to 30% more energy effi-cient than LPDDR5X [30] GDDR6 1 Chip[28] ∼12 𝑛𝑠 2 GB 64 GB/s ∼11 𝑚𝑚 ∼100 ∗∼7∗∼8.8∗Obtained by Experiments GDDR7 1 Chip ∼12 𝑛𝑠 3 GB 128 GB/s ∼11 𝑚𝑚 ∼120 †∼5.6†∼7.0†20% more energy efficient than GDDR6 [48].
+> Emerging Memory Technologies
+> 3D Stacked 1 Layer ∼5𝑛𝑠 1GB 8TB/s —∼10 𝑘 −50 𝑘 ∗∼0.1∗∼0.1∗Obtained by Experiments HBF 1 Stack[17, 21] ∼1𝜇𝑠 384 GB 1 TB/s ∼8.25 𝑚𝑚 ∼300 †∼6†∼10 †4×𝑝 bg and 2 ×𝑒 read and 𝑒 write
+> than HBM3E [13, 17, 26].
+
+high-bandwidth 3D stack on-chip SRAM; under the same power budget, the optimized prefill chip achieves up to 2.3 × and 3.23 ×
+
+higher energy efficiency (token/J) compared to baseline NPU and H100, respectively. For decode, larger-capacity, lower-bandwidth off-chip memory proves more effective: bandwidth demand is lower, and the additional capacity directly improves throughput. The optimal decode chip design delivers up to 1.93 × and 2.72 ×
+
+higher energy efficiency than the baseline NPU and H100. 
+
+## 2 Unified Memory System Modeling 
+
+We establish an analytical memory model with two objectives: (1) characterizing the memory behavior intrinsic to agentic LLM inference for further integration into the co-design framework; and (2) remaining extensible to emerging memory technologies so that the framework retains its utility as the technology landscape evolves. Achieving both objectives simultaneously is non-trivial. A model tailored to a specific technology family can exploit fine-grained microarchitectural detail, but does so at the cost of general-ity, whereas an overly abstract model risks discarding the physical constraints critical for practical deployment. Our key observation is that, despite their diversity, memory technologies relevant to NPU co-design can be faithfully compared along a compact parameter set spanning physical layers (memory stack count) and performance (latency, capacity, bandwidth, energy), as consolidated in the header of Table 1. In the following subsections, we first detail how these parameters are instantiated for established technologies and the constraints governing their integration. We then present the hier-archical analytical model that underpins the co-design framework. Finally, we demonstrate extensibility through two case studies on 3D-stacked SRAM and High Bandwidth Flash. 
+
+## 2.1 Established Memory Technologies 
+
+In this work, we consider on-chip SRAM and three widely deployed off-chip memory families: GDDR, LPDDR, and HBM. Both on-chip and off-chip memory parameters are summarized in Table 1. 
+
+Memory Stack Count. This constraint applies exclusively to off-chip memory; on-chip SRAM is fabricated directly on, or bonded atop, the compute die and therefore does not consume die-shoreline resources. For off-chip technologies, memory devices are physically placed along selected edges of the compute die and connected through high-speed PHY interfaces, collectively referred to as the die shoreline [ 7]. This imposes a fundamental physical bound on the number of memory stacks that can be integrated around a single compute die. In modern accelerator designs, only a subset of the shoreline (typically two edges) is allocated for memory attachment, while the remaining edges are reserved for PCIe, scale-up intercon-nects (e.g., NVLink), and other I/O. Each off-chip stack occupies 
+
+𝐿 PHY ≈ 4–15 mm of shoreline depending on the technology (see Table 1), bounding the maximum number of attachable stacks as 
+
+𝑁 stack ≲
+
+ 𝐿 mem 
+
+𝐿 PHY + 𝐿 margin 
+
+
+
+(1) where 𝐿 mem is the die-edge length reserved for memory. This con-straint is further tightened by the lithography reticle limit: current DUV/EUV steppers impose a maximum die exposure field of ap-proximately 26 mm × 33 mm [ 4, 60 ], giving an upper bound of 
+
+𝐿 mem ≤ 2 × 33 mm . Consequently, even under an unconstrained power budget, the number of off-chip stacks is hard-bounded by physical die geometry [36]. 
+
+Performance Indicators. We characterize each technology along three performance axes: I/O access latency (Latency), per-die ca-pacity (Capacity), and peak bandwidth (Bandwidth). These metrics form the standard basis for memory system evaluation in prior accelerator studies [ 39 ] and are directly obtainable from vendor datasheets and JEDEC specifications. Together, they determine the rate at which data can be supplied to the compute units and the volume of model state that can reside at each hierarchy level, both of which critically govern LLM inference throughput. In addition, we decompose memory energy into three compo-nents: static background power ( 𝑝 bg ), per-bit read energy ( 𝑒 read ), 
+
+> 3
+
+and per-bit write energy ( 𝑒 write ). This decomposition is sufficient for our transactional memory model because LLM inference mem-ory accesses are dominated by large, contiguous bulk transfers (each modeled as a single read or write transaction), rather than fine-grained random accesses that would require row-buffer or bank-conflict modeling. Background power captures the capacity-dependent leakage cost that persists regardless of access activity, while the per-bit dynamic terms capture the access-dependent cost that scales with bandwidth utilization. Together, these three coeffi-cients parameterize the power equation in Equation (6); a discussion of the memory power model is presented in Section 4.1. 
+
+## 2.2 Proposed Analytical Model for Memory Hierarchy 
+
+As data access is straightforward and typically involves contin-uously loading large volumes of data from off-chip memory, we model each data read and write process as a single operation. For instance, loading the K or V cache in a single attention layer is modeled as one operation, during which we record the bandwidth usage consumed by the compute units. For on-chip memory, we model the bandwidth utilization of ma-trix and vector operations separately, as they exhibit distinct access patterns. Since the off-chip memory system can be hierarchical, with multiple stacked memory technologies, we introduce a multi-level memory hierarchy with 𝐿 levels, where level 0 represents the compute unit and level 𝐿 denotes the farthest memory. Data is transferred progressively from level 𝐿 toward the compute unit through adjacent memory level boundaries. For each boundary 𝑖 ,we define the following constraints: 
+
+• 𝐵 𝑖 : effective bandwidth from level 𝑖 + 1 to level 𝑖 . When level 𝑖 
+
+supports double buffering and simultaneously transfers data to level 𝑖 − 1, the effective bandwidth is limited by the remaining available bandwidth of level 𝑖 . Therefore, the effective bandwidth is defined as 
+
+𝐵 eff  
+
+> 𝑖
+
+= 𝐵 peak  
+
+> 𝑖
+
+− 𝐵 eff  
+
+> 𝑖 +1
+
+(2) 
+
+• 𝜆 𝑖 : fixed transfer latency across boundary 𝑖 
+
+• 𝑥 𝑖 : amount of data needed to be transferred from the current memory level 𝑖 
+
+• 𝛼 𝑖 : fraction of data that is stored in memory level 𝑖 
+
+We model the data transfer latency 𝜏 𝑖 for loading an 𝛼 𝑖 fraction of the data amount 𝑥 stored at the current memory level as follows: 
+
+𝜏 𝑖 (𝑥, 𝛼 𝑖 ) = 𝜆 𝑖 + 𝛼 𝑖 𝑥 𝐵 eff 
+
+> 𝑖
+
+(3) 
+
+Double Buffering Transfer Model. We recursively compute the total transfer latency: 
+
+𝑥 remain  
+
+> 𝑖
+
+= (1 − 𝛼 𝑖 )𝑥 𝑖 (4) 
+
+𝑇 𝑖 (𝑥 𝑖 , [𝛼 𝑖 , . . . , 𝛼 𝐿 ]) =
+
+
+
+𝜆 𝑖 + 𝑥 𝑖 
+
+𝐵 eff 
+
+> 𝑖
+
+, Case 1 
+
+𝑇 𝑖 +1 (𝑥 remain  
+
+> 𝑖
+
+, [𝛼 𝑖 +1, . . . , 𝛼 𝐿 ]) , Case 2 (5) 
+
+Case 1: Fully overlapped transfer. The deeper memory level supplies data fast enough such that the transfer latency to the upper level is fully hidden. 
+
+Case 2: Bandwidth-limited transfer. The transfer cannot be fully overlapped, and the remaining data results in additional stall time. This formulation captures hierarchical memory latency, band-width, and double-buffered overlap. For brevity, we omit the detailed derivations for Case 1 and Case 2, as they introduce additional com-plexity without changing the modeling intuition. The core idea is to compare the load time at the current memory level, 𝜏 𝑖 , with the load time of the next memory level, 𝑇 𝑖 +1.
+
+## 2.3 Emerging Memory Technologies 
+
+Beyond established devices, two emerging technologies—3D-Stacked on-chip SRAM and High Bandwidth Flash (HBF). These two technologies occupy qualitatively new positions in the design space that existing models fail to capture. We treat each as a case study to motivate their inclusion in the unified framework and their combined parameters are reflected in Table 1. 
+
+3D-Stacked SRAM. Conventional 2D SRAM is area- and leakage-limited: scaling to larger on-chip capacities has slowed significantly below 7 nm due to diminishing cell density gains and rapidly rising leakage currents [ 55 ]. 3D-stacked SRAM circumvents this by bond-ing multiple SRAM dies vertically via dense TSV or hybrid-bonding interconnects, multiplying effective capacity per compute-die foot-print without widening the physical die area. As shown in Table 1, a single stacked layer achieves ∼1 GB at ∼8 TB/s—roughly 4×
+
+the bandwidth of a 2D die at the same node—while retaining sub-nanosecond access latency and the same ultra-low per-bit energy (𝑒 read ≈ 0.1 pJ/bit). The primary constraint is thermal: stacking increases power density, requiring careful thermal budgeting as ad-ditional layers are added. The stacked capacity covers a significant fraction of the active KV-cache working set for mid-size models, enabling a large class of prefill-stage accesses to be served entirely on-chip and substantially reducing HBM bandwidth demand. 
+
+High Bandwidth Flash (HBF). HBF [ 17 , 21 ] vertically integrates NAND Flash with a DRAM buffer and a high-bandwidth PHY, tar-geting the capacity gap between HBM ( ∼36 GB) and traditional SSDs (terabytes). A single HBF stack delivers ∼384 GB at ∼1 TB/s with a shoreline footprint of only ∼8.25 mm, substantially denser in capacity per shoreline millimeter than any DRAM-based solu-tion. However, HBF carries two significant penalty terms relative to DRAM: its static background power is approximately 4× higher (𝑝 bg ≈ 300 mW/GB vs. ∼75 mW/GB for HBM) [ 13 , 17 ], and its per-bit read and write energy are roughly 2× higher ( 𝑒 read ≈ 6 pJ/bit, 
+
+𝑒 write ≈ 10 pJ/bit) [ 26 ]. Access latency also reaches the microsec-ond range—three orders of magnitude slower than SRAM. These constraints make HBF unsuitable as a primary bandwidth source but well-matched as the outermost capacity tier for LLM weight storage and KV-cache overflow in long-context agentic sessions, where data is streamed sequentially at throughputs well below the 1 TB/s interface limit. 
+
+## 3 Memory System Exploration for Heterogeneous NPUs 
+
+During LLM inference, the prefill and decode stages exhibit fun-damentally different compute and memory access patterns. Prefill    
+
+> 4MemExplorer: Navigating the Heterogeneous Memory Design Space for Agentic Inference NPUs On -Chip Off -Chip
+> Systolic Array
+> HBM SRAM
+> Input
+> Matrix
+> Output
+> Buffer
+> II. On -Chip
+> Storage Priority
+> I. Off -Chip
+> Bandwidth Priority
+> III . Dataflow
+> Strategy
+> W
+> W
+> W
+> AA
+> A
+> KV KV
+
+Figure 3: Example of software-controlled dataflow strategy, bandwidth allocation, and storage scheduling across a het-erogeneous memory hierarchy. 
+
+processes long input sequences with large activation footprints, while decode generates tokens incrementally and is dominated by KV-cache access and reuse. These differences make it challenging for a single NPU configuration to simultaneously optimize both phases, motivating heterogeneous memory system design and the potential for Prefill–Decode disaggregation [59]. Prior work, such as PLENA [ 51 ] and RPU [ 1], has analyzed the computation characteristics of the prefill and decode stages. However, these works assume fixed memory configurations, which limits their ability to capture phase-specific memory demands. In this work, we further investigate the memory behavior of these stages and identify distinct bandwidth and capacity requirements across the two phases. 
+
+Systematic Memory Bandwidth Requirement. During the prefill stage, especially when activations exceed on-chip capacity, both activations and weights must be loaded simultaneously from off-chip memory, resulting in high bandwidth demand. In contrast, during the decode stage, only weights and KV cache are streamed from memory, leading to lower overall bandwidth requirements. 
+
+Systematic Memory Capacity Requirement. Memory capacity plays a more critical role during the decode stage. As observed in prior work [ 51 ], decode often suffers from low compute utilization when the batch size is limited by memory capacity. This effect is further amplified in agentic workloads, where long contexts and large KV caches significantly increase memory requirements. When capacity is insufficient, batch size must be reduced, resulting in smaller workloads and poor systolic array utilization. Increasing memory capacity enables larger batch sizes, thereby improving compute utilization and throughput. In contrast, the prefill stage is typically less sensitive to capacity constraints, as it is primarily compute-bound, with compute units already operating at high utilization. These observations highlight that prefill and decode benefit from different memory configurations: prefill favors high-bandwidth Compute Model      
+
+> System Model
+> PLENA Emulator
+> extended for Memory
+> Emulation
+> Cross Validation
+> Memory Model
+> Co -Design Exploration Validation
+> Dataflow Strategy
+> Data Movement Model
+> Data Placement
+> Bandwidth Allocation
+> Prefill Only
+> Workload Speciazlization
+> Decode Only
+> Model Config Workload Trace
+> Execution
+> Strategy
+> Performance Metric
+> Cross -validation
+
+Figure 4: Overview of MemExplorer. The extended PLENA emulator is used to validate the system model accuracy. 
+
+memory to sustain compute throughput, whereas decode bene-fits from larger-capacity memory tiers to improve utilization and efficiency, suggesting the need for heterogeneous NPU designs. 
+
+## 4 Algorithm-aware Systematic Co-design 
+
+MemExplorer enables systematic co-design of the memory hier-archy, compute architecture, and software strategies in a holistic manner for heterogeneous NPU design. The framework consists of the following key components, which are described in the subse-quent sections. 
+
+• System Model includes both memory and compute models. The analytic model estimates system performance and power. 
+
+• Data Movement Model defines dataflow strategy, data place-ment, and bandwidth allocation across different memory levels, enabling flexible execution strategies tailored to different work-loads. 
+
+• Workload Specialization takes model configurations and work-load traces (including prompt and generated token counts) as input, and models the prefill and decode only performance using the system model. 
+
+• System Co-Design Exploration jointly searches among the NPU architecture, heterogeneous memory hierarchy, and soft-ware strategies, enabling systematic design space exploration (DSE) for optimal performance and power efficiency. 
+
+## 4.1 System Modeling 
+
+To obtain the overall performance model, we integrate the an-alytical hierarchical memory model (discussed in Section 2.2) with the PLENA [ 51 ] performance analytical model. The memory model characterizes data movement across on-chip and multi-level off-chip memory, including bandwidth utilization, latency, and power consumption. The compute analytical model is based on PLENA [ 51 ], which is highly configurable in terms of compute dimensions and memory controller bandwidth. To validate the accuracy of the analytic performance model, we extend the PLENA transaction-level emulator, which models the cycle-level behavior of the compute unit. We further augment the emulator to incorporate the hierarchical memory system and associated power models, enabling cross-validation against the analytic estimates. The validation results are shown in Table 9. The total system power consumption is primarily driven by two components: (1) the accelerator compute unit executing operations, 
+
+> 5HBM
+> Package Substrate
+> Interposer
+> Plena
+> HBM Controller
+> Phy
+> Phy
+> S
+
+eread 
+
+> D
+> HBM
+> Package Substrate
+> Interposer
+> Plena
+> HBM Controller
+> Phy
+> Phy
+> Destination
+
+ewrite 
+
+> D
+> S
+
+Figure 5: Memory Read/Write Power Measurement. The path for 𝑒 read (left) outlines the end-to-end energy consumed when retrieving data from the memory cells and transferring it to the Plena compute die. Conversely, 𝑒 write (right) accounts for the energy required to move data from the Plena compute die and write it into the memory cells. 
+
+and (2) data movement across the heterogeneous memory hierar-chy. Modeling both components comprehensively is essential for accurate system-level evaluation. 
+
+Compute Power Modeling. We construct an analytic power model by decomposing the accelerator into key components, such as the systolic array matrix units. For each component, we generate rep-resentative design samples and obtain power estimates through synthesis using Synopsys Design Compiler with the 7 nm Open-ROAD predictive PDK [ 9]. We then fit parametric models to these samples to capture the power behavior of individual components. Finally, we aggregate these component-level models to obtain an overall power estimation for PLENA. 
+
+Memory Power Modeling. The memory power model is estimated by aggregating the power consumption of individual memory units. The model captures both read and write behaviors to provide accu-rate power estimation. The formulation is shown in Equation (6), and the corresponding coefficients are summarized in Table 1. Band-width utilization is derived from the memory traffic model for each memory unit. 
+
+𝑃 (𝐶, 𝐵𝑊 read , 𝐵𝑊 write ) = 𝑝 bg · 𝐶 + 𝑒 read · 𝐵𝑊 read + 𝑒 write · 𝐵𝑊 write (6) where: 
+
+• 𝐶 is the total memory capacity (GB), 
+
+• 𝐵𝑊 read is the read bandwidth (bit/s), 
+
+• 𝐵𝑊 write is the write bandwidth (bit/s), 
+
+## 4.2 Data Movement Model 
+
+The software strategies explored in MemExplorer are summarized in Table 2, with execution examples illustrated in Figure 3. These strategies control data movement, storage decisions, and bandwidth allocation across the memory hierarchy. 
+
+Dataflow Strategy. This strategy determines how weights, in-puts, and outputs are accessed during computation (e.g., weight-stationary, input-stationary, or output-stationary)[ 23 ]. When one data type is stationary, it remains on-chip while the remaining data are streamed from memory. For large off-chip data, frequent memory accesses can significantly degrade performance, making dataflow selection critical for efficient execution. 
+
+On-Chip Storage Priority. This strategy abstracts compiler-level optimizations by prioritizing which data types (weights, activations, KV cache, or intermediate results) are stored on-chip. Since most NPUs operate on a limited set of data types, this higher-level ab-straction enables efficient modeling of storage decisions without requiring detailed compiler optimizations. 
+
+Off-Chip Bandwidth Priority. Most NPUs support concurrent streaming of multiple data types using separate buffers, but limited off-chip bandwidth may prevent simultaneous saturation. There-fore, bandwidth allocation priority must be defined. To limit design space complexity, we adopt a fixed allocation policy, assigning 75% bandwidth to matrix data and 25% to vector data when matrix priority is selected. 
+
+## 4.3 Workload Specialization 
+
+To evaluate prefill-only and decode-only throughput for a specific workload, we model each stage independently by identifying the cases for maximum throughput. 
+
+Prefill Throughput. During the prefill stage, throughput is primar-ily limited by compute and memory bandwidth when processing long input sequences. Hence we are simply treating the single batch for evaluation. 
+
+Decode Throughput. During the decode stage, throughput is dom-inated by KV-cache growth and batch-level parallelism. Hence, we need to set the batch size to the max.The maximum batch size is then derived based on the available memory capacity. The memory footprint is computed by considering model weights and KV cache, which scale with batch size, input tokens, and generated tokens. 
+
+## 4.4 System Co-Design Exploration 
+
+The architectural design space of a 3D-stacked accelerator is inher-ently vast, spanning compute array dimensions, multi-tier memory configurations (including 3D-stacked SRAM, HBM, and other off-chip technologies), quantization precision, and software strategies, as summarized in Table 2. The cross-product of these parameters yields a design space on the order of 10 6 configurations, making exhaustive evaluation prohibitively expensive. We frame the co-design problem as a multi-objective design space exploration that simultaneously maximizes inference throughput and minimizes power consumption under a total system cost constraint. Let x ∈ X denote a design configuration and f (x) = (𝑓 1 (x), . . . , 𝑓 𝑀 (x)) the 𝑀 objectives of interest (e.g., throughput and power), where each evaluation of f requires invoking the analytical performance and power models described above. The goal is to identify design points that approximate the true Pareto frontier P∗ = {x ∈ X |  x′ : f (x′) ≻ f (x)} as closely as possible within a limited evaluation budget. Since each evaluation requires running the full analytical model stack, naive search strategies such as grid search or random sam-pling are impractical at this scale. We therefore employ Multi-Objective Bayesian Optimization (MOBO) [ 11 ], a sample-efficient 
+
+> 6MemExplorer: Navigating the Heterogeneous Memory Design Space for Agentic Inference NPUs
+
+framework that maintains a probabilistic surrogate model of the objective functions and uses it to decide which configuration to evaluate next. 
+
+Optimization procedure. The optimization proceeds in two phases. In the initialization phase , 𝑁 init (= 20 in our experiments) configurations are drawn via Sobol quasi-random sequences to provide broad coverage of the design space, and their objectives are evaluated to form the initial dataset D𝑁 init . In the iterative phase ,the following loop repeats until the total evaluation budget 𝑁 total 
+
+(= 100 ) is exhausted: (1) Surrogate fitting. Fit independent GP surrogates to the current observations D𝑡 , optimizing kernel hyperparame-ters via maximum likelihood estimation. (2) Acquisition maximization. Since the design space is dis-crete and large, we approximate the acquisition function maximum by evaluating 𝛼 EHVI on a randomly sampled sub-set of unevaluated configurations and selecting the highest-scoring candidate as x𝑡 +1.(3) Evaluation. Evaluate f (x𝑡 +1) using the analytical model and augment the dataset D𝑡 +1 = D𝑡 ∪ {( x𝑡 +1, f (x𝑡 +1))} .By directing evaluations toward regions of high expected im-provement, MOBO converges toward a high-quality Pareto frontier within a limited budget, enabling us to identify favorable throughput–power trade-offs across diverse LLM workloads. The two key components, the GP surrogate and the EHVI acquisition function, are detailed below. 
+
+Gaussian Process surrogate. We model each objective 𝑓 𝑚 inde-pendently with a Gaussian Process (GP) [ 46 ], a non-parametric probabilistic model that places a distribution over functions. Given 
+
+𝑡 previously evaluated configurations D𝑡 = {( x𝑖 , f (x𝑖 ))} 𝑡 𝑖 =1, the GP posterior yields, for any candidate x, a predictive mean 𝜇 𝑚 (x)
+
+estimating the objective value and a predictive variance 𝜎 2 
+
+> 𝑚
+
+(x)
+
+quantifying model uncertainty. Regions of the design space far from observed points exhibit higher variance, which naturally en-ables the optimizer to balance exploitation of promising regions with exploration of uncertain ones. 
+
+Acquisition function. At each iteration, the optimizer must decide which candidate to evaluate next. This is guided by an acquisition function that scores each unevaluated configuration based on its potential to improve the current Pareto set. We adopt Expected Hypervolume Improvement (EHVI) [ 11 , 14 ], as the dominated hy-pervolume is the only unary indicator that is strictly monotone with respect to Pareto dominance [ 61 ], ensuring that maximizing it provably improves the Pareto front quality. The dominated hypervolume measures the volume of the objec-tive space dominated by the current Pareto set P𝑡 with respect to a reference point r:
+
+HV (P 𝑡 , r) = Vol  {y ∈ R𝑀 | ∃ x ∈ P 𝑡 : f (x) ⪯ y ⪯ r}. (7) EHVI computes the expected increase in this hypervolume if a candidate x were to be evaluated, integrating over the GP posterior: 
+
+𝛼 EHVI (x) = EHV (P 𝑡 ∪ { x}, r) − HV (P 𝑡 , r) | D 𝑡 
+
+ . (8) In addition, MemExplorer provides accuracy-aware quantiza-tion simulation that can be directly integrated into the exploration 0 15 30 45 60 75 90 
+
+> Exploration Steps
+> 1
+> 2
+> 3
+> Dominated Hypervolume  1e6
+> Ours (GP + EHVI)
+> NSGA-II
+> MO-TPE
+> Random
+
+Figure 6: Hypervolume (HV) convergence over exploration steps during Design Space Exploration, averaged across 10 seeds (shaded regions indicate ±1 standard deviation). We compare four methods: Ours (GP+EHVI) [ 11 ], which fits inde-pendent Gaussian Process surrogates and selects the next can-didate by maximizing the analytical Expected Hypervolume Improvement; NSGA-II [ 12 ], a population-based evolution-ary algorithm using non-dominated sorting and crowding dis-tance; MO-TPE [ 38 ], a multi-objective Tree-structured Parze Estimator implemented via Optuna; and Random, which sam-ples candidates uniformly at random. All methods share the same random initialization for the first 20 steps to ensure a fair comparison. 
+
+loop, enabling co-evaluation of power, bandwidth, capacity, latency, and additionally model quality, under each candidate memory and asymmetric precision configuration. Our accuracy simulation is built on top of MASE [ 8], a dataflow-aware quantization framework that we extend to support the full range of Microscaling (MX) data formats [ 10 , 51 ] used across the memory hierarchy. Specifically, the simulator provides parame-terized MXINT and MXFP format emulation with configurable mantissa bits, exponent bits, scale exponent bits, and block size 
+
+(𝑀, 𝐸, 𝑆, 𝐵 ), enabling accurate emulation of any precision configu-ration supported by the PLENA compute unit. On top of the data format layer, the framework supports a range of off-the-shelf post-training quantization algorithms, such as GPTQ [ 15 ], QuaRot [ 3], and output-norm guided blockwise clipping [ 51 ]. Together, these provide a unified accuracy evaluation interface: given a per-tensor MX precision assignment for weights, activations, and KV cache, the simulator returns workload performance metrics. We currently support agentic tasks, including OSWorld [53] and BFCL [41]. 
+
+## 5 Evaluation 
+
+We evaluate MemExplorer by first validating our analytical model against cycle-accurate emulation, then conducting ablation studies on both software strategies and memory hierarchy configurations to justify the co-design, and finally performing end-to-end design space exploration under realistic power constraints to compare against GPU baselines on agentic workloads and emerging model architectures. 
+
+> 7
+
+Table 2: Design space including compute, memory configu-rations, and software strategies. On-chip storage represents allocating additional on-chip memory capacity to store fre-quently reused data (e.g., weights, activations, or KV cache) to reduce off-chip traffic. Dataflow strategy refers to differ-ent GEMM execution strategies, including weight stationary (WS), input stationary (IS), and output stationary (OS), which determine data reuse patterns across the memory hierarchy. Bandwidth allocation represents redistributing limited off-chip memory bandwidth across different ports or data types to maximize utilization under bandwidth constraints.                                                       
+
+> Parameter Design Space Compute Configuration
+> PE Array Dim {128 ×128 ,64 ×256 ,32 ×512 ,16 ×1024 }
+> VLEN {128 ,256 ,512 ,1024 ,2048 }
+> On-chip Memory Configuration
+> 3D-Stacked SRAM {0,1,2,3,4}
+> Conventional SRAM {Enabled ,Disabled }
+> Off-chip Memory Configuration
+> HBM Type ∈ {
+> HBM3E (24GB, 1TB/s), HBM4 (36GB, 2TB/s) }
+> Stacks ∈ { 1,2,4,8}
+> HBF HBF (384GB, 1TB/s) Stacks ∈ { 1,2,4,8}
+> GDDR Type ∈ {
+> GDDR6 (2GB, 64GB/s), GDDR7 (3GB, 128GB/s) }
+> Stacks ∈ { 1,2,4,8}
+> LPDDR Type ∈ {
+> LPDDR5X (16GB, 76.8GB/s), LPDDR6 (16GB, 172.8GB/s) }
+> Stacks ∈ { 1,2,4,8}
+> Quantization Precision
+> Activation {MXFP8, MXFP16, MXINT8, MXINT16 }
+> KV Cache {MXFP4, MXFP8, MXINT4, MXINT8 }
+> Weight {MXFP4, MXFP8, MXINT4, MXINT8 }
+> Software Strategy
+> Onchip Storage Priority {Activation, KV Cache, Weight, Equal }
+> Dataflow Strategy {WS, OS, IS }
+> Offchip BW Priority {Matrix, Vector, Equal }
+
+## 5.1 Experiment Setup 
+
+Models and Datasets. We evaluate several popular open-source Transformer-based large language models (LLMs), including Llama- 
+
+> 3.3-70B
+
+[ 27 ], Qwen3 [ 54 ], and LLaDA [ 33 ]. For agentic workloads, we focus on the BFCL [41] and OSWorld [53] benchmarks. To accurately simulate real agentic inference behavior, both prompt and generation token lengths are required in the perfor-mance evaluation. By running BFCL-Web Search Base and OSWorld LibreOffice using Llama-3.3-70B , we obtain two representative to-ken usage configurations: BFCL-Web Search Base (114K prompt, 5K 
+
+Table 3: Bit-width ablation on the Web-Search-Base sub-task of BFCL[ 41 ], a long-context agentic benchmark, using Qwen3-32B. The evaluation metric is defined as the success rate over all tasks. W/A/KV denotes the bit widths for weights, activations, and KV cache, respectively.                  
+
+> Config W/A/KV BFCL ↑Peak BW Storage (GB) Base 16/16/16 0.33 8TB/s 174.4 GB Q1 8/8/8 0.36 4TB/s 87.2 GB Q2 4/4/4 0.17 2TB/s 43.6 GB
+
+Table 4: Software strategy ablation using the P1 configura-tion from Table 6 with batch size 1. Weight-stationary (WS) dataflow with activation-prioritized on-chip storage achieves the best energy efficiency by maximizing data reuse and re-ducing off-chip traffic. Combined with double buffering (Sec-tion 2.2) and weight-prioritized bandwidth allocation, com-putation and memory transfers are effectively overlapped.                                   
+
+> Base S1 S2 S3 S4 Storage Priority Equal Equal Act Act Weight Exec Priority OS OS OS WS IS BW Prirority Equal Weight Weight Weight Act Weight-BW 1TB/s 1.5TB/s 1.5TB/s 1.5TB/s 0.5TB/s Act-BW 1TB/s 0.5TB/s 0.5TB/s 0.5TB/s 1.5TB/s Token/J 1.00 ×1.32 ×1.41 ×2.31 ×0.59 ×
+
+generation) and OSWorld LibreOffice (90K prompt, 8K generation). These token configurations are used in the subsequent experiments. 
+
+Inference Evaluation. We compare end-to-end system perfor-mance against GPU baselines, including the NVIDIA A100 (80 GB SXM) and H100 (80 GB SXM), to ensure a fair and practical evalu-ation. The GPU experiments are conducted on a system running Ubuntu 22.04, CUDA 12.8, Python 3.11, PyTorch 2.8.0, and vLLM 0.10 (V1). 
+
+## 5.2 Ablation Study 
+
+We first determine the quantization configuration by evaluating different bit-width settings on the Web-Search-Base subset of the BFCL agentic workload (Table 3). The 8/8/8 configuration matches the full-precision baseline while halving memory bandwidth and storage requirements. All subsequent experiments adopt this con-figuration. Using this quantization and the fixed hardware configuration in Table 6, we then ablate the software strategies and memory hierar-chy independently. As shown in Tables 4 and 5, both dimensions meaningfully influence overall performance from complementary perspectives, confirming that they collectively form a co-design space worth exploring jointly. 
+
+## 5.3 Co-Optimizing Heterogenous System 
+
+We explore the design space to identify Pareto-optimal memory configurations for two representative agentic language model workloads: BFCL-Web Search Base [ 41 ] and OSWorld LibreOffice 
+
+> 8MemExplorer: Navigating the Heterogeneous Memory Design Space for Agentic Inference NPUs
+
+Table 5: Memory hierarchy ablation with the software strat-egy fixed to P1 in Table 6. Increasing on-chip SRAM capacity allows more activations and weights to reside on chip, re-ducing off-chip bandwidth demand and enabling the use of lower-bandwidth, more energy-efficient off-chip memory technologies. 
+
+Base H1 H2 H3 On-chip SRAM ×1 3D-SRAM ×3 3D-SRAM ×3 3D-SRAM ×3L1 Off-chip HBM3E ×4 HBM3E ×4 HBM3E ×4 HBM3E ×4L2 Off-chip — — LPDDR5X ×8 HBF ×2L3 Off-chip — — — LPDDR5X ×8Power 300.09 364.74 386.12 718.96 Max Batch 1 1 8 32 TPS 1.48 4.71 5.83 5.51 Token/J 1.00 × 2.62 × 3.06 × 1.55 ×0.0x 2.0x 4.0x 6.0x    
+
+> TPS (Normalized)
+> 1.0x
+> 2.0x
+> 3.0x
+> 4.0x
+> Power (Normalized)
+> P1
+> P2
+> Prefill Pareto Frontier
+> 0.0x 2.0x 4.0x 6.0x
+> TPS (Normalized)
+> 1.0x
+> 2.0x
+> 3.0x
+> 4.0x
+> D2
+> D1
+> Decode Pareto Frontier
+> Non-Pareto (40 pts)
+> Base (1.0x, 1.0x)
+> Prefill Pareto (10 pts)
+> Decode Pareto (9 pts)
+> Prefill Selected (P1, P2)
+> Decode Selected (D1, D2)
+
+Figure 7: The samples are selected from the Pareto frontier by maximizing Token/J while satisfying the 700W constraint. 
+
+(OSWorld-L) [ 53 ]. During the search, we constrain the total Thermal Design Power (TDP) to 700 W, matching the TDP of the NVIDIA H100 SXM equipped with 80 GB of HBM3 memory, and fix the quantization to 8/8/8 as validated in Table 3. Because the memory bandwidth and capacity requirements differ significantly between the prefill and decode stages, we conduct separate searches for each stage. The resulting Pareto-optimal configurations are summarized in Table 6. With this design, we observe that, during the prefill stage, in-creasing on-chip memory capacity and bandwidth can significantly improve performance. This improvement arises because storing activations on the chip reduces the bandwidth required to load weights from off-chip memory. For the decode stage, a hierarchical heterogeneous memory system can improve power efficiency by placing data in more energy-efficient memory technologies, such as LPDDR. Moreover, by leveraging chunk-based double buffering, the memory hierarchy can overlap data transfer and computation, enabling high performance while benefiting from larger memory capacity and improved energy efficiency. To evaluate overall system performance, we consider the BFCL [ 41 ] and OSWorld [ 53 ] agentic workloads and maximize the batch size supported by the available memory hierarchy. We compare against A100 and H100 GPUs. Since a single device cannot A100        
+
+> H100
+> Base
+> P1+D1
+> 0
+> 1
+> 2
+> TPS ( ×A100)
+> Llama-3.3-70B TPS
+> A100
+> H100
+> Base  P1  P2
+> A100
+> H100
+> Base  D1  D2
+> 0
+> 2
+> 4
+> Token/J ( ×A100)  Prefill Decode
+> Llama-3.3-70B Token/J
+> A100
+> H100
+> Base
+> P1+D1
+> 0
+> 1
+> 2
+> TPS ( ×A100)
+> Qwen3-32B TPS
+> A100
+> H100
+> Base  P1  P2
+> A100
+> H100
+> Base  D1  D2
+> 0
+> 2
+> 4
+> 6
+> Token/J ( ×A100)  Prefill Decode
+> Qwen3-32B Token/J
+> OSWorld (90k, 8k) BFCL (114k, 5k)
+
+Figure 8: The P1 configuration achieves low TTFT, although it remains higher than A100 and H100 due to reduced com-pute resources. The D1 configuration delivers higher TPS, improving decoding throughput. The P2 and D2 configu-rations prioritize energy efficiency, achieving significantly higher tokens-per-joule. Finally, the combined P1 + D1 con-figuration provides a balanced design, achieving both low TTFT and high TPS across prefill and decode stages. For the PD disaggregation modelling, the communication channel is modelled with the NVLink, similar to the LLMCompass [ 58 ]. 
+
+accommodate large models under agentic workloads, we use four GPUs for each platform. For fairness, we compare four PLENA devices with the optimized memory system against four A100 and four H100 GPUs. Results are shown in Figure 8. 
+
+## 5.4 Working with emerging AI models 
+
+5.4.1 Diffusion Language Model. Diffusion language models (dLLMs) generate tokens through iterative denoising over the entire sequence, instead of autoregressive token-by-token decod-ing. During inference, the model repeatedly processes the full sequence across multiple diffusion steps, resulting in repeated full-sequence computation and memory access. Compared to autoregressive models, dLLMs exhibit larger activation footprints, since intermediate activations scale with sequence length and must be reused across multiple diffusion iterations. As a result, dLLMs place higher demands on on-chip memory capacity and bandwidth to efficiently store and reuse activations [33]. Since long-context agentic workloads are not well supported in current dLLM models [ 33 ], we adopt the GSM8K benchmark [ 57 ]as a representative workload. We use the average token usage (1.4K prompt, 0.2K generation) for evaluation. The search results are shown in Table 7. 
+
+5.4.2 Large MoE Model with Sparsity. To investigate memory hier-archy design for extremely large sparse Mixture-of-Experts (MoE) models, we include Qwen3.5-397B-A17B [ 45 ] as a representative case study. This model contains 397B total parameters, requiring approximately 370 GB of storage for weights alone, while activating 
+
+> 9
+
+Table 6: Pareto frontier samples selected from DSE for both prefill and decode optimization on the OSWorld task (input tokens: 90K, output tokens: 8K).                                                                                                                                               
+
+> Prefill Optimization Compute Memory Hierarchy Software Power Perf Config PE Array VLEN On-chip L1 Off-chip L2 Off-chip L3 Off-chip Storage Exec BW Avg TDP Batch TPS
+> Base 2048 ×128 2048 SRAM ×1HBM3E ×4None None Equal OS Equal 245.8 300.1 11.00 ×
+> P1 2048 ×256 2048 3D Stacked ×3HBM4 ×2HBF ×1None Act WS Matrix 632.3 697.1 16 6.71 ×
+> P2 1024 ×512 2048 3D Stacked ×2HBM4 ×2LPDDR5X ×8 LPDDR5X ×8Equal WS Equal 531.7 570.0 16 4.93 ×
+> Decode Optimization Compute Memory Hierarchy Software Power Perf Config PE Array VLEN On-chip L1 Off-chip L2 Off-chip L3 Off-chip Storage Exec BW Avg TDP Batch TPS
+> Base 2048 ×128 2048 SRAM ×1HBM3E ×4None None Equal OS Equal 257.4 300.1 11.00 ×
+> D1 2048 ×64 1024 SRAM ×1HBM3E ×2HBF ×1None Act WS Matrix 239.27 249.90 16 1.44 ×
+> D2 1024 ×64 1024 3D Stacked ×1HBM4 ×2HBF ×2LPDDR5X ×8Act WS Matrix 441.85 450.95 32 2.19 ×
+
+Table 7: Performance and energy efficiency comparison for LLaDA-8B (Diffusion) [ 33 ] under different memory config-urations, normalized to the baseline. As shown, storing all activations and a portion of the KV cache on chip leads to significant performance improvements. Hence, both prefill and decode tend to convert to a similar memory design.                            
+
+> Baseline Prefill Optimized Decode Optimized On-chip SRAM 3D-Stack ×23D-Stack ×3L1 Off-chip HBM3E ×4HBM3E ×2HBM3E ×2Power 281.89 307.76 341.21 Batch Size 128 64 64 Token/J 1.00 ×1.65 ×1.33 ×
+
+only 17B parameters per token. Such characteristics make it repre-sentative of large-scale sparse inference workloads, where only a subset of experts is activated at each step. Supporting this large-scale sparse model requires substantial off-chip memory capacity alongside high memory bandwidth to sustain expert loading and token routing. Due to the long evaluation time, even for the analytical model, we restrict the design space exploration to memory configuration optimization while fixing the compute resources and software strategies. According to the search results, HBF is frequently selected as part of the optimal configurations due to its high capacity and moderate-to-high bandwidth, making it well-suited for storing infrequently accessed expert weights while maintaining strong performance. Additionally, intermediate activations in this large-scale MoE model are substantial. By adopting 3D-stacked SRAM as on-chip memory, we significantly reduce off-chip traffic and improve data reuse. Our results are shown in Table 8. 
+
+## 5.5 Towards Extreme Heterogenuity 
+
+The overall inference process can be decomposed into multiple stages. In this work, we investigate the potential of exploiting the extreme heterogeneity of the memory system to maximize perfor-mance, beyond conventional prefill and decode disaggregation. For 
+
+Table 8: Performance and energy efficiency comparison for Qwen3.5-397B-A17B (MoE) under different memory configu-rations, normalized to the baseline PLENA + HBF ×2 configu-ration.                        
+
+> Baseline Prefill Optimized Decode Optimized On-chip SRAM 3D-SRAM ×4SRAM L1 Off-chip HBF ×2HBF ×2HBF ×1L2 Off-chip ——LPDDR5X ×8L3 Off-chip ——LPDDR5X ×8Power 519.42 648.93 441.09
+> Batch Size 32 128 64 Token/J 1.00 ×3.52 ×1.13 ×
+
+agentic workloads, the prefill stage involves substantial computa-tion across layers. We therefore further decompose the prefill stage at the layer level (Attention and FFN), enabling different system configurations to be evaluated for different layers. In contrast, the decode stage in agentic workloads consists of multiple iterations and incurs significant memory traffic due to repeated token gener-ation. To capture this behavior, we partition the decode stage into multiple phases based on the progression of generated tokens. 
+
+## 5.6 Model Validation 
+
+As shown in Figure 4, we developed an emulator to cross-validate our memory model. PLENA [ 51 ] provides a cycle-accurate trans-actional emulator that models off-chip memory behavior using Ramulator [ 25 ]. This emulator has been further validated on FPGA platforms with HBM memory. However, it is significantly slower than our analytic, model-based MemExplorer. To evaluate the accuracy of MemExplorer, we compare its pre-dictions against emulator results under the same hardware config-uration (Base Configuration in Table 6) and identical workloads. Since the emulator is significantly slower, directly evaluating the full inference pipeline is impractical. Instead, we select three repre-sentative Transformer layers and report the average performance to mitigate variation. The validation results are presented in Table 9.  
+
+> 10 MemExplorer: Navigating the Heterogeneous Memory Design Space for Agentic Inference NPUs Prefill
+> Attn
+> Prefill
+> FFN
+> Decode(E)
+> Attn
+> Decode(E)
+> FFN
+> Decode(L)
+> Attn
+> Decode(L)
+> FFN
+> 0.90×
+> 1.00×
+> 1.10×
+> 1.20×
+> Tok/J ( ×Base)  Prefill Stages Decode Stages
+
+Heterogeneity Upper Bound : Per -Stage Tok/J     
+
+> 90k/2k Prefill stages
+> 5k/90k Prefill stages
+> 90k/2k Decode stages
+> 5k/90k Decode stages
+
+Figure 9: Comparison of P1 (purple) and D1 (green) configu-rations from Table 6. For prefill-heavy workloads, Attention and FFN exhibit different bottlenecks and can therefore be optimized independently. In contrast, decode sequences are typically short in prefill-heavy scenarios, limiting the po-tential performance gains from decode optimization. For decode-heavy workloads, however, additional optimization opportunities arise by separating early-stage decoding (first 50% of generated tokens) from late-stage decoding (remain-ing 50%), as these stages exhibit different memory and com-pute characteristics. Table 9: Results for a transformer block in the Llama-3.3-70B 
+
+prefill stage with input sequence length 4096. 
+
+Evaluator / Model Simulated Time Run Time 
+
+PLENA emulator (ref) 814.14 ms 4.15 mins PLENA analytic 658.32 ms (19.14%) 3 ms 
+
+Our model 731.11 ms (10.20%) 24 ms 
+
+## 6 Related Work 
+
+Memory Technologies. As shown in Figure 1b, a wide range of memory technologies has emerged to address the growing capacity and bandwidth demands of modern AI accelerators [ 56 ], yet no single solution simultaneously provides high bandwidth, large capacity, and low power. HBM [ 20 ] is widely adopted in high-performance accelerators from NVIDIA V100 [ 34 ] to B200 [ 49 ]and upcoming Vera Rubin systems [ 35 ], while GDDR [ 19 , 30 ] offers a cost-effective alternative. LPDDR [ 22 , 29 ] targets energy-efficient deployments, including datacenter platforms such as NVIDIA Grace [18]. Recently, High Bandwidth Flash (HBF) [ 17 , 21 ] has emerged to bridge the capacity gap between high-bandwidth memory and traditional storage. On the on-chip side, conventional 2D SRAM provides the highest bandwidth with sub-nanosecond latency but is limited to hundreds of megabytes per die due to area and leak-age constraints. 3D-stacked SRAM, as demonstrated by AMD’s V-Cache [ 52 ], circumvents this by bonding multiple SRAM dies ver-tically, significantly expanding on-chip capacity without increasing die footprint. These diverse trade-offs across bandwidth, capacity, power, and physical constraints necessitate heterogeneous memory hierarchies, whose detailed characteristics we model in Table 1. 
+
+Hardware–Software Co-design on Memory Technologies. 
+
+Accurate modeling of such hierarchies remains an open challenge. Existing memory simulators, including Ramulator [ 25 ] and DRAM-Sys [ 47 ], provide detailed cycle-accurate simulation of DRAM be-havior, capturing timing, scheduling, and power characteristics at the device level. However, these tools are designed for conventional DRAM technologies and do not model emerging memory tech-nologies such as 3D-stacked SRAM or HBF. They do not capture end-to-end LLM inference workloads or accelerator-level execution characteristics, making them insufficient for evaluating memory-centric design trade-offs across heterogeneous hierarchies. H3 [ 17 ] proposes a hybrid HBM–HBF architecture for cost-efficient LLM inference and demonstrates the benefit of tiered off-chip memory, yet does not model on-chip memory hierarchies or detailed memory traffic patterns. Li et al. [ 24 ] present a hardware– software co-design for 3D-DRAM-based LLM serving accelerators, focusing on a specific 3D-DRAM technology rather than provid-ing a general framework that spans diverse memory technologies. MemExplorer bridges this gap by jointly modeling heterogeneous compute and memory hierarchies—spanning various technologies including the emerging 3D-stacked SRAM and HBF—enabling sys-tematic exploration for modern LLM inference workloads. 
+
+Disaggregated serving of heterogeneous NPUs. To optimize LLM serving, PD disaggregation separates compute-intensive pre-fill from memory-bound decoding to reduce resource interference, as demonstrated by DistServe [ 59 ], Splitwise [ 40 ], Mooncake [ 43 ]. Recent NPU designs, such as RPU [ 1] and PLENA [ 51 ], explore disaggregation across heterogeneous NPU configurations. How-ever, these works primarily focus on compute heterogeneity while assuming fixed memory configurations, limiting their ability to capture the memory requirements of prefill and decode stages. 
+
+## 7 Conclusion 
+
+The increasing hardware accelerator heterogeneity in emerging LLM systems leads to challenges in memory system architecture co-design. We present MemExplorer, a novel memory system synthe-sizer that automatically identifies an efficient memory architecture for heterogeneous NPU systems. We propose a unified abstraction for the systematic exploration of accelerator memory architecture and develop automated techniques that combine the exploration of both compute and memory design choices. As the first attempt at memory architecture exploration for het-erogeneous accelerator systems, MemExplorer has two main limi-tations. First, it does not model multi-device systems with shared memory, as chip-to-chip (C2C) interconnects and cross-device com-munication overhead are not currently captured. Second, the pre-cision is consistent and does not support mixed precision across the prefill and decode stages. These will be our key future work to explore both theoretically and practically. We plan to validate our framework on real GPU and accelerator platforms, extend the framework to multi-core compute systems with shared memory hi-erarchies, and incorporate mixed-precision execution and emerging memory technologies into the exploration. 
+
+## References   
+
+> [1] Matthew Adiletta, Gu-Yeon Wei, and David Brooks. 2026. RPU – A Reasoning Processing Unit. arXiv:2602.18568 [cs.AR] https://arxiv.org/abs/2602.18568 [2] Saaket Agashe, Kyle Wong, Vincent Tu, Jiachen Yang, Ang Li, and Xin Eric Wang. 2025. Agent S2: A Compositional Generalist-Specialist Framework for Computer Use Agents. arXiv:2504.00906 [cs.AI] https://arxiv.org/abs/2504.00906 11
+
+[3] Saleh Ashkboos, Amirkeivan Mohtashami, Maximilian L. Croci, Bo Li, Pashmina Cameron, Martin Jaggi, Dan Alistarh, Torsten Hoefler, and James Hensman. 2024. QuaRot: Outlier-Free 4-Bit Inference in Rotated LLMs. arXiv:2404.00456 [cs.LG] https://arxiv.org/abs/2404.00456 [4] ASML. 2024. ASML TWINSCAN NXE EUV Lithography Systems. https: //www.asml.com/products/euv-lithography-systems/twinscan-nxe3400b Maximum exposure field size of 26 mm × 33 mm. [5] Yushi Bai, Shangqing Tu, Jiajie Zhang, Hao Peng, Xiaozhi Wang, Xin Lv, Shulin Cao, Jiazheng Xu, Lei Hou, Yuxiao Dong, Jie Tang, and Juanzi Li. 2025. LongBench v2: Towards Deeper Understanding and Reasoning on Realistic Long-context Multitasks. arXiv:2412.15204 [cs.CL] https://arxiv.org/abs/2412.15204 [6] Hyungjoo Chae, Namyoung Kim, Kai Tzu iunn Ong, Minju Gwak, Gwanwoo Song, Jihoon Kim, Sunghwan Kim, Dongha Lee, and Jinyoung Yeo. 2025. Web Agents with World Models: Learning and Leveraging Environment Dynamics in Web Navigation. arXiv:2410.13232 [cs.CL] https://arxiv.org/abs/2410.13232 [7] Victor Chen, Bassem Abdel-Dayem, Changhua Wan, and Feng Ling. 2022. Overcoming Design Challenges for High Bandwidth Memory Interface with CoWoS. In 2022 IEEE International Symposium on Electromagnetic Compati-bility & Signal/Power Integrity (EMCSI) . IEEE, Piscataway, NJ, USA, 455–458. https://doi.org/10.1109/EMCSI39492.2022.10050234 [8] Jianyi Cheng, Cheng Zhang, Zhewen Yu, Christos-Savvas Bouganis, George A Constantinides, and Yiren Zhao. 2023. A dataflow compiler for efficient llm inference using custom microscaling formats. arXiv:2307.15517 [cs.AR] https: //arxiv.org/abs/2307.15517 [9] L. T. Clark, V. Vashishtha, L. Shifren, A. Gujja, S. Sinha, B. Cline, C. Ramamurthy, and G. Yeric. 2016. ASAP: A 7-nm finFET predictive process design kit. Microelec-tronics Journal 53 (July 2016), 105–115. https://doi.org/10.1016/j.mejo.2016.04.006 [10] Bita Darvish Rouhani, Ritchie Zhao, Venmugil Elango, Rasoul Shafipour, Mathew Hall, Maral Mesmakhosroshahi, Ankit More, Levi Melnick, Maximilian Golub, Girish Varatkar, Lai Shao, Gaurav Kolhe, Dimitry Melts, Jasmine Klar, Renee L’Heureux, Matt Perry, Doug Burger, Eric Chung, Zhaoxia (Summer) Deng, Sam Naghshineh, Jongsoo Park, and Maxim Naumov. 2023. With Shared Microex-ponents, A Little Shifting Goes a Long Way. In Proceedings of the 50th Annual International Symposium on Computer Architecture (Orlando, FL, USA) (ISCA ’23) .Association for Computing Machinery, New York, NY, USA, Article 83, 13 pages. https://doi.org/10.1145/3579371.3589351 [11] Samuel Daulton, Maximilian Balandat, and Eytan Bakshy. 2020. Differentiable expected hypervolume improvement for parallel multi-objective Bayesian opti-mization. Advances in neural information processing systems (NeurIPS) 33 (2020), 9851–9864. [12] Kalyanmoy Deb, Amrit Pratap, Sameer Agarwal, and TAMT Meyarivan. 2002. A fast and elitist multiobjective genetic algorithm: NSGA-II. IEEE transactions on evolutionary computation (TEC) 6, 2 (2002), 182–197. [13] Emergent Mind. 2026. High Bandwidth Flash (HBF) Overview . Emergent Mind. https://www.emergentmind.com/topics/high-bandwidth-flash-hbf Updated Jan. 12, 2026. Accessed: 2026-03-16. [14] Michael TM Emmerich, Kyriakos C Giannakoglou, and Boris Naujoks. 2006. Single-and multiobjective evolutionary optimization assisted by Gaussian ran-dom field metamodels. IEEE Transactions on Evolutionary Computation (TEC) 10, 4 (2006), 421–439. [15] Elias Frantar, Saleh Ashkboos, Torsten Hoefler, and Dan Alistarh. 2023. GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers. arXiv:2210.17323 [cs.LG] https://arxiv.org/abs/2210.17323 [16] Team GLM, :, Aohan Zeng, Bin Xu, Bowen Wang, Chenhui Zhang, Da Yin, Dan Zhang, Diego Rojas, Guanyu Feng, Hanlin Zhao, Hanyu Lai, Hao Yu, Hongning Wang, Jiadai Sun, Jiajie Zhang, Jiale Cheng, Jiayi Gui, Jie Tang, Jing Zhang, Jingyu Sun, Juanzi Li, Lei Zhao, Lindong Wu, Lucen Zhong, Mingdao Liu, Minlie Huang, Peng Zhang, Qinkai Zheng, Rui Lu, Shuaiqi Duan, Shudan Zhang, Shulin Cao, Shuxun Yang, Weng Lam Tam, Wenyi Zhao, Xiao Liu, Xiao Xia, Xiaohan Zhang, Xiaotao Gu, Xin Lv, Xinghan Liu, Xinyi Liu, Xinyue Yang, Xixuan Song, Xunkai Zhang, Yifan An, Yifan Xu, Yilin Niu, Yuantao Yang, Yueyan Li, Yushi Bai, Yuxiao Dong, Zehan Qi, Zhaoyu Wang, Zhen Yang, Zhengxiao Du, Zhenyu Hou, and Zihan Wang. 2024. ChatGLM: A Family of Large Language Models from GLM-130B to GLM-4 All Tools. arXiv:2406.12793 [cs.CL] https://arxiv.org/ abs/2406.12793 [17] Minho Ha, Euiseok Kim, and Hoshik Kim. 2026. H3: Hybrid Architecture Using High Bandwidth Memory and High Bandwidth Flash for Cost-Efficient LLM Inference. IEEE Computer Architecture Letters 25, 1 (2026), 49–52. https://doi.or g/10.1109/LCA.2026.3660969 [18] Dion Harris. 2023. NVIDIA Grace and Grace Hopper Update. Presentation at the HPC User Forum, Argonne National Laboratory. https://www.hpcuserf orum.com/wp-content/uploads/2023/09/Dion-Harris-Update-on-NVIDIA-Grace_Grace- Hopper.2.pdf Slide 15: "Energy Efficient Design" highlights LPDDR5X at 5 pJ/bit vs. DDR5 at 35 pJ/bit.. [19] JEDEC Solid State Technology Association. 2023. GDDR6 SGRAM Standard. https://www.jedec.org/standards-documents/docs/jesd250 JESD250. [20] Hongshin Jun, Jinhee Cho, Kangseol Lee, Ho-Young Son, Kwiwook Kim, Hanho Jin, and Keith Kim. 2017. HBM (High Bandwidth Memory) DRAM Technology and Architecture. In 2017 IEEE International Memory Workshop (IMW) . IEEE, Piscataway, NJ, USA, 1–4. https://doi.org/10.1109/IMW.2017.7939084 [21] Joungho Kim. 2026. HBF Technology, Workload Analysis and Roadmap. Pre-sentation slides, TeraByte Interconnection and Package Laboratory (TERALAB), KAIST. https://www.dropbox.com/scl/fo/pv1wqpyvqjz7qdra1z94e/AFeIVtavoj2 HDWxbLzzYN7o/HBF_Workload_and_Roadmap_Joungho_Kim.pdf School of Electrical Engineering, KAIST. Accessed: 2026-03-14. [22] Scott Knowlton. 2026. LPDDR6 vs. LPDDR5 and LPDDR5X: What’s the Differ-ence? Synopsys Blog. https://www.synopsys.com/blogs/chip-design/lpddr6-vs-lpddr5x-lpddr5-differences.html Accessed: 2026-03-14. [23] Jeong-Jun Lee and Peng Li. 2020. Reconfigurable Dataflow Optimization for Spatiotemporal Spiking Neural Computation on Systolic Array Accelerators. In 2020 IEEE 38th International Conference on Computer Design (ICCD) . IEEE, Piscataway, NJ, USA, 57–64. https://doi.org/10.1109/ICCD50377.2020.00027 [24] Cong Li, Yihan Yin, Chenhao Xue, Zhao Wang, Fujun Bai, Yixin Guo, Xiping Jiang, Qiang Wu, Yuan Xie, and Guangyu Sun. 2026. Hardware-Software Co-design for 3D-DRAM-based LLM Serving Accelerator. arXiv:2603.04797 [cs.AR] https://arxiv.org/abs/2603.04797 [25] Haocong Luo, Yahya Can Tuğrul, F. Nisa Bostancı, Ataberk Olgun, A. Giray Yağlıkçı, and Onur Mutlu. 2024. Ramulator 2.0: A Modern, Modular, and Ex-tensible DRAM Simulator. IEEE Comput. Archit. Lett. 23, 1 (Jan. 2024), 112–116. https://doi.org/10.1109/LCA.2023.3333759 [26] Xiaoyu Ma and David Patterson. 2026. Challenges and Research Directions for Large Language Model Inference Hardware. https://doi.org/10.48550/arXiv.260 1.05047 arXiv:2601.05047 [cs.AR] [27] AI Meta. 2024. Introducing meta llama 3: The most capable openly available llm to date. https://ai.meta.com/blog/meta-llama-3/. Meta AI blog post, Accessed: 2026-04-10. [28] Micron Technology, Inc. 2019. Micron GDDR6 Memory Product Flyer. https: //www.mouser.co.uk/pdfDocs/gddr6_product_flyer.pdf. Technical product flyer, accessed: 2026-03-14. [29] Micron Technology, Inc. 2025. LPDDR5X DRAM Components. https://www.mi cron.com/products/memory/dram-components/lpddr5x/. Micron product page, accessed: 2026-03-14. [30] Seunghyun Moon. 2025. Next-Generation GDDR7 Memory Technology . Technical Report. JEDEC. https://www.jedec.org/sites/default/files/Seunghyun%20Moon_ 03_29_25_Final.pdf JEDEC Presentation. [31] Moonshot AI. 2024. Kimi Linear: An Expressive, Efficient Attention Architecture. arXiv:2412.18525 [cs.CL] https://arxiv.org/abs/2412.18525 [32] Jiayi Nie, Haoran Wu, Yao Lai, Zeyu Cao, Cheng Zhang, Binglei Lou, Erwei Wang, Jianyi Cheng, Timothy M. Jones, Robert Mullins, Rika Antonova, and Yiren Zhao. 2026. KernelCraft: Benchmarking for Agentic Close-to-Metal Kernel Generation on Emerging Hardware. arXiv:2603.08721 [cs.AR] https://arxiv.org/ abs/2603.08721 [33] Shen Nie, Fengqi Zhu, Zebin You, Xiaolu Zhang, Jingyang Ou, Jun Hu, Jun Zhou, Yankai Lin, Ji-Rong Wen, and Chongxuan Li. 2025. Large Language Diffusion Models. arXiv:2502.09992 [cs.CL] https://arxiv.org/abs/2502.09992 [34] NVIDIA Corporation. 2018. NVIDIA Tesla V100 GPU Architecture Datasheet. https://images.nvidia.com/content/technologies/volta/pdf /volta- v100-datasheet-update-us-1165301-r5.pdf. Version R5. [35] NVIDIA Corporation. 2026. NVIDIA Vera Rubin Platform Opens the Next Frontier of Agentic AI. https://nvidianews.nvidia.com/news/nvidia-vera-rubin-platform. Press release, Accessed: 2026-03-22. [36] Marcelo Orenes-Vera, Esin Tureci, Margaret Martonosi, and David Wentzlaff. 2024. Muchisim: A Simulation Framework for Design Exploration of Multi-Chip Manycore Systems. arXiv:2312.10244 [cs.AR] https://arxiv.org/abs/2312.10244 [37] Anne Ouyang, Simon Guo, Simran Arora, Alex L. Zhang, William Hu, Christo-pher Ré, and Azalia Mirhoseini. 2025. KernelBench: Can LLMs Write Efficient GPU Kernels? arXiv:2502.10517 [cs.LG] https://arxiv.org/abs/2502.10517 [38] Yoshihiko Ozaki, Yuki Tanigaki, Shuhei Watanabe, and Masaki Onishi. 2020. Multiobjective tree-structured parzen estimator for computationally expensive optimization problems. In Proceedings of the 2020 genetic and evolutionary com-putation conference . Association for Computing Machinery, New York, NY, USA, 533–541. [39] Neel Patel, Amin Mamandipoor, Derrick Quinn, and Mohammad Alian. 2023. XFM: Accelerated Software-Defined Far Memory. In Proceedings of the 56th Annual IEEE/ACM International Symposium on Microarchitecture (Toronto, ON, Canada) (MICRO ’23) . Association for Computing Machinery, New York, NY, USA, 769–783. https://doi.org/10.1145/3613424.3623776 [40] Pratyush Patel, Esha Choukse, Chaojie Zhang, Aashaka Shah, Íñigo Goiri, Saeed Maleki, and Ricardo Bianchini. 2024. Splitwise: Efficient generative LLM inference using phase splitting. arXiv:2311.18677 [cs.AR] https://arxiv.org/abs/2311.18677 [41] Shishir G Patil, Huanzhi Mao, Fanjia Yan, Charlie Cheng-Jie Ji, Vishnu Suresh, Ion Stoica, and Joseph E. Gonzalez. 2025. The Berkeley Function Calling Leader-board (BFCL): From Tool Use to Agentic Evaluation of Large Language Models. Proceedings of the Forty-second International Conference on Machine Learning via OpenReview. https://openreview.net/forum?id=2GmDdhBdDk 12 MemExplorer: Navigating the Heterogeneous Memory Design Space for Agentic Inference NPUs 
+
+[42] PatSnap Eureka. 2025. The HBM Wars: SK Hynix’s Dominance, Samsung’s Roadmap, and the Looming Threat of Cyclicality. https://eureka.patsnap.com /insight/the-hbm-wars-sk-hynixs-dominance-samsungs-roadmap-and-the-looming-threat-of-cyclicality. Accessed: 2026-03-16. [43] Ruoyu Qin, Zheming Li, Weiran He, Mingxing Zhang, Yongwei Wu, Weimin Zheng, and Xinran Xu. 2025. Mooncake: A KVCache-centric Disaggregated Architecture for LLM Serving. arXiv:2407.00079 [cs.DC] https://arxiv.org/abs/ 2407.00079 [44] Qwen Team. 2025. Qwen2.5-1M Technical Report. arXiv:2501.15383 [cs.CL] https://arxiv.org/abs/2501.15383 [45] Qwen Team. 2026. Qwen3.5: Towards Native Multimodal Agents. https: //qwen.ai/blog?id=qwen3.5 [46] Matthias Seeger. 2004. Gaussian processes for machine learning. International journal of neural systems 14, 02 (2004), 69–106. [47] Lukas Steiner, Matthias Jung, Felipe S. Prado, Kirill Bykov, and Norbert Wehn. 2022. DRAMSys4.0: An Open-Source Simulation Framework for In-depth DRAM Analyses. Int. J. Parallel Program. 50, 2 (April 2022), 217–242. https://doi.org/10 .1007/s10766-022-00727-4 [48] TechPowerUp. 2023. Samsung GDDR7 Memory Operates at Lower Voltage, Built on Same Node as 24 Gbps GDDR6. https://www.techpowerup.com/311457/sam sung-gddr7-memory-operates-at-lower-voltage-built-on-same-node-as-24-gbps-g6. Accessed: 2026-03-16. [49] TechPowerUp. 2025. NVIDIA B200 GPU Specifications. https://www.techpowe rup.com/gpu-specs/b200.c4210. Accessed: 2026-03-22. [50] James Wang. 2026. AWS and Cerebras Collaboration Sets a New Standard for AI Inference Speed and Performance in the Cloud. https://www.cerebras.ai/blog/c erebras-is-coming-to-aws. Accessed: 2026-04-07. [51] Haoran Wu, Can Xiao, Jiayi Nie, Xuan Guo, Binglei Lou, Jeffrey T. H. Wong, Zhiwen Mo, Cheng Zhang, Przemyslaw Forys, Wayne Luk, Hongxiang Fan, Jianyi Cheng, Timothy M. Jones, Rika Antonova, Robert Mullins, and Aaron Zhao. 2025. Combating the Memory Walls: Optimization Pathways for Long-Context Agentic LLM Inference. arXiv:2509.09505 [cs.AR] https://arxiv.org/abs/2509.09505 [52] John Wuu, Rahul Agarwal, Michael Ciraula, Carl Dietz, Brett Johnson, Dave Johnson, Russell Schreiber, Raja Swaminathan, Will Walker, and Samuel Naffziger. 2022. 3D V-Cache: the Implementation of a Hybrid-Bonded 64MB Stacked Cache for a 7nm x86-64 CPU. In 2022 IEEE International Solid-State Circuits Conference (ISSCC) , Vol. 65. IEEE, Piscataway, NJ, USA, 428–429. https://doi.org/10.1109/IS SCC42614.2022.9731565 [53] Tianbao Xie, Danyang Zhang, Jixuan Chen, Xiaochuan Li, Siheng Zhao, Ruisheng Cao, Toh Jing Hua, Zhoujun Cheng, Dongchan Shin, Fangyu Lei, Yitao Liu, Yiheng Xu, Shuyan Zhou, Silvio Savarese, Caiming Xiong, Victor Zhong, and Tao Yu. 2024. OSWorld: Benchmarking Multimodal Agents for Open-Ended Tasks in Real Computer Environments. arXiv:2404.07972 [cs.AI] https://arxiv.org/abs/24 04.07972 [54] An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, Chujie Zheng, Dayiheng Liu, Fan Zhou, Fei Huang, Feng Hu, Hao Ge, Haoran Wei, Huan Lin, Jialong Tang, Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin Yang, Jiaxi Yang, Jing Zhou, Jingren Zhou, Junyang Lin, Kai Dang, Keqin Bao, Kexin Yang, Le Yu, Lianghao Deng, Mei Li, Mingfeng Xue, Mingze Li, Pei Zhang, Peng Wang, Qin Zhu, Rui Men, Ruize Gao, Shixuan Liu, Shuang Luo, Tianhao Li, Tianyi Tang, Wenbiao Yin, Xingzhang Ren, Xinyu Wang, Xinyu Zhang, Xuancheng Ren, Yang Fan, Yang Su, Yichang Zhang, Yinger Zhang, Yu Wan, Yuqiong Liu, Zekun Wang, Zeyu Cui, Zhenru Zhang, Zhipeng Zhou, and Zihan Qiu. 2025. Qwen3 Technical Report. arXiv:2505.09388 [cs.CL] https://arxiv.org/abs/2505.09388 [55] S. Yu. 2022. Semiconductor Memory Devices and Circuits . CRC Press, Boca Raton, FL, USA. https://books.google.co.uk/books?id=FPBjEAAAQBAJ [56] Shimeng Yu and Tae-Hyeon Kim. 2024. Semiconductor Memory Technologies: State-of-the-Art and Future Trends. Computer 57, 1 (2024), 150–154. https: //doi.org/10.1109/MC.2023.3332791 [57] Zhongshen Zeng, Pengguang Chen, Shu Liu, Haiyun Jiang, and Jiaya Jia. 2025. MR-GSM8K: A Meta-Reasoning Benchmark for Large Language Model Evalua-tion. The Thirteenth International Conference on Learning Representations via OpenReview. https://openreview.net/forum?id=br4H61LOoI [58] Hengrui Zhang, August Ning, Rohan Prabhakar, and David Wentzlaff. 2023. A Hardware Evaluation Framework for Large Language Model Inference. arXiv:2312.03134 [cs.AR] https://arxiv.org/abs/2312.03134 [59] Yinmin Zhong, Shengyu Liu, Junda Chen, Jianbo Hu, Yibo Zhu, Xuanzhe Liu, Xin Jin, and Hao Zhang. 2024. DistServe: Disaggregating Prefill and Decoding for Goodput-optimized Large Language Model Serving. arXiv:2401.09670 [cs.DC] https://arxiv.org/abs/2401.09670 [60] Jingchen Zhu, Chenhao Xue, Yiqi Chen, Zhao Wang, Chen Zhang, Yu Shen, Yifan Chen, Zekang Cheng, Yu Jiang, Tianqi Wang, Yibo Lin, Wei Hu, Bin Cui, Runsheng Wang, Yun Liang, and Guangyu Sun. 2024. Theseus: Exploring Efficient Wafer-Scale Chip Design for Large Language Models. arXiv:2407.02079 [cs.AR] https://arxiv.org/abs/2407.02079 [61] Eckart Zitzler, Lothar Thiele, Marco Laumanns, Carlos M Fonseca, and Vi-viane Grunert Da Fonseca. 2003. Performance assessment of multiobjective optimizers: An analysis and review. IEEE Transactions on evolutionary computa-tion (TEC) 7, 2 (2003), 117–132. 13
