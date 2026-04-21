@@ -6,79 +6,77 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-20
-- 运行时间：2026-04-20 19:56:08 UTC
+- 最新运行日期：2026-04-21
+- 运行时间：2026-04-21 20:09:19 UTC
 - 运行状态：成功
-- 本次总论文数：19
-- 精读区：8
+- 本次总论文数：18
+- 精读区：7
 - 速读区：11
 
 ### 今日简报（AI）
-今日精选19篇论文，深度聚焦卫星边缘计算节能与硬件高效型架构创新。
-满分力作CroSatFL重新定义了卫星联邦学习能效，Exp-Minus-Log算子则为神经符号网络硬件加速提供了新路径。
-建议优先研读CroSatFL掌握空间计算前沿，或参考PD36-C模型探索百万级参数的轻量级视觉应用。
-- 详情：[/202604/20/README](/202604/20/README)
+- 今日共生成 18 篇推荐（精读 7 篇，速读 11 篇）
+- 精读：《GEM3D CIM General Purpose Matrix Computation Using 3D Integrated SRAM eDRAM Hybrid Compute In Memory on Memory Architecture》（9.0/10）, 《Forge-UGC: FX optimization and register-graph engine for universal graph compiler》（9.0/10）
+- 速读：《DA-PTQ: Drift-Aware Post-Training Quantization for Efficient Vision-Language-Action Models》（8.0/10）, 《HyperLiDAR: Adaptive Post-Deployment LiDAR Segmentation via Hyperdimensional Computing》（8.0/10）, 《OSC: Hardware Efficient W4A4 Quantization via Outlier Separation in Channel Dimension》（8.0/10）
+- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
+- 详情：[/202604/21/README](/202604/21/README)
 
 ### 精读区论文标签
-1. [CroSatFL: Energy-Efficient Federated Learning with Cross-Aggregation for Satellite Edge Computing](/202604/20/2604.15779v1-crosatfl-energy-efficient-federated-learning-with-cross-aggregation-for-satellite-edge-computing)  
-   标签：评分：10.0/10、query:hwnas
-   evidence：用于卫星边缘计算的在轨分层联邦学习
-2. [Hardware-Efficient Neuro-Symbolic Networks with the Exp-Minus-Log Operator](/202604/20/2604.13871v1-hardware-efficient-neuro-symbolic-networks-with-the-exp-minus-log-operator)  
+1. [GEM3D CIM General Purpose Matrix Computation Using 3D Integrated SRAM eDRAM Hybrid Compute In Memory on Memory Architecture](/202604/21/2604.13969v1-gem3d-cim-general-purpose-matrix-computation-using-3d-integrated-sram-edram-hybrid-compute-in-memory-on-memory-architecture)  
    标签：评分：9.0/10、query:hwnas
-   evidence：硬件高效的算子设计，旨在减少边缘硬件的延迟和芯片面积
-3. [Ragged Paged Attention: A High-Performance and Flexible LLM Inference Kernel for TPU](/202604/20/2604.15464v1-ragged-paged-attention-a-high-performance-and-flexible-llm-inference-kernel-for-tpu)  
+   evidence：用于 DNN 加速的 3D 集成 SRAM-eDRAM 混合存内计算架构
+2. [Forge-UGC: FX optimization and register-graph engine for universal graph compiler](/202604/21/2604.16498v1-forge-ugc-fx-optimization-and-register-graph-engine-for-universal-graph-compiler)  
    标签：评分：9.0/10、query:hwnas
-   evidence：通过细粒度分块将LLM工作负载映射到TPU架构
-4. [AdaVFM: Adaptive Vision Foundation Models for Edge Intelligence via LLM-Guided Execution](/202604/20/2604.15622v1-adavfm-adaptive-vision-foundation-models-for-edge-intelligence-via-llm-guided-execution)  
+   evidence：针对异构加速器硬件的Transformer部署编译器
+3. [Flint: Compiler Enabled Cluster-Free Design Space Exploration for Distributed ML](/202604/21/2604.17550v1-flint-compiler-enabled-cluster-free-design-space-exploration-for-distributed-ml)  
    标签：评分：9.0/10、query:hwnas
-   evidence：集成NAS以实现边缘设备上的高效端侧推理
-5. [Overmind NSA: A Unified Neuro-Symbolic Computing Architecture with Approximate Nonlinear Activations and Preemptive Memory Bypass](/202604/20/2604.15623v1-overmind-nsa-a-unified-neuro-symbolic-computing-architecture-with-approximate-nonlinear-activations-and-preemptive-memory-bypass)  
+   evidence：编译器启用的分布式机器学习设计空间探索
+4. [AccelCIM: Systematic Dataflow Exploration for SRAM Compute-in-Memory Accelerator](/202604/21/2604.17692v1-accelcim-systematic-dataflow-exploration-for-sram-compute-in-memory-accelerator)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对内存和硬件瓶颈进行跨层优化的统一神经符号架构
-6. [Closing the Theory-Practice Gap in Spiking Transformers via Effective Dimension](/202604/20/2604.15769v1-closing-the-theory-practice-gap-in-spiking-transformers-via-effective-dimension)  
+   evidence：SRAM 存内计算加速器的系统化数据流探索
+5. [Enabling AI ASICs for Zero Knowledge Proof](/202604/21/2604.17808v1-enabling-ai-asics-for-zero-knowledge-proof)  
    标签：评分：9.0/10、query:hwnas
-   evidence：神经形态硬件上的能效和显式脉冲电路构建
-7. [MemExplorer: Navigating the Heterogeneous Memory Design Space for Agentic Inference NPUs](/202604/20/2604.16007v1-memexplorer-navigating-the-heterogeneous-memory-design-space-for-agentic-inference-npus)  
+   evidence：针对AI ASIC的硬件感知复杂度模型与内核重构
+6. [M100: An Orchestrated Dataflow Architecture Powering General AI Computing](/202604/21/2604.17862v1-m100-an-orchestrated-dataflow-architecture-powering-general-ai-computing)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对NPU的内存带宽优化
-8. [Co-Design of CNN Accelerators for TinyML using Approximate Matrix Decomposition](/202604/20/2604.16113v1-co-design-of-cnn-accelerators-for-tinyml-using-approximate-matrix-decomposition)  
+   evidence：用于AI推理的编译器-架构协同设计
+7. [Towards Real-Time ECG and EMG Modeling on $μ$ NPUs](/202604/21/2604.18067v1-towards-real-time-ecg-and-emg-modeling-on--npus)  
    标签：评分：9.0/10、query:hwnas
-   evidence：资源受限下TinyML的CNN加速器协同设计
+   evidence：针对NPU兼容轻量化模型的硬件感知层设计
 
 ### 速读区论文标签
-1. [A Compact and Efficient 1.251 Million Parameter Machine Learning CNN Model PD36-C for Plant Disease Detection: A Case Study](/202604/20/2604.11332v1-a-compact-and-efficient-1251-million-parameter-machine-learning-cnn-model-pd36-c-for-plant-disease-detection-a-case-study)  
+1. [DA-PTQ: Drift-Aware Post-Training Quantization for Efficient Vision-Language-Action Models](/202604/21/2604.11572v1-da-ptq-drift-aware-post-training-quantization-for-efficient-vision-language-action-models)  
    标签：评分：8.0/10、query:hwnas
-   evidence：面向边缘部署和离线推理的紧凑型CNN设计
-2. [ResBM: Residual Bottleneck Models for Low-Bandwidth Pipeline Parallelism](/202604/20/2604.11947v1-resbm-residual-bottleneck-models-for-low-bandwidth-pipeline-parallelism)  
+   evidence：针对资源受限机器人的高效部署进行训练后量化
+2. [HyperLiDAR: Adaptive Post-Deployment LiDAR Segmentation via Hyperdimensional Computing](/202604/21/2604.12331v1-hyperlidar-adaptive-post-deployment-lidar-segmentation-via-hyperdimensional-computing)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对低带宽通信设计的架构
-3. [Active Imitation Learning for Thermal- and Kernel-Aware LFM Inference on 3D S-NUCA Many-Cores](/202604/20/2604.11948v1-active-imitation-learning-for-thermal--and-kernel-aware-lfm-inference-on-3d-s-nuca-many-cores)  
+   evidence：能量约束下边缘应用的轻量级模型
+3. [OSC: Hardware Efficient W4A4 Quantization via Outlier Separation in Channel Dimension](/202604/21/2604.12782v1-osc-hardware-efficient-w4a4-quantization-via-outlier-separation-in-channel-dimension)  
    标签：评分：8.0/10、query:hwnas
-   evidence：3D多核架构上的内核感知推理与热管理
-4. [Evaluating Cross-Architecture Performance Modeling of Distributed ML Workloads Using StableHLO](/202604/20/2604.12090v1-evaluating-cross-architecture-performance-modeling-of-distributed-ml-workloads-using-stablehlo)  
+   evidence：通过离群值分离实现硬件高效的W4A4量化
+4. [DroneScan-YOLO: Redundancy-Aware Lightweight Detection for Tiny Objects in UAV Imagery](/202604/21/2604.13278v1-dronescan-yolo-redundancy-aware-lightweight-detection-for-tiny-objects-in-uav-imagery)  
    标签：评分：8.0/10、query:hwnas
-   evidence：使用MLIR StableHLO进行跨架构性能建模
-5. [Leveraging Mathematical Reasoning of LLMs for Efficient GPU Thread Mapping](/202604/20/2604.10387v1-leveraging-mathematical-reasoning-of-llms-for-efficient-gpu-thread-mapping)  
+   evidence：计算受限下的无人机图像轻量化检测
+5. [Semantic-Geometric Dual Compression: Training-Free Visual Token Reduction for Ultra-High-Resolution Remote Sensing Understanding](/202604/21/2604.11122v1-semantic-geometric-dual-compression-training-free-visual-token-reduction-for-ultra-high-resolution-remote-sensing-understanding)  
    标签：评分：7.0/10、query:hwnas
-   evidence：高效GPU线程映射以防止资源浪费
-6. [gMatch: Fine-Grained and Hardware-Efficient Subgraph Matching on GPUs](/202604/20/2604.10601v1-gmatch-fine-grained-and-hardware-efficient-subgraph-matching-on-gpus)  
+   evidence：超高分辨率遥感图像的视觉令牌削减，以提高推理效率
+6. [SCNO: Spiking Compositional Neural Operator -- Towards a Neuromorphic Foundation Model for Nuclear PDE Solving](/202604/21/2604.11625v1-scno-spiking-compositional-neural-operator----towards-a-neuromorphic-foundation-model-for-nuclear-pde-solving)  
    标签：评分：7.0/10、query:hwnas
-   evidence：GPU上硬件高效的子图匹配
-7. [Energy-Efficient Federated Edge Learning For Small-Scale Datasets in Large IoT Networks](/202604/20/2604.10662v1-energy-efficient-federated-edge-learning-for-small-scale-datasets-in-large-iot-networks)  
+   evidence：用于PDE求解的能效脉冲神经架构
+7. [Multiple spiking functionalities in annealing-optimized Ag/Hf$_{0.5}$Zr$_{0.5}$O$_2$-based memristive neurons](/202604/21/2604.11780v1-multiple-spiking-functionalities-in-annealing-optimized-aghf05zr05o2-based-memristive-neurons)  
    标签：评分：7.0/10、query:hwnas
-   evidence：能效联邦边缘学习与资源优化
-8. [LRD-Net: A Lightweight Real-Centered Detection Network for Cross-Domain Face Forgery Detection](/202604/20/2604.10862v1-lrd-net-a-lightweight-real-centered-detection-network-for-cross-domain-face-forgery-detection)  
+   evidence：基于非冯诺依曼架构的节能硬件
+8. [LightTune: Lightweight Forward-Only Online Fine-Tuning with Applications to Link Adaptation](/202604/21/2604.12406v1-lighttune-lightweight-forward-only-online-fine-tuning-with-applications-to-link-adaptation)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对资源受限设备的轻量级架构
-9. [Leveraging Mathematical Reasoning of LLMs for Efficient GPU Thread Mapping](/202604/20/2604.10387v2-leveraging-mathematical-reasoning-of-llms-for-efficient-gpu-thread-mapping)  
+   evidence：针对资源受限移动设备的轻量级在线微调
+9. [Hybrid Adaptive Tuning for Tiered Memory Systems](/202604/21/2604.12165v1-hybrid-adaptive-tuning-for-tiered-memory-systems)  
    标签：评分：6.0/10、query:hwnas
-   evidence：自动GPU线程映射以防止资源分配带来的性能损失
-10. [Characterizing the Impact of Congestion in Modern HPC Interconnects](/202604/20/2604.11432v1-characterizing-the-impact-of-congestion-in-modern-hpc-interconnects)  
+   evidence：分层内存系统的自动调优以提高容量和利用率
+10. [Agentic Discovery with Active Hypothesis Exploration for Visual Recognition](/202604/21/2604.12999v1-agentic-discovery-with-active-hypothesis-exploration-for-visual-recognition)  
    标签：评分：6.0/10、query:hwnas
-   evidence：表征AI训练负载中HPC互连的拥塞情况
-11. [GPU Acceleration of Sparse Fully Homomorphic Encrypted DNNs](/202604/20/2604.11659v1-gpu-acceleration-of-sparse-fully-homomorphic-encrypted-dnns)  
+   evidence：用于神经网络架构发现和进化分支的智能体框架
+11. [Analog Optical Inference on Million-Record Mortgage Data](/202604/21/2604.13251v1-analog-optical-inference-on-million-record-mortgage-data)  
    标签：评分：6.0/10、query:hwnas
-   evidence：加密DNN稀疏矩阵乘法的GPU加速以提升运行效率
+   evidence：用于机器学习推理的模拟光计算
 
 
 <div class="dpr-home-promo-card">
