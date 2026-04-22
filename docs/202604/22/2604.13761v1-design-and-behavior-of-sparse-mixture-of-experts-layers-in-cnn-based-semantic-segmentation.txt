@@ -1,0 +1,338 @@
+Title: Design and Behavior of Sparse Mixture-of-Experts Layers in CNN-based Semantic Segmentation
+
+URL Source: https://arxiv.org/pdf/2604.13761v1
+
+Published Time: Thu, 16 Apr 2026 00:52:27 GMT
+
+Number of Pages: 10
+
+Markdown Content:
+# Design and Behavior of Sparse Mixture-of-Experts Layers in CNN-based Semantic Segmentation 
+
+Svetlana Pavlitska *1,2, Haixi Fan ∗1,2, Konstantin Ditschuneit 2, J. Marius Z¨ ollner 1,21FZI Research Center for Information Technology 2Karlsruhe Institute of Technology (KIT) 
+
+pavlitska@fzi.de 
+
+Abstract 
+
+Sparse mixture-of-experts (MoE) layers have been shown to substantially increase model capacity without a pro-portional increase in computational cost and are widely used in transformer architectures, where they typically re-place feed-forward network blocks. In contrast, integrat-ing sparse MoE layers into convolutional neural networks (CNNs) remains inconsistent, with most prior work focus-ing on fine-grained MoEs operating at the filter or chan-nel levels. In this work, we investigate a coarser, patch-wise formulation of sparse MoE layers for semantic seg-mentation, where local regions are routed to a small sub-set of convolutional experts. Through experiments on the Cityscapes and BDD100K datasets using encoder–decoder and backbone-based CNNs, we conduct a design analy-sis to assess how architectural choices affect routing dy-namics and expert specialization. Our results demon-strate consistent, architecture-dependent improvements (up to +3.9 mIoU) with little computational overhead, while re-vealing strong design sensitivity. Our work provides em-pirical insights into the design and internal dynamics of sparse MoE layers in CNN-based dense prediction. Our code is available at https://github.com/KASTEL-MobilityLab/moe-layers/ .
+
+1. Introduction 
+
+Sparse mixture-of-experts (MoE) [32] architectures have recently demonstrated strong potential within large transformer-based architectures [9, 15, 26, 28, 43]. Sparse MoE models fundamentally alter how resources are allo-cated within a network, concentrating computational power where and when it is most needed. This approach enables significantly larger models without corresponding increases in computational demand during inference, making sparse MoE models a promising solution for efficiently scaling artificial intelligence systems. This adaptability and effi-
+
+> *
+
+Equal contribution `    
+
+> Patch-wise
+> gate  G
+> Expert 2
+> De-patchify
+> Patchify
+> using a  g×g
+> grid
+> Expert 4
+> PatchConvMoE layer replacing
+> convolutional layer ℓ
+> Encoder Decoder
+> Gating weights
+> for a patch
+> Expert 5
+> Expert 6
+> Expert 8
+> Expert 3
+> Expert 1
+> Expert 7
+> Input feature map g2patches
+> Input image Semantic segmentation output
+> Conv layer  ℓ
+> Top-k
+> selection
+> (k=2)
+> Repeat for each patch
+> Output feature map
+
+Figure 1. Overview of the studied PatchConvMoE layer within a CNN for semantic segmentation. A standard convolutional layer ℓ
+
+is replaced with a sparse MoE layer comprising convolutional lay-ers as experts and a patch-wise gating network. The input feature map is split into a g × g grid of patches. Each patch is routed to a small subset of experts using top-k routing (here: a total of n = 8 
+
+experts with top-2 routing, i.e., k = 2 ). Expert outputs are linearly combined and reassembled into the output feature map. 
+
+ciency make MoE particularly appealing in contexts where computational costs are a critical constraint. For convolutional neural networks (CNNs), sparse MoE layers have been mainly applied at the filter [35] or chan-nel [38, 41] level, and less at the layer level [3, 20], and mainly for the image classification task. Semantic segmen-tation is inherently more complex, requiring pixel-wise pre-dictions. While sparse MoE layers have been applied to vision transformers for semantic segmentation [10], their usage in CNNs for this task has received less attention. A research gap thus remains in understanding how to ef-fectively integrate sparse MoE layers into CNNs for dense prediction tasks, such as semantic segmentation, and how these models behave internally. In transformer architec-tures, MoE layers are a standardized component that replace the feed-forward network blocks and operate naturally at the token or patch level, enabling efficient scaling of model capacity without a proportional increase in computational cost. In contrast, existing MoE formulations for CNNs have been developed primarily for image classification, where 
+
+> arXiv:2604.13761v1 [cs.CV] 15 Apr 2026
+
+image-level routing is sufficient to capture global seman-tics. However, semantic segmentation requires pixel-level predictions, making such coarse routing inadequate. In this work, we analyze a patch-level routing strategy for sparse MoE layers in CNNs, where the feature map is divided into spatial regions, and each region is routed to a small subset of convolutional experts. Beyond enabling spatial adaptivity at manageable computational cost, this formulation allows us to explicitly characterize and diagnose the behavior of con-ditional computation in dense prediction networks with a focus on the expert specialization and routing dynamics. Our contributions can be summarized as follows: • We provide a systematic behavioral analysis of sparse MoE layers within CNN-based semantic segmentation models, examining how gating design, routing granular-ity, expert count, and layer placement affect accuracy, computational overhead, routing stability, and expert spe-cialization. • We evaluate six CNN-based segmentation architectures, including encoder–decoder and backbone-based net-works, on the Cityscapes and BDD100K datasets. 
+
+2. Related Work 
+
+The MoE was first introduced by Jacobs et al. [14] in the early 1990s to improve model efficiency and specializa-tion. Their approach relied on multiple expert networks, each specializing in different parts of the input space, and a gating network that learned to assign inputs to the most appropriate expert. This architecture enabled adap-tive learning, where experts focused on distinct subtasks, improving interpretability and performance. Works pursu-ing model-level MoEs mainly focus on the computer vision tasks [17, 18, 22, 23, 33, 36, 40]. MoEs at the level of neu-ral network components, which are the focus of this work, have been mostly used in transformers. 
+
+2.1. Sparse MoE Layers for Transformers 
+
+Early MoE models were fully dense, evaluating all experts for every input, resulting in high computational costs. Eigen et al. [8] suggested integrating MoEs as modular subcom-ponents within architectures, each with its own learned gat-ing network. A key breakthrough, however, came with the introduction of sparse MoEs by Shazeer et al. [32], who proposed a top-k sparsely-gated routing that activates only a small subset of experts per input. This approach pre-served model capacity while drastically reducing computa-tional overhead. Lepikhin et al. [15] extended this concept to transformer models through GShard, demonstrating the feasibility of sparsity in large-scale language models. The idea was further scaled by models such as Switch Trans-formers [9] and GLaM [7], which used sparse expert routing to efficiently train trillion-parameter networks. More recent works also include DeepSeek-MoE [5]. In computer vision, sparse MoEs were first applied to vision transformers (ViTs) [6] by Riquelme et al. in V-MoE [27], where experts replaced standard feed-forward layers, resulting in significant improvements in scalabil-ity with minimal compute overhead. Xue et al. [37] ex-tended this approach by incorporating MoE layers across multiple transformer blocks. Hwang et al. [13] introduced Tutel, which integrates adaptive sparse experts into hierar-chical Swin Transformer [16] backbones to efficiently sup-port large-scale vision tasks. Puigcerver et al. [24] pro-posed Soft-MoE, replacing top-k gating with a fully differ-entiable soft routing mechanism that improves convergence and gradient flow. In the remote sensing domain, Rossi et al. [31] developed Swin2-MoSE, which combines MoE modules with shifted window attention for high-resolution image restoration. Additionally, Rajbhandari et al. [26] in-troduced DeepSpeed-MoE, a training and inference frame-work that enables the scalable deployment of sparse MoE layers across transformer architectures. Sparse MoEs are thus an established component in transformer architectures. 
+
+2.2. Sparse MoE Layers for CNNs 
+
+MoE layers in CNNs are integrated using diverse strategies, unlike transformers, where they consistently replace feed-forward layers. In CNNs, experts can operate at different granularities: filters, channels, or layers. Wang et al. were the first to apply sparse MoE lay-ers to CNNs in DeepMoE [35], where they introduced channel-group experts routed adaptively per input, achiev-ing gains on CIFAR-100 and ImageNet. Similarly, Cond-Conv [38] incorporated multiple filter sets per convolutional layer, with input-dependent gating leading to improved per-formance and parameter efficiency. Dynamic Convolu-tion [2] used attention over convolution kernels, while Slim-Conv [25] selected among experts with varying receptive fields to enhance multi-scale learning. For more modular structures, sparsely-gated MoE mod-ules [20] were integrated at the block or layer level, enabling interpretability through semantic expert specialization. Ad-vMoE [41] refined granularity further by introducing filter-and channel-level experts within each layer. These were ac-tivated via a gating network to form input-dependent path-ways, boosting adversarial robustness and efficiency. Chen et al. [3] provided a theoretical analysis of how MoE layers achieve specializations in CNNs for simple vision tasks. Overall, CNN-based MoEs deliver consistent benefits across vision tasks, with expert placement varying from fil-ter [2, 38], channel [35, 41], to block [20]. However, to the best of our knowledge, sparse MoEs have not yet been ap-plied to CNNs for semantic segmentation. A related attempt by Han et al. [10] integrates sparse MoE layers into vision transformers for this task. 3. Sparse MoE Architecture for CNNs 
+
+We analyze the effect of integrating a sparse MoE layer into CNNs for semantic segmentation. While the individual components (sparse MoE routing, load balancing, patch-wise feature grouping) have been explored in prior contexts, their combination within CNNs for dense prediction has not been systematically studied. We use a reference configura-tion, called PatchConvMoE , which serves as the basis for our experiments. 
+
+3.1. MoE Layer Configuration 
+
+To study the effect of sparse expert routing in convolutional networks, we employ convolutional layers as experts, main-taining the spatial inductive bias inherent to CNNs. This choice enables a direct comparison with standard convo-lutional baselines while allowing for conditional computa-tion through expert selection. Using convolutional experts also ensures compatibility across architectures with mini-mal modification to existing network designs. In our configuration, a single 1 ×1 or 3 ×3 convolutional layer ℓ (depending on the model) is replaced with a Patch-ConvMoE layer composed of N experts {e1, . . . , e N } and a gating network G. Each expert ej replicates the structure of the replaced convolutional layer and outputs Co feature maps. The gate predicts routing weights and activates only the top-k experts for each input, combining their outputs through a weighted sum. This mechanism increases model capacity while keeping the number of active parameters per forward pass close to that of the baseline. Two gating network variants are analyzed (see Figure 2). The first employs a single 3 ×3 convolution, followed by global average pooling and a softmax layer, whereas the second uses a deeper two-layer convolutional architecture that can capture more complex spatial dependencies. This comparative setup enables assessment of how gate com-plexity influences expert specialization and overall segmen-tation performance. 
+
+> (a) Conv-GAP gate
+> (b) 2Conv-GAP gate
+> Figure 2. Gate architectures.
+
+3.2. Patch-Level Routing 
+
+Sparse MoE layers in CNNs can operate at different rout-ing granularities. Image-level routing, commonly used in prior work for classification, assigns a single expert con-figuration to the entire feature map, limiting spatial adapt-ability. Pixel-level routing, in contrast, allows fine-grained specialization but is computationally prohibitive for high-resolution feature maps. In this work, we therefore focus on an intermediate patch-level routing strategy, which par-titions the feature map into spatial regions and routes each patch to a small subset of experts, offering a practical trade-off between spatial flexibility and efficiency. Given a feature map f ∈ RHf ×Wf ×Cf as an input to layer ℓ, we divide it into a g × g grid of non-overlapping patches, each of size Hf 
+
+> g
+
+× Wf 
+
+> g
+
+× Cf , resulting in p = g2
+
+patches {f1, . . . , fp}. Each patch fi is then processed inde-pendently. A gating function G receives the patch as input and produces a sparse weight vector: 
+
+G(fi) = [ g1(fi), . . . , g N (fi)] ,
+
+which determines the top-k experts selected from a pool of 
+
+N convolutional experts {e1, . . . , e N }. The output for each patch is computed as a weighted sum of the selected expert outputs: 
+
+yi = X
+
+> j∈TopK (G(fi))
+
+gj (fi) · ej (fi), yi ∈ R Hfg × Wfg ×Co .
+
+The patch outputs {yi} are then reassembled into the output feature map f ′ ∈ RHf ×Wf ×Co .
+
+3.3. Balancing Losses 
+
+A common challenge in training sparse MoE layers is rout-ing collapse [32], where the gating network routes most in-puts to a small subset of experts, resulting in unbalanced expert usage and reduced generalization. To mitigate this effect, several balancing losses have been proposed. The importance loss Limp [32] penalizes variance in expert importance across a batch to encourage uniform routing. The switch loss Lswitch [9] promotes bal-anced expert activation by directly matching the average routing probability to a uniform prior. The entropy loss 
+
+Lentropy maximizes the entropy of expert assignments, en-couraging diverse expert utilization [21]. While some of these losses were originally developed for transformer-based MoEs, their comparative behavior in convolutional architectures has not been systematically an-alyzed. We therefore include all three variants to examine how balancing losses influence routing stability and expert specialization in CNN-based sparse MoE layers. 
+
+4. Experiments and Evaluation 
+
+We evaluate the architecture described above on two types of CNN models: encoder-decoder models and models with a pre-trained CNN backbone for feature extraction and an attached segmentation head. We demonstrate the impact of various architectural choices on model performance and routing behavior. Table 1. Performance of the baselines and models with one convolutional layer replaced with a PatchConvMoE layer in the decoder with 8 experts, top-2 routing, Lentropy , and the 3 ×3 grid for patchification. We highlight the best overall mIoU per architecture in bold and mIoU of models with a PatchConvMoE layer surpassing that of the baseline in green . Inference time evaluated on NVIDIA RTX2080Ti.                                                                                                                               
+
+> Architecture Number of parameters GFLOPs Inf. time mIoU in % total active per image, ms Cityscapes BDD100K
+> ENet
+> Baseline 351,660 8.72 12.04 51.80 52.27 PatchConvMoE, Conv-GAP gate 352,956 (+0.36%) 352,092 (+0.12%) 8.73 (+0.11%) 25.15 (+108.89%) 53.33 (+1.53) 53.43 (+1.16) PatchConvMoE, 2Conv-GAP gate 353,548 (+0.54%) 352,684 (+0.29%) 8.74 (+0.23%) 25.20 (+109.30%) 55.70 (+3.90) 53.70 (+1.43)
+> PatchConvMoE, 3Conv-GAP gate 354,140 (+0.71%) 353,276 (+0.46%) 8.76 (+0.46%) 25.26 (+109.80%) 50.82 53.60 (+1.33)
+> ERFNet
+> Baseline 2,066,642 27.70 17.96 60.66 54.59 PatchConvMoE, Conv-GAP gate 2,157,714 (+4.40%) 2,089,410 (+1.10%) 28.01 (+1.12%) 28.64 (+59.47%) 60.51 54.96 (+0.37) PatchConvMoE, 2Conv-GAP gate 2,158,290 (+4.43%) 2,089,986 (+1.13%) 28.01 (+1.12%) 28.69 (+59.74%) 61.98 (+1.32) 55.32 (+0.73)
+> PatchConvMoE, 3Conv-GAP gate 2,158,898 (+4.46%) 2,090,594 (+1.15%) 28.02 (+1.16%) 28.75 (+60.08%) 60.72 (+0.06) 54.84 (+0.25)
+> U-Net
+> Baseline 4,318,995 57.90 16.83 64.94 58.50 PatchConvMoE, Conv-GAP gate 4,338,579 (+0.45%) 4,320,147 (+0.02%) 57.92 (+0.03%) 22.17 (+31.73%) 61.57 56.17 PatchConvMoE, 2Conv-GAP gate 4,452,627 (+3.09%) 4,342,323 (+0.54%) 58.21 (+0.54%) 24.21 (+43.85%) 63.88 58.90 (+0.40)
+> LR-ASPP (MobileNetv3 )Baseline 3,284,547 2.09 13.93 66.79 61.53 PatchConvMoE, Conv-GAP gate 3,289,283 (+0.14%) 3,286,211 (+0.05%) 2.091 (+0.05%) 21.22 (+52.33%) 67.90 (+1.11) 63.84 (+2.31) PatchConvMoE, 2Conv-GAP gate 3,289,875 (+0.16%) 3,286,803 (+0.06%) 2.091 (+0.05%) 21.27 (+52.69%) 68.63 (+1.84) 64.64 (+3.11)
+> DeepLabv3+ (ResNet50 )Baseline 40,351,667 352.72 24.19 77.26 78.80 PatchConvMoE, Conv-GAP gate 44,498,867 (+10.28%) 40,959,923 (+1.51%) 358.03 (+1.51%) 33.30 (+37.66%) 76.98 78.73 PatchConvMoE, 2Conv-GAP gate 44,499,459 (+10.28%) 40,960,515 (+1.51%) 358.04 (+1.51%) 33.36 (+37.91%) 77.61 (+0.35) 80.98 (+2.18)
+> PSPNet (ResNet50 )Baseline 48,956,262 356.87 63.38 73.05 78.12 PatchConvMoE, Conv-GAP gate 49,061,355 (+0.21%) 48,982,535 (+0.05%) 357.06 (+0.05%) 72.49 (+14.37%) 72.26 79.21 (+1.09) PatchConvMoE, 2Conv-GAP gate 49,061,947 (+0.22%) 48,983,127 (+0.05%) 357.06 (+0.05%) 72.54 (+14.45%) 75.63 (+2.58) 81.01 (+2.89)
+
+4.1. Experimental Setup 
+
+We evaluate the impact of embedding a PatchCon-vMoE in ENet [19], ERFNet [29], U-Net [30], 
+
+LR-ASPP [12], DeepLabv3+ [1], and PSPNet [42] on the Cityscapes [4] and BDD100k [39] datasets. For the models with backbones, we use ResNet-50 [11] and MobileNetv3 [12]. We use 3, 475 fine-grained 
+
+Cityscapes images with publicly available annota-tions for 19 classes. Following the established proto-col, we randomly crop patches of size 769 ×769 px for the Cityscapes and of size 640 ×640 px for BDD100k 
+
+dataset. We report mIoU on the official validation subsets. Our experiments intentionally focus on compact and widely used CNNs to allow controlled comparisons and to analyze the effects of sparse MoE integration under realistic computational constraints. High-end CNNs, such as HR-Net [34] variants, achieve higher absolute mIoU on datasets but rely on considerably larger backbones and feature-fusion modules. Since our objective is to understand how sparse expert routing interacts with CNN design rather than to pursue new SotA results, smaller and more interpretable models provide a more suitable experimental setting. Each model is trained for 200 epochs using SGD with a batch size of 8, a momentum of 0.9, and an ini-tial learning rate of 2 × 10 −2 without a learning rate scheduler. For backbone-based models ( DeepLabv3+ ,
+
+LR-ASPP , PSPNet ), all backbones were pre-trained on 
+
+ImageNet . Baselines without backbone pre-training demonstrated lower mIoU values. We utilize four types of NVIDIA GPUs (RTX 2080 Ti, RTX 3090, A100, and RTX A6000) to meet the memory requirements of models of varying sizes, with up to 64GB of VRAM. 
+
+4.2. Performance and Efficiency Analysis 
+
+Baseline Architecture: Embedding sparse MoE layers consistently improves performance across all evaluated ar-chitectures and datasets (see Table 1). The largest relative improvement appears for lightweight models such as ENet ,reaching +3.9 mIoU on Cityscapes and LR-ASPP with 
+
++3.11 mIoU on BDD100K , while larger models such as 
+
+PSPNet and DeepLabv3+ also exhibit consistent, though smaller, absolute gains. 
+
+Number of parameters and inference speed: Integrat-ing a PatchConvMoE layer results in a moderate increase in the total number of parameters across all architectures, ranging from around +0 .4% and up to +4 .5% for the en-coder–decoder models and up to +10 .3% for the largest backbone-based networks (see Table 1). Because only a small subset of experts is active for each input, the num-Table 2. Image-based (i.e., no patchification) vs. patch-based routing and different patch sizes evaluated on Cityscapes . PatchConvMoE layers with 2Conv-GAP gate, other settings follow Table 1. 
+
+Patch size in px ENet ERFNet U-Net LR-ASPP DeepLabv3+ PSPNet 
+
+mIoU in % Grid size mIoU in % Grid size mIoU in % Grid size mIoU in % Grid size mIoU in % Grid size mIoU in % Grid size 
+
+No patchification 31.37 - 16.25 - 57.95 - 55.12 - - 64.47 -Patch size 8 ×8 px 51.26 48 ×48 60.31 24 ×24 16.50 96 ×96 58.93 48 ×48 77.14 24 ×24 70.44 12 ×12 Patch size 16 ×16 px 51.69 24 ×24 60.24 12 ×12 18.35 48 ×48 60.68 24 ×24 77.41 (+0.15) 12 ×12 72.92 6×6Patch size 32 ×32 px 52.97 (+1.17) 12 ×12 61.46 (+0.80) 6×6 20.09 24 ×24 61.36 12 ×12 77.49 (+0.23) 6×6 75.63 (+2.58) 3×3
+
+Patch size 64 ×64 px 53.56 (+1.76) 6×6 61.98 (+1.32) 3×3 28.02 12 ×12 66.94 (+0.15) 6×6 77.61 (+0.35) 3×3 75.02 (+1.97) 1×1Patch size 128 ×128 px 55.70 (+3.90) 3×3 46.81 1×1 56.66 6×6 68.63 (+1.84) 3×3 77.56 (+0.30) 1×1 64.68 1×1Patch size 256 ×256 px 50.04 1×1 24.88 1×1 65.87 (+0.93) 3×3 65.47 1×1 77.24 1×1 24.88 1×1
+
+Table 3. mIoU in % for different balancing losses and parameter k for the PatchConvMoE layers with 2Conv-GAP gate and top-k routing evaluated on Cityscapes . We highlight the results for the best-performing balancing loss, other settings follow Table 1.                                                                  
+
+> Loss ENet ERFNet U-Net LR-ASPP DeepLabv3+ PSPNet
+> top-1 top-2 top-1 top-2 top-1 top-2 top-1 top-2 top-1 top-2 top-1 top-2
+> No loss 54.13 (+2.33) 55.72 (+3.92) 59.58 59.44 56.59 57.02 67.47(+0.68) 67.11 (+0.32) 78.05 (+0.79) 77.66 (+0.40) 70.21 70.35
+> Lentropy 51.92 (+0.12) 55.70 (+3.90) 62.04 (+1.38) 61.98 (+1.32) 62.83 63.88 68.47 (+1.68) 68.63 (+1.84) 77.50 (+0.24) 77.61 (+0.35) 62.08 75.63 (+2.58)
+> Limp 53.76 (+1.96) 53.29 (+1.49) 59.05 62.12 (+1.46) 66.03 (+1.09) 67.21 (+2.27) 67.19 (+0.40) 67.35 (+0.56) 77.41 (+0.15) 77.55 (+0.29) 64.97 76.25 (+3.20)
+> Lswitch 53.75 (+1.95) 54.55 (+2.75) 59.36 60.86 (+0.20) 64.42 65.24 (+0.30) 67.23 (+0.44) 67.49 (+0.70) 77.30 (+0.04) 77.27 (+0.01) 66.99 75.46 (+2.41)
+
+Table 4. Varying number of experts and parameter k for the top-k
+
+routing evaluated on Cityscapes . PatchConvMoE layers with 2Conv-GAP gate, other settings follow Table 1.                                                                                                            
+
+> Number of Total number of mIoU in % experts parameters top-1 top-2 top-4 top-8
+> ENet
+> 2352,252 52.09 (+0.29) 53.86 (+2.06) --4352,684 48.64 53.84 (+2.04) 51.97 (+0.17) -8353,548 51.68 55.70 (+3.90) 50.98 54.16(+2.36) 16 355,276 52.07 (+0.27) 52.19 (+0.39) 52.05 (+0.25) 50.42
+> ERFNet
+> 22,093,202 62.05(+1.39) 61.42 (+0.76) --42,157,714 62.04(+1.38) 61.58 (+0.92) 62.51 (+1.85) -82,236,050 60.65 61.98(+1.32) 60.74 (+0.08) 61.43 (+0.77) 16 2,344,338 60.33 60.42 59.90 61.49 (+0.83)
+> U-Net
+> 24,338,579 62.35 63.28 --44,379,187 62.83 65.87 (+0.93) 65.31(+0.38) -84,452,627 63.30 63.88 62.32 62.57
+> LR-ASPP
+> 23,286,371 68.74 (+1.95) 65.70 --43,287,539 68.04 (+1.25) 67.42 (+0.63) 67.04 (+0.25) -83,289,875 68.47 (+1.68) 68.63 (+1.84) 68.32 (+1.53) 65.22
+> DeepLabv3+
+> 240,960,083 76.58 76.77 --442,139,875 76.72 76.92 74.64 -844,499,459 77.50 (+0.24) 77.61 (+0.35) 75.30 75.45
+> PSPNet
+> 249,003,033 72.89 76.41 (+3.36 )--449,022,671 68.62 74.83 (+1.78) 74.91 (+1.86) -849,061,947 62.08 75.63 (+2.58) 75.90 (+2.85) 75.45 (+2.40)
+
+ber of parameters effectively used during inference remains close to that of the baseline, reaching up to +1 .51% . The increase in GFLOPs is also small, up to +1 .51% . Train-ing time increased up to 30% compared to the baseline, depending on the architecture. The increase in inference time is larger for lightweight models, reaching +14 .45% 
+
+for PSPNet . Note that the higher accuracy does not stem solely from increased capacity, because models with top-1 routing using a single convolutional layer during inference, as in the baseline, still achieve higher mIoU. These results show that sparse expert routing scales efficiently, providing consistent improvements in segmentation on both datasets without compromising computational performance. 
+
+Table 5. Independent vs. shared experts in the PatchConvMoE layer in ENet with 2Conv-GAP gate and patch size 128 ×128 px evaluated on Cityscapes , other settings follow Table 1. 
+
+Experts Parameters Routing mIoU in % 
+
+8 independent experts 353,548 top-1 51.68 top-2 55.70 (+3.90) 
+
+8 independent + 1 shared experts 353,692 top-1 51.45 top-2 50.21 8 independent + 2 shared experts 353,836 top-1 54.89 (+3.09) top-2 50.14 8 independent + 3 shared experts 353,980 top-1 52.87 (+1.07) top-2 50.45 8 independent + 4 shared experts 354,124 top-1 51.54 top-2 54.49 (+2,69) 
+
+4.3. Ablations for MoE Layer Components 
+
+In the following, we discuss the impact of architectural choices for PatchConvMoE layer components on the model performance. Due to space constraints, we perform detailed ablations on Cityscapes , which reflect consistent trends observed for BDD100K .
+
+Gate Architecture: The 2Conv-GAP gate with two in-stead of one convolutional layer leads to an increase in mIoU performance compared to the baseline for all models (see Table 1). Additionally, 2Conv-GAP generally yields a higher mIoU than Conv-GAP. We exemplarily evaluate fur-ther increasing the number of convolutional layers in the gate to three (3Conv-GAP) for ENet and ERFNet , but it leads to worse performance compared to 2Conv-GAP. An overly complex gate might therefore obstruct learning. The increase in the total number of parameters in the model is insignificant between the gate architectures. 
+
+Patchification: Patch-wise routing leads to higher mIoU compared to image-wise routing. The image-wise routing consistently performs worse than the baseline (see Table 2). The optimal grid size and correspondingly patch size for Table 6. Number and positions of MoE layers replacing convolutional layers evaluated on Cityscapes . We use architecture-specific layer names to facilitate reproducibility. PatchConvMoE layers with 2Conv-GAP gate, other settings follow Table 1. 
+
+Num MoE MoE Layer position Patch Total number of mIoU layers size, px parameters in % 
+
+ENet 
+
+1 3×3 conv layer in first encoder regular block ( regular1 1 ) 64 ×64 369,532 53.56 (+1.76) 1 3×3 conv layer in bridge regular block ( regular3 4 ) 32 ×32 419,068 54.80 (+3.00) 1 Last 3 ×3 conv layer in the decoder ( regular5 1 ) 128 ×128 353,548 55.70 (+3.90) 
+
+2 regular3 4 and regular5 1 32 ×32,128 ×128 420,956 36.46 3 Three conv layers in regular5 1 128 ×128 389,292 32.31 3 Conv layers in regular1 1 and regular3 4 and regular5 1 64 ×64, 32 ×32,128 ×128 438,828 34.81 
+
+ERFNet 
+
+1 First 3 ×3 conv layer in encoder after downsampling ( encoder.layer1 ) 64 ×64 2,108,610 61.05 (+0.39) 1 3×3 conv layer in the middle of the bridge ( encoder.layer10 ) 32 ×32 2,224,002 59.95 1 Last 3 ×3 conv layer in decoder ( decoder.layer2 ) 64 ×64 2,157,714 61.98 (+1.32) 
+
+2 Last two 3 ×3 conv layer in decoder ( decoder.layer2 ) 64 ×64 2,249,970 60.61 3 Conv layers in encoder.layer1 (encoder.layer10 ) decoder.layer2 64 ×64, 32 ×32,,64 ×64 2,604,738 59.96 
+
+U-Net 
+
+1 First 3 ×3 conv layer in encoder after downsampling, down1.maxpoolconv 128 ×128 4,434,499 62.83 1 Last 3 ×3 conv layer in encoder ( down4.maxpoolconv ) 16 ×16 6,097,683 22.01 1 Last 3 ×3 conv layer in decoder ( up4.conv.doubleconv ) 256 ×256 4,379,187 65.87 (+0.93) 
+
+2 Last two 3 ×3 conv layer in decoder ( up4.conv.doubleconv ) 256 ×256 4,452,915 46.89 3 Conv layers in down1.maxpoolconv and down4.maxpoolconv and up4.conv.doubleconv 128 ×128,16 ×16, 256 ×256 6,885,939 28.02 
+
+LR-ASPP 
+
+1 3×3 conv layer at the beginning of backbone (trunk.block1.1) 128 ×128 3,293,779 63.68 1 3×3 conv layer at the end of backbone (trunk.block4.1) 32 ×32 3,375,859 45.66 1 First 1 ×1 conv layer in decoder ( convs2 ) 128 ×128 3,289,875 68.63 (+1.84) 
+
+2 Last two 1 ×1 conv layer in decoder ( convs2, convup3 ) 128 ×128 3,445,347 64.89 3 Conv layers at the beginning and end of backbone (trunk.block1.1, trunk.block4.1) and in decoder ( convs2 ) 128 ×128,32 ×32, 128 ×128 3,391,499 34.57 
+
+DeepLabv3+ 
+
+1 3×3 conv layer at the beginning of backbone (backbone.layer1.2) 64 ×64 40,614,915 73.41 1 3×3 conv layer at the end of backbone (backbone.layer4.2) 16 ×16 56,904,195 48.41 1 Last 3 ×3 conv layer in decoder (decoder.lastconv.3) 64 ×64 44,499,459 77.61 (+0.35) 
+
+2 Last two 3 ×3 conv layers in decoder (decoder.lastconv.0/3) 64 ×64 45,277,059 73.87 3 Last two 3 ×3 conv layers in decoder, last 1 ×1 conv layer in decoder 64 ×64,64 ×64,64 ×64 45,330,264 45.62 
+
+PSPNet 
+
+1 3×3 conv layer at the beginning of backbone (layer1.2.conv2) 64 ×64 49,219,510 75.56 (+2.51) 1 3×3 conv layer at the end of backbone (layer4.2) 16 ×16 65,567,832 66.01 1 Last 1 ×1 conv layer before upsampling in decoder ( cls.4 ) 32 ×32 49,061,947 75.63 (+2.58) 
+
+1 Last 3 ×3 conv layer before upsampling in decoder ( aux.0 ) 32 ×32 65,545,654 75.02 (+1.98) 2 Last two 1 ×1 conv layer in decoder ( cls.4, aux.4 ) 32 ×32 49,272,715 75.03 (+1.99) 3 3×3 conv layer at the beginning and end of backbone (layer1.2, layer4.2) and in decoder ( aux.4 ) 64 ×64,16 ×16, 32 ×32 65,862,107 59.02 
+
+each architecture depend on the feature map size before the PatchConvMoE layer. While the optimal patch size differs across the architectures, it mostly corresponded to the 3 ×3grid size for all models. Therefore, we further use models with the optimal patch size corresponding to a 3 ×3 grid for all experiments. 
+
+Balancing loss: The entropy loss and the importance loss lead to the best results(see Table 3). Because the switch loss is typically used in conjunction with top-1 routing, we also evaluate k = 1 , but it does not demonstrate perfor-mance improvement. Completely omitting the balancing loss has led to improved MoE performance for some mod-els. Without balancing losses, however, expert usage col-lapsed to a single dominant expert, preventing expert spe-cialization. 
+
+Number of experts: The best-performing architecture is typically the one with four or eight experts. Further increas-ing the number of experts does not result in a corresponding increase in performance (see Table 4). Unlike MoE applica-tions in transformers, where models are often expanded by more than 10 × [9], we achieve only approximately 2 × scal-ing. Depending on the architecture, increasing the number of experts beyond 8 or 16 can lead to a significant increase in the number of parameters, making the architecture less appealing due to higher computational costs. 
+
+Number of activated experts ( k): Our experiments (see Table 4) show that top-2 routing usually provides better ac-curacy than top-1. However, continuing to activate more experts in training does not sustain this trend. Since we position the PatchConvMoE layer at the end of the model, activating more experts may exacerbate training instability and increase the difficulty of loss convergence. Further-more, these experiments stress the importance of sparsity. For n experts, models without sparsity, i.e., with k = n, in most cases achieve worse results than sparse experts, where 
+
+k < n .
+
+Independent vs. shared experts: Motivated by the re-cent success of shared experts for sparse MoE layers in vision transformers [5, 10, 37], we evaluate the impact of adding a shared expert exemplarily for the ENet (see Ta-ble 5). None of the variants with shared experts reach the performance of a model with independent experts, although several models can beat the baseline in terms of mIoU. Since no previous works have explored the effect of shared experts in CNNs, these results suggest that shared experts may be less beneficial for CNNs than for transformers. 
+
+4.4. Ablations for the Number and Position of MoE Layers 
+
+We evaluate the placement of MoE layers at three differ-ent positions: the encoder’s last convolutional layer as well as the decoder’s first and last convolutional layers (see Ta-ble 6). Note that the optimal patch size varies for MoE lay-ers placed in different positions within the architecture. The placement of the MoE layer in the decoder is evi-dently more beneficial than in the encoder, likely because decoder layers are more directly involved in refining the segmentation output based on the learned features. The po-sitions with a relatively higher number of parameters (the last 3 ×3 convolutional layer in the decoder) correlate with slightly better performance in terms of mIoU, potentially in-dicating that more parameters in the MoE layers contribute positively to the segmentation task to a certain extent. Replacing multiple convolutional layers with MoE lay-ers leads to significantly worse segmentation performance. Sparse routing introduces conditional computation, leading to high variance across training runs. With multiple MoE layers, the network becomes unstable. A single optimally placed MoE layer thus offers the benefits of adaptive com-putation without the instability associated with excessive sparsity. This is different from transformers, where typi-cally all FFN layers are replaced with MoE layers. 
+
+4.5. Routing and Interpretability Analysis 
+
+In the following, we analyze expert use with quantitative and qualitative methods and assess the extent to which rout-ing collapse is pronounced. 
+
+Quantitative routing analysis (see Table 7) uses the normalized routing entropy (NRE) and top expert concen-tration (TEC). NRE is computed by deriving the distribu-tion of how often each expert is selected. NRE thus mea-sures how evenly routing decisions are spread across ex-perts, with lower values indicating routing collapse. TEC is computed by measuring the proportion of patches assigned to the most frequently selected experts and reflects the de-gree of routing dominance, with higher values indicating stronger routing collapse. The analysis shows that routing diversity strongly depends on both the balancing loss and the underlying architecture. The switch loss consistently yields the highest NRE and comparatively low TEC across all models, indicating stable and well-distributed expert uti-lization. In contrast, the importance loss leads to substan-tially lower NRE and markedly higher TCE values, partic-ularly for lightweight architectures, revealing pronounced expert dominance. The entropy loss generally maintains                                                
+
+> Table 7. Routing collapse during inference for the PatchConvMoE models with 2Conv-GAP gate and 8 experts on the Cityscapes
+> data: normalized routing entropy (NRE), where lower values mean routing collapse, and top expert concentration (TEC), where higher values mean routing collapse. Cases with the most stable routing are marked bold .
+> Model Lswitch Limp Lentropy
+> NRE TEC NRE TEC NRE TEC
+> ENet 0.9255 0.4394 0.5764 0.7425 0.8877 0.5024
+> ERFNet 0.9686 0.5183 0.8057 0.7790 0.8408 0.5563
+> U-Net 0.9887 0.4409 0.9880 0.4894 0.9874 0.5330
+> LR-ASPP 0.9951 0.2951 0.7701 0.6193 0.9468 0.4931
+> DeepLabv3+ 0.9660 0.4379 0.9606 0.3888 0.8629 0.4724
+> PSPNet 0.9738 0.3537 0.9686 0.3595 0.9177 0.5189
+
+high NRE but still exhibits elevated TCE in several models, suggesting partial imbalance despite globally diverse rout-ing. Larger backbone-based models show more stable rout-ing across losses, while smaller models are more sensitive to the choice of loss. 
+
+Expert–class heatmaps (see Figure 3) show how of-ten each class–expert pair is used during test-time routing. Expert utilization varies notably with the balancing loss: switch loss yields the most diverse routing with several ac-tive experts, importance loss causes partial collapse with about three dominant experts, and entropy loss shows the strongest collapse, with only a few experts active across most classes. Large static classes like road or building dominate routing under collapse, whereas smaller objects such as person, rider, and traffic sign exhibit clearer dif-ferentiation under switch loss. Across models, ENet is largely insensitive to the loss type, while deeper networks (ERFNet , U-Net , DeepLabv3+ ) achieve richer, more class-selective expert usage, indicating that broader partici-pation scales with model capacity. 
+
+Expert pair co-occurrence matrices (see Figure 4) show how often experts are activated together during top-
+
+k routing. Across architectures, switch loss produces the most distributed co-activation with several active pairs and no dominant combination. Importance loss yields fewer but stable pairs, whereas entropy loss collapses to one or two recurring co-activations. Deeper models such as ERFNet 
+
+and DeepLabv3+ display the richest pair diversity under switch loss, while smaller networks like ENet show limited co-routing regardless of the loss. Overall, switch loss pro-motes broader expert collaboration, while importance and entropy lead to narrower, repetitive pair usage. In summary, the extent of routing collapse depends strongly on both the balancing loss and model capacity. Backbone-based architectures show more stable and diverse expert usage, even with weaker balancing, suggesting that deeper feature representations support more reliable gating. Overall, higher model capacity and discriminative features mitigate collapse and promote broader expert usage. a) ENet , Lswitch b) ENet , Limp c) ENet , Lentropy                                 
+
+> d) ERFNet ,Lswitch e) ERFNet ,Limp f) ERFNet ,Lentropy
+> g) U-Net ,Lswitch h) U-Net ,Limp i) U-Net ,Lentropy
+> j) LR-ASPP ,Lswitch k) LR-ASPP ,Limp l) LR-ASPP ,Lentropy
+> m) DeepLabv3+ ,Lswitch n) DeepLabv3+ ,Limp o) DeepLabv3+ ,Lentropy
+
+Figure 3. Routing heatmaps during inference for models with one convolutional layer replaced with a PatchConvMoE layer in the decoder with 8 experts, 2Conv-GAP gate, top-2 routing, Lentropy ,and the 3 ×3 grid for patchification evaluated on Cityscapes .
+
+5. Conclusion 
+
+In this work, we analyzed the behavior of sparse MoE lay-ers in CNNs for semantic segmentation, focusing on routing stability and conditional computation. We adopted a patch-wise routing strategy that assigns local regions to a small subset of convolutional experts, enabling structured analy-sis of expert utilization and collapse. Across six architec-tures and two datasets, a single sparse MoE layer improved segmentation accuracy with minor parameter increases. Extensive ablations of gating design, expert count, rout-ing sparsity, and layer placement revealed consistent de-                                        
+
+> a) ENet ,Lswitch b) ENet ,Limp c) ENet ,Lentropy
+> d) ERFNet ,Lswitch e) ERFNet ,Limp f) ERFNet ,Lentropy
+> g) U-Net ,Lswitch h) U-Net ,Limp i) U-Net ,Lentropy
+> j) LR-ASPP ,Lswitch k) LRASPP ,Limp l) LR-ASPP ,Lentropy
+> m) DeepLabv3+ ,Lswitch n) DeepLabv3+ ,Limp o) DeepLabv3+ ,Lentropy
+
+Figure 4. Expert co-routing frequency during inference. The set-tings follow Figure 3. 
+
+sign trends. The most effective configuration used eight ex-perts, top-2 routing, and a single MoE layer in the decoder, with balancing loss to mitigate collapse. Entropy loss of-ten achieved the highest mIoU, while switch loss produced the most uniform expert usage and lowest routing collapse, while importance loss showed stronger expert dominance. Qualitative analyses further highlighted spatial and seman-tic specialization and its dependence on balancing strategy and model capacity. Overall, this work provides empirical insight into the de-sign and behavior of sparse MoE layers for CNN-based dense prediction and contributes to a better understanding of structured conditional computation in vision models. Acknowledgment 
+
+This work was supported by funding from the Topic En-gineering Secure Systems of the Helmholtz Association (HGF) and by KASTEL Security Research Labs (46.23.03). 
+
+References 
+
+[1] Liang-Chieh Chen, Yukun Zhu, George Papandreou, Florian Schroff, and Hartwig Adam. Encoder-decoder with atrous separable convolution for semantic image segmentation. In 
+
+European Conference on Computer Vision (ECCV) , 2018. 4 [2] Yinpeng Chen, Xiyang Dai, Mengchen Liu, Dongdong Chen, Lu Yuan, and Zicheng Liu. Dynamic convolution: At-tention over convolution kernels. In IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2020. 2[3] Zixiang Chen, Yihe Deng, Yue Wu, Quanquan Gu, and Yuanzhi Li. Towards understanding the mixture-of-experts layer in deep learning. Advances in neural information pro-cessing systems , 35, 2022. 1, 2 [4] Marius Cordts, Mohamed Omran, Sebastian Ramos, Timo Rehfeld, Markus Enzweiler, Rodrigo Benenson, Uwe Franke, Stefan Roth, and Bernt Schiele. The cityscapes dataset for semantic urban scene understanding. In 
+
+IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2016. 4 [5] Damai Dai, Chengqi Deng, Chenggang Zhao, R. X. Xu, Huazuo Gao, Deli Chen, Jiashi Li, Wangding Zeng, Xingkai Yu, Y. Wu, Zhenda Xie, Y. K. Li, Panpan Huang, Fuli Luo, Chong Ruan, Zhifang Sui, and Wenfeng Liang. Deepseek-moe: Towards ultimate expert specialization in mixture-of-experts language models. In Proceedings of the 62nd An-nual Meeting of the Association for Computational Linguis-tics (ACL) , 2024. 2, 6 [6] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai, Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Syl-vain Gelly, et al. An image is worth 16x16 words: Trans-formers for image recognition at scale. arXiv preprint arXiv:2010.11929 , 2020. 2 [7] Nan Du, Yanping Huang, Andrew M. Dai, Simon Tong, Dmitry Lepikhin, Yuanzhong Xu, Maxim Krikun, Yanqi Zhou, Adams Wei Yu, Orhan Firat, Barret Zoph, Liam Fe-dus, Maarten P. Bosma, Zongwei Zhou, Tao Wang, Yu Emma Wang, Kellie Webster, Marie Pellat, Kevin Robinson, Kath-leen S. Meier-Hellstern, Toju Duke, Lucas Dixon, Kun Zhang, Quoc V. Le, Yonghui Wu, and Zhifeng Chen. Glam: Efficient scaling of language models with mixture-of-experts. In International Conference on Machine Learning (ICML) , 2022. 2 [8] David Eigen, Marc’Aurelio Ranzato, and Ilya Sutskever. Learning factored representations in a deep mixture of ex-perts. arXiv preprint arXiv:1312.4314 , 2013. 2 [9] William Fedus, Barret Zoph, and Noam Shazeer. Switch transformers: Scaling to trillion parameter models with sim-ple and efficient sparsity. Journal of Machine Learning Re-search , 2022. 1, 2, 3, 6 [10] Xumeng Han, Longhui Wei, Zhiyang Dou, Zipeng Wang, Chenhui Qiang, Xin He, Yingfei Sun, Zhenjun Han, and Qi Tian. Vimoe: An empirical study of designing vision mixture-of-experts. arXiv preprint arXiv:2410.15732 , 2024. 1, 2, 6 [11] Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun. Deep residual learning for image recognition. In IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2016. 4 [12] Andrew Howard, Ruoming Pang, Hartwig Adam, Quoc V. Le, Mark Sandler, Bo Chen, Weijun Wang, Liang-Chieh Chen, Mingxing Tan, Grace Chu, Vijay Vasudevan, and Yukun Zhu. Searching for mobilenetv3. In IEEE Interna-tional Conference on Computer Vision (ICCV) , 2019. 4 [13] Changho Hwang, Wei Cui, Yifan Xiong, Ziyue Yang, Ze Liu, Han Hu, Zilong Wang, Rafael Salas, Jithin Jose, Prab-hat Ram, et al. Tutel: Adaptive mixture-of-experts at scale. 
+
+Proceedings of Machine Learning and Systems , 2023. 2 [14] Robert A Jacobs, Michael I Jordan, Steven J Nowlan, and Geoffrey E Hinton. Adaptive mixtures of local experts. Neu-ral computation , 1991. 2 [15] Dmitry Lepikhin, HyoukJoong Lee, Yuanzhong Xu, Dehao Chen, Orhan Firat, Yanping Huang, Maxim Krikun, Noam Shazeer, and Zhifeng Chen. GShard: Scaling Giant Mod-els With Conditional Computation and Automatic Shard-ing. In International Conference on Learning Representa-tions (ICLR) , 2021. 1, 2 [16] Ze Liu, Yutong Lin, Yue Cao, Han Hu, Yixuan Wei, Zheng Zhang, Stephen Lin, and Baining Guo. Swin transformer: Hierarchical vision transformer using shifted windows. In 
+
+ICCV , 2021. 2 [17] Jiaqi Ma, Zhe Zhao, Xinyang Yi, Jilin Chen, Lichan Hong, and Ed H Chi. Modeling task relationships in multi-task learning with multi-gate mixture-of-experts. In International Conference on Knowledge Discovery & Data Mining , 2018. 2[18] Oier Mees, Andreas Eitel, and Wolfram Burgard. Choosing smartly: Adaptive multimodal fusion for object detection in changing environments. In IEEE/RSJ International Confer-ence on Intelligent Robots and Systems (IROS) , 2016. 2 [19] Adam Paszke, Abhishek Chaurasia, Sangpil Kim, and Euge-nio Culurciello. Enet: A deep neural network architecture for real-time semantic segmentation. CoRR , abs/1606.02147, 2016. 4 [20] Svetlana Pavlitska, Christian Hubschneider, Lukas Struppek, and J. Marius Z¨ ollner. Sparsely-gated mixture-of-expert lay-ers for cnn interpretability. In International Joint Conference on Neural Networks (IJCNN) , 2023. 1, 2 [21] Svetlana Pavlitska, Haixi Fan, Konstantin Ditschuneit, and Marius Z¨ ollner. Robust experts: the effect of adversarial training on cnns with sparse mixture-of-experts layers. In 
+
+IEEE International Conference on Computer Vision (ICCV) Workshops , 2025. 3 [22] Svetlana Pavlitskaya, Christian Hubschneider, Michael We-ber, Ruby Moritz, Fabian Huger, Peter Schlicht, and Marius Zollner. Using mixture of expert models to gain insights into semantic segmentation. In Conference on Computer Vision and Pattern Recognition (CVPR) - Workshops , 2020. 2 [23] Svetlana Pavlitskaya, Christian Hubschneider, and Michael Weber. Evaluating mixture-of-experts architectures for net-work aggregation. In Deep Neural Networks and Data for Automated Driving: Robustness, Uncertainty Quantifica-tion, and Insights Towards Safety . 2022. 2 [24] Joan Puigcerver, Carlos Riquelme, Basil Mustafa, and Neil Houlsby. From sparse to soft mixtures of experts. arXiv preprint arXiv:2308.00951 , 2023. 2 [25] Jiaxiong Qiu, Cai Chen, Shuaicheng Liu, Heng-Yu Zhang, and Bing Zeng. Slimconv: Reducing channel redundancy in convolutional neural networks by features recombining. 
+
+IEEE Transactions on Image Processing , 2021. 2 [26] Samyam Rajbhandari, Conglong Li, Zhewei Yao, Minjia Zhang, Reza Yazdani Aminabadi, Ammar Ahmad Awan, Jeff Rasley, and Yuxiong He. Deepspeed-moe: Advanc-ing mixture-of-experts inference and training to power next-generation ai scale. In International conference on machine learning , 2022. 1, 2 [27] Carlos Riquelme, Joan Puigcerver, Basil Mustafa, Maxim Neumann, Rodolphe Jenatton, Andr´ e Susano Pinto, Daniel Keysers, and Neil Houlsby. Scaling vision with sparse mix-ture of experts. In Conference on Neural Information Pro-cessing Systems (NIPS/NeurIPS) , 2021. 2 [28] Stephen Roller, Sainbayar Sukhbaatar, Arthur Szlam, and Jason Weston. Hash layers for large sparse models. In Conference on Neural Information Processing Systems (NIPS/NeurIPS) , 2021. 1 [29] Eduardo Romera, Jos´ e M. ´Alvarez, Luis Miguel Bergasa, and Roberto Arroyo. Erfnet: Efficient residual factorized convnet for real-time semantic segmentation. IEEE Trans. Intell. Transp. Syst. , 2018. 4 [30] Olaf Ronneberger, Philipp Fischer, and Thomas Brox. U-net: Convolutional networks for biomedical image segmentation. In International Conference on Medical Image Computing and Computer Assisted Intervention (MICCAI) , 2015. 4 [31] Leonardo Rossi, Vittorio Bernuzzi, Tomaso Fontanini, Mas-simo Bertozzi, and Andrea Prati. Swin2-mose: A new single image supersolution model for remote sensing. IET Image Processing , 2025. 2 [32] Noam Shazeer, Azalia Mirhoseini, Krzysztof Maziarz, Andy Davis, Quoc V. Le, Geoffrey E. Hinton, and Jeff Dean. Outrageously large neural networks: The sparsely-gated mixture-of-experts layer. In International Conference on Learning Representations (ICLR) , 2017. 1, 2, 3 [33] Abhinav Valada, Ankit Dhall, and Wolfram Burgard. Convo-luted mixture of deep experts for robust semantic segmenta-tion. In International Conference on Intelligent Robots and Systems (IROS) - Workshops , 2016. 2 [34] Jingdong Wang, Ke Sun, Tianheng Cheng, Borui Jiang, Chaorui Deng, Yang Zhao, Dong Liu, Yadong Mu, Mingkui Tan, Xinggang Wang, et al. Deep high-resolution represen-tation learning for visual recognition. IEEE transactions on pattern analysis and machine intelligence , 2021. 4 [35] Xin Wang, Fisher Yu, Lisa Dunlap, Yi-An Ma, Ruth Wang, Azalia Mirhoseini, Trevor Darrell, and Joseph E. Gonzalez. Deep mixture of experts via shallow embedding. In Confer-ence on Uncertainty in Artificial Intelligence , 2019. 1, 2 [36] Xiang Xu, Lingdong Kong, Hui Shuai, Liang Pan, Ziwei Liu, and Qingshan Liu. Limoe: Mixture of lidar representation learners from automotive scenes. CoRR , abs/2501.04004, 2025. 2 [37] Fuzhao Xue, Ziji Shi, Futao Wei, Yuxuan Lou, Yong Liu, and Yang You. Go wider instead of deeper. In AAAI Conference on Artificial Intelligence (AAAI) , 2022. 2, 6 [38] Brandon Yang, Gabriel Bender, Quoc V Le, and Jiquan Ngiam. Condconv: Conditionally parameterized convolu-tions for efficient inference. Conference on Neural Informa-tion Processing Systems (NIPS/NeurIPS) , 32, 2019. 1, 2 [39] Fisher Yu, Haofeng Chen, Xin Wang, Wenqi Xian, Yingying Chen, Fangchen Liu, Vashisht Madhavan, and Trevor Dar-rell. Bdd100k: A diverse driving dataset for heterogeneous multitask learning. In IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2020. 4 [40] Lianbo Zhang, Shaoli Huang, Wei Liu, and Dacheng Tao. Learning a mixture of granularity-specific experts for fine-grained categorization. In IEEE International Conference on Computer Vision (ICCV) , 2019. 2 [41] Yihua Zhang, Ruisi Cai, Tianlong Chen, Guanhua Zhang, Huan Zhang, Pin-Yu Chen, Shiyu Chang, Zhangyang Wang, and Sijia Liu. Robust mixture-of-expert training for convo-lutional neural networks. In IEEE International Conference on Computer Vision (ICCV) , 2023. 1, 2 [42] Hengshuang Zhao, Jianping Shi, Xiaojuan Qi, Xiaogang Wang, and Jiaya Jia. Pyramid scene parsing network. In IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2017. 4 [43] Barret Zoph. Designing effective sparse expert models. In IEEE International Parallel and Distributed Processing Symposium, (IPDPS) - Workshops , 2022. 1

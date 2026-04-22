@@ -6,77 +6,79 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-21
-- 运行时间：2026-04-21 20:09:19 UTC
+- 最新运行日期：2026-04-22
+- 运行时间：2026-04-22 20:07:38 UTC
 - 运行状态：成功
-- 本次总论文数：18
-- 精读区：7
+- 本次总论文数：19
+- 精读区：8
 - 速读区：11
 
 ### 今日简报（AI）
-- 今日共生成 18 篇推荐（精读 7 篇，速读 11 篇）
-- 精读：《GEM3D CIM General Purpose Matrix Computation Using 3D Integrated SRAM eDRAM Hybrid Compute In Memory on Memory Architecture》（9.0/10）, 《Forge-UGC: FX optimization and register-graph engine for universal graph compiler》（9.0/10）
-- 速读：《DA-PTQ: Drift-Aware Post-Training Quantization for Efficient Vision-Language-Action Models》（8.0/10）, 《HyperLiDAR: Adaptive Post-Deployment LiDAR Segmentation via Hyperdimensional Computing》（8.0/10）, 《OSC: Hardware Efficient W4A4 Quantization via Outlier Separation in Channel Dimension》（8.0/10）
-- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202604/21/README](/202604/21/README)
+今日深度解析 19 篇前沿论文，聚焦“硅片感知”神经网络与嵌入式 FPGA 的高能效加速器设计。
+研究表明，通过参数化架构与软硬协同优化，可显著提升模型在端侧硬件上的运行效率与能效比。
+建议关注混合精度量化及长文本训练的负载均衡技术，探索 AI 模型在受限资源下的性能极限。
+- 详情：[/202604/22/README](/202604/22/README)
 
 ### 精读区论文标签
-1. [GEM3D CIM General Purpose Matrix Computation Using 3D Integrated SRAM eDRAM Hybrid Compute In Memory on Memory Architecture](/202604/21/2604.13969v1-gem3d-cim-general-purpose-matrix-computation-using-3d-integrated-sram-edram-hybrid-compute-in-memory-on-memory-architecture)  
+1. [Energy Efficient LSTM Accelerators for Embedded FPGAs through Parameterised Architecture Design](/202604/22/2604.19293v1-energy-efficient-lstm-accelerators-for-embedded-fpgas-through-parameterised-architecture-design)  
+   标签：评分：10.0/10、query:hwnas
+   evidence：针对FPGA的可参数化硬件加速器设计
+2. [Silicon Aware Neural Networks](/202604/22/2604.19334v1-silicon-aware-neural-networks)  
+   标签：评分：10.0/10、query:hwnas
+   evidence：针对定制硅片的面积和功耗优化的硅感知神经网络
+3. [AIPC: Agent-Based Automation for AI Model Deployment with Qualcomm AI Runtime](/202604/22/2604.14661v1-aipc-agent-based-automation-for-ai-model-deployment-with-qualcomm-ai-runtime)  
    标签：评分：9.0/10、query:hwnas
-   evidence：用于 DNN 加速的 3D 集成 SRAM-eDRAM 混合存内计算架构
-2. [Forge-UGC: FX optimization and register-graph engine for universal graph compiler](/202604/21/2604.16498v1-forge-ugc-fx-optimization-and-register-graph-engine-for-universal-graph-compiler)  
+   evidence：针对特定硬件推理运行时的AI模型部署自动化
+4. [When Spike Sparsity Does Not Translate to Deployed Cost: VS-WNO on Jetson Orin Nano](/202604/22/2604.17040v1-when-spike-sparsity-does-not-translate-to-deployed-cost-vs-wno-on-jetson-orin-nano)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对异构加速器硬件的Transformer部署编译器
-3. [Flint: Compiler Enabled Cluster-Free Design Space Exploration for Distributed ML](/202604/21/2604.17550v1-flint-compiler-enabled-cluster-free-design-space-exploration-for-distributed-ml)  
+   evidence：评估边缘GPU硬件上脉冲稀疏性向能量和延迟的转化
+5. [Unlocking the Edge deployment and ondevice acceleration of multi-LoRA enabled one-for-all foundational LLM](/202604/22/2604.18655v1-unlocking-the-edge-deployment-and-ondevice-acceleration-of-multi-lora-enabled-one-for-all-foundational-llm)  
    标签：评分：9.0/10、query:hwnas
-   evidence：编译器启用的分布式机器学习设计空间探索
-4. [AccelCIM: Systematic Dataflow Exploration for SRAM Compute-in-Memory Accelerator](/202604/21/2604.17692v1-accelcim-systematic-dataflow-exploration-for-sram-compute-in-memory-accelerator)  
+   evidence：针对移动芯片组高效端侧推理的硬件感知框架
+6. [Evaluation of Winning Solutions of 2025 Low Power Computer Vision Challenge](/202604/22/2604.19054v1-evaluation-of-winning-solutions-of-2025-low-power-computer-vision-challenge)  
    标签：评分：9.0/10、query:hwnas
-   evidence：SRAM 存内计算加速器的系统化数据流探索
-5. [Enabling AI ASICs for Zero Knowledge Proof](/202604/21/2604.17808v1-enabling-ai-asics-for-zero-knowledge-proof)  
+   evidence：在边缘设备上平衡准确度与延迟、内存和能耗
+7. [Design Rules for Extreme-Edge Scientific Computing on AI Engines](/202604/22/2604.19106v1-design-rules-for-extreme-edge-scientific-computing-on-ai-engines)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对AI ASIC的硬件感知复杂度模型与内核重构
-6. [M100: An Orchestrated Dataflow Architecture Powering General AI Computing](/202604/21/2604.17862v1-m100-an-orchestrated-dataflow-architecture-powering-general-ai-computing)  
+   evidence：针对AI引擎和FPGA SoC的极端边缘计算设计规则
+8. [Scalable Memristive-Friendly Reservoir Computing for Time Series Classification](/202604/22/2604.19343v1-scalable-memristive-friendly-reservoir-computing-for-time-series-classification)  
    标签：评分：9.0/10、query:hwnas
-   evidence：用于AI推理的编译器-架构协同设计
-7. [Towards Real-Time ECG and EMG Modeling on $μ$ NPUs](/202604/21/2604.18067v1-towards-real-time-ecg-and-emg-modeling-on--npus)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对NPU兼容轻量化模型的硬件感知层设计
+   evidence：针对软硬协同设计的忆阻器友好型架构
 
 ### 速读区论文标签
-1. [DA-PTQ: Drift-Aware Post-Training Quantization for Efficient Vision-Language-Action Models](/202604/21/2604.11572v1-da-ptq-drift-aware-post-training-quantization-for-efficient-vision-language-action-models)  
+1. [A KL Lens on Quantization: Fast, Forward-Only Sensitivity for Mixed-Precision SSM-Transformer Models](/202604/22/2604.13440v1-a-kl-lens-on-quantization-fast-forward-only-sensitivity-for-mixed-precision-ssm-transformer-models)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限机器人的高效部署进行训练后量化
-2. [HyperLiDAR: Adaptive Post-Deployment LiDAR Segmentation via Hyperdimensional Computing](/202604/21/2604.12331v1-hyperlidar-adaptive-post-deployment-lidar-segmentation-via-hyperdimensional-computing)  
+   evidence：在具有计算和内存限制的边缘设备上部署大模型
+2. [Rethinking AI Hardware: A Three-Layer Cognitive Architecture for Autonomous Agents](/202604/22/2604.13757v1-rethinking-ai-hardware-a-three-layer-cognitive-architecture-for-autonomous-agents)  
    标签：评分：8.0/10、query:hwnas
-   evidence：能量约束下边缘应用的轻量级模型
-3. [OSC: Hardware Efficient W4A4 Quantization via Outlier Separation in Channel Dimension](/202604/21/2604.12782v1-osc-hardware-efficient-w4a4-quantization-via-outlier-separation-in-channel-dimension)  
+   evidence：将智能层映射到不同的计算基座
+3. [SparseBalance: Load-Balanced Long Context Training with Dynamic Sparse Attention](/202604/22/2604.13847v1-sparsebalance-load-balanced-long-context-training-with-dynamic-sparse-attention)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过离群值分离实现硬件高效的W4A4量化
-4. [DroneScan-YOLO: Redundancy-Aware Lightweight Detection for Tiny Objects in UAV Imagery](/202604/21/2604.13278v1-dronescan-yolo-redundancy-aware-lightweight-detection-for-tiny-objects-in-uav-imagery)  
+   evidence：算法-系统协同设计框架，优化系统效率和模型准确性
+4. [Early Exiting U-Net for Efficient Processing on UAVs: A Case Study in Environmental Monitoring](/202604/22/2604.13961v1-early-exiting-u-net-for-efficient-processing-on-uavs-a-case-study-in-environmental-monitoring)  
    标签：评分：8.0/10、query:hwnas
-   evidence：计算受限下的无人机图像轻量化检测
-5. [Semantic-Geometric Dual Compression: Training-Free Visual Token Reduction for Ultra-High-Resolution Remote Sensing Understanding](/202604/21/2604.11122v1-semantic-geometric-dual-compression-training-free-visual-token-reduction-for-ultra-high-resolution-remote-sensing-understanding)  
+   evidence：用于无人机硬件高效处理的早退U-Net
+5. [Event Tensor: A Unified Abstraction for Compiling Dynamic Megakernel](/202604/22/2604.13327v2-event-tensor-a-unified-abstraction-for-compiling-dynamic-megakernel)  
    标签：评分：7.0/10、query:hwnas
-   evidence：超高分辨率遥感图像的视觉令牌削减，以提高推理效率
-6. [SCNO: Spiking Compositional Neural Operator -- Towards a Neuromorphic Foundation Model for Nuclear PDE Solving](/202604/21/2604.11625v1-scno-spiking-compositional-neural-operator----towards-a-neuromorphic-foundation-model-for-nuclear-pde-solving)  
+   evidence：用于动态大算子的编译器抽象以最大化GPU利用率
+6. [Multi-Agent Object Detection Framework Based on Raspberry Pi YOLO Detector and Slack-Ollama Natural Language Interface](/202604/22/2604.13345v1-multi-agent-object-detection-framework-based-on-raspberry-pi-yolo-detector-and-slack-ollama-natural-language-interface)  
    标签：评分：7.0/10、query:hwnas
-   evidence：用于PDE求解的能效脉冲神经架构
-7. [Multiple spiking functionalities in annealing-optimized Ag/Hf$_{0.5}$Zr$_{0.5}$O$_2$-based memristive neurons](/202604/21/2604.11780v1-multiple-spiking-functionalities-in-annealing-optimized-aghf05zr05o2-based-memristive-neurons)  
+   evidence：集成到资源受限的硬件平台中
+7. [MaMe & MaRe: Matrix-Based Token Merging and Restoration for Efficient Visual Perception and Synthesis](/202604/22/2604.13432v1-mame--mare-matrix-based-token-merging-and-restoration-for-efficient-visual-perception-and-synthesis)  
    标签：评分：7.0/10、query:hwnas
-   evidence：基于非冯诺依曼架构的节能硬件
-8. [LightTune: Lightweight Forward-Only Online Fine-Tuning with Applications to Link Adaptation](/202604/21/2604.12406v1-lighttune-lightweight-forward-only-online-fine-tuning-with-applications-to-link-adaptation)  
+   evidence：提升计算效率的GPU友好型矩阵操作
+8. [Self-adaptive Multi-Access Edge Architectures: A Robotics Case](/202604/22/2604.13542v1-self-adaptive-multi-access-edge-architectures-a-robotics-case)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对资源受限移动设备的轻量级在线微调
-9. [Hybrid Adaptive Tuning for Tiered Memory Systems](/202604/21/2604.12165v1-hybrid-adaptive-tuning-for-tiered-memory-systems)  
+   evidence：边缘卸载的高效计算系统
+9. [Design and Behavior of Sparse Mixture-of-Experts Layers in CNN-based Semantic Segmentation](/202604/22/2604.13761v1-design-and-behavior-of-sparse-mixture-of-experts-layers-in-cnn-based-semantic-segmentation)  
    标签：评分：6.0/10、query:hwnas
-   evidence：分层内存系统的自动调优以提高容量和利用率
-10. [Agentic Discovery with Active Hypothesis Exploration for Visual Recognition](/202604/21/2604.12999v1-agentic-discovery-with-active-hypothesis-exploration-for-visual-recognition)  
+   evidence：稀疏混合专家层在不按比例增加计算成本的情况下提高模型容量
+10. [AI Coding Agents Need Better Compiler Remarks](/202604/22/2604.13927v1-ai-coding-agents-need-better-compiler-remarks)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于神经网络架构发现和进化分支的智能体框架
-11. [Analog Optical Inference on Million-Record Mortgage Data](/202604/21/2604.13251v1-analog-optical-inference-on-million-record-mortgage-data)  
+   evidence：编译器感知的程序优化与反馈
+11. [Heuristic Style Transfer for Real-Time, Efficient Weather Attribute Detection](/202604/22/2604.13947v1-heuristic-style-transfer-for-real-time-efficient-weather-attribute-detection)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于机器学习推理的模拟光计算
+   evidence：用于实时检测的轻量级高效架构
 
 
 <div class="dpr-home-promo-card">
