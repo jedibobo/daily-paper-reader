@@ -6,79 +6,82 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-22
-- 运行时间：2026-04-22 20:07:38 UTC
+- 最新运行日期：2026-04-23
+- 运行时间：2026-04-23 20:08:23 UTC
 - 运行状态：成功
-- 本次总论文数：19
-- 精读区：8
+- 本次总论文数：20
+- 精读区：9
 - 速读区：11
 
 ### 今日简报（AI）
-今日深度解析 19 篇前沿论文，聚焦“硅片感知”神经网络与嵌入式 FPGA 的高能效加速器设计。
-研究表明，通过参数化架构与软硬协同优化，可显著提升模型在端侧硬件上的运行效率与能效比。
-建议关注混合精度量化及长文本训练的负载均衡技术，探索 AI 模型在受限资源下的性能极限。
-- 详情：[/202604/22/README](/202604/22/README)
+今日精选 20 篇论文聚焦高效推理，深度攻克视觉 Transformer 剪枝与存算一体（CIM）加速难题。
+重点关注 Dispatch-Aware 动态注意力及 CIMple 架构，两者为端侧模型提供了极具竞争力的硬件加速方案。
+建议优先研读两篇 9.0 分论文，快速掌握端侧 ASR 与 3D 目标检测的轻量化前沿技术。
+- 详情：[/202604/23/README](/202604/23/README)
 
 ### 精读区论文标签
-1. [Energy Efficient LSTM Accelerators for Embedded FPGAs through Parameterised Architecture Design](/202604/22/2604.19293v1-energy-efficient-lstm-accelerators-for-embedded-fpgas-through-parameterised-architecture-design)  
-   标签：评分：10.0/10、query:hwnas
-   evidence：针对FPGA的可参数化硬件加速器设计
-2. [Silicon Aware Neural Networks](/202604/22/2604.19334v1-silicon-aware-neural-networks)  
-   标签：评分：10.0/10、query:hwnas
-   evidence：针对定制硅片的面积和功耗优化的硅感知神经网络
-3. [AIPC: Agent-Based Automation for AI Model Deployment with Qualcomm AI Runtime](/202604/22/2604.14661v1-aipc-agent-based-automation-for-ai-model-deployment-with-qualcomm-ai-runtime)  
+1. [Dispatch-Aware Ragged Attention for Pruned Vision Transformers](/202604/23/2604.15408v1-dispatch-aware-ragged-attention-for-pruned-vision-transformers)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对特定硬件推理运行时的AI模型部署自动化
-4. [When Spike Sparsity Does Not Translate to Deployed Cost: VS-WNO on Jetson Orin Nano](/202604/22/2604.17040v1-when-spike-sparsity-does-not-translate-to-deployed-cost-vs-wno-on-jetson-orin-nano)  
+   evidence：调度感知的注意力内核以减少剪枝Transformer的延迟
+2. [CIMple: Standard-cell SRAM-based CIM with LUT-based split softmax for attention acceleration](/202604/23/2604.15944v1-cimple-standard-cell-sram-based-cim-with-lut-based-split-softmax-for-attention-acceleration)  
    标签：评分：9.0/10、query:hwnas
-   evidence：评估边缘GPU硬件上脉冲稀疏性向能量和延迟的转化
-5. [Unlocking the Edge deployment and ondevice acceleration of multi-LoRA enabled one-for-all foundational LLM](/202604/22/2604.18655v1-unlocking-the-edge-deployment-and-ondevice-acceleration-of-multi-lora-enabled-one-for-all-foundational-llm)  
+   evidence：用于边缘大模型加速的基于 SRAM 的存内计算 (CIM)
+3. [CIMple: Standard-cell SRAM-based CIM with LUT-based split softmax for attention acceleration](/202604/23/2604.15944v2-cimple-standard-cell-sram-based-cim-with-lut-based-split-softmax-for-attention-acceleration)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对移动芯片组高效端侧推理的硬件感知框架
-6. [Evaluation of Winning Solutions of 2025 Low Power Computer Vision Challenge](/202604/22/2604.19054v1-evaluation-of-winning-solutions-of-2025-low-power-computer-vision-challenge)  
+   evidence：利用存内计算和基于查找表的Softmax进行边缘LLM加速的软硬协同设计
+4. [Fully Analog Resonant Recurrent Neural Network via Metacircuit](/202604/23/2604.17277v1-fully-analog-resonant-recurrent-neural-network-via-metacircuit)  
    标签：评分：9.0/10、query:hwnas
-   evidence：在边缘设备上平衡准确度与延迟、内存和能耗
-7. [Design Rules for Extreme-Edge Scientific Computing on AI Engines](/202604/22/2604.19106v1-design-rules-for-extreme-edge-scientific-computing-on-ai-engines)  
+   evidence：用于高能效边缘智能的全模拟神经网络
+5. [Towards Real-Time ECG and EMG Modeling on $μ$NPUs](/202604/23/2604.18067v2-towards-real-time-ecg-and-emg-modeling-on-npus)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对AI引擎和FPGA SoC的极端边缘计算设计规则
-8. [Scalable Memristive-Friendly Reservoir Computing for Time Series Classification](/202604/22/2604.19343v1-scalable-memristive-friendly-reservoir-computing-for-time-series-classification)  
+   evidence：针对NPU兼容模型架构的硬件感知层设计
+6. [CHICO-Agent: An LLM Agent for the Cross-layer Optimization of 2.5D and 3D Chiplet-based Systems](/202604/23/2604.18764v1-chico-agent-an-llm-agent-for-the-cross-layer-optimization-of-25d-and-3d-chiplet-based-systems)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对软硬协同设计的忆阻器友好型架构
+   evidence：芯粒系统的跨层优化与协同设计
+7. [Efficient Mixture-of-Experts LLM Inference with Apple Silicon NPUs](/202604/23/2604.18788v1-efficient-mixture-of-experts-llm-inference-with-apple-silicon-npus)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对MoE大模型的NPU友好型算子映射与内核优化
+8. [Evaluation of Winning Solutions of 2025 Low Power Computer Vision Challenge](/202604/23/2604.19054v2-evaluation-of-winning-solutions-of-2025-low-power-computer-vision-challenge)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：平衡延迟和内存的边缘设备高效视觉模型
+9. [Algorithm and Hardware Co-Design for Efficient Complex-Valued Uncertainty Estimation](/202604/23/2604.19993v1-algorithm-and-hardware-co-design-for-efficient-complex-valued-uncertainty-estimation)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：算法与硬件协同设计，并自动搜索最优配置
 
 ### 速读区论文标签
-1. [A KL Lens on Quantization: Fast, Forward-Only Sensitivity for Mixed-Precision SSM-Transformer Models](/202604/22/2604.13440v1-a-kl-lens-on-quantization-fast-forward-only-sensitivity-for-mixed-precision-ssm-transformer-models)  
+1. [Hardware-Efficient Neuro-Symbolic Networks with the Exp-Minus-Log Operator](/202604/23/2604.13871v2-hardware-efficient-neuro-symbolic-networks-with-the-exp-minus-log-operator)  
    标签：评分：8.0/10、query:hwnas
-   evidence：在具有计算和内存限制的边缘设备上部署大模型
-2. [Rethinking AI Hardware: A Three-Layer Cognitive Architecture for Autonomous Agents](/202604/22/2604.13757v1-rethinking-ai-hardware-a-three-layer-cognitive-architecture-for-autonomous-agents)  
+   evidence：硬件高效算子设计，旨在减少边缘硬件的延迟和芯片面积
+2. [Pushing the Limits of On-Device Streaming ASR: A Compact, High-Accuracy English Model for Low-Latency Inference](/202604/23/2604.14493v2-pushing-the-limits-of-on-device-streaming-asr-a-compact-high-accuracy-english-model-for-low-latency-inference)  
    标签：评分：8.0/10、query:hwnas
-   evidence：将智能层映射到不同的计算基座
-3. [SparseBalance: Load-Balanced Long Context Training with Dynamic Sparse Attention](/202604/22/2604.13847v1-sparsebalance-load-balanced-long-context-training-with-dynamic-sparse-attention)  
+   evidence：优化边缘设备的准确性、延迟和内存占用
+3. [Revisiting Token Compression for Accelerating ViT-based Sparse Multi-View 3D Object Detectors](/202604/23/2604.14563v1-revisiting-token-compression-for-accelerating-vit-based-sparse-multi-view-3d-object-detectors)  
    标签：评分：8.0/10、query:hwnas
-   evidence：算法-系统协同设计框架，优化系统效率和模型准确性
-4. [Early Exiting U-Net for Efficient Processing on UAVs: A Case Study in Environmental Monitoring](/202604/22/2604.13961v1-early-exiting-u-net-for-efficient-processing-on-uavs-a-case-study-in-environmental-monitoring)  
+   evidence：动态调整Patch大小以加速基于ViT的检测器并降低推理延迟
+4. [COEVO: Co-Evolutionary Framework for Joint Functional Correctness and PPA Optimization in LLM-Based RTL Generation](/202604/23/2604.15001v2-coevo-co-evolutionary-framework-for-joint-functional-correctness-and-ppa-optimization-in-llm-based-rtl-generation)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于无人机硬件高效处理的早退U-Net
-5. [Event Tensor: A Unified Abstraction for Compiling Dynamic Megakernel](/202604/22/2604.13327v2-event-tensor-a-unified-abstraction-for-compiling-dynamic-megakernel)  
+   evidence：联合功能正确性和PPA优化的协同进化框架
+5. [UHR-BAT: Budget-Aware Token Compression Vision-Language model for Ultra-High-Resolution Remote Sensing](/202604/23/2604.13565v1-uhr-bat-budget-aware-token-compression-vision-language-model-for-ultra-high-resolution-remote-sensing)  
    标签：评分：7.0/10、query:hwnas
-   evidence：用于动态大算子的编译器抽象以最大化GPU利用率
-6. [Multi-Agent Object Detection Framework Based on Raspberry Pi YOLO Detector and Slack-Ollama Natural Language Interface](/202604/22/2604.13345v1-multi-agent-object-detection-framework-based-on-raspberry-pi-yolo-detector-and-slack-ollama-natural-language-interface)  
+   evidence：遥感任务中严格上下文预算下的令牌压缩
+6. [A Resource-Efficient Hybrid CNN-LSTM network for image-based bean leaf disease classification](/202604/23/2604.13835v1-a-resource-efficient-hybrid-cnn-lstm-network-for-image-based-bean-leaf-disease-classification)  
    标签：评分：7.0/10、query:hwnas
-   evidence：集成到资源受限的硬件平台中
-7. [MaMe & MaRe: Matrix-Based Token Merging and Restoration for Efficient Visual Perception and Synthesis](/202604/22/2604.13432v1-mame--mare-matrix-based-token-merging-and-restoration-for-efficient-visual-perception-and-synthesis)  
+   evidence：资源高效的CNN-LSTM混合网络，为便携设备减少70%模型体积
+7. [An ASIC Emulated Oscillator Ising/Potts Machine Solving Combinatorial Optimization Problems](/202604/23/2604.14027v1-an-asic-emulated-oscillator-isingpotts-machine-solving-combinatorial-optimization-problems)  
    标签：评分：7.0/10、query:hwnas
-   evidence：提升计算效率的GPU友好型矩阵操作
-8. [Self-adaptive Multi-Access Edge Architectures: A Robotics Case](/202604/22/2604.13542v1-self-adaptive-multi-access-edge-architectures-a-robotics-case)  
+   evidence：用于加速组合优化的定制 ASIC 架构数字仿真
+8. [Parallel R-tree-based Spatial Query Processing on a Commercial Processing-in-Memory System](/202604/23/2604.14445v1-parallel-r-tree-based-spatial-query-processing-on-a-commercial-processing-in-memory-system)  
    标签：评分：7.0/10、query:hwnas
-   evidence：边缘卸载的高效计算系统
-9. [Design and Behavior of Sparse Mixture-of-Experts Layers in CNN-based Semantic Segmentation](/202604/22/2604.13761v1-design-and-behavior-of-sparse-mixture-of-experts-layers-in-cnn-based-semantic-segmentation)  
+   evidence：将空间查询映射到商用存内计算（PIM）硬件上
+9. [[Emerging Ideas] Artificial Tripartite Intelligence: A Bio-Inspired, Sensor-First Architecture for Physical AI](/202604/23/2604.13959v1-emerging-ideas-artificial-tripartite-intelligence-a-bio-inspired-sensor-first-architecture-for-physical-ai)  
    标签：评分：6.0/10、query:hwnas
-   evidence：稀疏混合专家层在不按比例增加计算成本的情况下提高模型容量
-10. [AI Coding Agents Need Better Compiler Remarks](/202604/22/2604.13927v1-ai-coding-agents-need-better-compiler-remarks)  
+   evidence：针对具有能耗和延迟限制的物理AI的传感器优先架构契约
+10. [TOPCELL: Topology Optimization of Standard Cell via LLMs](/202604/23/2604.14237v1-topcell-topology-optimization-of-standard-cell-via-llms)  
    标签：评分：6.0/10、query:hwnas
-   evidence：编译器感知的程序优化与反馈
-11. [Heuristic Style Transfer for Real-Time, Efficient Weather Attribute Detection](/202604/22/2604.13947v1-heuristic-style-transfer-for-real-time-efficient-weather-attribute-detection)  
+   evidence：通过大模型进行标准单元拓扑优化
+11. [VeriGraphi: A Multi-Agent Framework of Hierarchical RTL Generation for Large Hardware Designs](/202604/23/2604.14550v1-verigraphi-a-multi-agent-framework-of-hierarchical-rtl-generation-for-large-hardware-designs)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于实时检测的轻量级高效架构
+   evidence：使用大语言模型进行硬件设计的层次化RTL生成
 
 
 <div class="dpr-home-promo-card">
