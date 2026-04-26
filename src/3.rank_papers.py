@@ -18,7 +18,8 @@ FILTERED_DIR = os.path.join(ARCHIVE_DIR, "filtered")
 RANKED_DIR = os.path.join(ARCHIVE_DIR, "rank")
 
 MAX_CHARS_PER_DOC = 850
-BATCH_SIZE = 100
+_batch_size_raw = str(os.getenv("BLT_RERANK_BATCH_SIZE", "40")).strip()
+BATCH_SIZE = int(_batch_size_raw) if _batch_size_raw.isdigit() and int(_batch_size_raw) > 0 else 40
 TOKEN_SAFETY = 29000
 RRF_K = 60
 

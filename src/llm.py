@@ -1,6 +1,7 @@
 import os
 import time
 from typing import List, Dict, Tuple, Any, Optional
+from urllib.parse import urljoin
 
 import requests
 
@@ -391,67 +392,113 @@ class BltClient(LLMClient):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        payload: Dict[str, Any] = {
-            "model": model or self.model,
-            "query": query,
-            "documents": documents,
-        }
-        if top_n is not None:
-            payload["top_n"] = int(top_n)
+        requested_model = (model or self.model or "").strip()
+        model_candidates = [requested_model]
+        fallback_models = str(os.getenv("BLT_RERANK_MODEL_FALLBACKS", "")).strip()
+        if fallback_models:
+            model_candidates.extend([m.strip() for m in fallback_models.split(",") if m.strip()])
+        model_candidates = list(dict.fromkeys([m for m in model_candidates if m]))
+
+        if not model_candidates:
+            raise ValueError("rerank: 缺少模型名，请设置 BLT_RERANK_MODEL 或传入 model")
+
+        def _build_payload_variants(model_name: str) -> List[Dict[str, Any]]:
+            base_payload: Dict[str, Any] = {
+                "model": model_name,
+                "query": query,
+                "documents": documents,
+            }
+            if top_n is not None:
+                base_payload["top_n"] = int(top_n)
+            return [
+                base_payload,
+                {k: v for k, v in base_payload.items() if k != "top_n"},
+                {
+                    "model": model_name,
+                    "query": query,
+                    "documents": [{"text": d} for d in documents],
+                    **({"top_n": int(top_n)} if top_n is not None else {}),
+                },
+            ]
 
         request_bases = self._iter_retry_bases(total_attempts=6)
         last_error: Exception | None = None
         for attempt_idx, req_base in enumerate(request_bases, start=1):
-            request_url = f"{req_base.rstrip('/')}/rerank"
-            try:
-                response = requests.post(request_url, headers=headers, json=payload, timeout=120)
-                response.raise_for_status()
-                try:
-                    response_data = response.json()
-                except ValueError:
-                    print("Rerank 响应无法解析为 JSON，原始文本预览:", response.text[:500])
-                    raise
-
-                if isinstance(response_data, dict) and 'error' in response_data:
-                    err = response_data.get('error') or {}
-                    print("Rerank 返回错误:", {
-                        'type': err.get('type'),
-                        'code': err.get('code'),
-                        'message': err.get('message') or err,
-                    })
-                    raise requests.exceptions.HTTPError(f"Rerank API error: {err}")
-
-                return response_data
-            except Exception as e:
-                last_error = e
-                if attempt_idx < len(request_bases):
-                    next_base = request_bases[attempt_idx] if attempt_idx < len(request_bases) else ''
-                    print(
-                        f"Rerank 请求失败（base={req_base}，第 {attempt_idx} 次），"
-                        f"将回退到 {next_base}"
-                    )
-                    continue
-                print(f"通过 requests 调用 Rerank API 时出错: {e}")
-                print("Rerank 请求摘要:", {
-                    "url": request_url,
-                    "model": payload.get("model"),
-                    "query_len": len(query or ""),
-                    "documents": len(documents),
-                    "top_n": payload.get("top_n"),
-                })
-                if e.response is not None:
-                    try:
-                        print("错误详情(JSON):", e.response.json())
-                    except ValueError:
+            base = req_base.rstrip("/")
+            request_urls = [f"{base}/rerank"] if base.endswith("/v1") else [f"{base}/v1/rerank", f"{base}/rerank"]
+            for model_name in model_candidates:
+                payload_variants = _build_payload_variants(model_name)
+                for variant_idx, payload in enumerate(payload_variants, start=1):
+                    for request_url in request_urls:
                         try:
-                            print("错误详情(TEXT):", e.response.text[:500])
-                        except Exception:
-                            pass
-                else:
-                    print("错误详情: 未收到服务端响应（可能是网络/SSL问题）。")
-                raise
+                            response = requests.post(
+                                request_url,
+                                headers=headers,
+                                json=payload,
+                                timeout=120,
+                                allow_redirects=False,
+                            )
+                            if response.status_code in {301, 302, 303, 307, 308}:
+                                redirect_to = str(response.headers.get("Location") or "").strip()
+                                if redirect_to:
+                                    redirected_url = urljoin(request_url, redirect_to)
+                                    print(f"Rerank 命中重定向，改为直接 POST: {redirected_url}")
+                                    response = requests.post(
+                                        redirected_url,
+                                        headers=headers,
+                                        json=payload,
+                                        timeout=120,
+                                        allow_redirects=False,
+                                    )
+
+                            response.raise_for_status()
+                            try:
+                                response_data = response.json()
+                            except ValueError:
+                                print("Rerank 响应无法解析为 JSON，原始文本预览:", response.text[:500])
+                                raise
+
+                            if isinstance(response_data, dict) and 'error' in response_data:
+                                err = response_data.get('error') or {}
+                                print("Rerank 返回错误:", {
+                                    'type': err.get('type'),
+                                    'code': err.get('code'),
+                                    'message': err.get('message') or err,
+                                })
+                                raise requests.exceptions.HTTPError(f"Rerank API error: {err}")
+
+                            return response_data
+                        except Exception as e:
+                            last_error = e
+                            print(
+                                f"Rerank 请求失败（url={request_url}，base={req_base}，第 {attempt_idx} 次，"
+                                f"model={model_name}，payload_variant={variant_idx}/{len(payload_variants)}）"
+                            )
+                            if hasattr(e, "response") and e.response is not None:
+                                try:
+                                    print("本次失败详情(JSON):", e.response.json())
+                                except ValueError:
+                                    try:
+                                        print("本次失败详情(TEXT):", e.response.text[:500])
+                                    except Exception:
+                                        pass
+                            else:
+                                print("本次失败详情: 未收到服务端响应（可能是网络/SSL问题）。")
+                            continue
+
+            if attempt_idx < len(request_bases):
+                next_base = request_bases[attempt_idx] if attempt_idx < len(request_bases) else ''
+                print(f"Rerank 将回退到下一个 base：{next_base}")
+                continue
 
         if last_error is not None:
+            print("Rerank 请求摘要:", {
+                "models_tried": model_candidates,
+                "query_len": len(query or ""),
+                "documents": len(documents),
+                "top_n": int(top_n) if top_n is not None else None,
+                "base_candidates": list(dict.fromkeys(request_bases)),
+            })
             raise last_error
         raise RuntimeError("rerank 未命中可用 base")
 
