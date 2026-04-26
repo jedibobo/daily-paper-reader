@@ -1,0 +1,772 @@
+Title: POLAR-PIC: A Holistic Framework for Matrixized PIC with Co-Designed Compute, Layout, and Communication
+
+URL Source: https://arxiv.org/pdf/2604.19337v1
+
+Published Time: Wed, 22 Apr 2026 01:06:45 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# POLAR-PIC: A Holistic Framework for Matrixized PIC with Co-Designed Compute, Layout, and Communication 
+
+# Yizhuo Rao 
+
+Sun Yat-Sen University Guangzhou, China raoyzh6@mail2.sysu.edu.cn 
+
+# Xingjian Cui ∗
+
+Sun Yat-Sen University Guangzhou, China cuixj8@mail2.sysu.edu.cn 
+
+# Shangzhi Pang 
+
+Sun Yat-Sen University Guangzhou, China pangshzh@mail2.sysu.edu.cn 
+
+# Jiabin Xie 
+
+Sun Yat-Sen University Guangzhou, China xiejb6@mail2.sysu.edu.cn 
+
+# Guangnan Feng 
+
+Sun Yat-Sen University Guangzhou, China fenggn7@mail.sysu.edu.cn 
+
+# Jinhui Wei 
+
+Sun Yat-Sen University Guangzhou, China weijh28@mail2.sysu.edu.cn 
+
+# Ziyan Zhang 
+
+Sun Yat-Sen University Guangzhou, China zhangzy273@mail2.sysu.edu.cn 
+
+# Languang Gao 
+
+Sun Yat-Sen University Guangzhou, China gaolg@mail2.sysu.edu.cn 
+
+# Zhenyu Wang 
+
+Institute of Plasma Physics, Chinese Academy of Sciences Hefei, China zhenyu.wang@ipp.ac.cn 
+
+# Zhiguang Chen †
+
+Sun Yat-Sen University Guangzhou, China zhiguang.chen@nscc-gz.cn 
+
+# Yutong Lu 
+
+Sun Yat-Sen University Guangzhou, China luyutong@mail.sysu.edu.cn 
+
+## Abstract 
+
+Particle-in-Cell (PIC) simulations are fundamental to plasma physics but often suffer from limited scalability due to particle–grid inter-action bottlenecks and particle redistribution costs. Specifically, the particle–grid interaction computations have not taken full advan-tage of the emerging Matrix Processing Units (MPUs), the parti-cle motion introduces irregular memory accesses, and the bulk-synchronous redistribution further destroys long-term data locality thereby limiting parallel efficiency. To address these inefficiencies, we present POLAR-PIC , a co-designed framework for large-scale PIC simulations that (i) reformulates Field Interpolation into an MPU-friendly outer-product form, (ii) maintains a physically or-dered particle layout to preserve memory contiguity, and (iii) over-laps particle communication with Deposition to hide redistribution overhead. The evaluation on the pilot system of an Exascale super-computer demonstrates that POLAR-PIC accelerates the entire particle-processing phase by up to 10 .9× in uniform plasma and 
+
+4.4× in real-world laser-ion acceleration scenarios compared to the native WarpX reference pipeline on LX2. Ablation studies reveal that the speedups achieved by Interpolation and Deposition are 
+
+8.0× and 13 .2×, respectively, and the asynchronous communication design sustains a 99 .1% overlap ratio. In cross-platform compar-isons, POLAR-PIC achieves 13 .2% of theoretical peak efficiency on the CPU-based LS system, while WarpX reaches 9.6% on NVIDIA A800 GPUs. Notably, the scalability evaluation demonstrates that 
+
+POLAR-PIC maintains 67 .5% weak scaling efficiency on over 2  
+
+> ∗Contributed equally.
+> †Corresponding author.
+> This work is licensed under a Creative Commons Attribution 4.0 International License.
+> HPDC ’26, Cleveland, OH, USA
+> ©2026 Copyright held by the owner/author(s). ACM ISBN 979-8-4007-2640-8/2026/07 https://doi.org/10.1145/3806645.3807574
+
+million cores under high-migration dynamic workloads, highlight-ing the importance of holistic co-design for future matrix-centric HPC systems. 
+
+## CCS Concepts 
+
+• Computer systems organization → Single instruction, mul-tiple data ; • Computing methodologies → Parallel computing methodologies .
+
+## Keywords 
+
+Particle-in-Cell simulation, High-Performance Computing, Scien-tific Computing, Hardware Acceleration 
+
+ACM Reference Format: 
+
+Yizhuo Rao, Xingjian Cui, Shangzhi Pang, Jiabin Xie, Guangnan Feng, Jinhui Wei, Ziyan Zhang, Languang Gao, Zhenyu Wang, Zhiguang Chen, and Yu-tong Lu. 2026. POLAR-PIC: A Holistic Framework for Matrixized PIC with Co-Designed Compute, Layout, and Communication. In The 35th Interna-tional Symposium on High-Performance Parallel and Distributed Computing (HPDC ’26), July 13–16, 2026, Cleveland, OH, USA. ACM, New York, NY, USA, 16 pages. https://doi.org/10.1145/3806645.3807574 
+
+## 1 Introduction 
+
+The Particle-in-Cell (PIC) method is fundamental to kinetic plasma physics and widely used in astrophysical and laboratory plasma research [ 1– 4 ]. Large-scale PIC simulations, which track billions of particles while solving Maxwell’s equations on Eulerian grids, impose severe pressure on the compute, memory, and interconnect subsystems. On the other hand, as heterogeneous HPC systems evolve toward the Exascale era, efficient hardware utilization has become a critical challenge for both the HPC and computational physics communities. Although frameworks such as VPIC [ 1] and WarpX [ 2 , 5] scale well on heterogeneous systems, particle-grid interaction remains  
+
+> arXiv:2604.19337v1 [cs.DC] 21 Apr 2026 HPDC ’26, July 13–16, 2026, Cleveland, OH, USA Yizhuo Rao et al.
+
+Figure 1: Native WarpX v24.07 Runtime breakdown of Uni-form Plasma and Laser-Ion Acceleration simulation on the Tianhe Xingyi platform. 
+
+the dominant bottleneck, often accounting for over 80% of run-time [ 1 , 2 , 5 , 6 ] (Figure 1). It consists of Field Interpolation, a bandwidth-bound Gather-Stencil kernel, and Charge/Current De-position, a Scatter-Add kernel limited by write conflicts and atomic overheads [ 2, 7]. Existing optimizations such as SoA and periodic sorting help [2, 5, 6, 8], but irregular particle motion still prevents sustained bandwidth on VPUs and MPUs. Specifically, modern processor architectures are rapidly evolving toward matrix-centric compute paradigms. Representative CPUs, incorporating architectural extensions such as Intel AMX [ 9] and Arm SME [ 10 ], now integrate specialized Matrix Processing Units (MPUs). These units execute Matrix Outer-Product Accumulate (MOPA) instructions to compute and accumulate the outer product of two vectors into on-chip tiles within a single cycle, offering a quadratic increase in arithmetic density compared to VPUs. Matrix-PIC [ 6] capitalizes on this opportunity by reformulating the Deposi-tion kernel into an outer-product form. By combining incremental particle sorting with tile-level buffering to mitigate write conflicts, it achieves significant acceleration for high-order Deposition. However, localized optimization of the Deposition phase is in-sufficient to resolve particle-processing performance bottlenecks in MPU-based PIC simulations, due to three fundamental limitations. First, governed by Amdahl’s Law, accelerating Deposition shifts the primary computational bottleneck to the Field Interpolation stage. Mathematically, Field Interpolation constitutes an inner-product reduction (many-to-one), presenting a structural mismatch with the native outer-product mechanism of MPUs (one-to-many). Second, Matrix-PIC[ 6] maintains only the logical order of particle indices, re-lying on intermittent global reordering to restore physical memory contiguity. As particle disorder accumulates, the growing reorder-ing cost introduces significant runtime overhead and performance jitter. Third, mainstream frameworks such as WarpX/AMReX [ 2 , 11 ]typically employ bulk-synchronous parallel (BSP) execution models, treating particle redistribution as a global synchronization point. While these frameworks exhibit robust weak scalability, the BSP pattern constrains single-step performance, particularly in high-dynamic, non-uniform scenarios like Laser-Ion Acceleration (LIA). As shown in Figure 1, the redistribution cost in LIA escalates with increasing parallelism, identifying particle redistribution as an ex-panding bottleneck at scale. To address the challenges of operator structural mismatch, frag-mented data supply, and blocking synchronization, we propose 
+
+POLAR-PIC (Particle Outer-product, Locality-Aware, and RMA-overlapped PIC ). This framework co-designs kernel reformulation, data layout maintenance, and communication scheduling to elevate the optimization scope from isolated kernel acceleration to particle-processing critical path reduction on MPU-based architectures. The primary contributions of this paper are organized as follows: 1. We introduce a novel co-design of a matrix outer-product formulation for the PIC Field Interpolation operator. By transforming the Field Interpolation operator into an MPU-compatible outer-product form via a cell-centric batching strat-egy, we bridge the structural mismatch between the Interpo-lation’s native inner-product logic and the hardware’s outer-product primitives, mitigating the bottleneck shift predicted by Amdahl’s Law. 2. We propose an inline Sort-on-Write (SoW) mechanism to prevent physical layout degradation arising from the di-vergence between logical indexing and physical storage. 
+
+Rather than performing a periodic global sort, SoW leverages the inherent read-modify-write path and thread-local tile buffer-ing to maintain strict cell-grouped physical contiguity for the majority of particles with negligible amortized 𝑂 (1) overhead, ensuring a stable, contiguous data supply for matrix-based oper-ations. 3. We design a fine-grained communication overlap strat-egy using pre-packing and notifiable RMA. To mitigate syn-chronization stalls caused by particle redistribution, we fuse the packing of migrating particles directly into the Field Inter-polation kernel and initiate non-blocking transfers using the high-performance one-sided communication library UNR [ 12 ]. This scheduling effectively hides packing overhead, overlaps par-ticle communication with the Deposition kernel, and optimizes the entire particle communication path. In summary, POLAR-PIC synergizes operator outer-product reformulation, the SoW locality maintenance mechanism, and RMA-overlapped communication into a cohesive optimization paradigm that advances PIC simulations toward next-generation HPC sys-tems. Built upon the open-source, highly optimized WarpX[ 2 ], our experiments on the next-generation HPC platform equipped with an LX2 CPU demonstrate that POLAR-PIC accelerates the particle-processing phase by up to 10 .9× in uniform plasma and 4.4× in laser-ion acceleration scenarios over the WarpX baseline. Further-more, it surpasses the matrix-based SOTA Matrix-PIC by 4.7× and 
+
+3.8× in these respective scenarios. Moreover, we report a cross-platform peak-efficiency comparison for context, where POLAR-PIC attains 13 .2% of theoretical peak efficiency on the LS pilot system and WarpX reaches 9.6% on NVIDIA A800. POLAR-PIC: A Holistic Framework for Matrixized PIC with Co-Designed Compute, Layout, and Communication HPDC ’26, July 13–16, 2026, Cleveland, OH, USA 
+
+## 2 Related Work 2.1 Vectorization and Matrixization in PIC 
+
+As processor architectures evolve toward heterogeneous designs, ex-ploiting SIMD techniques is increasingly necessary for maximizing PIC compute throughput. Early architectural optimizations focused on vector processing units (VPUs), leveraging data-layout trans-formations (AoS-to-SoA) [ 13 ], particle binning [ 13 ], and portable VPU backends in production codes [ 1, 2, 5, 11 ], with adaptive SIMD strategies to accommodate nonuniform particle distributions [ 8 ]. Nevertheless, irregular Gather/Scatter behavior remains largely constrained by bandwidth and address-generation overheads, a lim-itation also observed when mapping sparse/irregular kernels to ac-celerators [ 14 ], while similar refactor-and-vectorize practices have benefited other large-scale scientific codes [ 15 ]. The subsequent emergence of matrix-centric hardware has driven a paradigm shift toward mapping structured-grid stencils onto high-density Matrix Outer-Product Accumulate (MOPA) primitives [ 16 – 19 ], alongside layout-aware redesigns in scientific models [ 20 ] and even matrix-centric formulations of compression algorithms [ 21 ]. In particle simulations, Matrix-PIC [ 6] pioneered refactoring the Deposition kernel into an MPU-friendly outer-product formulation on emerg-ing matrix-centric CPUs, opening a CPU-oriented path that is com-plementary to mature GPU-based PIC pipelines. Rather than target-ing a direct replacement of existing GPU solutions, this line of work explores how matrix-oriented computation, locality maintenance, and runtime scheduling can be co-designed within a unified general-purpose execution environment. However, Matrix-PIC leaves Field Interpolation unresolved due to the structural mismatch between In-terpolation’s inner-product reduction and the native outer-product mechanism of MPUs. Consequently, effectively mapping massive particle Gather to MPUs remains an open gap on next-generation matrix architectures; removing this emerging Amdahl bottleneck is the efficiency gap that this work aims to close. 
+
+## 2.2 Data Layout and Particle Sorting 
+
+PIC performance hinges on maintaining spatio-temporal locality against particle diffusion [ 22 , 23 ], typically necessitating SoA lay-outs [ 13 , 23 , 24 ] and Space-Filling Curves (SFC) [ 24 ]. To counter dynamic locality degradation, production frameworks employ pe-riodic full physical sorting to restore memory compaction [ 1, 5,25 ]. However, this incurs prohibitive 𝑂 (𝑁 ) data movement costs that preclude high-frequency execution. Alternatively, lightweight index-based strategies, such as the GPMA in Matrix-PIC [ 6, 26 , 27 ]or incremental binning [ 8, 23 ], reduce movement overheads but may not guarantee physical contiguity, leading to memory fragmenta-tion that starves bandwidth-sensitive MPU pipelines. To resolve this tension between sorting cost and memory contiguity, POLAR-PIC adopts a Controlled Data Duplication mechanism inspired by opti-mization techniques in sparse matrix and graph processing [ 14 , 28 ]. This approach preserves the sustained physical contiguity required for matrix acceleration while mitigating the excessive overhead of full global reordering. 
+
+## 2.3 Computation-Communication Overlap 
+
+While computation-communication overlap is a canonical strat-egy for scalability, standard MPI non-blocking primitives often suffer from pseudo-asynchronous behavior due to the lack of in-dependent background progress [ 29 – 33 ]. To overcome these soft-ware stack limitations, Remote Direct Memory Access (RDMA) and One-sided Communication mechanisms have been developed to offload data transfer to hardware, featuring optimizations for intra-node copy engines [ 34 ], distributed locks [ 35 ], host memory management [ 36 ], and event-driven notification as seen in Unified Notifiable RMA (UNR) [ 12 ]. However, existing overlap schemes predominantly focus on static grid Halo exchange [ 37 , 38 ], leav-ing irregular, data-dependent particle redistribution and its pack-ing/transfer constrained by the end-of-step batching model inher-ent to bulk-synchronous parallel (BSP) designs. POLAR-PIC fills this gap by embedding particle packing and transmission into the computational data path, thereby avoiding explicit end-of-step syn-chronization on the critical path and reducing tail effects caused by migration-related overheads. 
+
+## 3 Preliminaries 
+
+This section formalizes the mathematical model of Field Interpo-lation and analyzes its architectural bottlenecks to motivate the proposed MPU-based optimization and SoW design. 
+
+## 3.1 Field Interpolation and Particle Update 
+
+Field Interpolation maps electromagnetic fields from discrete grid points to continuous particle positions. Mathematically, this op-eration represents a high-dimensional tensor contraction process, where the weight tensor derived from shape functions is contracted with the grid field tensor along the stencil dimension to resolve the field value at particle coordinates. For a particle located at x𝑝 = (𝑥, 𝑦, 𝑧 ), the interpolated physical quantity 𝐹 𝑝 (such as 𝐸 𝑝 or 𝐵 𝑝 ) is derived by weighting grid node values within the local support stencil. Assuming a shape function of order 𝑆 , we have: 
+
+𝐹 (x𝑝 ) =
+
+> 𝑆
+
+∑︁ 
+
+> 𝑘 =0
+> 𝑆
+
+∑︁ 
+
+> 𝑗 =0
+> 𝑆
+
+∑︁ 
+
+> 𝑖 =0
+
+ 𝑆 𝑥 (𝑖 ) 𝑆 𝑦 ( 𝑗 ) 𝑆 𝑧 (𝑘 ) · 𝐹 grid (𝑖 0 + 𝑖, 𝑗 0 + 𝑗, 𝑘 0 + 𝑘 ).
+
+(1) where 𝑆 𝑥 , 𝑆 𝑦 , 𝑆 𝑧 denote the normalized shape factors along the axes, and (𝑖 0, 𝑗 0, 𝑘 0) represents the base index of the grid cell containing the particle. The order 𝑆 dictates the stencil width, necessitating that the summation indices 𝑖, 𝑗, 𝑘 traverse all 𝑆 + 1 spatially coupled grid nodes starting from the base anchor (𝑖 0, 𝑗 0, 𝑘 0).While Field Interpolation constitutes a memory-bound gather-stencil bottleneck on next-generation architectures due to its struc-tural mismatch with MPU primitives, the subsequent Particle Push 
+
+phase exposes an unavoidable write-back path that we leverage for layout maintenance. Using the interpolated fields E𝑝 and B𝑝 , this kernel updates particle momentum and position via the Lorentz force equation [ 39 , 40 ]. Crucially, the push operation follows a de-terministic read-modify-write dataflow: it streams current attributes to compute the next state and commits the results to memory. This mandatory write-back path serves as the pivotal leverage point for the layout optimizations proposed in this work, enabling dynamic reordering without additional memory passes. HPDC ’26, July 13–16, 2026, Cleveland, OH, USA Yizhuo Rao et al. 
+
+## 3.2 Matrix Outer-Product Calculation Paradigm 
+
+To overcome the scaling limitations of traditional vector architec-tures, recent CPUs increasingly integrate Matrix Processing Units (MPUs). Distinct from Vector Processing Units (VPUs), MPUs na-tively support the Matrix Outer-Product Accumulate (MOPA) opera-tion. Given a ∈ R𝑚 and b ∈ R𝑛 , MOPA computes their outer product and accumulates it into an on-chip 2D tile register C ∈ R𝑚 ×𝑛 :
+
+C ← C + a ⊗ b. (2) Representative implementations like Arm SME FMOPA deliver a near-quadratic increase in compute density by executing 𝑚 × 𝑛 
+
+fused multiply-add updates operations per instruction. However, the irregular access patterns inherent to PIC simulations impede pipeline saturation, necessitating paradigm migration and locality optimizations to regularize data supply for effective MPU utiliza-tion. 
+
+## 3.3 PIC Workflow and Redistribution Overheads 
+
+As illustrated in the central loop of Figure 2, a standard electromag-netic PIC timestep cycles through four distinct phases: Interpolation & Push , Deposition , Field Solve , and Particle Redistribute .
+
+Figure 2: POLAR-PIC integrates the MPU-based Interpola-tion, the Dual-Stream Reuse, the UNR-based asynchronous communication pipeline, and SoW Layout. 
+
+Conventionally (e.g., in WarpX [ 2]), the Particle Redistribute phase is positioned at the end of the timestep as a bulk-synchronous parallel (BSP) barrier. This process strictly sequences three steps: scanning and packing boundary-crossing particles, blocking com-munication, and unpacking. In high-dynamic scenarios, the sub-stantial overhead of particle packing combined with this blocking communication pattern becomes a dominant performance bottle-neck. 
+
+## 3.4 UNR Asynchronous Communication Library 
+
+The Unified Notifiable RMA (UNR) library [ 12 ] provides a light-weight asynchronous interface for HPC, offering one-sided RMA built on low-level communication primitives and enhanced com-pletion notification: UNR_Put /Get offload transfers to the NIC via RDMA with minimal CPU involvement, while notifiable completion uses native event counters to signal data arrival without explicit handshakes or matching, jointly enabling high-performance asyn-chronous communication suitable for tight compute pipelines in PIC simulations. 
+
+## 4 Methodology 
+
+This section details the system design of POLAR-PIC. Guided by the characteristics of next-generation architectures, we propose a co-optimization scheme that integrates an outer-product Field Interpolation operator, a Sort-on-Write (SoW) layout maintenance strategy, and a computation-communication overlap scheduler to collectively address the challenges of compute throughput, memory locality, and communication overheads in PIC simulations. 
+
+## 4.1 Overall Framework 
+
+POLAR-PIC adopts an algorithm-memory-communication co-design 
+
+philosophy that unifies coupled computation, data organization, and particle migration into a dataflow pipeline. As illustrated in Figure 2, the framework comprises three interdependent modules. 
+
+First, the compute module reformulates the Field Interpo-lation for MPUs. This module processes particles in cell-based batches, transforming the original per-particle inner-product re-duction into a 2D outer-product accumulation form. This module relies on an ordered particle layout to prevent irregular gather-load patterns from diminishing MPU throughput. 
+
+Second, SoW maintains the ordered layout and prepares migrating particles for communication. It leverages the particle write-back path to keep resident particles contiguous in memory, while identifying and packing cross-domain particles on the fly, effectively producing the outgoing data needed by redistribution. 
+
+Third, the redesigned redistribution module overlaps par-ticle communication with Deposition. After the Field Interpo-lation phase, it issues non-blocking UNR_Put operations to asyn-chronously transfer the migrant particles packed by SoW. By invok-ing UNR_Wait after the Deposition kernel completes, the primary communication latency is effectively hidden within the computa-tion pipeline, leaving only a minimal merge step at the end of the timestep. In summary, high computational throughput hinges on the or-dered in-memory layout maintained by SoW, while SoW also packs migrating particles for the redistribution module to overlap trans-mission and collection. This co-design enables POLAR-PIC to achieve particle-processing phase performance improvements beyond iso-lated kernel optimizations on next-generation HPC platforms. 
+
+## 4.2 Matrixized Field Interpolation 
+
+Field Interpolation projects electromagnetic fields from the Eulerian grid onto Lagrangian particle positions and constitutes a typical 
+
+gather-stencil kernel. As illustrated in Figure 3, each particle per-forms a weighted accumulation over 𝐾 stencil nodes, yielding low operational intensity and an inherent many-to-one inner-product reduction between a weight vector and a field vector. To bridge this structural mismatch with MPU-style outer-product execution, POLAR-PIC introduces an outer-product reformulation via Batch-ing through Tensor Stacking . By logically stacking 𝑁 particles within the same cell (e.g., 𝑁 = 8 in FP64), it casts 𝑁 independent POLAR-PIC: A Holistic Framework for Matrixized PIC with Co-Designed Compute, Layout, and Communication HPDC ’26, July 13–16, 2026, Cleveland, OH, USA 
+
+Figure 3: Matrixized Field Interpolation and Sort-on-Write dataflow. Left: Matrix outer-product Interpolation via tensor stacking; Middle: in-register classification and pre-packing; Right: double-buffered SoA layout that maintains a physically contiguous layout. 
+
+1 × 𝐾 linear contractions into a single 𝑁 × 𝐾 matrix form, thereby shifting the kernel from a 1-D vector pipeline to an MPU-friendly 2-D batched dataflow that exposes outer-product accumulation. Since typical particle densities far exceed the batch size, full batches are efficiently formed from contiguous SoA segments. Residual parti-cles fewer than 𝑁 are handled via zero-padding, ensuring a unified matrix execution path. Let 𝐾 denote the stencil size for 3-D Interpolation (e.g., 𝐾 =
+
+43 = 64 for 3rd-order Interpolation) and 𝐷 denote the dimension of field components (typically 𝐷 = 6 for {𝐸 𝑥 , 𝐸 𝑦 , 𝐸 𝑧 , 𝐵 𝑥 , 𝐵 𝑦 , 𝐵 𝑧 }). For a particle 𝑝 , the interpolated field f𝑝 ∈ R𝐷 is accumulated from 𝐾 
+
+stencil nodes: 
+
+f𝑝 =
+
+> 𝐾
+
+∑︁ 
+
+> 𝑞 =1
+
+𝑤 𝑝,𝑞 · g𝑞 , (3) where g𝑞 ∈ R𝐷 is the field vector at grid node 𝑞 , and 𝑤 𝑝,𝑞 is the geometric weight scalar for particle 𝑝 at that node (i.e., the product of shape functions 𝑆 𝑥 𝑆 𝑦 𝑆 𝑧 ). By stacking 𝑁 particles from the same cell, we construct a weight matrix W ∈ R𝑁 ×𝐾 and a grid-field matrix G ∈ R𝐾 ×𝐷 :
+
+W =
+
+
+
+wT
+
+> 𝑝 1
+
+...
+
+wT
+
+> 𝑝 𝑁
+
+
+
+, G =
+
+
+
+gT
+
+> 1
+
+...
+
+gT
+
+> 𝐾
+
+
+
+, (4) where each w𝑝 𝑖 ∈ R𝐾 stacks the stencil weights of particle 𝑝 𝑖 .The Interpolation result for the entire batch, F ∈ R𝑁 ×𝐷 , can be expressed as the matrix multiplication F = WG . Expanding along the stencil dimension yields a sum of rank-1 updates :
+
+F =
+
+> 𝐾
+
+∑︁ 
+
+> 𝑞 =1
+
+ w:,𝑞 ⊗ g𝑞 
+
+ , (5) where w:,𝑞 ∈ R𝑁 is the stacked weight vector of 𝑁 particles for stencil node 𝑞 , and g𝑞 ∈ R𝐷 represents the corresponding field-component vector. This form maps directly to the MPU dataflow. The loop iterates over stencil nodes, loads one g𝑞 , and accumulates 
+
+w:,𝑞 ⊗ g𝑞 into a tile register via MOPA. For a field vector with 𝐷 = 6,
+
+g𝑞 can be zero-padded to the tile width (e.g., 8), leading to the tile update: 
+
+Ftile ← Ftile + w:,𝑞 ⊗ g𝑞 . (6) 
+
+## 4.3 Sort-on-Write Algorithm 
+
+The performance of MPU-based Interpolation hinges on contigu-ous data supply, which traditional index-based sorting [ 6 ] fails to guarantee. To resolve the memory fragmentation bottleneck, we propose the Sort-on-Write (SoW) mechanism. As shown in Fig-ure 3 and Algorithm 1, SoW exploits the read-modify-write dataflow of particle push to transform explicit reordering into an inlined streaming split . This design dynamically maintains a physically contiguous layout without a periodic stop-the-world global sort. 
+
+4.3.1 Dual-Region Memory Management. Leveraging the CFL con-dition that most particles remain local within a time step, we parti-tion each tile’s memory into a dominant Ordered Region (physi-cally contiguous) and a small Disordered Region (append-only tail). This dual-region layout is maintained using two pre-allocated buffers per rank-local tile, sized by a runtime upper-bound heuris-tic to avoid reallocation during timesteps while keeping the extra space cost local to each tile. Runtime pointer swapping reuses these buffers across timesteps, thereby eliminating frequent dy-namic allocation overheads without resorting to full-volume global double-buffering. Within this layout, the Ordered Region supports direct MPU vector loading, whereas the Disordered Region relies on a lightweight auxiliary index ( bin_to_ip ) to recover logical traversal order. This hybrid organization keeps the vast majority of memory accesses contiguous while confining fragmentation to a small tail. During the SoW process, those disordered particles are progressively absorbed back into the Ordered Region of the next buffer, naturally restoring physical locality over time. 
+
+4.3.2 Execution Flow and Layout Reuse. The SoW execution follows a fused pipeline (Algorithm 1): 
+
+• Tail Sorting: At the beginning of each time step, we perform a low-cost 𝑂 (𝑁 𝑡𝑎𝑖𝑙 ) binning pass on the Disordered Region to enable logical-order traversal. HPDC ’26, July 13–16, 2026, Cleveland, OH, USA Yizhuo Rao et al. 
+
+Algorithm 1 SoW-Enabled Time-Step: Stream-Split, Comm-Fusion, and Layout Reuse 
+
+Require: Particles P𝑐𝑢𝑟 (Ordered + Indexed), Fields E, B, Comm Buffers B𝑙𝑜𝑐𝑎𝑙 , B𝑟𝑒𝑚𝑜𝑡𝑒 , Pre-defined Masks m𝑠𝑡𝑎𝑦 , m𝑚𝑜𝑣𝑒 , m𝑟𝑚𝑡 
+
+Ensure: Updated P𝑛𝑒𝑥𝑡 partitioned for reuse; Comm initiated; Cur-rent/Charge J deposited  
+
+> 1:
+
+// Disordered particles in P𝑐𝑢𝑟 are pre-binned for logical traversal  
+
+> 2:
+
+Initialize cursors: 𝑝𝑡𝑟 𝑜𝑟𝑑 ← 0, 𝑝𝑡𝑟 𝑑𝑖𝑠 ← Capacity (P 𝑛𝑒𝑥𝑡 );
+
+// Phase 1: Interpolation & Push with SoW  
+
+> 3:
+
+for each cell 𝑐 ∈ Tile 𝑇 do  
+
+> 4:
+
+Meta [𝑐 ].start ← 𝑝𝑡𝑟 𝑜𝑟𝑑 ; ⊲ start offset for next frame  
+
+> 5:
+
+S𝑜𝑟𝑑 ← VPU_Load (P 𝑐𝑢𝑟 .Ordered [𝑐 ]) ; 
+
+> 6:
+
+S𝑖𝑑𝑥 ← VPU_GatherLoad (P 𝑐𝑢𝑟 .Disordered , bin_to_ip [𝑐 ]) ; 
+
+> 7:
+
+for batch P𝑖𝑛 ∈ (S 𝑜𝑟𝑑 , S𝑖𝑑𝑥 ) do  
+
+> 8:
+
+P𝑛𝑒𝑤 ← MPU_InterpolationKernel (P𝑖𝑛 , E, B) ;
+
+// In-register Classification & Stream-Split  
+
+> 9:
+
+c𝑛𝑒𝑤 ← GetCellID (P𝑛𝑒𝑤 ); 
+
+> 10:
+
+m𝑠𝑡𝑎𝑦 ← ( c𝑛𝑒𝑤 == 𝑐 ); 
+
+> 11:
+
+m𝑚𝑜𝑣𝑒 ← (¬ m𝑠𝑡𝑎𝑦 );
+
+// Keep Resident physically contiguous  
+
+> 12:
+
+CompactStore (P𝑛𝑒𝑥𝑡 [𝑝𝑡𝑟 𝑜𝑟𝑑 ], P𝑛𝑒𝑤 , m𝑠𝑡𝑎𝑦 ) ;  
+
+> 13:
+
+𝑝𝑡𝑟 𝑜𝑟𝑑 ← 𝑝𝑡𝑟 𝑜𝑟𝑑 + PopCount (m𝑠𝑡𝑎𝑦 ); 
+
+> 14:
+
+if Any (m𝑚𝑜𝑣𝑒 ) then  
+
+> 15:
+
+𝑁 𝑚𝑜𝑣𝑒 ← PopCount (m𝑚𝑜𝑣𝑒 );
+
+// Grow Disordered Region from Tail  
+
+> 16:
+
+𝑝𝑡𝑟 𝑑𝑖𝑠 ← 𝑝𝑡𝑟 𝑑𝑖𝑠 − 𝑁 𝑚𝑜𝑣𝑒 ; 
+
+> 17:
+
+CompactStore (P𝑛𝑒𝑥𝑡 [𝑝𝑡𝑟 𝑑𝑖𝑠 ], P𝑛𝑒𝑤 , m𝑚𝑜𝑣𝑒 ); 
+
+// Fusion: Pre-pack based on Destination  
+
+> 18:
+
+m𝑟𝑚𝑡 ← IsRemoteRank (P𝑛𝑒𝑤 , m𝑚𝑜𝑣𝑒 ); 
+
+> 19:
+
+CopyToBuffer (B𝑙𝑜𝑐𝑎𝑙 , P𝑛𝑒𝑤 , m𝑚𝑜𝑣𝑒 ∧ ¬ m𝑟𝑚𝑡 );  
+
+> 20:
+
+CopyToBuffer (B𝑟𝑒𝑚𝑜𝑡𝑒 , P𝑛𝑒𝑤 , m𝑟𝑚𝑡 );  
+
+> 21:
+
+end if  
+
+> 22:
+
+end for  
+
+> 23:
+
+Meta [𝑐 ].length ← 𝑝𝑡𝑟 𝑜𝑟𝑑 − Meta [𝑐 ].start  
+
+> 24:
+
+end for  
+
+> 25:
+
+TriggerUNR_BatchPut (B𝑟𝑒𝑚𝑜𝑡𝑒 , PopCount (m𝑟𝑚𝑡 )); 
+
+// Phase 2: Deposition with Layout Reuse  
+
+> 26:
+
+for each cell 𝑐 ∈ Tile 𝑇 do ⊲ Reuse ordered layout  
+
+> 27:
+
+P𝑜𝑟𝑑 ← VPU_Load (P 𝑛𝑒𝑥𝑡 , Meta [𝑐 ].start , Meta [𝑐 ].length ) 
+
+> 28:
+
+MPU_DepositKernel (P𝑜𝑟𝑑 , J) 
+
+> 29:
+
+end for  
+
+> 30:
+
+for particle 𝑝 ∈ Range (𝑝𝑡𝑟 𝑑𝑖𝑠 , Capacity ) do ⊲ Fallback to VPU  
+
+> 31:
+
+VPU_DepositKernel (𝑝, J) 
+
+> 32:
+
+end for 
+
+• Stream-Split Write-back (Lines 9-22): During the update phase, SIMD instructions classify particles as resident or mi-grating . A dual-pointer streaming store then separates them: resident particles are compacted into the Ordered Region of the next buffer, while migrating particles are appended to the Disordered tail. This mechanism acts as a self-healing process, continuously absorb-ing disordered particles back into the ordered layout. Furthermore, since position updates preserve cell indices for the duration of the step, the Deposition kernel (Lines 26-30) directly reuses this con-tiguous layout for high-throughput MOPA execution, falling back to VPU atomics only for the sparse tail. 
+
+## 4.4 Overlapping Particle Communication with Deposition 
+
+From a dataflow perspective, the updated particle position x𝑛 +1 is available at the end of Particle Push , and subsequent Deposition and field update do not change the particle’s spatial mapping to grid indices. Accordingly, redistribution can be partially initiated early by (i) determining the destination tile/rank from x𝑛 +1 and (ii) pre-packing a copy of migrating particle attributes into pre-allocated remote send buffers or local tiles. As illustrated in Figure 4, this design transforms the traditional blocking communication phase into an asynchronous pipeline, effectively masking transmission latency while avoiding interference with field solvers. 
+
+Figure 4: Comparison of Particle Redistribution Strategies. 
+
+4.4.1 Re-packing via Kernel Fusion. In native WarpX redistribution, migrant particles are identified and packed through a separate end-of-step scan, which introduces redundant traversal and additional memory traffic. POLAR-PIC removes this standalone scan-and-pack stage by fusing pre-packing into the write-back path, where SoW already exposes the destination information of migrated particles. The runtime precomputes neighbor connectivity under the static domain decomposition and registers communication buffers during initialization; thread-private send/recv buffers are used to reduce synchronization and avoid consolidating per-thread outputs. During write-back, migrants are dispatched directly to their destinations. Intra-rank migrants are written from registers into the target tile’s receive buffer, while inter-rank migrants are packed into the thread-private UNR send buffer for the corresponding neighbor. Meanwhile, particles leaving the current tile are swapped into the tail disordered region so they can be removed efficiently at the end of the step. Buffers follow a linear [Header | Payload] layout with lightweight per-thread offsets, and UNR batch transmission avoids extra process-level memcpy and cache pollution. Importantly, this design does not imply that all packing work disappears; rather, POLAR-PIC: A Holistic Framework for Matrixized PIC with Co-Designed Compute, Layout, and Communication HPDC ’26, July 13–16, 2026, Cleveland, OH, USA 
+
+the remaining packing work is absorbed into the write-back path instead of appearing as a separate end-of-step stage. 
+
+4.4.2 Asynchronous Transmission with UNR. After pre-packing completes, the main thread invokes UNR batch_put outside the OpenMP region to submit all RDMA writes across threads and neighbor directions in one batch. The NIC then transfers data from thread-local send buffers into remote receive buffers, while the CPU proceeds immediately to the Deposition kernel, thereby overlapping communication with Deposition. A receiver process only waits for completion signals via UNR_Wait to detect data arrival, rather than posting receive-side synchronization operations such as MPI_Recv ,
+
+MPI_Irecv/Wait , or MPI_Win_Fence .
+
+4.4.3 Convergence and Particle Finalization. POLAR-PIC confines overlap to the Deposition window and enforces convergence with 
+
+UNR_Wait immediately after Deposition to avoid interference with the latency-sensitive field-solve communication. This separation reduces contention in NIC queues and network injection bandwidth and improves timestep stability; in practice, most particle transfers complete before Deposition ends, making the post-Deposition wait negligible. After convergence, received particles are unpacked and finalized. Since SoW clusters invalid entries at the tail disordered region, deletion reduces to tail truncation by updating the SoA size pointer. Incoming [Header | Payload] segments are then unpacked and appended to the target tile’s SoA tail using parallel memcpy . Overall, POLAR-PIC refactors redistribution from an end-of-step blocking BSP phase into a pipelined overlap scheme that achieves effective masking while isolating bandwidth interference. 
+
+## 5 Experimental Setup 5.1 Experimental Platform 
+
+Our primary experiments were conducted on the LS pilot system, a next-generation HPC cluster. Each compute node incorporates two LX2 high-performance CPUs. As illustrated in the architectural diagram in Figure 5, each processor package contains over 256 cores distributed across two compute dies. These cores support both vector (VPU) and matrix (MPU) computation engines. The VPUs execute double-precision (FP64) SIMD instructions, while the MPUs are designed for 8 ×8 matrix operations. Critically, the MPU’s MOPA instruction offers approximately 4 × the theoretical FP64 performance of the VPU’s Multiply-Accumulate (MLA) instruction, presenting a significant opportunity for acceleration. Both compute units operate at frequencies at or above 1.3 GHz. The LX2 CPU implements a system-on-chip design where each Die features 128GB of off-die DDR memory organized across 4 NUMA domains. The Dies are interconnected through an LXLink network, which provides up to 48 GB/s bidirectional bandwidth per NIC and supports RDMA operations. The LS system employs a customized Linux-based OS with LLVM-based Clang/Flang com-pilers. All binaries are compiled with -O3 and -flto and linked against an optimized OpenMPI library and architecture-tuned math kernels. For one-sided transfers, we utilize the latest UNR library tuned for LS RDMA verbs. For comparison, the MPI-based redistri-bution is implemented using non-blocking MPI_Isend /MPI_Irecv 
+
+primitives to provide asynchronous progress. 
+
+Figure 5: Architectural diagram of the LX2 processor, illus-trating the dual-Die design, core distribution, and key com-ponents like the VPU, MPU, and memory interfaces. 
+
+For cross-platform comparison, we conducted experiments on a platform equipped with two 28-core CPUs and 8 NVIDIA A800 GPUs, which features 80 GB of HBM2e memory. The software environment used for these tests included NVIDIA driver version 535.104.12. 
+
+## 5.2 Workloads and Configuration 
+
+We implement the POLAR-PIC framework atop the widely adopted 
+
+WarpX v24.07 [2 ]. While our current implementation targets WarpX, the proposed architectural optimizations are generic and portable to other standard PIC workflows. Performance comparisons and ablation studies are conducted on 2 compute nodes using a hybrid MPI+OpenMP parallelization strategy. We configure one MPI rank per NUMA domain (aggregating 16 ranks per node), spawning 32 OpenMP threads per rank with strict thread affinity enforced to minimize context switching overhead. For large-scale weak scala-bility experiments, we utilize the Uniform Plasma benchmark on LS pilot system, scaling up to 4,096 nodes with the same per-node configuration. We disable I/O to isolate computational performance. All simu-lations employ a 3D Cartesian grid with 3rd-order B-spline shape factors, the Yee field solver, direct current Deposition, and the Boris particle pusher. We execute 100 timesteps for measurement after an initial warm-up phase. We use two workloads: (i) a Uniform Plasma microbenchmark with a grid of 256 × 128 × 128 , where we sweep the particle density, i.e., particles per cell (PPC), to vary computational intensity and memory pressure, and adjust the ther-mal velocity 𝑢 𝑡ℎ to induce different levels of particle migration; and (ii) a Laser-Ion Acceleration with a Planar Target produc-tion case with a grid of 192 × 192 × 256 over an approximately 
+
+7.5 𝜇𝑚 × 7.5 𝜇𝑚 × 15 𝜇𝑚 domain to validate particle-phase perfor-mance under strongly non-uniform particle distributions and signif-icant migration. All experiments are repeated three times excluding warm-up overhead; we report the average execution time across these trials to filter out transient system jitter. Detailed physical and numerical parameters are listed in Appendix B. 
+
+## 5.3 Evaluation Metrics 
+
+We quantify performance using a multi-level metric suite. To isolate the architectural impact on particle-grid interactions, we define overall Particle-Phase Time as 𝑇 𝑝𝑎𝑟𝑡𝑖𝑐𝑙𝑒 = 𝑇 𝐼𝑛𝑡𝑒𝑟𝑝𝑜𝑙𝑎𝑡𝑖𝑜𝑛 +𝑇 𝑑𝑒𝑝𝑜𝑠𝑖𝑡 +
+
+𝑇 𝑟𝑒𝑑𝑖𝑠𝑡𝑟𝑖𝑏𝑢𝑡𝑒 , where 𝑇 𝐼𝑛𝑡𝑒𝑟𝑝𝑜𝑙𝑎𝑡𝑖𝑜𝑛 includes Field Interpolation, Push, SoW, and fused re-packing overheads; 𝑇 𝑑𝑒𝑝𝑜𝑠𝑖𝑡 includes current HPDC ’26, July 13–16, 2026, Cleveland, OH, USA Yizhuo Rao et al. 
+
+Deposition overhead; and 𝑇 𝑟𝑒𝑑𝑖𝑠𝑡𝑟𝑖𝑏𝑢𝑡𝑒 captures particle communi-cation issuing, explicit waiting, and post-processing. Furthermore, 
+
+𝑇 𝑠𝑡𝑒𝑝𝑠 = 𝑇 𝑝𝑎𝑟𝑡𝑖𝑐𝑙𝑒 /𝑁 𝑠𝑡𝑒𝑝𝑠 denotes the average particle-phase time per step . Unless otherwise specified, all derivative metrics in this work (including speedups, throughput, and efficiency) are normal-ized against 𝑇 𝑝𝑎𝑟𝑡𝑖𝑐𝑙𝑒 or 𝑇 𝑠𝑡𝑒𝑝𝑠 to exclude the Eulerian field solver and global halo exchanges, which remain identical to the native WarpX reference pipeline on LX2. Our primary optimization target is therefore the particle-processing critical path, while end-to-end full-timestep behavior is reported separately in the weak-scaling study. For ablations, we further decompose computation into 𝑇 𝑝𝑟𝑒𝑝 
+
+(index / shape-factor preparation), 𝑇 𝑠𝑜𝑟𝑡 (IncrSort or SoW over-head), 𝑇 𝑘𝑒𝑟𝑛𝑒𝑙 (pure math execution), and 𝑇 𝑟𝑒𝑑𝑢𝑐𝑒 (write-back / re-duction); and we decompose communication into 𝑇 𝑝𝑎𝑐𝑘 (seri-alization and packing), 𝑇 𝑖𝑠𝑠𝑢𝑒 (issuing MPI / UNR calls), 𝑇 𝑤𝑎𝑖𝑡 (ex-plicit synchronization), and 𝑇 𝑝𝑜𝑠𝑡 _𝑝𝑟𝑜𝑐𝑒𝑠𝑠 (unpacking, appending, and invalid-particle removal). To evaluate particle processing throughput and computational density, we report Particles per Second (PPS, 𝑁 𝑡𝑜𝑡𝑎𝑙 /𝑇 𝑠𝑡𝑒𝑝𝑠 ) and 
+
+Cycles per Particle (CPP), the latter being normalized to a 1.3 GHz reference frequency. The Effective Transport Overlap Ratio 
+
+𝜂 overlap is defined as: 
+
+𝜂 overlap = 1 − 𝑇 Overlap  
+
+> 𝑖𝑠𝑠𝑢𝑒
+
++ 𝑇 Overlap 
+
+> 𝑤𝑎𝑖𝑡
+
+𝑇 baseline  
+
+> 𝑖𝑠𝑠𝑢𝑒
+
++ 𝑇 baseline 
+
+> 𝑤𝑎𝑖𝑡
+
+(7) where the numerator represents the explicit communication time under overlap, and the denominator is the exposed particle-communication time of the BSP-style native WarpX redistribution path. Since the BSP approach prohibits overlap, 𝜂 overlap directly quantifies the fraction of communication latency removed from the critical path relative to synchronous execution. In the results, we discuss residual synchronization through the communication-critical path and report a representative maximum per-rank wait time Finally, we evaluate hardware utilization and particle-phase qual-ity. Peak efficiency is defined as: 
+
+𝜂 peak = max 
+
+ Í Particle FLOPs 
+
+𝑇 𝑠𝑡𝑒𝑝𝑠 · 𝑃 theoretical 
+
+
+
+× 100% , (8) where 𝑃 theoretical is the theoretical FP64 peak of the platform. Particle FLOPs are standardized using the native WarpX implementation, counting 1,636 and 419 FLOPs per particle for the Interpolation and Deposition kernels, respectively. Following standard PIC community practice [ 2], we also report the per-node Figure of Merit (FOM node ): FOM node = max 
+
+ 𝛼𝑁 𝑐 + 𝛽𝑁 𝑝 
+
+𝑇 𝑠𝑡𝑒𝑝𝑠 · 𝑁 𝑛𝑜𝑑𝑒𝑠 
+
+
+
+, (9) where 𝑁 𝑐 and 𝑁 𝑝 are the total number of grid cells and macroparti-cles, respectively. The weights 𝛼 = 0.1 and 𝛽 = 0.9 are adopted to ensure consistency with WarpX benchmarks [2]. 
+
+## 5.4 Experimental Design 
+
+Table 1 summarizes the ablation variants and integrated system configurations. Here C0 corresponds to the native BSP-style WarpX particle-redistribution path without communication-computation overlap. For sorting-based comparisons, Matrix-PIC serves as the state-of-the-art reference, representing the logical-order optimiza-tion path beyond the native WarpX baseline. We bold the default POLAR-PIC setup, and provide full implementation details in Ap-pendix A. 
+
+Table 1: Summary of experimental configurations and abla-tion variants. Variant Key Configuration Characteristics                       
+
+> Exp 1: Interpolation (Gather & Push) Variants
+> G0 (Baseline) WarpX native, Compiler auto-vectorization (VPU), Unsorted G1 Hand-tuned VPU intrinsics, Unsorted G2 VPU, Logical Index-Sort (Reproduces Matrix-PIC [6]) G3 VPU, Physical Reordering (based on G2 indices) G4 VPU, Sort-on-Write (SoW) Physical Reordering G5 MPU, Logical Index-Sort (MPU version of G2) G6 MPU, Physical Reordering (MPU version of G3)
+> G7 (POLAR-PIC) MPU, SoW Physical Reordering
+> Exp 2: Deposition (Scatter) Variants
+> D0 (Baseline) WarpX native, Compiler auto-vectorization (VPU), Unsorted D1 MPU, Reuse G2’s Logical Index (Reproduces Matrix-PIC [6]) D2 MPU, Reuse G7’s Physical Layout + Tail Binning
+> D3 (POLAR-PIC) MPU, Reuse G7’s Physical Layout + VPU Tail
+> Exp 3: Overlap Strategy Variants
+> C0 (Baseline) No Overlap (BSP-style blocking redistribution) C1 MPI-based, Conservative sync (Post-Deposit)
+> C2 (POLAR-PIC) UNR-based, Conservative sync (Post-Deposit)
+> C3 MPI-based, Aggressive sync (Post-FieldSolve) C4 UNR-based, Aggressive sync (Post-FieldSolve)
+> Integrated Systems
+> WarpX-Native (Baseline) Native WarpX v24.07 reference pipeline on LX2 (G0 + D0 + C0) Matrix-PIC State-of-the-art logical-order pipeline (G2 + D1 + C0)
+> POLAR-PIC Full Outer-Product Pipeline (G7 + D3 + C2)
+
+## 6 Experimental Results 6.1 Overall Performance 
+
+Unless otherwise stated, the results in this subsection focus on particle-phase performance, which is the primary optimization target of POLAR-PIC. End-to-end full-timestep behavior is reported separately in the weak-scaling study in Section6.6. 
+
+6.1.1 Uniform Plasma Microbenchmarks. We first evaluate peak particle throughput and dynamic robustness by sweeping parti-cle density (PPC) and thermal velocity ( 𝑢 𝑡ℎ ). Relative to the na-tive WarpX reference pipeline on LX2, POLAR-PIC achieves up to 10 .9× particle-phase speedup in high-density regimes and still delivers a 7.3× advantage under high migration intensity; it also outperforms Matrix-PIC by up to 4.7×.As illustrated in Figure 6, the WarpX-Native reference is bounded by the throughput ceiling of the VPU path. While Matrix-PIC de-livers significant speedups at moderate densities, its performance degrades at high PPC ( > 256 ) due to escalating index-maintenance overheads. POLAR-PIC avoids this scalability pitfall by relying on the SoW mechanism, preserves physical contiguity and yields a near-monotonic throughput trend as PPC increases. At very low densities ( 𝑃𝑃𝐶 = 1), speedups naturally diminish for matrix-based variants because padding and metadata costs are hard to amortize when batches are underfilled, consistent with prior observations on low-occupancy matrix kernels [6]. When sweeping thermal velocity ( 𝑢 𝑡ℎ ) to emulate dynamic dis-order, the advantages of our physical layout management become POLAR-PIC: A Holistic Framework for Matrixized PIC with Co-Designed Compute, Layout, and Communication HPDC ’26, July 13–16, 2026, Cleveland, OH, USA 
+
+Figure 6: Uniform-plasma particle-phase performance under varying particle density (PPC) and thermal velocity 𝑢 𝑡ℎ .
+
+even more pronounced. While the Baseline shows limited sensitivity to disorder because it does not exploit locality, sorting-based meth-ods face challenges as disorder increases. Specifically, at 𝑢 𝑡ℎ = 0.2,Matrix-PIC’s speedup collapses to just 1.2× due to severe data sup-ply stalls. Conversely, POLAR-PIC demonstrates superior resilience via the SoW mechanism. Even under this worst-case turbulence, it sustains a 7.3× speedup over the Baseline, maintaining contiguous SoA segments for the MPU where logical ordering fails. 
+
+6.1.2 Laser-Ion Acceleration Benchmark. In the highly non-uniform LIA benchmark, POLAR-PIC sustains a robust 4.4× particle-processing speedup over the Baseline and 3.8× over Matrix-PIC, significantly outperforming logical-ordering alternatives in migration-heavy scenarios. As shown in Figure 7, the performance advantage stems primar-ily from the optimized handling of particle redistribution, which emerges as the dominant cost in this regime. POLAR-PIC addresses this bottleneck through its asynchronous pipeline, accelerating the redistribution phase by 3.0× relative to the Baseline. Crucially, the analysis of long-tail latency highlights a major stability gap. Matrix-PIC suffers from severe performance jitter due to frequent index rebuilding, with the (max − mean) deviation exceeding that of the Baseline by 6.1% . In contrast, by leveraging UNR-based NIC offloading and computation-communication overlap, POLAR-PIC effectively masks synchronization overheads. This design reduces 
+
+Table 2: Summary of 𝑇 𝑃𝑎𝑟𝑡𝑖𝑐𝑙𝑒 , PPS, CPP in Uniform Plasma at representative PPC points ( 𝑢 𝑡ℎ = 0.01 ).                                                       
+
+> PPC Scheme 𝑇 𝑃𝑎𝑟𝑡𝑖𝑐𝑙𝑒 (s) PPS (Gparticles/s) CPP (cycles/particle) Speedup ( ×)1
+> Baseline (WarpX) 1.102 0.381 3.416 1.00
+> Matrix-PIC 1.852 0.226 5.741 0.60 POLAR-PIC 1.379 0.304 4.275 0.80 8Baseline (WarpX) 4.278 0.784 1.657 1.00 Matrix-PIC 2.290 1.465 0.887 1.87
+> POLAR-PIC 1.769 1.896 0.686 2.42
+> 64 Baseline (WarpX) 30.280 0.887 1.466 1.00 Matrix-PIC 9.798 2.740 0.475 3.09
+> POLAR-PIC 3.750 7.158 0.182 8.07
+> 512 Baseline (WarpX) 236.939 0.906 1.434 1.00 Matrix-PIC 101.673 2.112 0.615 2.33
+> POLAR-PIC 21.651 9.919 0.131 10.94
+
+Figure 7: Particle-Phase Performance and Long-tail Effect Analysis of Laser-Ion Acceleration Simulations with Varying PPC. 
+
+the cumulative long-tail latency by 34 .6% compared to the Baseline and 38 .3% compared to Matrix-PIC, confirming that POLAR-PIC de-livers not just higher throughput, but predictable stability essential for highly dynamic production simulations. 
+
+Figure 8: Correctness verification for Laser-Ion Acceleration at step 2000 and over the full 2000-step evolution. 
+
+6.1.3 Correctness Verification for Laser-Ion Acceleration. To ensure numerical fidelity, we conducted a controlled comparison against the native WarpX baseline on the LX2 platform using the LIA bench-mark. Figure 8 reports a qualitative phase-space comparison at step 2000, together with the per-step errors of total charge, total energy, and longitudinal momentum over 2000 steps. As illustrated in Fig-ure 8, the electron longitudinal phase-space structures and beam morphologies remain highly consistent between native WarpX and POLAR-PIC. Quantitative phase-space assessment yields a Mean Squared Error (MSE) of 3.198 and a Mean Absolute Error (MAE) of 0.8401 (normalized to 𝑚 𝑒 𝑐 ). Given that the peak momentum exceeds 100 𝑚 𝑒 𝑐 , the MAE corresponds to a relative error below 
+
+0.84% . The remaining discrepancies are primarily attributed to the altered floating-point summation order inherent in the matrix outer-product reformulation. Meanwhile, the per-step error curves in Figure 8(d–f) show that the total charge, total energy, and longi-tudinal momentum errors remain stably bounded throughout the 2000-step evolution. Together, these results indicate that POLAR-PIC preserves numerical consistency without introducing visible artifacts or instability in this benchmark. HPDC ’26, July 13–16, 2026, Cleveland, OH, USA Yizhuo Rao et al. 
+
+## 6.2 Ablation 1: Interpolation Kernel Evolution 
+
+In these experiments, we fix the Deposition strategy to the native WarpX deposition path (D0) and disable communication overlap to isolate the impact of data supply strategies and kernel formulations. 
+
+6.2.1 Stability of SoW Data Supply (G0–G4). We first evaluate the stability of data supply strategies under varying migration intensities, finding that the SoW mechanism (G4) sustains high throughput ( 5.2 × 10 9 PPS) even at 𝑢 𝑡ℎ = 0.2.
+
+Figure 9: VPU results for G0–G4 at 𝑃𝑃𝐶 = 512 , and MPU Interpolation results for G5–G7 across PPC at 𝑢 𝑡ℎ = 0.01 (with G0/G1 shown as baselines). 
+
+As shown in Figure 9(a), while unsorted baselines (G0/G1) are insensitive to dynamics due to their low-throughput slow sequen-tial access, logical ordering (G2) provides benefits only in low-migration regimes ( 𝑢 𝑡ℎ < 0.1). As disorder intensifies, the indirect memory accesses in G2 incur escalating address-generation over-heads. Specifically, 𝑇 𝑝𝑟𝑒𝑝 and 𝑇 𝑟𝑒𝑑𝑢𝑐𝑒 increase by 5.6× as 𝑢 𝑡ℎ rises from 0.01 to 0.1, neutralizing the benefits of logical grouping. Con-versely, G3 and G4 demonstrate that physical continuity is critical for sustaining bandwidth. Although G3 improves locality via index-guided write-back, its sorting overhead is 1.19 × higher than G4’s tail-sorting approach at 𝑢 𝑡ℎ = 0.2. By implementing the dual-region SoW mechanism, G4 eliminates redundant sorting for resident parti-cles, maintaining optimal data supply bandwidth across all dynamic regimes. 
+
+6.2.2 Impact of Data Supply on MPU Interpolation (G0–G1, G5– G7). Fixing migration at 𝑢 𝑡ℎ = 0.01 , we sweep particle density to demonstrate that physically contiguous data supply is the prereq-uisite for unlocking the full acceleration potential of the matrix outer-product operator. Figure 9(b) reveals that in the ultra-sparse regime ( 𝑃𝑃𝐶 = 1), MPU variants lag due to unamortized padding and metadata over-heads ( > 80% of runtime). However, as density increases ( 𝑃𝑃𝐶 ≥ 8), the outer-product operator delivers substantial gains. G5 improves the kernel-stage throughput by 18 .5× over G0 at 𝑃𝑃𝐶 = 512 , and introducing physical reordering (G6) further boosts memory band-width utilization by 1.2×. The fully realized G7, which combines 
+
+Tail Sorting with the Stream-Split mechanism, achieves the optimal synergy between data layout and hardware characteristics. As de-tailed in Table 3, G7 reduces the computational cost to a minimal 0.100 CPP, representing a 7.96 × efficiency gain over the Baseline. 
+
+Table 3: Performance summary for Interpolation (G0–G7) and Deposition (D0–D3) variants under representative condi-tions (PPC=512, 𝑢 𝑡ℎ = 0.01 )                                                    
+
+> Variant Time (s) PPS (Gparticle/s) CPP (cycles/particle) Speedup ( ×)
+> Interpolation & Push
+> G0 131.312 1.635 0.795 1.00 G1 42.476 5.056 0.257 3.09 G2 27.778 7.731 0.168 4.73 G3 22.936 9.363 0.139 5.73 G4 22.013 9.756 0.133 5.97 G5 25.121 8.548 0.152 5.23 G6 21.178 10.140 0.128 6.20
+> G7 16.490 13.023 0.100 7.96
+> Deposition
+> D0 86.221 2.491 0.522 1.00 D1 51.142 4.199 0.310 1.69 D2 6.922 31.023 0.042 12.46
+> D3 6.523 32.922 0.039 13.22
+
+These results confirm that while the MPU reformulation represents a significant architectural enhancement, the SoW-based data supply is the necessary enabler for its efficiency. 
+
+Figure 10: Reuse benefits for D0–D2 under fixed 𝑢 𝑡ℎ = 0.01 
+
+and Robustness for D0, D2-D3 under PPC=512. 
+
+## 6.3 Ablation 2: Synergistic Gains in Deposition 
+
+These experiments fix the Interpolation operator to either G2 (logi-cal) or G4 (physical) and vary Deposition implementations (D0–D3) to evaluate the efficiency of layout reuse. 
+
+6.3.1 Comparison of Different Layout Reuse (D0–D2). We evaluate layout reuse efficiency, finding that explicitly reusing the physically contiguous layout (D2) significantly outperforms logical ordering (D1), accelerating preparation and kernel execution by 23 × and 
+
+5.3×, respectively, at 𝑃𝑃𝐶 = 512 .Figure 10(a) shows that while both D1 and D2 mitigate atomic write conflicts compared to the baseline D0, the advantage of phys-ical contiguity in D2 is decisive. Crucially, since D2 reuses the dual-region SoW structure and requires only lightweight sorting of the disordered tail, its sorting cost is reduced by 83 .5% relative to D1. This architectural efficiency is quantified in Table 3: while logi-cally ordered variants consume > 0.3 CPP due to atomic contention and index maintenance, the physically contiguous D2 effectively saturates Deposition bandwidth, reducing the cost to ∼ 0.04 CPP. POLAR-PIC: A Holistic Framework for Matrixized PIC with Co-Designed Compute, Layout, and Communication HPDC ’26, July 13–16, 2026, Cleveland, OH, USA 
+
+Figure 11: Impact of 𝑢 𝑡ℎ on overlap efficiency and runtime breakdown. Comparisons between average and maximum rank times highlight load imbalance and tail latency effects. 
+
+6.3.2 Trade-off Between Dynamic–Static Splitting and Tail Over-Sorting (D0, D2–D3). Comparing tail handling strategies under vary-ing migration intensities reveals that the dynamic–static splitting policy (D3) yields the optimal trade-off, avoiding the 33% sorting overhead incurred by forced reordering (D2) at high turbulence. We fix 𝑃𝑃𝐶 = 512 and sweep 𝑢 𝑡ℎ to evaluate robustness. As shown in Figure 10(b), D2 and D3 are comparable in low-migration regimes. However, as migration intensity increases, D2 suffers from escalating sorting costs and degraded MPU data supply efficiency for the resorted tail. At 𝑢 𝑡ℎ = 0.2, D2’s kernel performance lags behind D3 by 2.7×. By falling back to the VPU atomic path only for the sparse disordered tail, D3 avoids expensive re-sorting while maintaining high-throughput MPU execution for the majority of particles, which reside in the Ordered Region. This confirms that reusing the physically contiguous layout combined with a hybrid splitting policy constitutes the robust Deposition pipeline even under worst-case migration scenarios. 
+
+## 6.4 Ablation 3: Benefits of Overlap 
+
+6.4.1 Overlap Efficiency and Hardware Offloading (C0–C2). Evalu-ating communication efficiency under dynamic loads ( 𝑃𝑃𝐶 = 512 ,varying 𝑢 𝑡ℎ ) reveals that the synergistic combination of SoW-based pre-packing and RDMA offloading (C2) eliminates explicit synchro-nization barriers, achieves a peak overlap ratio of 99 .1% , and reduces total communication time by 20 × compared to the MPI-based alter-native. As illustrated in Figure 11(a), the foundation of this efficiency is the SoW mechanism, which eliminates redundant traversals and reduces the exposed standalone scan-and-pack stage by ≥
+
+99% across all migration rates. Importantly, this does not mean that packing work vanishes entirely. Instead, the residual pack-ing cost is absorbed into the write-back path described in Sec-tion 4.4.1 and is therefore accounted for within 𝑇 𝐼𝑛𝑡𝑒𝑟𝑝𝑜𝑙𝑎𝑡𝑖𝑜𝑛 rather than as a separate end-of-step stage. As indicated by the mea-surements summarized in Figure 9(a), the packing cost 𝑇 𝑆𝑜𝑟𝑡 ab-sorbed into the write-back store path contributes only 0.146 s (3.3% of 𝑇 𝐼𝑛𝑡𝑒𝑟𝑝𝑜𝑙𝑎𝑡𝑖𝑜𝑛 ) to 𝑇 𝐼𝑛𝑡𝑒𝑟𝑝𝑜𝑙𝑎𝑡𝑖𝑜𝑛 under the representative case of 
+
+𝑢 𝑡ℎ = 0.01 , whereas the exposed standalone packing stage in the baseline accounts for 12.869 s. Building on this fusion, the computation–communication pipeline further amplifies the gains. While the MPI-based C1 reaches a saturation point of 82.3% overlap due to software overheads, the UNR-based C2 leverages RDMA hardware offloading to fully decouple data transmission from CPU intervention. This near-perfect overlap effectively masks redistribu-tion costs. Specifically, C2 reduces the maximum per-rank wait time to just 0.01 s, representing a 58 × reduction relative to C1, which verifies that the asynchronous design successfully hides synchro-nization latency behind the Deposition kernel. 
+
+6.4.2 Stability and Network Contention (C0–C4). Analyzing the stability of the communication-critical path ( 𝑇 𝑖𝑠𝑠𝑢𝑒 + 𝑇 𝑤𝑎𝑖𝑡 + 𝑇 𝑓 𝑖𝑒𝑙𝑑 )via boxplots reveals that the conservative overlap strategy (C2) provides the most robust time-to-solution by avoiding the network contention inherent in aggressive overlap strategies (C3/C4). As shown in Figure 11(b–e), while the bulk-synchronous base-line (C0) suffers a scalability collapse with a > 14 × latency surge under dynamic loads ( 𝑢 𝑡ℎ = 0.2), asynchronous strategies generally mitigate this impact. However, attempting to maximize overlap by extending particle traffic into the field-solver phase (C3/C4) proves counterproductive. Specifically, although the MPI-based C3 low-ers median latency, it induces severe jitter, increasing maximum latency by 2.3× compared to C1. This contention persists even with hardware offloading: the aggressive C4 exhibits a 2.25 × longer tail compared to the conservative C2, despite having comparable medians. This degradation confirms that extending particle traffic saturates NIC bandwidth, interfering with latency-sensitive field synchronization. By isolating communication to the Deposition window, our method (C2) eliminates these resource conflicts, main-taining the tightest latency distribution and ensuring predictable time-to-solution. 
+
+## 6.5 Cross-Platform Peak Efficiency 
+
+For contextual reference, POLAR-PIC achieves 13 .2% of theoret-ical peak efficiency on the LX2 CPU, while WarpX reaches 9.6% 
+
+on the NVIDIA A800 GPU. On the evaluated LX2 platform, this corresponds to a 13 .2× improvement in peak-efficiency ratio over the native WarpX port. As detailed in Table 4, the native WarpX reference on LX2 is con-strained to ∼ 1% efficiency due to irregular memory access and VPU throughput ceilings, whereas POLAR-PIC substantially improves utilization through outer-product reformulation and sustained data continuity. On the evaluated matrix-centric CPU platform, this domain-specific co-optimization yields a 2.4× gain over Matrix-PIC and achieves a node-level Figure of Merit ( FOM node ) of 1.1 × 10 10 .We report the cross-platform comparison only as context, since the platforms and software stacks differ. HPDC ’26, July 13–16, 2026, Cleveland, OH, USA Yizhuo Rao et al. 
+
+Table 4: Cross-platform performance comparison (double precision; normalized to platform peak and reported for context).                         
+
+> Platform Variant 𝜂 peak (%) FOM node
+> LX2 CPU (This work) *
+> WarpX (Native) 1.0 8.3e8 Matrix-PIC 5.5 3.6e9
+> POLAR-PIC 13.2 1.1e10
+> NVIDIA A800 (Measured) *WarpX (CUDA) 9.6 3.3e9 Reference Platforms **
+> WarpX (Perlmutter A100) 12.9 9.2e8 WarpX (Summit V100) 8.3 8.0e8 WarpX (Frontier MI250X) 3.3 1.3e9 WarpX (Fugaku A64FX) 1.1 2.2e7
+> *𝜂 peak is normalized to the theoretical peak performance of the target hardware.
+> ** Reference values from [2] are provided for context.
+
+Figure 12: End-to-end full-timestep weak-scaling breakdown from 1 to 4096 nodes (over 2 million cores) on the LS system under high-turbulence stress ( 𝑃𝑃𝐶 = 512 , 𝑢 𝑡ℎ = 0.2). 
+
+## 6.6 Weak Scalability at Scale 
+
+In the end-to-end full-timestep weak-scaling study from 1 to 4,096 nodes (over 2 million physical cores) under high-turbulence stress (𝑢 𝑡ℎ = 0.2), POLAR-PIC maintains a robust weak-scaling efficiency of 67 .5% , significantly outperforming the native WarpX reference, which drops to 42 .5% due to unmasked communication overheads. Figure 12 reveals the divergence in end-to-end scaling behav-ior. While both implementations exhibit scalability exceeding 90% 
+
+up to 16 nodes, the native WarpX reference degrades sharply at scale because blocking communication fails to hide the growing latency of large-scale interconnects and heavy particle redistribu-tion overheads. In contrast, POLAR-PIC’s asynchronous pipeline effectively masks these overheads, sustaining near-ideal scaling (∼ 100% ) for the particle-handling components (Interpolation, De-position, and Particle Redistribution) even at the 2-million-core scale, whereas the native WarpX particle efficiency drops to 62 .8% .These results validate that our co-design substantially alleviates the particle-processing bottleneck. However, the end-to-end break-down also reveals an Amdahl’s Law implication: once particle costs are reduced, the Field Solver becomes the dominant residual cost, identifying the field-update phase as the critical target for future optimization. 
+
+## 7 Conclusion and Future Work 
+
+This paper presents POLAR-PIC , a holistic co-design framework that systematically resolves the architectural mismatches between traditional PIC algorithms and emerging matrix-centric hardware. By synergizing the reformulation of Field Interpolation into an MPU-friendly outer-product kernel, the enforcement of physical memory contiguity via the Sort-on-Write (SoW) mechanism, and the deployment of an RMA-based asynchronous communication pipeline, POLAR-PIC establishes a highly efficient integrated exe-cution path for particle simulations. Experimental evaluations on the next-generation LS pilot system demonstrate that POLAR-PIC significantly improves the particle-processing path over existing solutions. In uniform plasma bench-marks, it achieves speedups of up to 10 .9× over the native WarpX reference pipeline on LX2 and outperforms the matrix-based state-of-the-art Matrix-PIC by 4.7×. Extending to real-world laser-ion ac-celeration scenarios, the framework maintains robust performance, achieving speedups of 4.4× over the native WarpX reference and 
+
+3.8× over Matrix-PIC despite intense particle migration. Moreover, the asynchronous communication design effectively masks redistri-bution overhead, sustaining an overlap ratio of 99 .1% even under high-turbulence conditions. For contextual reference, POLAR-PIC attains 13 .2% of theoretical peak efficiency on the evaluated CPU-based LS system, while WarpX reaches 9.6% on NVIDIA A800 GPUs. Furthermore, the framework maintains 67 .5% end-to-end weak scal-ing efficiency from 1 to 4,096 nodes (aggregating over 2 million cores). With the particle-processing bottleneck effectively mitigated, our end-to-end weak-scaling analysis indicates that the field solver emerges as the new dominant cost in the simulation time step. Consequently, future work will focus on optimizing field-solver al-gorithms and their associated communication paths to better match the throughput of the accelerated particle kernels. Additionally, we plan to extend the POLAR-PIC paradigm to support more complex multi-physics scenarios, such as Quantum Electrodynamics (QED) and dynamic load balancing in non-uniform mesh refinements, to address a broader spectrum of high-energy physics challenges. 
+
+## Acknowledgments 
+
+We sincerely thank all the anonymous reviewers for their valuable feedback. This research was supported by Guangdong S&T Program under Grant No. 2024B0101040005, the National Natural Science Foundation of China (NSFC): No.62461146204 and No.62502552, Guangdong Province Special Support Program for Cultivating High-Level Talents: 2021TQ06X160, National Key Research and Devel-opment Program of China under Grant No. YFE030170000 and the Strategic Priority Research Program of Chinese Academy of Sci-ences under Grant No. XDB0790203. This research used the open-source particle-in-cell code WarpX. Primary WarpX contributors are with LBNL, LLNL, CEA-LIDYL, SLAC, DESY, CERN, Helion Energy, and TAE Technologies. We acknowledge all WarpX contributors. 
+
+## References   
+
+> [1] Robert Bird, Nigel Tan, Scott V. Luedtke, Stephen Lien Harrell, Michela Taufer, and Brian Albright. Vpic 2.0: Next generation particle-in-cell simulations. IEEE Transactions on Parallel and Distributed Systems , 33(4):952–963, 2022.
+
+POLAR-PIC: A Holistic Framework for Matrixized PIC with Co-Designed Compute, Layout, and Communication HPDC ’26, July 13–16, 2026, Cleveland, OH, USA 
+
+[2] Luca Fedeli, Axel Huebl, France Boillod-Cerneux, Thomas Clark, Kevin Gott, Conrad Hillairet, Stephan Jaure, Adrien Leblanc, Rémi Lehe, Andrew Myers, Christelle Piechurski, Mitsuhisa Sato, Neïl Zaim, Weiqun Zhang, Jean-Luc Vay, and Henri Vincenti. Pushing the frontier in the design of laser-based electron accelerators with groundbreaking mesh-refined particle-in-cell simulations on exascale-class supercomputers. In SC22: International Conference for High Perfor-mance Computing, Networking, Storage and Analysis , pages 1–12, 2022. [3] Ricardo A Fonseca, Luis O Silva, Frank S Tsung, Viktor K Decyk, Wei Lu, Chuang Ren, Warren B Mori, Shaogui Deng, Shiyoun Lee, T Katsouleas, et al. Osiris: A three-dimensional, fully relativistic particle in cell code for modeling plasma based accelerators. In International conference on computational science , pages 342–351. Springer, 2002. [4] Tony D Arber, Keith Bennett, Christopher S Brady, Alistair Lawrence-Douglas, MG Ramsay, Nathan J Sircombe, Paddy Gillies, Roger G Evans, Holger Schmitz, Anthony R Bell, et al. Contemporary particle-in-cell approach to laser-plasma modelling. Plasma Physics and Controlled Fusion , 57(11):113001, 2015. [5] A. Myers, A. Almgren, L.D. Amorim, J. Bell, L. Fedeli, L. Ge, K. Gott, D.P. Grote, M. Hogan, A. Huebl, R. Jambunathan, R. Lehe, C. Ng, M. Rowan, O. Shapo-val, M. Thévenet, J.-L. Vay, H. Vincenti, E. Yang, N. Zaïm, W. Zhang, Y. Zhao, and E. Zoni. Porting warpx to gpu-accelerated platforms. Parallel Computing ,108:102833, 2021. [6] Yizhuo Rao, Xingjian Cui, Jiabin Xie, Shangzhi Pang, Guangnan Feng, Jinhui Wei, Zhiguang Chen, and Yutong Lu. Matrix-pic: Harnessing matrix outer-product for high-performance particle-in-cell simulations. In In 21st European Conference on Computer Systems (EUROSYS ’26), . Association for Computing Machinery, 2026. https://arxiv.org/abs/2601.08277. [7] Kohji Yoshikawa, Satoshi Tanaka, and Naoki Yoshida. A 400 trillion-grid vlasov simulation on fugaku supercomputer: large-scale distribution of cosmic relic neutrinos in a six-dimensional phase space. In Proceedings of the International Conference for High Performance Computing, Networking, Storage and Analysis ,SC ’21, New York, NY, USA, 2021. Association for Computing Machinery. [8] J. Derouillat, A. Beck, F. Pérez, T. Vinci, M. Chiaramello, A. Grassi, M. Flé, G. Bouchard, I. Plotnikov, N. Aunai, J. Dargent, C. Riconda, and M. Grech. Smilei : A collaborative, open-source, multi-purpose particle-in-cell code for plasma simulation. Computer Physics Communications , 222:351–373, 2018. [9] Yusuke Endo, Satoshi Ohshima, and Takeshi Nanri. Optimization of a gemm implementation using intel amx. In Proceedings of the Supercomputing Asia and International Conference on High Performance Computing in Asia Pacific Region , SCA/HPCAsia ’26, page 81–90, New York, NY, USA, 2026. Association for Computing Machinery. [10] Stefan Remke and Alexander Breuer. Hello sme! generating fast matrix multi-plication kernels using the scalable matrix extension. In Proceedings of the SC ’24 Workshops of the International Conference on High Performance Computing, Network, Storage, and Analysis , SC-W ’24, page 1443–1454. IEEE Press, 2025. [11] Weiqun Zhang, Ann Almgren, Vince Beckner, John Bell, Johannes Blaschke, Cy Chan, Marcus Day, Brian Friesen, Kevin Gott, Daniel Graves, Max P. Katz, Andrew Myers, Tan Nguyen, Andrew Nonaka, Michele Rosso, Samuel Williams, and Michael Zingale. Amrex: a framework for block-structured adaptive mesh refinement. Journal of Open Source Software , 4(37):1370, 2019. [12] Guangnan Feng, Jiabin Xie, Dezun Dong, and Yutong Lu. Unr: Unified notifiable rma library for hpc. In Proceedings of the International Conference for High Performance Computing, Networking, Storage, and Analysis , SC ’24. IEEE Press, 2024. [13] Viktor K. Decyk and Tajendra V. Singh. Particle-in-cell algorithms for emerging computer architectures. Computer Physics Communications , 185(3):708–719, 2014. [14] Changwan Hong, Aravind Sukumaran-Rajam, Bortik Bandyopadhyay, Jinsung Kim, Süreyya Emre Kurt, Israt Nisa, Shivani Sabhlok, Ümit V. Çatalyürek, Srini-vasan Parthasarathy, and P. Sadayappan. Efficient sparse-matrix multi-vector product on gpus. In Proceedings of the 27th International Symposium on High-Performance Parallel and Distributed Computing , HPDC ’18, page 66–79, New York, NY, USA, 2018. Association for Computing Machinery. [15] Ping Gao, Xiaohui Duan, Bertil Schmidt, Wusheng Zhang, Lin Gan, Haohuan Fu, Wei Xue, Weiguo Liu, and Guangwen Yang. Optimization of reactive force field simulation: Refactor, parallelization, and vectorization for interactions. IEEE Transactions on Parallel and Distributed Systems , 33(2):359–373, 2022. [16] Han Huang, Jiabin Xie, Guangnan Feng, Xianwei Zhang, Dan Huang, Zhiguang Chen, and Yutong Lu. Hstencil: Matrix-vector stencil computation with inter-leaved outer product and mla. In Proceedings of the International Conference for High Performance Computing, Networking, Storage and Analysis , SC ’25, page 1816–1829, New York, NY, USA, 2025. Association for Computing Machinery. [17] Yiwei Zhang, Kun Li, Liang Yuan, Jiawen Cheng, Yunquan Zhang, Ting Cao, and Mao Yang. Lorastencil: Low-rank adaptation of stencil computation on tensor cores. In Proceedings of the International Conference for High Performance Computing, Networking, Storage, and Analysis , SC ’24. IEEE Press, 2024. [18] Yuetao Chen, Kun Li, Yuhao Wang, Donglin Bai, Lei Wang, Lingxiao Ma, Liang Yuan, Yunquan Zhang, Ting Cao, and Mao Yang. Convstencil: Transform stencil computation to matrix multiplication on tensor cores. In Proceedings of the 29th ACM SIGPLAN Annual Symposium on Principles and Practice of Parallel Programming , PPoPP ’24, page 333–347, New York, NY, USA, 2024. Association for Computing Machinery. [19] Xiaoyan Liu, Yi Liu, Hailong Yang, Jianjin Liao, Mingzhen Li, Zhongzhi Luan, and Depei Qian. Toward accelerated stencil computation by adapting tensor core unit on gpu. In Proceedings of the 36th ACM International Conference on Supercomputing , ICS ’22, New York, NY, USA, 2022. Association for Computing Machinery. [20] Hang Cao, Liang Yuan, He Zhang, Yunquan Zhang, Baodong Wu, Kun Li, Shigang Li, Minghua Zhang, Pengqi Lu, and Junmin Xiao. Agcm-3dlf: Accelerating atmospheric general circulation model via 3-d parallelization and leap-format. 
+
+IEEE Transactions on Parallel and Distributed Systems , 34(3):766–780, 2023. [21] Shihui Song, Yafan Huang, Peng Jiang, Xiaodong Yu, Weijian Zheng, Sheng Di, Qinglei Cao, Yunhe Feng, Zhen Xie, and Franck Cappello. Ceresz: Enabling and scaling error-bounded lossy compression on cerebras cs-2. In Proceedings of the 33rd International Symposium on High-Performance Parallel and Distributed Computing , HPDC ’24, page 309–321, New York, NY, USA, 2024. Association for Computing Machinery. [22] Didem Unat, Anshu Dubey, Torsten Hoefler, John Shalf, Mark Abraham, Mauro Bianco, Bradford L. Chamberlain, Romain Cledat, H. Carter Edwards, Hal Finkel, Karl Fuerlinger, Frank Hannig, Emmanuel Jeannot, Amir Kamil, Jeff Keasler, Paul H J Kelly, Vitus Leung, Hatem Ltaief, Naoya Maruyama, Chris J. Newburn, and Miquel Pericás. Trends in data locality abstractions for hpc systems. IEEE Transactions on Parallel and Distributed Systems , 28(10):3007–3020, 2017. [23] A. Beck, J. Derouillat, M. Lobet, A. Farjallah, F. Massimo, I. Zemzemi, F. Perez, T. Vinci, and M. Grech. Adaptive simd optimizations in particle-in-cell codes with fine-grain particle sorting. Computer Physics Communications , 244:246–263, 2019. [24] Yann Barsamian, Sever A. Hirstoaga, and Éric Violard. Efficient data layouts for a three-dimensional electrostatic particle-in-cell code. Journal of Computational Science , 27:345–356, 2018. [25] Yann Barsamian, Arthur Charguéraud, Sever A. Hirstoaga, and Michel Mehren-berger. Efficient strict-binning particle-in-cell algorithm for multi-core simd processors. In Marco Aldinucci, Luca Padovani, and Massimo Torquati, edi-tors, Euro-Par 2018: Parallel Processing , pages 749–763, Cham, 2018. Springer International Publishing. [26] Michael A. Bender and Haodong Hu. An adaptive packed-memory array. ACM Trans. Database Syst. , 32(4):26–es, November 2007. [27] Brian Wheatman and Helen Xu. A Parallel Packed Memory Array to Store Dynamic Graphs , pages 31–45. SIAM, 2021. [28] Vignesh Balaji and Brandon Lucia. Combining data duplication and graph reordering to accelerate parallel graph processing. In Proceedings of the 28th International Symposium on High-Performance Parallel and Distributed Computing ,HPDC ’19, page 133–144, New York, NY, USA, 2019. Association for Computing Machinery. [29] Torsten Hoefler and Andrew Lumsdaine. Overlapping communication and com-putation with high level communication routines. In 2008 Eighth IEEE Interna-tional Symposium on Cluster Computing and the Grid (CCGRID) , pages 572–577, 2008. [30] S. Cools and W. Vanroose. The communication-hiding pipelined bicgstab method for the parallel solution of large unsymmetric linear systems. Parallel Computing ,65:1–20, 2017. [31] Alexandre Denis, Julien Jaeger, Emmanuel Jeannot, and Florian Reynier. Amethodology for assessing computation/communication overlap of mpi non-blocking collectives. Concurrency and Computation: Practice and Experience ,34(22):e7168, 2022. [32] Hui Zhou, Robert Latham, Ken Raffenetti, Yanfei Guo, and Rajeev Thakur. Mpi progress for all. In SC24-W: Workshops of the International Conference for High Performance Computing, Networking, Storage and Analysis , pages 425–435, 2024. [33] Jiajun Huang, Kaiming Ouyang, Yujia Zhai, Jinyang Liu, Min Si, Ken Raffenetti, Hui Zhou, Atsushi Hori, Zizhong Chen, Yanfei Guo, and Rajeev Thakur. Acceler-ating mpi collectives with process-in-process-based multi-object techniques. In 
+
+Proceedings of the 32nd International Symposium on High-Performance Parallel and Distributed Computing , HPDC ’23, page 333–334, New York, NY, USA, 2023. Association for Computing Machinery. [34] Joong-Yeon Cho, Pu-Rum Seo, and Hyun-Wook Jin. Exploiting copy engines for intra-node mpi collective communication. The Journal of Supercomputing ,79(16):17962–17982, 2023. [35] Patrick Schmid, Maciej Besta, and Torsten Hoefler. High-performance distributed rma locks. In Proceedings of the 25th ACM International Symposium on High-Performance Parallel and Distributed Computing , HPDC ’16, page 19–30, New York, NY, USA, 2016. Association for Computing Machinery. [36] Chen Tang, Zhaole Chu, Peiquan Jin, Yongping Luo, and Kuankuan Guo. Hm2: Efficient host memory management for rdma-enabled distributed systems. In 
+
+Proceedings of the 32nd International Symposium on High-Performance Parallel and Distributed Computing , HPDC ’23, page 335–336, New York, NY, USA, 2023. Association for Computing Machinery. [37] Matthieu Schaller, Pedro Gonnet, Aidan B. G. Chalk, and Peter W. Draper. Swift: Using task-based parallelism, fully asynchronous communication, and graph HPDC ’26, July 13–16, 2026, Cleveland, OH, USA Yizhuo Rao et al.        
+
+> partition-based domain decomposition for strong scaling on more than 100,000 cores. In Proceedings of the Platform for Advanced Scientific Computing Conference ,PASC ’16, New York, NY, USA, 2016. Association for Computing Machinery. [38] Nicolas Guidotti, Pedro Ceyrat, João Barreto, José Monteiro, Rodrigo Rodrigues, Ricardo Fonseca, Xavier Martorell, and Antonio J. Peña. Particle-in-cell simulation using asynchronous tasking. In Leonel Sousa, Nuno Roma, and Pedro Tomás, editors, Euro-Par 2021: Parallel Processing , pages 482–498, Cham, 2021. Springer International Publishing. [39] Jay P Boris. Relativistic plasma simulation-optimization of a hybrid code. In Proc. Fourth Conf. Num. Sim. Plasmas , pages 3–67, 1970. [40] J-L Vay. Simulation of beams or plasmas crossing at relativistic velocity. Physics of Plasmas , 15(5), 2008.
+
+## A Implementation Details 
+
+Table 5 details the specific implementation strategies for each ex-perimental variant (G0–G7, D0–D3, and C0–C4). It highlights the architectural distinctions between baseline VPU approaches and the proposed MPU-accelerated designs, including the specific sorting mechanisms and overlap protocols employed to isolate performance contributions. 
+
+## B Simulation Parameters 
+
+Table 6 lists the comprehensive physical and numerical parameters used for the Uniform Plasma and Laser-Ion Acceleration bench-marks. These parameters are chosen to ensure the reproducibility of the performance results and to reflect representative workloads in high-energy density physics simulations. 
+
+## C Artifact Appendix C.1 Abstract 
+
+This artifact provides the open-source implementation of POLAR-PIC The released repository is built on top of WarpX and contains the implementation of the main ideas presented in this paper: an MPU-oriented particle-processing path, physically ordered particle layout management, and overlapped particle redistribution. 
+
+## C.2 Description & Requirements 
+
+C.2.1 How to access. The artifact is publicly available at https: //github.com/sherry-roar/polarpic-ad. 
+
+C.2.2 What is released. The repository releases the implementa-tion basis of POLAR-PIC on top of WarpX. In particular, it includes the code paths corresponding to: 
+
+• matrixized / physically ordered particle push, 
+
+• custom order-3 deposition, 
+
+• communication overlap and one-sided communication inte-gration, 
+
+• AMReX-side metadata changes required by physical sorting and incremental sorting. At the algorithm level, the released implementation reflects the three key ideas of the paper: reformulating Field Interpolation into an MPU-friendly outer-product form, maintaining physical local-ity through particle layout management, and overlapping particle communication with computation. 
+
+C.2.3 Dependencies. The artifact is based on WarpX and retains the corresponding WarpX/AMReX 24.07 implementation context. It also includes a vendored one-sided communication backend used by the released implementation. The best performance reported in the paper is obtained on the LS pilot system with LX2 CPUs and the associated software stack described in the main paper. 
+
+C.2.4 Portability. The repository preserves the source-level im-plementation of the POLAR-PIC optimization path, while some low-level mappings remain platform dependent. In the released code, the vpu /mpu paths should be understood as placeholders for the target machine’s vector/matrix execution path. When porting to another architecture, these parts can be adapted by replacing the corresponding vpu /mpu instruction functions and related backend-specific support. For example, when targeting Apple M-series pro-cessors, the same optimization path can in principle be retargeted by replacing the current vpu /mpu implementations with the corre-sponding instruction-level functions on that platform. Likewise, if the original communication backend is unavailable, the communi-cation path can be reimplemented with an equivalent one-sided in-terface, for example using MPI one-sided communication semantics, provided that the required synchronization behavior is preserved. 
+
+C.2.5 Additional note. The released artifact is intended to expose the implementation of POLAR-PIC in an inspectable open-source form. The strongest performance results in this paper correspond to the LS/LX2 platform. If evaluators or readers have questions about the code or platform adaptation, they may contact the authors. POLAR-PIC: A Holistic Framework for Matrixized PIC with Co-Designed Compute, Layout, and Communication HPDC ’26, July 13–16, 2026, Cleveland, OH, USA 
+
+Table 5: Detailed implementations for experimental configurations and ablation variants. 
+
+Config Implementation Specification Evaluation Purpose & Significance 
+
+Exp 1: Interpolation (Gather & Push) Variants 
+
+G0 Native WarpX Gather; relies on compiler auto-vectorization for VPU; no particle ordering. Establishes the performance baseline under irregular mem-ory access patterns. G1 Hand-tuned VPU Gather using explicit SIMD intrinsics; unsorted. Isolates the benefits of manual VPU instruction optimization from data locality factors. G2 G1 with incremental logical index sorting. Reproduces the logical-order supply strategy of Matrix-PIC [ 6]; quantifies locality benefits without physical data movement. G3 G2 enhanced with physical reordering based on the sorted indices (explicit memory compaction). Decouples the impact of physical compaction from logical indexing under the VPU kernel. G4 Replaces G3’s reordering with Sort-on-Write (SoW) mechanisms during the write-back path. Evaluates the efficiency of SoW compared to explicit memory compaction. G5 MPU Gather kernel enabled; retains G2-style logical index sorting. Assesses MPU sensitivity to logical-order supply and mem-ory fragmentation (MPU counterpart to G2). G6 MPU Gather kernel with G3-style physical reordering driven by indices. Measures the synergistic effect of MPU execution and ex-plicit physical compaction (MPU counterpart to G3). G7 MPU Gather kernel with SoW physical reordering (Final POLAR-PIC Gather). Validates that SoW-sustained contiguity enables stable, sus-tained MPU pipeline saturation. 
+
+Exp 2: Deposition (Scatter) Variants 
+
+D0 Native WarpX Deposition; uses default atomic conflict handling strategies. Baseline for Deposition computational cost and conflict res-olution without MPU reformulation. D1 MPU Deposition reusing G2’s incremental logical indices. Reproduces the Matrix-PIC Deposition strategy [ 6]; isolates MPU gains under logical ordering. D2 MPU Deposition reusing G7’s physical layout; adds extra binning for the disor-dered tail stream. Evaluates whether explicit tail binning improves robustness when perfect global contiguity is absent. D3 MPU Deposition reusing G7’s physical layout; falls back to VPU for the tail stream. Final design of POLAR-PIC. Maximizes reuse of SoW layout while maintaining efficient, low-overhead tail handling. 
+
+Exp 3: Overlap Strategy Variants 
+
+C0 Bulk-synchronous redistribution at end of the step (Scan → Pack → Send →
+
+Wait → Unpack). Baseline BSP behavior; exposes full packing and synchro-nization latency on the critical path. C1 MPI-based nonblocking overlap; initiates transfers and converges immediately after Deposit. Evaluates conservative overlap capabilities using standard MPI progress semantics. C2 UNR-based notifiable overlap; offloads pre-packed buffers and converges after Deposit. Default POLAR-PIC strategy. Validates NIC offloading and notifiable completion for stable overlap. C3 MPI-based overlap extended into the Field Solve phase. Assesses aggressive overlap limits and potential bandwidth interference with field communication. C4 UNR-based overlap extended into the Field Solve phase. Evaluates whether UNR enables deeper overlap windows without destabilizing overall performance. 
+
+Integrated Systems 
+
+Baseline Reference pipeline: (G0 + D0 + C0). Represents the production-grade WarpX configuration tuned with official optimizations for best-effort performance. Matrix-PIC Open-source-based Matrix-PIC architecture (G2 + D1 + C0) reconstructed by reusing incremental index sorting logic. Extends the matrixized SOTA by applying logical index-sorting to both Interpolation and Deposition without SoW physical reordering. Represents the manually implemented best-case baseline SOTA without SoW. POLAR-PIC Proposed pipeline: (G7 + D3 + C2). Integrates full MPU execution, SoW-sustained contiguity, and UNR-based overlap. HPDC ’26, July 13–16, 2026, Cleveland, OH, USA Yizhuo Rao et al. 
+
+Table 6: Key parameters for Uniform Plasma and Laser-Ion Acceleration workloads. 
+
+Input Parameter Uniform Plasma Laser-Ion Acceleration Objective Assess SIMD/MPU kernel efficiency under controlled conditions Evaluate system-level behavior under strongly non-uniform, migration-heavy dynamics 
+
+Physics Context Homogeneous periodic plasma for isolating per-step kernel behavior Laser–solid interaction capturing transient acceleration dynamics 
+
+Simulation Configuration 
+
+max_step 100 100 
+
+geometry.dims 3 3
+
+warpx.grid_type collocated collocated 
+
+amr.n_cell 256 × 128 × 128 192 × 192 × 256 
+
+geometry.prob_lo −2.0 × 10 −5 (all dims) −3.75 × 10 −6, −3.75 × 10 −6, −2.5 × 10 −6
+
+geometry.prob_hi +2.0 × 10 −5 (all dims) +3.75 × 10 −6, +3.75 × 10 −6, +1.25 × 10 −5
+
+Boundary Conditions & Solvers 
+
+boundary.field periodic (all faces) pml (all faces) 
+
+warpx.cfl 1.0 0.999 
+
+algo.particle_shape 3 (Cubic) 3 (Cubic) 
+
+algo.maxwell_solver Yee Yee 
+
+algo.particle_pusher Boris Boris 
+
+Particle Configuration 
+
+particles.tile_size 8 × 8 × 8 8 × 8 × 8
+
+electrons.profile Constant parse_density_function electrons.density 1.0 × 10 25 m−3 –
+
+electrons.ppc {1, 2, 4, . . . , 512} {1, 2, 4, . . . , 512} 
+
+electrons.u_th (x,y,z) {0, 0.01 , 0.05 , 0.1, 0.2} 0.01 (fixed) 
+
+target parameters – 𝐿 = 50 nm , 𝑛 𝑒 = 30 𝑛 𝑐 
+
+𝑛 𝑐 = 1.74 × 10 27 m−3
+
+Laser Parameters (LIA only) 
+
+laser.profile – Gaussian 
+
+laser.a0 – 16.0 
+
+laser.wavelength – 0.8 𝜇 m
+
+laser.duration – 30 fs 
+
+laser.focal_dist – 4.0 𝜇 m
+
+laser.waist – 4.0 𝜇 m

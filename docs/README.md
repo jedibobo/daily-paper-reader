@@ -7,72 +7,72 @@
 
 ## 每次日报
 - 最新运行日期：2026-04-26
-- 运行时间：2026-04-26 02:43:08 UTC
+- 运行时间：2026-04-26 19:42:59 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日深度解析光子AI与LLM驱动硬件设计等17篇前沿成果，探索计算效率的新边界。
-重点推荐全息衍射光子神经系统实现实时图像分类，以及利用模拟退火优化大模型生成硬件代码的创新框架。
-建议关注光电混合计算与边缘侧能效优化，把握AI赋能底层硬件设计的跨界趋势。
+今日深度研读 17 篇前沿成果，聚焦 GPU 异步架构加速与大模型内存瓶颈的硬件级突破。
+重点推荐 AsyncSparse 稀疏矩阵优化与 AQPIM 激活量化技术，两者显著提升了复杂计算的吞吐与容量。
+建议开发者关注边缘端轨迹预测与神经科学启发算子，探索软硬协同下的高效视觉感知方案。
 - 详情：[/202604/26/README](/202604/26/README)
 
 ### 精读区论文标签
-1. [Photonic AI: A Hybrid Diffractive Holographic Neural System for Passive Optical Real-Time Image Classification](/202604/26/2604.15364v1-photonic-ai-a-hybrid-diffractive-holographic-neural-system-for-passive-optical-real-time-image-classification)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：用于能效边缘智能的光学神经网络系统
-2. [HYPERHEURIST: A Simulated Annealing-Based Control Framework for LLM-Driven Code Generation in Optimized Hardware Design](/202604/26/2604.15642v1-hyperheurist-a-simulated-annealing-based-control-framework-for-llm-driven-code-generation-in-optimized-hardware-design)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：利用LLM生成RTL并进行PPA优化与硬件设计控制
-3. [Neuromorphic Parameter Estimation for Power Converter Health Monitoring Using Spiking Neural Networks](/202604/26/2604.15714v1-neuromorphic-parameter-estimation-for-power-converter-health-monitoring-using-spiking-neural-networks)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：在类脑硬件上使用脉冲神经网络实现亚毫瓦级边缘推理以降低能耗
-4. [Combining Convolution and Delay Learning in Recurrent Spiking Neural Networks](/202604/26/2604.15997v1-combining-convolution-and-delay-learning-in-recurrent-spiking-neural-networks)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：为资源受限的边缘系统提供内存占用更小的精简架构
-5. [TRON: Trainable, architecture-reconfigurable random optical neural networks](/202604/26/2604.16228v1-tron-trainable-architecture-reconfigurable-random-optical-neural-networks)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：架构可重构的随机光神经网络
-6. [Gradient-Free Continual Learning in Spiking Neural Networks via Inter-Spike Interval Regularization](/202604/26/2604.16496v1-gradient-free-continual-learning-in-spiking-neural-networks-via-inter-spike-interval-regularization)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：针对缺乏反向传播支持的类脑硬件的无梯度度量
+1. [AsyncSparse: Accelerating Sparse Matrix-Matrix Multiplication on Asynchronous GPU Architectures](/202604/26/2604.17834v1-asyncsparse-accelerating-sparse-matrix-matrix-multiplication-on-asynchronous-gpu-architectures)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：利用异步GPU硬件特性的协同设计内核
+2. [AQPIM: Breaking the PIM Capacity Wall for LLMs with In-Memory Activation Quantization](/202604/26/2604.18137v1-aqpim-breaking-the-pim-capacity-wall-for-llms-with-in-memory-activation-quantization)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对存内计算专门化的激活量化以增强带宽和计算效率
+3. [ChipLight: Cross-Layer Optimization of Chiplet Design with Optical Interconnects for LLM Training](/202604/26/2604.18909v1-chiplight-cross-layer-optimization-of-chiplet-design-with-optical-interconnects-for-llm-training)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对大模型训练的芯粒架构与光互连跨层优化
+4. [POLAR-PIC: A Holistic Framework for Matrixized PIC with Co-Designed Compute, Layout, and Communication](/202604/26/2604.19337v1-polar-pic-a-holistic-framework-for-matrixized-pic-with-co-designed-compute-layout-and-communication)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对矩阵处理单元协同设计计算、布局与通信
+5. [ImageHD: Energy-Efficient On-Device Continual Learning of Visual Representations via Hyperdimensional Computing](/202604/26/2604.21280v1-imagehd-energy-efficient-on-device-continual-learning-of-visual-representations-via-hyperdimensional-computing)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：通过FPGA加速器实现能效端侧学习
+6. [GraphLeap: Decoupling Graph Construction and Convolution for Vision GNN Acceleration on FPGA](/202604/26/2604.21290v1-graphleap-decoupling-graph-construction-and-convolution-for-vision-gnn-acceleration-on-fpga)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：通过解耦构建与卷积在FPGA上加速视觉GNN
 
 ### 速读区论文标签
 1. [Resource-Efficient Quantum-Enhanced Compressive Imaging via Quantum Classical co-Design](/202604/26/2604.16662v1-resource-efficient-quantum-enhanced-compressive-imaging-via-quantum-classical-co-design)  
    标签：评分：8.0/10、query:hwnas
-   evidence：量子硬件层与经典软件层的协同设计
-2. [EdgeVTP: Exploration of Latency-efficient Trajectory Prediction for Edge-based Embedded Vision Applications](/202604/26/2604.16783v1-edgevtp-exploration-of-latency-efficient-trajectory-prediction-for-edge-based-embedded-vision-applications)  
+   evidence：量子硬件与经典软件的协同设计
+2. [Neuroscience Inspired Graph Operators Towards Edge-Deployable Virtual Sensing for Irregular Geometries](/202604/26/2604.16722v1-neuroscience-inspired-graph-operators-towards-edge-deployable-virtual-sensing-for-irregular-geometries)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对边缘设备的嵌入式优先、延迟受限的轨迹预测器
-3. [E2AFS: Energy-Efficient Approximate Floating Point Square Rooter for Error Tolerant Computing](/202604/26/2604.16964v1-e2afs-energy-efficient-approximate-floating-point-square-rooter-for-error-tolerant-computing)  
+   evidence：具有严格延迟和能耗约束的边缘部署虚拟传感
+3. [EdgeVTP: Exploration of Latency-efficient Trajectory Prediction for Edge-based Embedded Vision Applications](/202604/26/2604.16783v1-edgevtp-exploration-of-latency-efficient-trajectory-prediction-for-edge-based-embedded-vision-applications)  
    标签：评分：8.0/10、query:hwnas
-   evidence：面向边缘AI和嵌入式系统的能效硬件架构
-4. [MobileAgeNet: Lightweight Facial Age Estimation for Mobile Deployment](/202604/26/2604.17007v1-mobileagenet-lightweight-facial-age-estimation-for-mobile-deployment)  
+   evidence：面向边缘嵌入式视觉应用的嵌入式优先轨迹预测器
+4. [When W4A4 Breaks Camouflaged Object Detection: Token-Group Dual-Constraint Activation Quantization](/202604/26/2604.16855v1-when-w4a4-breaks-camouflaged-object-detection-token-group-dual-constraint-activation-quantization)  
    标签：评分：8.0/10、query:hwnas
-   evidence：平衡移动端部署的准确率、低延迟和紧凑尺寸
-5. [The First Challenge on Mobile Real-World Image Super-Resolution at NTIRE 2026: Benchmark Results and Method Overview](/202604/26/2604.17306v1-the-first-challenge-on-mobile-real-world-image-super-resolution-at-ntire-2026-benchmark-results-and-method-overview)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：针对移动设备的高效网络设计，通过加速比进行评估
-6. [MoE-nD: Per-Layer Mixture-of-Experts Routing for Multi-Axis KV Cache Compression](/202604/26/2604.17695v1-moe-nd-per-layer-mixture-of-experts-routing-for-multi-axis-kv-cache-compression)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：全局内存预算下的逐层路由
-7. [AsyncSparse: Accelerating Sparse Matrix-Matrix Multiplication on Asynchronous GPU Architectures](/202604/26/2604.17834v1-asyncsparse-accelerating-sparse-matrix-matrix-multiplication-on-asynchronous-gpu-architectures)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：针对异步GPU架构协同设计的内核以加速稀疏矩阵乘法
-8. [GPUOS: A GPU Operating System Primitive for Transparent Operation Fusion](/202604/26/2604.17861v1-gpuos-a-gpu-operating-system-primitive-for-transparent-operation-fusion)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：用于算子融合和减少内核启动开销的即时编译系统
-9. [LoRaQ: Optimized Low Rank Approximation for 4-bit Quantization](/202604/26/2604.18117v1-loraq-optimized-low-rank-approximation-for-4-bit-quantization)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限硬件的4位量化优化低秩近似
-10. [AQPIM: Breaking the PIM Capacity Wall for LLMs with In-Memory Activation Quantization](/202604/26/2604.18137v1-aqpim-breaking-the-pim-capacity-wall-for-llms-with-in-memory-activation-quantization)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：针对存内计算优化的激活量化，提升带宽和计算效率
-11. [Programmable recirculating bricks mesh architecture for photonic neural networks](/202604/26/2604.18160v1-programmable-recirculating-bricks-mesh-architecture-for-photonic-neural-networks)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：光子神经网络的软件定义硬件
+   evidence：针对低比特推理的设备内存和延迟预算优化
+5. [KAIROS: Stateful, Context-Aware Power-Efficient Agentic Inference Serving](/202604/26/2604.16682v1-kairos-stateful-context-aware-power-efficient-agentic-inference-serving)  
+   标签：评分：7.0/10、query:hwnas
+   evidence：针对智能体AI推理服务的上下文感知功耗优化
+6. [Knowledge Distillation for Lightweight Multimodal Sensing-Aided mmWave Beam Tracking](/202604/26/2604.16708v1-knowledge-distillation-for-lightweight-multimodal-sensing-aided-mmwave-beam-tracking)  
+   标签：评分：7.0/10、query:hwnas
+   evidence：用于毫米波传感轻量化模型的知识蒸馏
+7. [Scalable and Adaptive Parallel Training of Graph Transformer on Large Graphs](/202604/26/2604.16715v1-scalable-and-adaptive-parallel-training-of-graph-transformer-on-large-graphs)  
+   标签：评分：7.0/10、query:hwnas
+   evidence：根据硬件配置优化并行化策略
+8. [Reducing Peak Memory Usage for Modern Multimodal Large Language Model Pipelines](/202604/26/2604.16734v1-reducing-peak-memory-usage-for-modern-multimodal-large-language-model-pipelines)  
+   标签：评分：7.0/10、query:hwnas
+   evidence：通过解决KV缓存瓶颈降低MLLM流水线的峰值内存占用
+9. [FliX: Flipped-Indexing for Scalable GPU Queries and Updates](/202604/26/2604.16725v1-flix-flipped-indexing-for-scalable-gpu-queries-and-updates)  
+   标签：评分：6.0/10、query:hwnas
+   evidence：可扩展的GPU查询和更新以实现高吞吐量
+10. [Flat optics for analog computing: from fundamental mechanisms to advanced meta-processors](/202604/26/2604.16849v1-flat-optics-for-analog-computing-from-fundamental-mechanisms-to-advanced-meta-processors)  
+   标签：评分：6.0/10、query:hwnas
+   evidence：用于零功耗信息处理的光学模拟计算与元处理器
+11. [CATP: Confidence-Aware Token Pruning for Camouflaged Object Detection](/202604/26/2604.16854v1-catp-confidence-aware-token-pruning-for-camouflaged-object-detection)  
+   标签：评分：6.0/10、query:hwnas
+   evidence：通过令牌剪枝减少计算开销以利于实际部署
 
 
 <div class="dpr-home-promo-card">
