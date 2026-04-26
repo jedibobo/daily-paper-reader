@@ -1,6 +1,7 @@
 import os
 import time
 from typing import List, Dict, Tuple, Any, Optional
+from urllib.parse import urljoin
 
 import requests
 
@@ -423,46 +424,67 @@ class BltClient(LLMClient):
         request_bases = self._iter_retry_bases(total_attempts=6)
         last_error: Exception | None = None
         for attempt_idx, req_base in enumerate(request_bases, start=1):
-            request_url = f"{req_base.rstrip('/')}/rerank"
+            base = req_base.rstrip("/")
+            request_urls = [f"{base}/rerank"] if base.endswith("/v1") else [f"{base}/v1/rerank", f"{base}/rerank"]
             for model_name in model_candidates:
                 payload_variants = _build_payload_variants(model_name)
                 for variant_idx, payload in enumerate(payload_variants, start=1):
-                    try:
-                        response = requests.post(request_url, headers=headers, json=payload, timeout=120)
-                        response.raise_for_status()
+                    for request_url in request_urls:
                         try:
-                            response_data = response.json()
-                        except ValueError:
-                            print("Rerank 响应无法解析为 JSON，原始文本预览:", response.text[:500])
-                            raise
+                            response = requests.post(
+                                request_url,
+                                headers=headers,
+                                json=payload,
+                                timeout=120,
+                                allow_redirects=False,
+                            )
+                            if response.status_code in {301, 302, 303, 307, 308}:
+                                redirect_to = str(response.headers.get("Location") or "").strip()
+                                if redirect_to:
+                                    redirected_url = urljoin(request_url, redirect_to)
+                                    print(f"Rerank 命中重定向，改为直接 POST: {redirected_url}")
+                                    response = requests.post(
+                                        redirected_url,
+                                        headers=headers,
+                                        json=payload,
+                                        timeout=120,
+                                        allow_redirects=False,
+                                    )
 
-                        if isinstance(response_data, dict) and 'error' in response_data:
-                            err = response_data.get('error') or {}
-                            print("Rerank 返回错误:", {
-                                'type': err.get('type'),
-                                'code': err.get('code'),
-                                'message': err.get('message') or err,
-                            })
-                            raise requests.exceptions.HTTPError(f"Rerank API error: {err}")
-
-                        return response_data
-                    except Exception as e:
-                        last_error = e
-                        print(
-                            f"Rerank 请求失败（base={req_base}，第 {attempt_idx} 次，"
-                            f"model={model_name}，payload_variant={variant_idx}/{len(payload_variants)}）"
-                        )
-                        if hasattr(e, "response") and e.response is not None:
+                            response.raise_for_status()
                             try:
-                                print("本次失败详情(JSON):", e.response.json())
+                                response_data = response.json()
                             except ValueError:
+                                print("Rerank 响应无法解析为 JSON，原始文本预览:", response.text[:500])
+                                raise
+
+                            if isinstance(response_data, dict) and 'error' in response_data:
+                                err = response_data.get('error') or {}
+                                print("Rerank 返回错误:", {
+                                    'type': err.get('type'),
+                                    'code': err.get('code'),
+                                    'message': err.get('message') or err,
+                                })
+                                raise requests.exceptions.HTTPError(f"Rerank API error: {err}")
+
+                            return response_data
+                        except Exception as e:
+                            last_error = e
+                            print(
+                                f"Rerank 请求失败（url={request_url}，base={req_base}，第 {attempt_idx} 次，"
+                                f"model={model_name}，payload_variant={variant_idx}/{len(payload_variants)}）"
+                            )
+                            if hasattr(e, "response") and e.response is not None:
                                 try:
-                                    print("本次失败详情(TEXT):", e.response.text[:500])
-                                except Exception:
-                                    pass
-                        else:
-                            print("本次失败详情: 未收到服务端响应（可能是网络/SSL问题）。")
-                        continue
+                                    print("本次失败详情(JSON):", e.response.json())
+                                except ValueError:
+                                    try:
+                                        print("本次失败详情(TEXT):", e.response.text[:500])
+                                    except Exception:
+                                        pass
+                            else:
+                                print("本次失败详情: 未收到服务端响应（可能是网络/SSL问题）。")
+                            continue
 
             if attempt_idx < len(request_bases):
                 next_base = request_bases[attempt_idx] if attempt_idx < len(request_bases) else ''
@@ -471,7 +493,6 @@ class BltClient(LLMClient):
 
         if last_error is not None:
             print("Rerank 请求摘要:", {
-                "url": request_url,
                 "models_tried": model_candidates,
                 "query_len": len(query or ""),
                 "documents": len(documents),
