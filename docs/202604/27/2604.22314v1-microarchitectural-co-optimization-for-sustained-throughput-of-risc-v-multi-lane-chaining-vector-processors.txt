@@ -1,0 +1,341 @@
+Title: Microarchitectural Co-Optimization for Sustained Throughput of RISC-V Multi-Lane Chaining Vector Processors
+
+URL Source: https://arxiv.org/pdf/2604.22314v1
+
+Published Time: Mon, 27 Apr 2026 00:30:20 GMT
+
+Number of Pages: 9
+
+Markdown Content:
+# Microarchitectural Co-Optimization for Sustained Throughput of RISC-V Multi-Lane Chaining Vector Processors 
+
+Weiying Wang and Zhiwei Zhang 
+
+Institute of Automation, Chinese Academy of Sciences School of Artificial Intelligence, University of Chinese Academy of Sciences Beijing 100049, China Email: {wangweiying2021, zhiwei.zhang }@ia.ac.cn 
+
+Abstract —Modern RISC vector processors rely on the syn-ergy of multi-lane parallelism and chaining to achieve high sustained throughput, yet their achieved performance often falls substantially short of the theoretical performance bound due to microarchitectural inefficiencies. In this work, we take the open-source RVV processor Ara as the target platform and analyze the sources of its sustained-throughput loss and optimize the design accordingly. We first establish an ideal multi-lane chaining 
+
+execution model as a microarchitectural reference for the ideal steady-state progression of the vector backend. Based on this model, we attribute Ara’s key bottlenecks to inefficiencies along three critical execution paths: memory-side inefficiencies in data supply and transaction issuance, control-side inefficiencies caused by conservative dependence management and issue control, and operand-delivery inefficiencies caused by access conflicts and result-propagation overhead. To address these bottlenecks, we propose a coordinated set of microarchitectural optimizations. Experimental results show that, without increasing raw memory bandwidth or changing the main processor configuration, Ara-Opt achieves a geometric-mean speedup of 1.33 × over baseline Ara. Under roofline-based normalization, the geometric-mean gap-closed ratio reaches 12.2%. In particular, scal, axpy, ger, and gemm achieve speedups of approximately 2.41 ×, 1.60 ×,
+
+1.52 ×, and 1.42 ×, with corresponding gap-closed ratios of 93.7%, 88.9%, 78.3%, and 59.3%, respectively. These results show that the proposed method can effectively recover sustained-throughput capability lost to microarchitectural inefficiencies in Ara under essentially unchanged hardware resource constraints, and move the implementation points of regular streaming and high-throughput workloads significantly closer to the theoretical performance bound. 
+
+Index Terms —RISC-V Vector Extension, Sustained Through-put, Multi-Lane Chaining, Microarchitectural Co-Optimization 
+
+I. I NTRODUCTION 
+
+As the scale and computational complexity of large models continue to grow [1], both computational throughput and data-supply capability have become key determinants of overall system efficiency [2]. Such models are typically composed of attention, feed-forward, and normalization modules, whose underlying computations can be largely reduced to regular and dense data-parallel operations, including matrix multipli-cations, element-wise vector operations, and reductions. Under fixed hardware resource constraints, continuously and effi-ciently exploiting data-level parallelism has therefore become a critical issue for large-model training and inference. Vector processors execute multiple data elements with a single instruction, thereby increasing computational through-put while reducing control overhead, and have long served as an important architectural substrate for regular dataflow computation. Since classic vector machines such as the CRAY-1 [3], vector architectures have evolved from early memory-memory organizations [4], [5] to vector-register organizations centered on explicit vector registers, while introducing chain-ing to allow dependent vector instructions to overlap as soon as the first results become available. In the era of general-purpose processors, vector processing concepts were largely carried forward through fixed-width SIMD, whose program-ming model is tightly coupled to implementation width and thus limited in scalability. By contrast, modern RISC vector architectures inherit the core principles of classical long-vector machines: organizing computation around long data streams and achieving high throughput through pipelined execution. More recently, the RISC-V Vector Extension (RVV) 1.0 [6], with its vector-length-agnostic design, has provided a unified programming model across implementations ranging from embedded processors to high-performance designs, thereby establishing an ISA foundation for modern long-vector pro-cessors. Modern RISC vector processors achieve high sustained throughput through the synergy of multi-lane parallelism and chaining. Multi-lane parallelism determines the upper bound of steady-state execution throughput, while chaining enables dependent vector instructions to overlap as soon as the first results become available. Ideally, if all lanes remain continuously utilized, the memory system supplies data at a stable rate, and pipeline progression incurs no additional stalls, the achieved performance should approach the theoret-ical performance bound imposed by the available hardware resources. In practice, however, sustained throughput often falls significantly short of this ideal bound. This suggests that, beyond macroscopic constraints such as peak compute capability or memory bandwidth, fine-grained inefficiencies in the microarchitectural implementation have become a primary 
+
+> arXiv:2604.22314v1 [cs.AR] 24 Apr 2026
+
+source of performance loss. In this work, we take the open-source RVV processor Ara [7]–[10] as the target platform and investigate sustained-throughput loss under fixed resource constraints. We first establish an ideal multi-lane chaining execution model as a microarchitectural reference for the ideal steady-state behavior of the vector backend. Building on this model, we analyze the major sources of sustained-throughput loss in Ara from the perspective of critical execution paths, and categorize them into three classes of implementation inefficiencies: inefficien-cies along the memory-side path, the control-side path, and the operand-delivery path. To address these bottlenecks, we propose a set of coordinated microarchitectural optimizations and further use a roofline model to evaluate how closely the optimized design approaches the theoretical performance bound. The main contributions of this paper are as follows:  
+
+> •
+
+We establish an ideal multi-lane chaining model for microarchitectural execution analysis. The model charac-terizes the ideal steady-state behavior of dependent vector instruction chains under a fixed processor configuration, assuming ideal data supply, timely dependence release, and no additional register-access conflicts, and serves as a microarchitectural reference for sustained-throughput-loss analysis.  
+
+> •
+
+We present a systematic analysis of sustained-throughput loss in Ara from the perspective of critical execution paths, and identify three major classes of inefficiencies: memory-side inefficiencies in data supply and transaction issuance, control-side inefficiencies caused by conser-vative dependence management and issue control, and operand-delivery inefficiencies caused by access conflicts and result propagation.  
+
+> •
+
+We propose coordinated microarchitectural optimizations targeting the three critical execution paths, including a descriptor-driven memory front-end with next-vl prefetch, early release of read-related dependences with dynamic local issue control, and multi-source forwarding with a dual-source operand queue. These techniques recover effective parallelism lost to implementation inefficiencies without expanding major hardware resources.  
+
+> •
+
+We validate the proposed techniques in an RTL imple-mentation. The results show that, without increasing raw memory bandwidth or changing the main processor con-figuration, the proposed optimizations significantly im-prove sustained vector throughput and move the achieved implementation points closer to the theoretical perfor-mance bound characterized by the roofline model. II. B ACKGROUND 
+
+This section reviews the architectural background relevant to this work. We first revisit the evolution of vector architectures and the fundamental characteristics of RVV. We then provide an overview of the Ara architecture. Finally, we establish an ideal multi-lane chaining model, which serves as the microar-chitectural reference for the subsequent bottleneck analysis. 
+
+A. Vector Architecture Evolution and RVV 
+
+Vector architectures have evolved over several decades from early streaming-style designs to modern scalable vector ISAs. Early implementations, such as the TI ASC and CDC STAR-100, primarily adopted a memory-memory organization, rely-ing on deep pipelines and streaming memory accesses to pro-cess large-scale array data [4], [5]. Subsequently, classic vector machines represented by the CRAY-1 established the vector-register paradigm [3]. Through explicit vector registers, lower startup overhead, and chaining mechanisms, these machines enabled dependent vector instructions to overlap in execution, thereby defining the basic form of classical long-vector ar-chitectures. Later systems, including the Cray X-MP, Y-MP, and their successors, as well as the Fujitsu VP, Hitachi S, and NEC SX series, further expanded the implementation space of vector architectures in high-performance computing [11]–[17]. In the era of general-purpose processors, vector concepts were mainly carried forward through fixed-width packed-SIMD extensions [18], [19]. Such designs, however, typically rely on fixed register widths, tightly coupling the programming model to implementation scale and offering limited support for complex memory access patterns, tail handling, exception recovery, and long-vector semantics. With the emergence of Arm SVE [20] and RISC-V RVV [6], modern vector archi-tectures have re-emphasized scalable vector lengths and richer vector semantics. RVV 1.0 is not merely a continuation of fixed-width SIMD; rather, it is a modern vector ISA centered on vector registers and designed to scale across implemen-tations of different sizes. Through mechanisms such as vl, vtype, SEW, and LMUL, RVV establishes a vector-length-agnostic programming model while incorporating key long-vector abstractions into the ISA, including complex memory accesses, mask/tail semantics, reductions, and vstart. RVV thus provides a unified and scalable ISA foundation for modern long-vector processors, and Ara is a representative open-source implementation in this design space. 
+
+B. Ara Architecture Overview 
+
+Ara is an open-source vector processing unit compliant with the RISC-V Vector Extension (RVV) 1.0 [8], [9]. It is tightly coupled with the scalar core CVA6 and achieves vector-level parallel execution through a scalable lane-based organization. At the top level, Ara consists of the dispatcher, sequencer, lanes, VLSU, SLDU, and MASKU. The dispatcher is responsi-ble for vector instruction decoding and CSR state maintenance; the sequencer manages issue control and dependency tracking; the VLSU handles vector load/store operations; the SLDU supports slide and permutation-related operations; and the MASKU processes predication and mask-related functions. At the execution level, vector operations are distributed across multiple parallel lanes, each of which integrates a local slice of the vector register file and a set of functional units, thereby sustaining data-parallel throughput over long-vector data streams. Ara supports configurable lane count, VLEN, data types, and extensions such as segmentation and MMU, thereby maintaining a unified RVV programming model across dif-ferent implementation scales. For the sustained-throughput behavior considered in this work, Ara’s potential performance advantage primarily derives from the synergy of multi-lane parallelism and chaining: the former provides parallel through-put in the steady-state phase, while the latter enables overlap among dependent instructions. Based on these architectural characteristics, the following sections establish an ideal execu-tion reference and analyze the sources of sustained-throughput loss in the actual implementation. 
+
+C. Ideal Multi-Lane Chaining Model 
+
+To analyze sustained-throughput loss in Ara under a fixed resource configuration, we establish an ideal multi-lane chain-ing model. The model keeps the processor lane count, functional-unit configuration, and raw memory bandwidth unchanged, and assumes that all lanes remain continuously active in the steady state. Chaining is assumed to be fully effective, such that a successor vector instruction can start as soon as the first results of its predecessor become available. The memory system is assumed to supply data continuously, without additional inefficiencies in transaction organization or bandwidth waste; vector register accesses are assumed to be conflict-free; and dependency management is assumed to introduce no extra pipeline stalls. Under these assumptions, the model characterizes the ideal execution behavior that the vector backend can achieve for dependent instruction chains under fixed microarchitectural resource constraints. t0 t1 t2 t3 t4 t5                       
+
+> t
+> e0 − 3 e4 − 7 e8 − 11 e12 − 15
+> e0 − 3 e4 − 7 e8 − 11 e12 − 15
+> e0 − 3 e4 − 7 e8 − 11 e12 − 15
+> e0 − 3 e4 − 7 e8 − 11 e12 − 15
+> vle32.v
+> vfmul.vv
+> vfadd.vv
+> vse32.v
+> Tfill VL /LTtail
+> Startup
+> Tail
+> Steady state
+> d1, 2
+> d2, 3
+> d3, 4
+> Fig. 1. Execution timeline and total-execution-time decomposition of a dependent vector instruction chain under ideal multi-lane chaining. The shaded region denotes the peak-throughput interval, where the instruction chain reaches steady-state overlap, and multiple vector instructions execute concurrently on different element groups.
+
+Fig. 1 illustrates the execution timeline of a dependent vector instruction chain, vle32.v → vfmul.vv → vfadd.vv →
+
+vse32.v, under ideal multi-lane chaining. The total execution time of the chain consists of three parts: the prologue phase, the steady-state phase, and the tail-drain phase. Let di,i +1 
+
+denote the startup propagation delay between two adjacent dependent instructions, and let Tfill denote the additional fill time from the startup of the last stage until the entire chain reaches peak-throughput operation. Then, the total prologue time before the chain enters the peak-throughput state can be expressed as 
+
+pN = 
+
+> N−1
+
+X
+
+> i=1
+
+di,i +1 + Tfill . (1) For vector length V L and lane count L, the execution time of the steady-state phase is 
+
+Tsteady =
+
+ V L L
+
+
+
+. (2) Accordingly, the ideal total execution time of the entire dependent vector instruction chain can be written as 
+
+Ttotal = pN + Tsteady + Ttail , (3) where Ttail denotes the tail-drain time after the steady-state phase ends. This decomposition corresponds to the prologue, steady-state, and drain intervals shown in Fig. 1. The model highlights that, under ideal chaining, the total execution time of a dependent vector instruction chain is deter-mined by a one-time prologue phase, a steady-state phase, and a tail-drain phase, rather than by a simple serial accumulation of the execution times of individual instructions. In Fig. 1, the light purple shaded region denotes the maximum sustained-throughput regime in steady-state overlapped execution. In an ideal implementation, multi-lane parallelism and chaining should jointly form a stable overlap interval. The model therefore serves as a microarchitectural reference for the ideal execution behavior of the vector backend. III. R ELATED WORK 
+
+Modern scalable vector processors, especially those based on RVV and adjacent design spaces, have formed a rich spec-trum of implementations. The Ara family represents the main open-source direction for long-vector, multi-lane RVV proces-sors [7]–[9], [21]. Saturn, Vitruvius+, Spatz, and Vicuna corre-spond to different design points, including short-vector RVV, decoupled vector coprocessor for HPC applications, compact shared-L1 vector units, and timing-predictable embedded vec-tor coprocessors [22]–[25]. Earlier work on Hwacha demon-strated the feasibility of a decoupled scalar/vector front end together with a vector-fetch-based organization [26]. Overall, these studies primarily focus on implementation organizations and design-space choices for vector processors, with emphasis on building different classes of vector architectures rather than explaining why an existing implementation fails to realize its expected sustained throughput. Prior studies have explored individual factors affecting vector throughput from the perspectives of memory access, scheduling, and register access. Hwacha emphasizes a de-coupled scalar/vector organization built around a vector-fetch-based microarchitecture [26], while Saturn focuses on efficient scheduling and chaining for short-vector execution, including latency-hiding behavior in short-chime pipelines [22]. Vit-ruvius+ and RISCV2 improve resource utilization through microarchitectural techniques such as vector register renaming or remapping, arithmetic/memory decoupling, and dedicated support for reductions [23], [27]. Prior work has also shown that bank conflicts, arbitration policies, and operand buffering can significantly affect the runtime performance of highly utilized vector processors [28]. From another perspective, Spatz shows that, in shared-L1 cluster settings, vector units can also evolve toward more compact and energy-efficient design points [24]. Most of these studies, however, primarily emphasize specific design points or local mechanisms, rather than providing a unified attribution across complete execution paths in an existing implementation. The works most closely related to ours are a small number of studies that analyze practical vector-processor throughput with the aid of ideal references or efficiency-oriented metrics. Ara2 introduces concepts such as raw throughput ideality and the ideal dispatcher to quantify how far the vector backend deviates from an ideal execution state [9]. TROOP analyzes throughput loss in low-operational-intensity workloads from a roofline perspective and proposes hardware optimizations to achieve at-the-roofline performance [29]. RISCV2 uses 
+
+elements per cycle (EPC) to reflect changes in effective par-allelism brought by mechanism-level optimizations [27]. Col-lectively, these studies suggest that reporting absolute perfor-mance alone is insufficient for explaining sustained-throughput behavior; instead, appropriate references or efficiency metrics are needed to analyze the gap between realized execution and ideal capability. Unlike prior work that proposes new design points or focuses on isolated local mechanisms, this work takes the existing open-source long-vector RVV processor Ara as the target and investigates why its realized execution persistently falls short of the ideal sustained-throughput bound under fixed processor configuration and raw memory-bandwidth con-straints. We analyze sustained-throughput loss from a unified microarchitectural execution perspective and further evaluate the extent to which such loss can be recovered through coordinated optimizations. IV. S USTAINED -T HROUGHPUT BOTTLENECK ANALYSIS 
+
+This section analyzes the major sources of sustained-throughput loss in Ara under fixed resource constraints based on the ideal multi-lane chaining execution model. 
+
+A. Data Supply Discontinuity and Transaction Inefficiency 
+
+The first class of bottlenecks arises along the memory-side path. Ideal execution requires load data to arrive at the backend continuously at a stable rate so as to sustain the overlap between computation and memory access in the steady-state phase. In Ara, however, load data delivery is primarily demand-driven: data are typically returned only after requests are issued, which makes latency in the external memory hierarchy more likely to be exposed directly on the critical execution path. As a result, even if the backend provides sufficient parallelism, steady-state progression cannot be maintained when the load data does not arrive continuously. This problem is further amplified by inefficient transac-tion organization in the memory front-end. In the current implementation, memory-instruction reception and subsequent address expansion are not sufficiently decoupled, so a sin-gle vector memory instruction continues to occupy front-end control resources while its addresses are being progressively expanded. Moreover, address expansion, transaction genera-tion, and transaction issuance proceed in a tightly dependent manner; when a preceding transaction is blocked by bus handshaking, backpressure propagates from the issuance stage to transaction generation and further to address expansion. In addition, because read and write address transactions are not explicitly separated on the issue path, mutual interference between different request types can further weaken transaction progression. Consequently, the memory-side path is unable to sustain either a stable stream of transactions or a continuous data supply to the backend. 
+
+B. Conservative Dependence Management and Issue Control 
+
+The second class of bottlenecks arises from dependence management and issue control. In Ara, an important problem is that both the granularity and the timing of dependence release are overly conservative, making it difficult for suc-cessor instructions to enter execution in a timely manner. Ideal chaining allows dependent instructions to overlap once predecessor results become incrementally available. In the actual implementation, however, the associated protection is typically retained until the entire instruction completes, rather than being released as soon as the dependence has been effectively resolved. As a result, even when source operands have already been read, and successor write instructions are safe to proceed in terms of dataflow semantics, the control path may still retain read-related occupancy, thereby enlarging the blocking window of WAR and false dependences and compressing the overlap that could otherwise be achieved. Beyond delayed global dependence release, local issue con-trol within a lane is also conservative. Some operand requests may still be marked as occupied in state, even though they have already satisfied the handshake conditions with downstream modules and could be consumed and released in the current cycle. If the local control logic decides whether to block sub-sequent issues solely based on the valid status of such requests, without checking whether they are already consumable by the downstream stage, occupancy that could have been eliminated in the current cycle continues to be treated as an effective blocking source. This introduces additional local bubbles and reduces effective parallelism in the steady-state phase. 
+
+C. Operand-Delivery Inefficiency 
+
+The third class of bottlenecks arises from inefficient operand delivery on the operand-delivery path, mainly in the form of intra-lane VRF access conflicts and excessive result-propagation latency. Ideal execution requires operands to reach consumers continuously and without conflict. In Ara, although the VRF is partitioned across lanes, intra-lane source-operand reads and result write-backs still contend at the bank, port, and arbitration levels. The resulting serialization of accesses directly disrupts backend progression and weakens the conti-nuity of operand supply. At the same time, results produced by predecessor func-tional units typically must first be written back to the VRF and then reread by successor consumers, stretching operand propagation into an indirect produce–write-back–reread path. In addition, the existing operand queue is primarily organized around a single VRF read path, which makes it difficult for already visible results in the execution network to become stable operand sources even when forwarding conditions are met. As a consequence, VRF access conflicts and indirect propagation together compress the overlap between adjacent dependent instructions. V. M ICROARCHITECTURAL CO-O PTIMIZATION 
+
+To address the three bottleneck classes above, we optimize Ara along three directions: the memory front-end, dependence management and issue control, and the operand-delivery path. 
+
+A. Decoupled Memory Front-End and Next-VL Prefetch 
+
+For the memory-side path, we first redesign the address-expansion and transaction-generation mechanisms in the mem-ory front-end. After a vector memory request enters the front-end, an address-stream descriptor generation unit first encapsulates the access characteristics of the entire instruction in a structured form, including the starting address, remaining access length, stride, element width, and access type. The descriptor is then sent, through a descriptor buffer and an arbitration unit, to an address-generation control unit for cen-tralized scheduling. The address-generation control unit uses a finite-state machine to switch among contiguous, fixed-stride, and indexed address-expansion modes, and enters a waiting state when address translation is required. Under its control, the address-expansion unit generates addresses for different access modes. The memory transaction generation unit then translates the expanded addresses into bus transactions, and the transaction queue unit buffers and continuously issues requests to the bus interface. The descriptor buffer and transaction queue thus decouple instruction reception from address ex-pansion and transaction generation from transaction issuance, enabling the memory front-end to sustain one-transaction-per-cycle progression when conditions permit. On top of this redesign, we introduce a next-vl prefetch mechanism to reduce the direct dependence of the load path on immediate demand returns. While serving accesses in the current vector-length interval, the system exploits the regularity and predictability of the access stream to organize prefetch transactions for the next vector-length interval in advance, and stores returned data in a local prefetch buffer. When a subsequent load hits in this buffer, data can be delivered directly to the subsequent delivery and write-back path without waiting for a new demand return. To ensure stable prefetch progression, we explicitly distinguish demand requests from prefetch requests at the AXI ID level, so that prefetch traffic can be organized, issued, and received as an independent class of background transactions. In this way, demand requests provide immediate data on the critical path, whereas next-vl prefetch prepares data for upcoming access intervals in advance, transforming the original fully passive load-delivery scheme into an active mode assisted by background prefetching and thereby improving the continuity of load data supply. 
+
+B. Early Read-Dependence Release and Dynamic Local Issue 
+
+To mitigate conservative blocking in dependence man-agement and issue control, we optimize both global read-dependence release and lane-local dynamic issue control. First, in the main sequencer, we introduce an early read-dependence release mechanism based on source-operand-read completion. Each lane reports the source-operand-read completion status of in-flight instructions, and these reports are aggregated at the global level. Once all source operands of a vector instruction have entered the operand queue, the sequencer clears its occupancy in the read-dependence table immediately, rather than waiting until the entire instruction finishes execution. This advances the timing of read-dependence release from in-struction completion to source-operand-consumption comple-tion, allowing successor write instructions to pass dependence checks earlier. On top of this mechanism, we further introduce dynamic local issue control in the lane-level sequencer. For operand requests that remain valid but have already satisfied the handshake conditions with downstream modules and can be consumed in the current cycle, the control logic no longer treats them as hard-blocking sources. Accordingly, lane-local issue decisions are extended from static occupancy checks to a joint evaluation of occupancy status and current-cycle releasability, so that occupancy that can be eliminated in the current cycle does not linger unnecessarily. Together, these two changes advance the release of global read-related occu-pancy and reduce the residence time of local blocking within each lane, thereby improving the entry timing of successor instructions. 
+
+C. Forwarding-Enhanced Operand Delivery 
+
+To address operand-delivery inefficiency, we propose a forwarding-oriented optimization that shortens result-propagation latency and improves operand-queue capture ca-pability. Specifically, we introduce a multi-source operand-forwarding mechanism in the operand requester. In addition to normal VRF reads, it can directly receive results from the load unit, arithmetic unit, multiply/floating-point unit, mask unit, and slide unit. When a dependence relation holds, and the requested address matches the result position, the result is directly forwarded through a bypass path into the operand queue. Successor consumers can thus proceed as soon as predecessor results become visible, without always waiting for the full write-back–reread process. To make forwarding a stable source of benefit, we further extend the input structure of the operand queue so that it can absorb writes from both the VRF read path and the forwarding network. The operand queue is therefore transformed from a single-source VRF-fed structure into a dual-source input structure that uniformly buffers both normal read results and forwarded results. Forwarded results thus evolve from temporary combinational bypasses into regular, queueable, and bufferable operand sources. In addition, by reducing unnecessary VRF rereads, the proposed design indirectly alle-viates register-access pressure within each lane. Multi-source forwarding, together with the dual-source operand queue, therefore shortens result-propagation latency along dependent chains, reduces the fraction of accesses that must go through the VRF, preserves more effective bandwidth for requests that truly require VRF access, and improves overlap between adjacent dependent instructions. VI. E VALUATION 
+
+This section evaluates the practical effectiveness of Ara-Opt from three perspectives: sustained-throughput improvement, closeness to the theoretical upper bound, and attribution of performance gains. 
+
+A. Experimental Setup 
+
+The evaluation compares baseline Ara against Ara-Opt, which integrates the proposed optimizations. The two designs use the same main architectural configuration and raw memory bandwidth. Unless otherwise specified, all experiments are conducted under a unified configuration with VLEN=1024, DLEN=256, and a 128-bit AXI interface, so that the ob-served performance differences primarily reflect improvements in microarchitectural efficiency rather than resource scaling. Performance results are obtained from cycle-accurate RTL models of both designs by running a set of representative test kernels and collecting key performance metrics. To cover different execution characteristics, we use a rep-resentative set of vector kernels, each implemented as hand-optimized assembly code. scal and axpy mainly character-ize sustained data supply and load-compute-store overlap in regular streaming scenarios. dotp, gemv, and symv cover reduction, chained dependence, and BLAS2-style mixed mem-ory/compute workloads. gemm, ger, trsm, and syrk repre-sent workloads with higher arithmetic intensity and more complex data reuse patterns. In addition, spmv and dwt complement the evaluation with irregular memory-bound and mixed memory/compute scenarios. For one-dimensional vector kernels, sufficiently long vector lengths are used to reduce the influence of startup and tail overheads. For matrix-related kernels, representative problem sizes are selected to reflect differences in arithmetic intensity, data reuse, and dependence characteristics. In particular, gemm is further evaluated with multiple matrix sizes to analyze scaling effects. 
+
+B. Performance, Gap and Sensitivity 
+
+Fig. 2 compares the achieved performance of baseline Ara and Ara-Opt across all evaluated kernels. Overall, Ara-Opt delivers positive performance improvement on all workloads, indicating that the proposed optimizations are not limited to specific kernels, but can consistently improve the processor’s realized throughput across different execution modes. Across all evaluated kernels, Ara-Opt achieves a geometric-mean speedup of approximately 1.33 × over baseline Ara. The largest gains are observed on scal, axpy, ger, and gemm, with speedups of about 2.41 ×, 1.60 ×, 1.52 ×, and 1.42 ×,respectively. symv, syrk, dwt, trsm, and spmv also achieve stable gains of about 1.18 ×–1.26 ×. By contrast, dotp and gemv improve only modestly, by about 1.05 × and 1.06 ×,respectively. SCAL AXPY DOTP GEMV SYMV GER TRSM SYRK GEMM SPMV DWT GeoMean                    
+
+> 0
+> 1
+> 2
+> 3
+> 8
+> 10
+> 12
+> 14
+> Performance (GFLOPS)
+> 2.41×
+> 1.60×
+> 1.05×
+> 1.06×
+> 1.20×
+> 1.52×
+> 1.18×
+> 1.21×
+> 1.42×
+> 1.18×
+> 1.26×
+> 1.33×
+> Baseline Ara Ara-Opt GeoMean (Baseline Ara) GeoMean (Ara-Opt)
+> Fig. 2. Achieved performance of baseline Ara and Ara-Opt across the evaluated workloads. Speedup is annotated above each Ara-Opt bar, and the geometric mean is reported across all workloads. Unless otherwise specified, representative problem sizes are N=1024 for one-dimensional vector kernels, 32 ×128 for gemv, 32 ×32 for symv, trsm, syrk, and spmv, and
+> 128 ×128 for ger and the default gemm evaluation.
+
+To further analyze the extent to which these performance gains reduce the gap to the ideal upper bound, Fig. 3 nor-malizes the measured performance of each kernel to the roofline-based ideal-performance bound. The peak compute capability is set to Ppeak = 16 GFLOPS , and the peak memory bandwidth is set to BW = 16 GB /s. Accordingly, the ideal-performance bound of each kernel is defined as 
+
+Pideal = min( Ppeak , BW × OI ) , OI = kernel ops kernel bytes .
+
+The figure reports the fraction already attained by the base-line, the additional fraction recovered by Ara-Opt, and the remaining gap. Overall, Ara-Opt moves the operating points of most workloads closer to the roofline-based ideal-performance bound, although the benefit is clearly workload dependent. For regular kernels with relatively stable data paths, namely scal, axpy, and ger, normalized performance improves from 0.40, 0.60, and 0.60 to 0.96, 0.95, and 0.91, respectively, corresponding to gap-closed ratios of about 93.7%, 88.9%, and 78.3%. This indicates that a substantial portion of the performance loss in these kernels is associated with the microarchitectural inefficiencies targeted in this work. By contrast, dotp and gemv improve only from 0.27 and 0.26 to 0.28 and 0.28, with gap-closed ratios of merely 1.8% and 2.2%. Likewise, symv, syrk, and spmv exhibit similarly low gap-closed ratios of about 2.3%, 2.3%, and 3.1%, indicating that the proposed optimizations are not their primary source of benefit. For the high-arithmetic-intensity kernel gemm, normalized performance improves from 0.58 to 0.83, cor-responding to a gap-closed ratio of about 59.3%. dwt also achieves a gap-closed ratio of about 29.6%, showing that the proposed optimizations remain effective in high-throughput and mixed-type scenarios. Overall, the geometric mean of normalized performance increases from 0.30 to 0.40, and the geometric-mean gap-closed ratio reaches about 12.2%. These results show that the proposed optimizations not only improve absolute performance, but also significantly improve how closely regular streaming and high-throughput workloads approach the ideal upper bound. SCAL AXPY DOTP GEMV SYMV GER TRSM SYRK GEMM SPMV DWT GeoMean                  
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Normalized Progress to Ideal
+> 0.40
+> +0.56
+> 0.60
+> +0.36
+> 0.27
+> +0.01
+> 0.26
+> +0.02
+> 0.11
+> +0.02
+> 0.60
+> +0.31
+> 0.41
+> +0.07
+> 0.10
+> +0.02
+> 0.58
+> +0.25
+> 0.15
+> +0.03 0.54
+> +0.14
+> 0.30
+> +0.10
+> 0.04 0.04
+> 0.72 0.72
+> 0.87
+> 0.09
+> 0.52
+> 0.88
+> 0.17
+> 0.83
+> 0.33
+> 0.60
+> SCAL AXPY DOTP GEMV SYMV GER TRSM SYRK GEMM SPMV DWT GeoMean
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Gap Closed (%)
+> 94% 89%
+> 2% 2% 2%
+> 78%
+> 12%
+> 2%
+> 59%
+> 3%
+> 30%
+> 12%
+> Baseline Attained
+> Optimization Gain
+> GeoMean (Baseline)
+> GeoMean (Gain)
+> Remaining Gap
+> Gap Closed
+
+Fig. 3. Normalized progress toward the roofline-based ideal-performance bound for baseline Ara and Ara-Opt. In the upper panel, the light segment denotes the fraction already attained by the baseline, the dark segment denotes the additional fraction recovered by Ara-Opt, and the remaining segment indicates the residual gap to the ideal bound. The lower panel reports the corresponding gap-closed ratio for each workload. 
+
+We further examine the impact of problem size on optimiza-tion benefit and observe different scaling behaviors for one-dimensional streaming kernels and high-arithmetic-intensity matrix kernels. As shown in Fig. 4, for scal, when the vector length increases from N = 512 to N = 2048 , Ara-Opt maintains stable performance benefit, while lane utilization continues to improve across the tested range, indicating that the proposed optimizations maintain stable benefit across the tested range. By contrast, gemm exhibits a more pronounced size effect as matrix size increases: although both absolute performance and utilization continue to improve, the rela-tive speedup gradually converges. Therefore, the proposed optimizations remain effective across different problem sizes, while the magnitude of the benefit depends on both workload type and scale. 
+
+C. Attribution of Performance Gains 
+
+Because the proposed optimizations interact strongly in the implementation, we do not attempt a fully orthogonal decomposition of individual mechanisms. Instead, we attribute performance gains using runtime statistics. As shown in Fig. 5, 512 1024 2048         
+
+> Vector length
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> Performance (GFLOPS)
+> SCAL
+> 2.26×
+> 2.41× 2.38×
+> 32×32 64×64 128×128
+> Matrix size
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> GEMM
+> 2.09× 1.60× 1.42×
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Lane Utilization (%)
+> Perf. (Baseline Ara) Perf. (Ara-Opt) Util. (Baseline Ara) Util. (Ara-Opt)
+
+Fig. 4. Sensitivity of optimization benefit to problem size for scal and gemm. Bars report achieved performance for baseline Ara and Ara-Opt, while lines show the corresponding lane utilization. Ara-Opt maintains stable benefit for long-vector streaming execution in scal and continues to improve absolute performance for gemm, although the relative speedup gradually converges as matrix size increases. 
+
+we focus on three metrics: the memory-only exposure ratio, defined as mem_only_cycles / total_rvv_cycles ,which quantifies the memory overhead directly exposed as total execution cycles; lane compute utilization, which reflects the recovery of effective computation cycles in the steady-state phase; and the VRF conflict ratio, which reflects structural contention along the operand-delivery path. The results for scal, axpy, and gemm show a consistent trend: the memory-only exposure ratio decreases substantially, while lane compute utilization increases markedly. Specifi-cally, for scal, the memory-only exposure ratio drops from 39.9% to 13.9%, while lane compute utilization increases from 10.0% to 24.1%. For axpy, the corresponding values change from 42.5% to 9.2% and from 9.9% to 15.9%, respectively. For gemm, the memory-only exposure ratio is reduced from 7.9% to 1.0%, while lane compute utilization rises from 58.0% to 82.7%; meanwhile, the VRF conflict ratio also decreases from 14.0% to 5.0%. These results indicate that, for regular streaming and high-throughput workloads, the optimized de-sign provides more continuous data supply and significantly reduces exposed memory overhead. At the same time, part of the structural contention in the operand-delivery path is alleviated, while conservative blocking in dependence manage-ment and issue control is further compressed. Together, these improvements increase the fraction of steady-state cycles that can be converted into useful computation, thereby improving lane utilization. By contrast, dotp and gemv better reflect the behavior of reduction-dominated workloads. For dotp, the total cycle count decreases only slightly, from 1918 to 1830. Its memory-only exposure ratio is already negligible, dropping further from about 0.2% to 0, while lane compute utilization increases only modestly from 13.3% to 14.0%, and the VRF conflict ratio de-creases from 3.7% to 2.2%. Similarly, although gemv reduces the memory-only exposure ratio from 15.8% to 3.4% and the VRF conflict ratio from 11.4% to 6.4%, its lane compute utilization improves only from 16.7% to 17.7%. This indicates that the dominant bottleneck in such kernels does not lie in front-end data supply or local structural conflicts, but rather in the reduction operation near the tail of the instruction chain. Even when exposed memory stalls are reduced, part of the VRF contention is alleviated, and more overlap opportunities are exposed by improved dependence management and issue control, the resulting gains remain constrained by the serial accumulation latency of the reduction tail and are therefore difficult to convert into higher overall performance. Overall, the gains of the proposed method on regular streaming and high-throughput workloads mainly come from the coordinated recovery of the memory-side path, the control-side path, and the operand-delivery path, whereas the improvement space for reduction-dominated workloads remains more constrained by structural serialization. SCAL AXPY DOTP GEMV GEMM                   
+
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> Mem-only Exposure Ratio (%)
+> 39.9 42.5
+> 0.2
+> 15.8
+> 7.9
+> 13.9
+> 9.2
+> 0.0
+> 3.4 1.0
+> SCAL AXPY DOTP GEMV GEMM
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Lane Compute Utilization (%)
+> 10.0 9.9 13.3 16.7
+> 58.0
+> 24.1
+> 15.9 14.0 17.7
+> 82.7
+> SCAL AXPY DOTP GEMV GEMM
+> 0
+> 5
+> 10
+> 15
+> VRF Conflict Ratio (%)
+> 0.0 0.0
+> 3.7
+> 11.4
+> 14.0
+> 0.0 0.0
+> 2.2
+> 6.4
+> 5.0
+> Baseline Ara Ara-Opt
+
+Fig. 5. Runtime-statistics-based attribution of performance gains. From left to right, the three panels report the memory-only exposure ratio 
+
+(mem_only_cycles / total_rvv_cycles ), lane compute utiliza-tion, and VRF conflict ratio. Ara-Opt reduces exposed memory stalls and im-proves effective compute utilization on regular streaming and high-throughput workloads, while the gains remain limited on reduction-dominated kernels. 
+
+VII. C ONCLUSIONS 
+
+This work studies sustained-throughput loss in RVV multi-lane chaining vector processors under fixed resource con-straints. Our results show that performance loss in Ara is not primarily limited by peak compute capability or raw memory bandwidth, but instead arises mainly from memory-side inefficiencies in data supply and transaction progression, control-side inefficiencies caused by conservative dependence management and issue control, and operand-delivery inef-ficiencies caused by access conflicts and result-propagation overhead. To address these bottlenecks, we established an ideal multi-lane chaining execution model as a microarchitectural reference and proposed a coordinated optimization approach targeting the three critical execution paths. Without increasing raw memory bandwidth or changing the main processor configuration, Ara-Opt achieves a geometric-mean speedup of 1.33 × over baseline Ara. Under roofline-based normalization, the geometric-mean gap-closed ratio reaches 12.2%. In particular, scal, axpy, ger, and gemm achieve speedups of 2.41 ×, 1.60 ×, 1.52 ×, and 1.42 ×, with corresponding gap-closed ratios of 93.7%, 88.9%, 78.3%, and 59.3%, respectively. These results show that the proposed method effectively recovers sustained-throughput capability lost to microarchitectural inefficiencies in Ara and drives regular streaming and high-throughput workloads closer to the theoretical performance bound. Future work will target reduction-dominated and complex memory-access workloads by investigating more suitable execution, memory-access, and result-propagation mechanisms. REFERENCES [1] J. Kaplan, S. McCandlish, T. Henighan, T. B. Brown, B. Chess, R. Child, S. Gray, A. Radford, J. Wu, and D. Amodei, “Scaling laws for neural language models,” 2020. [Online]. Available: https://arxiv.org/abs/2001.08361 [2] A. Ivanov, N. Dryden, T. Ben-Nun, S. Li, and T. Hoefler, “Data movement is all you need: A case study on optimizing transformers,” 2021. [Online]. Available: https://arxiv.org/abs/2007.00072 [3] R. M. Russell, “The cray-1 computer system,” Communications of the ACM , vol. 21, no. 1, pp. 63–72, 1978. [4] W. Watson, “The ti asc: a highly modular and flexible super computer architecture,” in Proceedings of the December 5-7, 1972, fall joint computer conference, part I , 1972, pp. 221–228. [5] C. J. Purcell, “The control data star-100: Performance measurements,” in Proceedings of the May 6-10, 1974, National Computer Conference and Exposition , 1974, pp. 385–387. [6] A. Waterman, K. Asanovi´ c et al. , “Working draft of the proposed risc-v v vector extension,” Online, May 2023, accessed: 2025-08-20. [Online]. Available: https://github.com/riscvarchive/riscv-v-spec [7] M. Cavalcante, F. Schuiki, F. Zaruba, M. Schaffner, and L. Benini, “Ara: A 1-ghz+ scalable and energy-efficient risc-v vector processor with mul-tiprecision floating-point support in 22-nm fd-soi,” IEEE Transactions on Very Large Scale Integration (VLSI) Systems , vol. 28, no. 2, pp. 530–543, 2019. [8] M. Perotti, M. Cavalcante, N. Wistoff, R. Andri, L. Cavigelli, and L. Benini, “A “new ara” for vector computing: An open source highly efficient risc-v v 1.0 vector processor design,” in 2022 IEEE 33rd International Conference on Application-specific Systems, Architectures and Processors (ASAP) . IEEE, 2022, pp. 43–51. [9] M. Perotti, M. Cavalcante, R. Andri, L. Cavigelli, and L. Benini, “Ara2: Exploring single-and multi-core vector processing with an efficient rvv 1.0 compliant open-source processor,” IEEE Transactions on Computers ,vol. 73, no. 7, pp. 1822–1836, 2024. [10] PULP Platform, “Ara: a 64-bit Vector Unit,” https://github.com/pulp-platform/ara, 2021, version 2.2.0. [11] M. C. August, G. M. Brost, C. C. Hsiung, and A. J. Schiffleger, “Cray x-mp: The birth of a supercomputer,” Computer , vol. 22, no. 1, pp. 45–52, 1989. [12] Cray Research, Inc., “The cray y-mp series of computer systems,” 1988. [Online]. Available: https://cray-history.net/wp-content/uploads/ 2021/08/Y-MP8D red redux.pdf [13] ——, “The cray c90 series of supercomputer systems,” https://cray-history.net/wp-content/uploads/2021/08/C90 Small sales.pdf, 1991. [14] ——, “Cray sv1 supercomputing series,” https://cray-history.net/wp-content/uploads/2021/08/SV1 redux.pdf, 1998. [15] N. Uchida, M. Hirai, M. Yoshida, and K. Hotta, “Fujitsu vp2000 series,” in Digest of Papers Compcon Spring ’90. Thirty-Fifth IEEE Computer Society International Conference on Intellectual Leverage , 1990, pp. 4– 11. [16] S. Kawabe, H. Murayama, and T. Odaka, “Hitachi supercomputer s-820 system overview,” in Japanese Supercomputing: Architecture, Algorithms, and Applications . Springer, 1988, pp. 128–135. [17] T. Watanabe, “Architecture and performance of nec supercomputer sx system,” Parallel Computing , vol. 5, no. 1-2, pp. 247–255, 1987. [18] Intel Corporation, “Intel® sse4 programming reference,” https://www.intel.com/content/dam/develop/external/us/en/documents/ d9156103-705230.pdf, 2007, streaming SIMD Extensions 4 (SSE4) Programming Reference. [19] C. Lomont, “Introduction to intel advanced vector extensions,” Intel white paper , vol. 23, no. 23, pp. 1–21, 2011. [20] N. Stephens, S. Biles, M. Boettcher, J. Eapen, M. Eyole, G. Gabrielli, M. Horsnell, G. Magklis, A. Martinez, N. Premillieu et al. , “The arm scalable vector extension,” IEEE micro , vol. 37, no. 2, pp. 26–39, 2017. [21] N. K. Purayil, M. Perotti, T. Fischer, and L. Benini, “Araxl: A physically scalable, ultra-wide risc-v vector processor design for fast and efficient computation on long vectors,” in 2025 Design, Automation & Test in Europe Conference (DATE) . IEEE, 2025, pp. 1–7. [22] J. Zhao, D. Grubb, M. Rusch, T. Wei, K. Anderson, B. Nikolic, and K. Asanovic, “Instruction scheduling in the saturn vector unit,” arXiv preprint arXiv:2412.00997 , 2024. [23] F. Minervini, O. Palomar, O. Unsal, E. Reggiani, J. Quiroga, J. Marimon, C. Rojas, R. Figueras, A. Ruiz, A. Gonzalez et al. , “Vitruvius+: An area-efficient risc-v decoupled vector coprocessor for high performance computing applications,” ACM Transactions on Architecture and Code Optimization , vol. 20, no. 2, pp. 1–25, 2023. [24] M. Cavalcante, D. W¨ uthrich, M. Perotti, S. Riedel, and L. Benini, “Spatz: A compact vector processing unit for high-performance and energy-efficient shared-l1 clusters,” in Proceedings of the 41st IEEE/ACM International Conference on Computer-Aided Design , 2022, pp. 1–9. [25] M. Platzer and P. Puschner, “Vicuna: A timing-predictable risc-v vec-tor coprocessor for scalable parallel computation,” in 33rd euromicro conference on real-time systems (ECRTS 2021) . Schloss Dagstuhl– Leibniz-Zentrum f¨ ur Informatik, 2021, pp. 1–1. [26] Y. Lee, C. Schmidt, A. Ou, A. Waterman, and K. Asanovic, “The hwacha vector-fetch architecture manual, version 3.8. 1,” EECS Department, University of California, Berkeley, Tech. Rep. UCB/EECS-2015-262 ,2015. [27] K. Patsidis, C. Nicopoulos, G. C. Sirakoulis, and G. Dimitrakopoulos, “Risc-v 2: a scalable risc-v vector processor,” in 2020 IEEE International Symposium on Circuits and Systems (ISCAS) . IEEE, 2020, pp. 1–5. [28] V. Razilov, I. Gecin, E. Mat´ uˇ s, and G. Fettweis, “Conflict management in vector register files,” ACM Transactions on Architecture and Code Optimization , vol. 22, no. 1, pp. 1–19, 2025. [29] N. K. Purayil, D. Shen, M. Perotti, and L. Benini, “Troop: At-the-roofline performance for vector processors on low operational intensity workloads,” in 2025 IEEE 43rd International Conference on Computer Design (ICCD) . IEEE, 2025, pp. 594–601.

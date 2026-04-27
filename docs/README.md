@@ -6,73 +6,79 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-26
-- 运行时间：2026-04-26 19:42:59 UTC
+- 最新运行日期：2026-04-27
+- 运行时间：2026-04-27 20:13:03 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
+- 本次总论文数：19
+- 精读区：8
 - 速读区：11
 
 ### 今日简报（AI）
-今日深度研读 17 篇前沿成果，聚焦 GPU 异步架构加速与大模型内存瓶颈的硬件级突破。
-重点推荐 AsyncSparse 稀疏矩阵优化与 AQPIM 激活量化技术，两者显著提升了复杂计算的吞吐与容量。
-建议开发者关注边缘端轨迹预测与神经科学启发算子，探索软硬协同下的高效视觉感知方案。
-- 详情：[/202604/26/README](/202604/26/README)
+今日精选19篇前沿论文，深度聚焦大模型在边缘侧的部署加速与长文本推理优化。
+重点推荐多LoRA基础模型在边缘端的加速方案，以及针对苹果芯片和无线网络环境的低延迟Transformer架构。
+建议关注KV缓存稀疏化与长上下文解码技术，这是提升端侧大模型实用性的关键突破口。
+- 详情：[/202604/27/README](/202604/27/README)
 
 ### 精读区论文标签
-1. [AsyncSparse: Accelerating Sparse Matrix-Matrix Multiplication on Asynchronous GPU Architectures](/202604/26/2604.17834v1-asyncsparse-accelerating-sparse-matrix-matrix-multiplication-on-asynchronous-gpu-architectures)  
+1. [Unlocking the Edge deployment and ondevice acceleration of multi-LoRA enabled one-for-all foundational LLM](/202604/27/2604.18655v2-unlocking-the-edge-deployment-and-ondevice-acceleration-of-multi-lora-enabled-one-for-all-foundational-llm)  
    标签：评分：9.0/10、query:hwnas
-   evidence：利用异步GPU硬件特性的协同设计内核
-2. [AQPIM: Breaking the PIM Capacity Wall for LLMs with In-Memory Activation Quantization](/202604/26/2604.18137v1-aqpim-breaking-the-pim-capacity-wall-for-llms-with-in-memory-activation-quantization)  
+   evidence：用于高效设备端LLM推理的硬件感知框架
+2. [Transformer Architecture with Minimal Inference Latency for Multi-Modal Wireless Networks](/202604/27/2604.18965v1-transformer-architecture-with-minimal-inference-latency-for-multi-modal-wireless-networks)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对存内计算专门化的激活量化以增强带宽和计算效率
-3. [ChipLight: Cross-Layer Optimization of Chiplet Design with Optical Interconnects for LLM Training](/202604/26/2604.18909v1-chiplight-cross-layer-optimization-of-chiplet-design-with-optical-interconnects-for-llm-training)  
+   evidence：无线网络中极低的推理延迟和内存占用
+3. [MCAP: Deployment-Time Layer Profiling for Memory-Constrained LLM Inference](/202604/27/2604.21026v1-mcap-deployment-time-layer-profiling-for-memory-constrained-llm-inference)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对大模型训练的芯粒架构与光互连跨层优化
-4. [POLAR-PIC: A Holistic Framework for Matrixized PIC with Co-Designed Compute, Layout, and Communication](/202604/26/2604.19337v1-polar-pic-a-holistic-framework-for-matrixized-pic-with-co-designed-compute-layout-and-communication)  
+   evidence：目标设备上的动态精度和内存放置决策
+4. [SPAC: Automating FPGA-based Network Switches with Protocol Adaptive Customization](/202604/27/2604.21881v1-spac-automating-fpga-based-network-switches-with-protocol-adaptive-customization)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对矩阵处理单元协同设计计算、布局与通信
-5. [ImageHD: Energy-Efficient On-Device Continual Learning of Visual Representations via Hyperdimensional Computing](/202604/26/2604.21280v1-imagehd-energy-efficient-on-device-continual-learning-of-visual-representations-via-hyperdimensional-computing)  
+   evidence：针对FPGA交换机的协议-架构协同设计
+5. [Focus Session: Hardware and Software Techniques for Accelerating Multimodal Foundation Models](/202604/27/2604.21952v1-focus-session-hardware-and-software-techniques-for-accelerating-multimodal-foundation-models)  
    标签：评分：9.0/10、query:hwnas
-   evidence：通过FPGA加速器实现能效端侧学习
-6. [GraphLeap: Decoupling Graph Construction and Convolution for Vision GNN Acceleration on FPGA](/202604/26/2604.21290v1-graphleap-decoupling-graph-construction-and-convolution-for-vision-gnn-acceleration-on-fpga)  
+   evidence：Transformer块的硬件和软件协同设计
+6. [Hardware-Software Co-Design for Event-Driven SNN Deployment on Low-Cost Neuromorphic FPGAs](/202604/27/2604.22179v1-hardware-software-co-design-for-event-driven-snn-deployment-on-low-cost-neuromorphic-fpgas)  
    标签：评分：9.0/10、query:hwnas
-   evidence：通过解耦构建与卷积在FPGA上加速视觉GNN
+   evidence：用于在FPGA上部署SNN的软硬件协同设计框架
+7. [HGQ-LUT: Fast LUT-Aware Training and Efficient Architectures for DNN Inference](/202604/27/2604.22293v1-hgq-lut-fast-lut-aware-training-and-efficient-architectures-for-dnn-inference)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对FPGA硬件效率的查找表感知训练与高效架构
+8. [Microarchitectural Co-Optimization for Sustained Throughput of RISC-V Multi-Lane Chaining Vector Processors](/202604/27/2604.22314v1-microarchitectural-co-optimization-for-sustained-throughput-of-risc-v-multi-lane-chaining-vector-processors)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：旨在持续吞吐量的微架构协同优化
 
 ### 速读区论文标签
-1. [Resource-Efficient Quantum-Enhanced Compressive Imaging via Quantum Classical co-Design](/202604/26/2604.16662v1-resource-efficient-quantum-enhanced-compressive-imaging-via-quantum-classical-co-design)  
+1. [HieraSparse: Hierarchical Semi-Structured Sparse KV Attention](/202604/27/2604.16864v1-hierasparse-hierarchical-semi-structured-sparse-kv-attention)  
    标签：评分：8.0/10、query:hwnas
-   evidence：量子硬件与经典软件的协同设计
-2. [Neuroscience Inspired Graph Operators Towards Edge-Deployable Virtual Sensing for Irregular Geometries](/202604/26/2604.16722v1-neuroscience-inspired-graph-operators-towards-edge-deployable-virtual-sensing-for-irregular-geometries)  
+   evidence：利用GPU稀疏张量核心加速KV缓存的内核
+2. [SinkRouter: Sink-Aware Routing for Efficient Long-Context Decoding in Large Language and Multimodal Models](/202604/27/2604.16883v1-sinkrouter-sink-aware-routing-for-efficient-long-context-decoding-in-large-language-and-multimodal-models)  
    标签：评分：8.0/10、query:hwnas
-   evidence：具有严格延迟和能耗约束的边缘部署虚拟传感
-3. [EdgeVTP: Exploration of Latency-efficient Trajectory Prediction for Edge-based Embedded Vision Applications](/202604/26/2604.16783v1-edgevtp-exploration-of-latency-efficient-trajectory-prediction-for-edge-based-embedded-vision-applications)  
+   evidence：内存受限的注意力机制与KV缓存优化
+3. [Open-TQ-Metal: Fused Compressed-Domain Attention for Long-Context LLM Inference on Apple Silicon](/202604/27/2604.16957v1-open-tq-metal-fused-compressed-domain-attention-for-long-context-llm-inference-on-apple-silicon)  
    标签：评分：8.0/10、query:hwnas
-   evidence：面向边缘嵌入式视觉应用的嵌入式优先轨迹预测器
-4. [When W4A4 Breaks Camouflaged Object Detection: Token-Group Dual-Constraint Activation Quantization](/202604/26/2604.16855v1-when-w4a4-breaks-camouflaged-object-detection-token-group-dual-constraint-activation-quantization)  
+   evidence：内存带宽优化与自定义计算着色器
+4. [E2AFS: Energy-Efficient Approximate Floating Point Square Rooter for Error Tolerant Computing](/202604/27/2604.16964v1-e2afs-energy-efficient-approximate-floating-point-square-rooter-for-error-tolerant-computing)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对低比特推理的设备内存和延迟预算优化
-5. [KAIROS: Stateful, Context-Aware Power-Efficient Agentic Inference Serving](/202604/26/2604.16682v1-kairos-stateful-context-aware-power-efficient-agentic-inference-serving)  
+   evidence：用于边缘AI的节能浮点架构
+5. [CCCL: In-GPU Compression-Coupled Collective Communication](/202604/27/2604.17172v1-cccl-in-gpu-compression-coupled-collective-communication)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对智能体AI推理服务的上下文感知功耗优化
-6. [Knowledge Distillation for Lightweight Multimodal Sensing-Aided mmWave Beam Tracking](/202604/26/2604.16708v1-knowledge-distillation-for-lightweight-multimodal-sensing-aided-mmwave-beam-tracking)  
+   evidence：压缩耦合的集合通信，旨在减少内存访问并优化带宽
+6. [LASER: Low-Rank Activation SVD for Efficient Recursion](/202604/27/2604.17224v1-laser-low-rank-activation-svd-for-efficient-recursion)  
    标签：评分：7.0/10、query:hwnas
-   evidence：用于毫米波传感轻量化模型的知识蒸馏
-7. [Scalable and Adaptive Parallel Training of Graph Transformer on Large Graphs](/202604/26/2604.16715v1-scalable-and-adaptive-parallel-training-of-graph-transformer-on-large-graphs)  
+   evidence：针对高效递归架构的动态压缩框架
+7. [The First Challenge on Mobile Real-World Image Super-Resolution at NTIRE 2026: Benchmark Results and Method Overview](/202604/27/2604.17306v1-the-first-challenge-on-mobile-real-world-image-super-resolution-at-ntire-2026-benchmark-results-and-method-overview)  
    标签：评分：7.0/10、query:hwnas
-   evidence：根据硬件配置优化并行化策略
-8. [Reducing Peak Memory Usage for Modern Multimodal Large Language Model Pipelines](/202604/26/2604.16734v1-reducing-peak-memory-usage-for-modern-multimodal-large-language-model-pipelines)  
+   evidence：针对移动设备超分辨率的高效网络设计，通过加速比进行评估
+8. [LLM-Guided Strategy Synthesis for Scalable Equality Saturation](/202604/27/2604.17364v1-llm-guided-strategy-synthesis-for-scalable-equality-saturation)  
    标签：评分：7.0/10、query:hwnas
-   evidence：通过解决KV缓存瓶颈降低MLLM流水线的峰值内存占用
-9. [FliX: Flipped-Indexing for Scalable GPU Queries and Updates](/202604/26/2604.16725v1-flix-flipped-indexing-for-scalable-gpu-queries-and-updates)  
+   evidence：使用LLM引导的策略合成自动化基于e-graph的编译器
+9. [Revisiting Auxiliary Losses for Conditional Depth Routing: An Empirical Study](/202604/27/2604.17228v1-revisiting-auxiliary-losses-for-conditional-depth-routing-an-empirical-study)  
    标签：评分：6.0/10、query:hwnas
-   evidence：可扩展的GPU查询和更新以实现高吞吐量
-10. [Flat optics for analog computing: from fundamental mechanisms to advanced meta-processors](/202604/26/2604.16849v1-flat-optics-for-analog-computing-from-fundamental-mechanisms-to-advanced-meta-processors)  
+   evidence：条件深度执行以实现轻量化计算
+10. [Compiling Deterministic Structure into SLM Harnesses](/202604/27/2604.17450v1-compiling-deterministic-structure-into-slm-harnesses)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于零功耗信息处理的光学模拟计算与元处理器
-11. [CATP: Confidence-Aware Token Pruning for Camouflaged Object Detection](/202604/26/2604.16854v1-catp-confidence-aware-token-pruning-for-camouflaged-object-detection)  
+   evidence：将智能体工作流编译为小模型的确定性执行计划
+11. [Isolating Recurring Execution-Dependent Abnormal Patterns on NISQ Quantum Devices](/202604/27/2604.17519v1-isolating-recurring-execution-dependent-abnormal-patterns-on-nisq-quantum-devices)  
    标签：评分：6.0/10、query:hwnas
-   evidence：通过令牌剪枝减少计算开销以利于实际部署
+   evidence：编译器对硬件特定异常模式的感知
 
 
 <div class="dpr-home-promo-card">

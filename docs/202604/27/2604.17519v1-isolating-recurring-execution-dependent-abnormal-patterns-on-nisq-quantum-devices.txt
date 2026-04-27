@@ -1,0 +1,613 @@
+Title: Isolating Recurring Execution-Dependent Abnormal Patterns on NISQ Quantum Devices
+
+URL Source: https://arxiv.org/pdf/2604.17519v1
+
+Published Time: Tue, 21 Apr 2026 01:28:44 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# Isolating Recurring Execution-Dependent Abnormal Patterns on NISQ Quantum Devices 
+
+## Zhenyu Qi 
+
+qzydustin@arizona.edu 
+
+University of Arizona Tucson, AZ, USA 
+
+## Qian Zhang 
+
+qzhang@cs.ucr.edu 
+
+University of California, Riverside Riverside, CA, USA 
+
+## Haotang Li 
+
+haotangl@arizona.edu 
+
+University of Arizona Tucson, AZ, USA 
+
+## Sen He 
+
+senhe@arizona.edu 
+
+University of Arizona Tucson, AZ, USA 
+
+## Jiyuan Wang ∗
+
+wjiyuan@tulane.edu 
+
+Tulane University New Orleans, LA, USA 
+
+## Abstract 
+
+Quantum compilers rely on calibration-derived noise models to guide circuit mapping and optimization. These models characterize gate and qubit errors independently and miss context-dependent effects such as crosstalk and correlated scheduling errors. As a result, two compiled circuits that score equally under the noise model can behave very differ-ently on real hardware, and the compiler has no mechanism to learn from such recurring mismatches. We present QRisk , a framework that discovers backend-specific abnormal patterns from real hardware executions. 
+
+QRisk uses delta debugging to isolate compact circuit frag-ments that consistently produce excess error not predicted by the noise model, then validates their persistence across repeated runs and calibration windows. The verified patterns are stored in a backend-specific pattern database. At compila-tion time, QRisk scans a compiled circuit for occurrences of known patterns and applies targeted commuting gate swaps to disrupt them, producing a semantically equivalent circuit with fewer abnormal patterns. We evaluate QRisk on two IBM backends ( ibm_fez and 
+
+ibm_marrakesh ) using Grover search circuits. On both back-ends, discovered patterns persist across multiple calibration windows over months. Disrupting these patterns via com-muting gate swaps reduces excess hardware noise by 24% on ibm_fez (Spearman 𝜌 = 0.515 , 𝑝 = 0.0007 ) and 45% on 
+
+> ∗
+
+Corresponding author. Permission to make digital or hard copies of all or part of this work for personal or classroom use is granted without fee provided that copies are not made or distributed for profit or commercial advantage and that copies bear this notice and the full citation on the first page. Copyrights for components of this work owned by others than the author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or republish, to post on servers or to redistribute to lists, requires prior specific permission and/or a fee. Request permissions from permissions@acm.org. 
+
+Conference’17, Washington, DC, USA 
+
+© 2026 Copyright held by the owner/author(s). Publication rights licensed to ACM. ACM ISBN 978-x-xxxx-xxxx-x/YYYY/MM 
+
+https://doi.org/10.1145/nnnnnnn.nnnnnnn 
+
+ibm_marrakesh (𝜌 = 0.711 , 𝑝 < 0.0001 ), while the noise model predicts identical error for all equivalent circuits. Test-ing on a third backend confirms that these patterns are backend-specific. 
+
+Keywords: quantum compilation, delta debugging, quantum program debugging, noise-aware optimization 
+
+ACM Reference Format: 
+
+Zhenyu Qi, Qian Zhang, Haotang Li, Sen He, and Jiyuan Wang. 2026. Isolating Recurring Execution-Dependent Abnormal Patterns on NISQ Quantum Devices. In . ACM, New York, NY, USA, 13 pages. 
+
+https://doi.org/10.1145/nnnnnnn.nnnnnnn 
+
+## 1 Introduction 
+
+Quantum computing promises major advances in domains such as cryptography, optimization, materials discovery, and machine learning by enabling solutions to problems that are intractable for classical computers [ 5 , 8 , 11 , 33 ]. By lever-aging quantum superposition and entanglement, quantum computers have the theoretical potential to deliver dramatic speedups over traditional architectures, motivating major investments from governments, industry, and academia in both quantum hardware and software stacks [4, 20, 27]. Yet hardware noise remains the primary barrier to prac-tical quantum computing [ 27 ]. Gate errors, readout errors, and crosstalk can corrupt nearly every computation on to-day’s noisy intermediate-scale quantum (NISQ) devices. To execute a useful program, a quantum compiler must map the circuit to the device’s native gate set, assign logical qubits to physical qubits, and route interactions through the hardware coupling graph [16]. Modern compilers make these decisions using calibration-derived noise models . Such models periodically summarize measured device characteristics, including gate error rates, readout fidelities, and coupling information. They therefore enable noise-aware compilation strategies that avoid appar-ently weak qubits or couplings. Their effectiveness, however, depends on an implicit assumption that the calibration sum-maries faithfully predict circuit behavior at execution time. 
+
+1 
+
+> arXiv:2604.17519v1 [cs.SE] 19 Apr 2026 Conference’17, July 2017, Washington, DC, USA Zhenyu Qi, Qian Zhang, Haotang Li, Sen He, and Jiyuan Wang
+
+That assumption is often wrong in practice. Calibration-derived noise models are largely context-free . They estimate the average error of individual gates or qubits in isolation, but do not capture how errors change under actual execu-tion context. In particular, they miss execution-dependent effects such as crosstalk [ 24 ] between simultaneously ac-tive qubits, correlated errors across neighboring couplers, and schedule-dependent interactions with decoherence. As a result, two compiled circuit variants may appear similarly good under the compiler’s noise model, yet behave very differently on real hardware: one executes with acceptable fidelity, whereas the other fails, even though both have the same fidelity prediction under calibration models [ 18 , 35 ]. The compiler cannot distinguish between them because the relevant error mechanisms are absent from its incomplete noise model. Consequently, a noise-aware compiler such as Qiskit may still generate and select circuit variants that contain harm-ful local abnormal patterns overlooked by calibration-based noise models. In our study of IBM’s two backends: ibm_fez 
+
+and ibm_marrakesh , we find evidence that these are not isolated anomalies, but recurring backend-specific patterns: specific local gate structures mapped onto specific physical neighborhoods that repeatedly exhibit abnormally high error across different circuits and over multiple days. For example, Figure 1 shows on ibm_marrakesh a 4-gate sequence rz →
+
+x→rz →cz on two coupled qubits; disrupting it with a single commuting gate swap reduces TVD from 0.058 to 0.032, a 44.5% reduction in excess hardware noise, even though no individual gate in the sequence has an unusually high cali-brated error rate. This suggests that real hardware exposes stable, reusable signals about which circuit structures are likely to perform poorly, beyond what is reflected in standard calibration snapshots. If a compiler could retain such signals in a pattern database , it could transform compiled circuits to disrupt known abnormal patterns and steer compilation toward more reliable alternatives. Isolating such execution-dependent patterns, however, is challenging. First, whether a reduced circuit segment still preserves the same abnormal behavior cannot be decided by a simple binary oracle, but instead requires a statistical com-parison between expected and observed outcomes. Second, quantum hardware is inherently unstable: calibration drift and transient fluctuations can easily obscure or mimic true recurring patterns. Pattern extraction therefore requires a method that can distinguish persistent abnormal patterns from ephemeral noise while remaining practical under lim-ited hardware budgets. More importantly, without such a method, quantum compilers remain unable to convert past compilation failures into reusable knowledge: they may con-tinue generating semantically equivalent circuit variants that contain the same abnormal patterns, even when these patterns have repeatedly performed poorly on the target backend. 
+
+We present QRisk , a framework for discovering and ex-ploiting persistent abnormal patterns from real hardware executions to improve quantum compilation. QRisk operates in two stages. In the offline stage, it applies a delta-debugging-like reduction procedure to isolate compact circuit fragments that preserve the discrepancy, then validates these fragments across repeated runs and calibration windows to retain only persistent patterns. In the online stage, it scans a compiled circuit for occurrences of known patterns and applies tar-geted commuting gate swaps to disrupt them, producing a semantically equivalent circuit free of known abnormal patterns. This paper makes three contributions. 
+
+• We present QRisk , a framework that discovers execution-derived persistent abnormal patterns by isolating com-pact discrepancy-preserving circuit fragments and val-idating their persistence across calibration windows. On two IBM backends ( ibm_fez and ibm_marrakesh ), the framework identifies 4-gate patterns that persist across multiple calibration windows over months. 
+
+• We validate the discovered patterns through cross-window repetition: independent delta debugging runs in separate calibration windows rediscover the same pattern in 8 out of 10 runs on ibm_fez and 10 out of 10 runs on ibm_marrakesh .
+
+• We evaluate the discovered patterns through controlled scaling experiments using commuting gate swaps on semantically equivalent circuits. On both backends, disrupting patterns reduces excess hardware noise (−24% on ibm_fez , 𝑝 = 0.0007 ; −45% on ibm_marrakesh ,
+
+𝑝 < 0.0001 ). Cross-hardware testing on a third back-end confirms the patterns are backend-specific. The rest of this paper is organized as follows. Section 2 pro-vides background on quantum circuits, noise modeling, and compilation, and presents a motivating example. Section 3 de-tails the QRisk framework, including the offline pattern dis-covery and verification stage and the online pattern-guided circuit transformation stage. Section 4 evaluates QRisk on two IBM backends. Section 5 discusses scope, physical inter-pretation, and limitations. Section 6 surveys related work, and Section 7 concludes. 
+
+## 2 Background and Motivation 
+
+In this section, we provide the background necessary to un-derstand QRisk . We introduce quantum circuits (Section 2.1), calibration-based noise modeling (Section 2.2), and quantum compilation (Section 2.3). We then present a motivating ex-ample that exposes the gap between noise-model predictions and real hardware behavior (Section 2.4). 
+
+2.1 Quantum Circuits 
+
+A quantum computation operates on qubits , the quantum analogue of classical bits. Unlike a classical bit, a qubit can  
+
+> 2QRisk Conference’17, July 2017, Washington, DC, USA
+
+# Identify Swap Result   
+
+> Abnormal pattern detected Gates dispersed
+
+Figure 1. Motivating example on ibm_marrakesh (qubits 6, 7, 8, 17). A compiled Grover circuit contains a 4-gate subsequence that causes abnormally high hardware error ( Identify ). A single commuting gate swap disperses the pattern without changing the circuit’s semantics ( Swap ). The transformed circuit reduces TVD from 0.058 to 0.032, a 44.5% error reduction, even though the noise model predicts identical error for both versions ( Result ). exist in a superposition of the |0⟩ and |1⟩ states; measuring it collapses the superposition and returns a classical outcome. Computations are expressed as quantum circuits : sequences of quantum gates applied to one or more qubits. Single-qubit gates (e.g., 𝑋 , 𝐻 , 𝑅 𝑧 ) manipulate individual qubits, while two-qubit entangling gates (e.g., CX, ECR) create correlations between qubit pairs. Mathematically, each quantum gate corresponds to a uni-tary matrix, and a quantum circuit denotes the matrix prod-uct of the gates it contains. Two circuits are therefore consid-ered equivalent if they implement the same overall unitary transformation, even if they use different quantum gate se-quences. This notion of equivalence is central to quantum compilation: the compiler may rewrite a circuit into a dif-ferent but semantically equivalent form in order to satisfy hardware constraints or improve execution quality. For ex-ample, the same logical computation may be realized using different decompositions, qubit mappings, or gate orderings, all of which preserve the intended functionality while chang-ing how the circuit interacts with the underlying hardware. 
+
+2.2 Quantum Noise Modeling 
+
+Every gate and measurement on NISQ hardware is imper-fect. Errors arise from imprecise control pulses, unwanted coupling to the environment (decoherence), and interactions between neighboring qubits (crosstalk) [ 27 ]. To account for these errors during compilation, compiler developers use 
+
+noise models from periodic calibration data. A noise model records per-gate error rates, per-qubit readout fidelities, and 
+
+𝑇 1/𝑇 2 coherence times for each physical qubit. Noise-aware compilers use this information to favor low-error qubits and couplers during mapping and routing [23, 37]. A depolarizing channel models gate infidelity: its strength is set to the calibrated error rate (minus the portion already accounted for by thermal relaxation), and it is applied as a 1-qubit or 2-qubit channel depending on the gate arity. A ther-mal relaxation channel models 𝑇 1 amplitude damping and 𝑇 2
+
+phase damping during the gate’s execution. For multi-qubit gates, each qubit receives its own independent single-qubit relaxation channel, tensored together with no correlated re-laxation. A readout channel applies an independent classical bit-flip to each measurement qubit. These noise models, however, are inherently context-free. They characterize each gate and qubit independently, ignor-ing context-dependent effects: crosstalk between simulta-neously driven qubits, correlated errors across neighboring couplers, and the interplay between gate scheduling and decoherence. 
+
+2.3 Quantum Compilation 
+
+On real quantum hardware, qubits are physical objects with limited connectivity, and not every pair of qubits can interact directly. Instead, interactions are constrained by the device’s 
+
+coupling graph . A quantum compiler maps a logical circuit onto such hardware by performing three key tasks: (1) qubit mapping , assigning logical qubits to physical qubits; (2) gate routing , inserting SWAP operations so that two-qubit gates act only on connected qubits; and (3) gate decomposition ,rewriting operations into the device’s native gate set [ 16 , 43 ]. These compilation choices directly affect execution fidelity. Even when two compiled circuits are semantically equiva-lent , they may use different physical qubits, couplers, gate orderings, and SWAP sequences, causing them to accumulate different levels of error. Because of this, modern quantum compilers often use noise models in Section 2.2 to guide map-ping and routing decisions, favoring candidates that appear more reliable according to estimated gate and readout errors. As mentioned in Section 2.2, the gap between what the noise  
+
+> 3Conference’17, July 2017, Washington, DC, USA Zhenyu Qi, Qian Zhang, Haotang Li, Sen He, and Jiyuan Wang
+
+model predicts and what the hardware actually produces can be substantial [ 18 , 35 ]. Two candidates that appear sim-ilarly good under the compiler’s noise model may behave very differently on real hardware if one contains abnormal patterns. This gap between model-guided compilation and real-device behavior motivates techniques that can identify and remember recurring abnormal patterns from hardware executions. 
+
+2.4 Motivating Example 
+
+Consider a 3-qubit Grover search circuit with one ancilla, compiled to physical qubits 97, 106, 107, and 108 on IBM’s 
+
+ibm_fez at Qiskit optimization level 3. Qubit 107 couples to all three others. The compiled circuit contains 151 native-gate operations (58 rz , 63 sx , 2 x, 28 cz ) plus 3 measurements. We compile this circuit multiple times and produce 50 semantically equivalent variants. The Qiskit noise simulator that leverages noise model predicts nearly identical error for all of them. This is expected: all variants use the same physical qubits and the same gate types, so the per-gate noise model produces the same prediction. On hardware, however, the variants diverge. Some match the noise model’s prediction closely, while others show up to 24% more hardware error than the model expects. This gap persists across repeated executions in the same calibration window. The noise model cannot explain it. Examining the high-error variants reveals a common 4-gate subsequence: q107 𝑆𝑋 𝑅𝑍 (.39 )
+
+q108 𝑆𝑋 
+
+None of these four gates has an unusually high calibrated error rate. The excess error comes from the sequence : single-qubit rotations on two coupled qubits immediately followed by a two-qubit gate between them. The noise model, which scores each gate independently, cannot flag this structure. The compiler treats all 50 variants as equally good, even though a subset consistently performs worse. 
+
+## 3 Approach 
+
+The motivating example in Section 2.4 shows that compiled circuits can contain local gate sequences that cause abnor-mally high error on hardware, yet appear harmless to the calibration-based noise model. We thus hypothesize that if such sequences recur across circuits and persist across cal-ibration windows, they can serve as actionable signals for effective quantum compilation. The goal of QRisk is to dis-cover these recurring patterns from hardware executions and use them to guide quantum compilation. 
+
+QRisk has two stages: an offline stage (Section 3.1) that dis-covers and verifies abnormal, execution-dependent patterns from noise-model-to-hardware mismatches, and an online stage (Section 3.2) that uses those patterns to transform com-piled circuits. Figure 2 shows the pipeline. We explain each step using the Grover circuit from Section 2.4 as a running example. 
+
+3.1 Offline Stage: Pattern Identification and Verification 
+
+Two properties of quantum hardware make pattern discovery challenging. First, quantum measurement is inherently sto-chastic: whether a reduced circuit still exhibits the abnormal behavior cannot be answered by a binary pass/fail oracle, but requires statistical comparison of output distributions. Sec-ond, hardware noise drifts over time as calibrations change, so a single observation may reflect a transient fluctuation rather than a persistent pattern. The offline stage takes a compiled circuit that shows a large gap between its noisy simulation and its real hardware output, and produces a set of verified abnormal patterns. It proceeds in two phases. The first phase, search , uses delta debugging to locate short gate sequences responsible for the gap, with a dynamic oracle that addresses the stochastic nature of quantum outputs. The second phase, verification ,repeats the search across multiple calibration windows to retain only persistent patterns. In this way, the search phase addresses the oracle challenge, while the verification phase filters out transient artifacts caused by hardware drift. 
+
+3.1.1 Pattern Search via Delta Debugging. The search phase adapts delta debugging (DDMin) [ 41 ] to quantum cir-cuits. In classical software engineering, DDMin systemati-cally removes subsets of a failing input to find a minimal subset that still triggers the failure. We apply the same prin-ciple to gate sequences: instead of removing lines of code, we remove segments of gates; instead of checking whether a test case crashes, we check whether removing a segment reduces the gap between the noise model’s prediction and the hardware’s actual behavior. 
+
+Partitioning the circuit into moments. Operating at single-gate granularity would require too many oracle calls, each involving a real hardware execution. It would also be conceptually misguided: the calibration-based noise model already captures per-gate error rates, so a single flagged gate carries no new information. The patterns we seek are context-dependent effects that arise from the interaction of multiple gates. We partition the circuit by moments . A moment groups all gates that can execute in parallel: starting from the linear operation sequence produced by the compiler, each gate is assigned to the earliest moment in which all of its qubits are free. A single moment may contain one operation or several operations on disjoint qubits. We then group consecutive moments into fixed-size segments (default: 3 moments per segment), and each segment serves as one unit for DDMin to remove or retain. Figure 3 illustrates this partitioning on  
+
+> 4QRisk Conference’17, July 2017, Washington, DC, USA
+
+Figure 2. QRisk framework overview. The offline stage discovers abnormal patterns through delta debugging with a ratio-based oracle, then verifies their persistence across repeated runs. The online stage transforms a compiled circuit by applying targeted commuting gate swaps to disrupt discovered patterns. Segment 1 Segment 2 q0 𝑆𝑋 𝑅𝑍 
+
+q1 𝑅𝑍 𝑆𝑋 
+
+q2 𝑅𝑍 𝑆𝑋 𝑅𝑍 𝑅𝑍 
+
+m1 m2 m3 m4 m5 m6 
+
+Figure 3. A 3-qubit circuit partitioned into 6 moments and 2 segments. Each moment groups gates that can execute in parallel (e.g., 𝑚 1 contains SX on 𝑞 0 and RZ on 𝑞 2). Consecu-tive moments are grouped into fixed-size segments (here 3 moments each), which serve as the atomic units for delta debugging. a small example circuit. For the running example, the 151-operation Grover circuit contains 107 moments (parallelism is low because most gates involve the hub qubit), yielding approximately 36 segments of 3 moments each. 
+
+Ratio-based discrepancy oracle. Each time DDMin re-moves a set of segments, the oracle must decide whether the remaining circuit still contains excess hardware noise. The most direct measure would be the Total Variation Distance (TVD) between the noise model’s prediction and the hard-ware output, TVD (𝑃 noisy , 𝑃 hw ). TVD is defined as TVD (𝑝, 𝑞 ) =
+
+> 12
+
+Í𝑥 ∈ { 0,1}𝑛 |𝑝 (𝑥 ) − 𝑞 (𝑥 )| , where 𝑝 (𝑥 ) and 𝑞 (𝑥 ) are the proba-bilities of observing bitstring 𝑥 under two distributions. How-ever, removing segments shortens the circuit, and shorter circuits accumulate less total error. The raw TVD therefore decreases even when the removed segments are not abnor-mal, creating a systematic bias toward flagging every seg-ment. To eliminate this bias, we normalize by the noise model’s own prediction of total error. The oracle computes the ratio 
+
+of actual hardware error to noise-model-predicted error: 
+
+𝑅 (𝐶 ′) = TVD (𝑃 ideal (𝐶 ′), 𝑃 hw (𝐶 ′)) 
+
+TVD (𝑃 ideal (𝐶 ′), 𝑃 noisy (𝐶 ′)) .
+
+This requires three executions per oracle call: an ideal simu-lation, a noisy simulation using the backend’s most recent calibration data (via Qiskit Aer), and a hardware execution. Both numerator and denominator shrink proportionally as segments are removed, so the ratio stays stable unless the re-moved segments contain genuine excess error. When 𝑅 ≈ 1,the noise model fully explains the hardware error. When 
+
+𝑅 > 1, there is excess hardware noise. If removing a segment  
+
+> 5Conference’17, July 2017, Washington, DC, USA Zhenyu Qi, Qian Zhang, Haotang Li, Sen He, and Jiyuan Wang
+
+causes the ratio to drop, that segment is responsible for part of the excess. 
+
+Calibrating the threshold from shot noise. The ratio 
+
+𝑅 itself fluctuates due to shot noise, so the oracle needs a threshold to distinguish genuine excess hardware noise from random variation. We calibrate this threshold per circuit before the main DDMin loop. We run two independent noisy simulations (with no real hardware involved) and compute their ratio five times: 
+
+𝑅 null = TVD (𝑃 ideal , 𝑃 noisy,2 )
+
+TVD (𝑃 ideal , 𝑃 noisy,1 ) .
+
+Because both distributions come from the same noise model with no real hardware involved, any deviation from 𝑅 null =
+
+1.0 is due entirely to shot noise. This gives a null distribu-tion: the range of ratio fluctuations expected when there is no excess hardware noise. The threshold is the 2-sigma upper bound of this null distribution minus 1.0: 𝜏 = 𝑅 null +
+
+2 𝜎 (𝑅 null ) − 1.0. Only ratio drops exceeding 𝜏 are treated as evidence of excess hardware noise. If the full circuit’s base-line ratio satisfies 𝑅 (𝐶 ) ≤ 1.0 + 𝜏 , the noise model already explains the hardware behavior within shot noise, and the algorithm returns an empty result without running DDMin. 
+
+Guarding against small-denominator instability. As DDMin removes segments, the circuit becomes shorter and the noise model predicts less total error, so the denomina-tor TVD (ideal , noisy ) shrinks. When the denominator ap-proaches the level of pure shot noise, small random fluc-tuations in the denominator cause large swings in the ra-tio, making the oracle unreliable. We set a floor using the same calibration runs from threshold calibration: TVD min =
+
+2 × TVD (noisy 1, noisy 2). The quantity TVD (noisy 1, noisy 2)
+
+measures the variation between two independent samples from the same noise model, which is pure shot noise (approx-imately 0.006 at 8,192 shots). Any denominator below twice this level no longer carries a meaningful signal. DDMin skips reduction steps where the denominator falls below this floor. DDMin maintains a candidate set of segments and a par-tition count 𝑛 . It narrows the set when removing a group causes 𝑅 to drop, or when removing the complement causes 
+
+𝑅 to drop. It also narrows to a group when that group alone preserves the elevated ratio. Algorithm 1 gives the full pro-cedure. 
+
+Running example: localizing the pattern in grover algorithm. The 151-operation Grover circuit spans 107 mo-ments and is partitioned into approximately 36 segments of 3 moments each. The oracle first measures the full circuit’s baseline ratio: 𝑅 (𝐶 ) = 1.3, which exceeds the calibrated threshold ( 1.0 + 𝜏 ), confirming the presence of excess hard-ware noise. DDMin begins by splitting the 36 segments into two halves and removing the first half. If the ratio of the remaining 
+
+Algorithm 1 DDMin adapted for quantum circuits. The algorithm takes a set of circuit segments and two predicates: 
+
+Drop (𝑋 ) returns true when removing segments 𝑋 causes the ratio 𝑅 to drop by more than 𝜏 , and Sufficient (𝑋 ) returns true when retaining only 𝑋 preserves 𝑅 > 1+𝜏 . The partition count doubles after each full scan and the search terminates when it exceeds 𝑛 max (set to 16). 
+
+Require: Segments 𝑆 = {𝑠 1, . . . , 𝑠 𝑚 }, predicates Drop ,
+
+Sufficient 
+
+Ensure: Minimal abnormal segment set  
+
+> 1:
+
+cands ← 𝑆 , 𝑛 ← 2 
+
+> 2:
+
+while |cands | ≥ 2 do  
+
+> 3:
+
+Split cands into 𝑛 groups 𝐺 1, . . . , 𝐺 𝑛  
+
+> 4:
+
+for each group 𝐺 𝑖 do  
+
+> 5:
+
+if Drop (𝐺 𝑖 ) then  
+
+> 6:
+
+cands ← 𝐺 𝑖 , 𝑛 ← 2; restart while  
+
+> 7:
+
+else if Drop (cands \ 𝐺 𝑖 ) then  
+
+> 8:
+
+cands ← cands \ 𝐺 𝑖 , 𝑛 ← 2; restart while  
+
+> 9:
+
+else if Sufficient (𝐺 𝑖 ) and |𝐺 𝑖 | < |cands | then  
+
+> 10:
+
+cands ← 𝐺 𝑖 , 𝑛 ← 2; restart while  
+
+> 11:
+
+end if  
+
+> 12:
+
+end for  
+
+> 13:
+
+𝑛 ← 2𝑛 ; if 𝑛 > 𝑛 max then return cands  
+
+> 14:
+
+end while  
+
+> 15:
+
+return cands 
+
+circuit stays high, the abnormal segments lie in the second half, and the first half is discarded. The algorithm repeats this binary search, progressively narrowing the candidate set. At each step, the oracle runs an ideal simulation, a noisy simulation, and a hardware execution on the reduced circuit to recompute 𝑅 .After several narrowing rounds, DDMin converges to a single segment covering moments 14–16 (4 operations). Re-moving this segment causes the ratio to drop close to 1.0; keeping it preserves the elevated ratio. The segment is ex-actly the 4-gate pattern shown in Section 2.4. Moment 14 contains two parallel single-qubit gates on qubits 107 and 108, moment 15 contains one rotation on qubit 107, and moment 16 contains the two-qubit gate between them. 
+
+3.1.2 Pattern Verification via Cross-Window Repeti-tion. A single DDMin run is not sufficient evidence of a persistent hardware effect. Shot noise can make a harmless segment look abnormal in one execution, and calibration drift can make a genuinely abnormal segment appear normal in another. A candidate pattern discovered once may reflect a transient fluctuation rather than a real hardware charac-teristic. Trusting such a one-time observation would pollute the pattern database with false positives. In our experiments, approximately 29% of flagged segments appeared in only one out of three runs and were discarded as transient noise.  
+
+> 6QRisk Conference’17, July 2017, Washington, DC, USA
+
+A recurring abnormal pattern should not depend on a sin-gle observation. Alghmadi et al. [ 3] establish this principle in the context of performance testing: rather than relying on any individual measurement, they determine whether an observed phenomenon recurs across repeated, indepen-dent observation periods. Similar methodologies for non-deterministic cloud systems [ 12 , 13 ] confirm that measure-ments subject to environmental variation require testing across multiple time intervals before results can be trusted. We apply the same reasoning to quantum hardware. Instead of asking whether a single DDMin run produces a statisti-cally significant ratio, we ask whether independent DDMin runs in different calibration windows repeatedly rediscover the same candidate pattern. Repeated rediscovery across in-dependently calibrated hardware sessions is evidence of a persistent hardware effect; a pattern that appears only once is discarded as noise. Concretely, QRisk runs DDMin on the same circuit once per week, each in a different calibration window. Each run performs its own baseline measurement and threshold cali-bration, then searches for abnormal segments from scratch. The per-run oracle threshold 𝜏 filters out random shot-noise fluctuations within a single run, but a pattern enters the data-base only if it is independently flagged in other runs. The flagged gate subsequence, together with its qubit assignment and backend identifier, is stored as a database entry. 
+
+Running example: verifying persistence. We ran DDMin on the Grover circuit 10 times across independent calibration windows from November 2025 to March 2026 on ibm_fez .The segment covering moments 14–16 (the 4-gate pattern) was flagged in 8 out of 10 runs (80%), the highest consistency among all segments. This consistent signal across indepen-dently calibrated hardware sessions over 4 months provides strong evidence that the pattern reflects a persistent hard-ware effect rather than transient noise. 
+
+3.2 Online Stage: Pattern-Guided Circuit Transformation 
+
+The offline stage produces a pattern database of persistent abnormal gate sequences. The online stage uses this database to guide compilation. Given a source quantum program and a target backend, QRisk first compiles the program once using the standard compiler (Qiskit optimization level 3). It then scans the compiled circuit for occurrences of known patterns and applies targeted gate reorderings to disrupt them. This mechanism can be implemented as a dedicated Qiskit com-pilation pass, allowing pattern-aware transformations to be incorporated directly into the existing compiler workflow. 
+
+Disrupting patterns via commuting gate swaps. Two adjacent gates in a circuit can be safely swapped whenever they commute as operators. This holds when both gates are diagonal in the computational basis (e.g., rz and cz ), even if they share a qubit. In this case, swapping the two gates preserves the circuit’s semantics and depth; only the gate ordering changes. For each pattern occurrence found in the circuit, QRisk 
+
+identifies commuting gate pairs within or adjacent to the pattern and swaps them to break the contiguous subsequence. The transformation terminates when no pattern occurrence remains, or when no further commuting swap can disrupt the remaining occurrences. Because every swap preserves semantic equivalence, the output circuit computes the same function as the input. 
+
+Running example: disrupting the pattern. The com-piled Grover circuit (151 operations) contains one occurrence of the 4-gate pattern at positions 34–37. QRisk disrupts this pattern with a single commuting swap. On qubit 107’s time-line, rz(107,0.393) and cz(108,107) are adjacent (the in-tervening sx(108) acts only on qubit 108 and occupies a separate parallel moment). Both rz and cz are diagonal in the computational basis, so they commute even though they share qubit 107. Swapping them yields the transformation shown in Figure 4. 
+
+Original: 
+
+q107 𝑆𝑋 𝑅𝑍 (.39 )
+
+q108 𝑆𝑋 
+
+⇓ commuting swap 
+
+Disrupted: 
+
+q107 𝑆𝑋 𝑅𝑍 (.39 )
+
+q108 𝑆𝑋 
+
+Figure 4. Commuting gate swap on the ibm_fez pattern. Swapping rz(107,0.39) past cz(108,107) breaks the con-tiguous 4-gate subsequence while preserving circuit seman-tics. The original 4-gate subsequence no longer appears as a con-tiguous block. The circuit is semantically equivalent but free of the abnormal pattern. 
+
+## 4 Evaluation 
+
+In this section, we evaluate QRisk empirically. We describe the experimental setup (Section 4.1), then evaluate whether the offline stage can discover abnormal patterns (Section 4.2) and whether those patterns persist across calibration win-dows (Section 4.3). Finally, we assess whether disrupting the patterns through commuting gate swaps reduces excess hardware noise (Section 4.4). 
+
+4.1 Setup 
+
+The QRisk prototype is implemented in Python on top of Qiskit [28]. Table 1 summarizes the key parameters.  
+
+> 7Conference’17, July 2017, Washington, DC, USA Zhenyu Qi, Qian Zhang, Haotang Li, Sen He, and Jiyuan Wang
+
+Table 1. Experimental parameters. 
+
+Parameter Value Backends ibm_fez (156 qubits) [2], 
+
+ibm_marrakesh (156 qubits) Native gate set rz , sx , x, cz 
+
+Transpilation level Qiskit optimization level 3 Shots per execution 8,192 Segment size 3 moments Threshold Calibrated per circuit Workload 3-qubit Grover circuits (1 ancilla) [11] 
+
+Backends and simulation. We run experiments on two IBM quantum computers: ibm_fez and ibm_marrakesh , both 156-qubit Heron processors. Circuits are compiled with Qiskit’s transpiler at optimization level 3, producing circuits in each backend’s native gate set. Noisy simulation uses Qiskit Aer with a noise model built from the backend’s most recent calibration data. Each execution uses 8,192 shots. 
+
+Workload. All experiments use 3-qubit Grover search circuits with one ancilla qubit (4 physical qubits total) to isolate the recurring abnormal hardware patterns. We eval-uate QRisk on different qubit layouts and backends to test generalization. 
+
+Metric. Our primary metric is TVD (noisy , real ), the dis-crepancy between what the noise model predicts and what the hardware actually produces (see Section 3.1.1 for the TVD definition). Higher values indicate more excess hard-ware noise. 
+
+4.2 Pattern Discovery 
+
+We evaluate whether QRisk ’s offline stage can discover ab-normal patterns from hardware executions. 
+
+Discovery on ibm_fez . We compiled a 3-qubit Grover cir-cuit (with one ancilla qubit) to physical qubits 97, 106, 107, and 108 on ibm_fez (qubit 107 couples to all three others; 28 CZ gates). The compiled circuit contains 36 segments of 3 moments each, with a baseline discrepancy ratio 𝑅 = 1.3.A single DDMin run converges in 5 steps and identifies 3 abnormal segments out of 36. Table 2 lists the candidate seg-ments from this representative run. The candidates cluster in a contiguous region (segments 4–6), suggesting a localized source of excess hardware noise. No single CZ qubit pair was dramatically enriched in abnormal segments (enrich-ment ranged from 0.67x to 1.26x), suggesting the issue is not a simple qubit-pair calibration problem but involves the sequential context of gates. 
+
+Discovery on ibm_marrakesh . To test whether QRisk can discover patterns on a different backend, we ran the pipeline 
+
+Table 2. Candidate segments from a single DDMin run on 
+
+ibm_fez .
+
+Segments Gate sequence 4q97 𝑅𝑍 (− 2.75 )   
+
+> q107 𝑅𝑍 (2.77 )𝑆𝑋
+> q108
+
+5 q107 𝑆𝑋 𝑅𝑍 (.39 ) 
+
+> q108 𝑆𝑋
+
+6q97 q107 𝑆𝑋 𝑆𝑋    
+
+> q108 𝑆𝑋 𝑅𝑍 (.76 )
+
+Table 3. Candidate segments from a single DDMin run on 
+
+ibm_marrakesh .
+
+Segments Gate sequence 6 q6 𝑆𝑋 𝑅𝑍 (− 1.19 )    
+
+> q7 𝑆𝑋 𝑅𝑍 (1.18 )𝑆𝑋
+
+7 q7 𝑅𝑍 (𝜋 )   
+
+> q8 𝑋 𝑅𝑍 (− 2.75 )
+
+8 q6 q7 𝑅𝑍 (− 2.75 ) 𝑆𝑋 
+
+independently on ibm_marrakesh with a different qubit lay-out (qubits 6, 7, 8, 17). The compiled circuit contains 37 seg-ments with a baseline ratio 𝑅 = 1.38 . A single DDMin run converges in 6 steps and identifies 3 abnormal segments. Table 3 lists the candidate segments. As on ibm_fez , the candidates cluster in a contiguous region (segments 6–8). 
+
+4.3 Pattern Verification 
+
+We evaluate whether the discovered patterns persist across independent calibration windows. 
+
+Cross-window verification on ibm_fez . We ran QRisk 
+
+on the same Grover circuit 10 times across independent cal-ibration windows from November 2025 to March 2026 on 
+
+ibm_fez . Table 4 summarizes the abnormal segments iden-tified in each run. Segment 5, which contains the 4-gate pattern, was flagged in 8 out of 10 runs (80%), the highest consistency among all segments. The adjacent segments 4 and 6 were flagged in 70% and 60% of runs respectively. Seg-ments outside the 3–7 region appeared in at most 20% of runs, indicating they are transient artifacts filtered out by repeated verification. 
+
+Cross-window verification on ibm_marrakesh . We per-formed the same repeated verification on ibm_marrakesh 
+
+across 10 independent calibration windows from November  
+
+> 8QRisk Conference’17, July 2017, Washington, DC, USA
+
+Table 4. Cross-window verification on ibm_fez : abnormal segments identified by DDMin across 10 independent cali-bration windows (November 2025 to March 2026). Run date Calibration window Abnormal segments Nov 2025 Window 1 2, 3, 4, 5, 6, 7 Nov 2025 Window 2 7, 8, 9 Dec 2025 Window 3 1–10 Dec 2025 Window 4 3, 4, 5, 6, 7 Jan 2026 Window 5 3, 4, 5
+
+Jan 2026 Window 6 4, 5
+
+Feb 2026 Window 7 4, 5, 6 Feb 2026 Window 8 6, 7 Mar 2026 Window 9 3, 4, 5, 6 Mar 2026 Window 10 5Table 5. Cross-window verification on ibm_marrakesh : ab-normal segments identified by DDMin across 10 independent calibration windows (November 2025 to April 2026). Run date Calibration window Abnormal segments Nov 2025 Window 1 5, 6, 7, 8 Nov 2025 Window 2 7, 8, 9 Dec 2025 Window 3 6, 7
+
+Dec 2025 Window 4 7
+
+Jan 2026 Window 5 6, 7, 8 Feb 2026 Window 6 7, 8 Mar 2026 Window 7 5, 6, 7
+
+Apr 2026 Window 8 6, 7, 8 Apr 2026 Window 9 7, 8 Apr 2026 Window 10 7
+
+2025 to April 2026. Table 5 summarizes the results. Segment 7, which contains the 4-gate pattern, was flagged in all 10 out of 10 runs (100%), the highest consistency among all segments. The adjacent segments 6 and 8 were flagged in 50% and 60% of runs, respectively. Segments outside the 6–8 region appeared in at most 20% of runs. 
+
+Finding. On two independent backends, QRisk discovers 4-gate patterns that persist across multiple calibration win-dows. On ibm_fez , segment 5 (the 4-gate pattern) was flagged in 8 out of 10 runs over 4 months. On ibm_marrakesh , seg-ment 7 (a different 4-gate pattern) was flagged in 10 out of 10 runs over 5 months. 
+
+4.4 Pattern-Guided Circuit Transformation Effectiveness 
+
+We evaluate whether disrupting discovered patterns through commuting gate swaps reduces excess hardware noise on hardware. For each backend, we generate 10 compiled cir-cuits that contain 3 occurrences of the discovered pattern. For each of them, we use commuting gate swaps to generate semantically equivalent variants where 0, 1, and 2 survive as contiguous subsequences. All variants have the same gate composition, circuit length, and computation. We executed them (40 total per backend) in a single calibration window, with execution order shuffled to control for hardware drift. 
+
+Scaling on ibm_fez . The circuit has 453 operations with 3 occurrences of the 4-gate pattern. Starting from the original circuit (3 occurrences, TVD (simulator , real ) = 0.066 ), QRisk 
+
+progressively eliminates pattern occurrences via commut-ing gate swaps. Each elimination reduces hardware noise: 
+
+0.066 → 0.059 → 0.052 → 0.050 , a 24% reduction when all 3 occurrences are disrupted (Figure 5(a)). The noise model pre-dicts nearly identical error across all groups, confirming that the excess is entirely due to hardware noise not captured by the model. In short, we eliminate all 3 patterns in the target circuit in less than 1 second. 
+
+Scaling on ibm_marrakesh . The circuit has 474 opera-tions with 3 occurrences of the ibm_marrakesh pattern. We generated 40 variants (10 per group) using the same method-ology. Starting from 3 occurrences ( TVD (simulator , real ) =
+
+0.058 ), QRisk reduces hardware noise from 0.058 → 0.045 →
+
+0.033 → 0.032 , a 45% reduction when all occurrences are eliminated (Figure 5(b)). The noise model again predicts constant noise rate across groups ( TVD (ideal , simulator ) ≈ 
+
+0.084 ). 
+
+Transformation result. The mean TVD (noisy , real ) on 
+
+ibm_fez drops from 0.066 (3 occurrences) to 0.050 (0 oc-currences), a 24% reduction in excess hardware noise. On 
+
+ibm_marrakesh , it drops from 0.058 to 0.032, a 45% reduction. In both cases, the noise model predicts identical quality for all variants, so the improvement is entirely due to avoiding execution-dependent errors that the noise model misses. The transformation itself is purely classical and takes under one second on a single CPU core. 
+
+Statistical significance. Table 6 reports statistical tests across all 40 individual circuits per experiment ( 𝑁 =40 per backend). Both ibm_fez and ibm_marrakesh show statisti-cally significant Spearman correlation between pattern count and excess hardware noise ( 𝑝 < 0.01 ), and significant Mann-Whitney U tests between the 0-occurrence and 3-occurrence groups. The Kingston cross-hardware control (discussed be-low) shows no significant effect, as expected. 
+
+Noise model blindness. The noise model’s prediction 
+
+TVD (ideal , noisy ) shows no correlation with pattern count on any backend (Table 6, middle columns). The calibration-based noise model assigns nearly identical predicted error to all variants regardless of how many pattern occurrences they contain. This confirms that the patterns represent a class of error that per-gate noise models fundamentally cannot capture.  
+
+> 9Conference’17, July 2017, Washington, DC, USA Zhenyu Qi, Qian Zhang, Haotang Li, Sen He, and Jiyuan Wang
+
+0 1 2 3
+
+Pattern count 
+
+0.02 
+
+0.04 
+
+0.06 
+
+0.08 
+
+0.10   
+
+> TVD(noisy, real)
+> (a) ibm_fez :−24%.
+
+0 1 2 3
+
+Pattern count 
+
+0.02 
+
+0.04 
+
+0.06 
+
+0.08 
+
+0.10 (b) ibm_marrakesh : −45%. 0 1 2 3
+
+Pattern count 
+
+0.02 
+
+0.04 
+
+0.06 
+
+0.08 
+
+0.10 (c) ibm_kingston (control): no trend. 
+
+Figure 5. TVD (noisy , real ) vs. surviving pattern count (10 circuits per group). (a) and (b) show monotonically increasing excess hardware noise on two backends. (c) runs the same ibm_fez circuits on a different chip, showing no effect. 
+
+Table 6. Statistical tests for scaling experiments ( 𝑁 =40 per backend). Pattern vs. excess hardware noise : the main hypothesis. 
+
+Mann-Whitney U : group 3 vs. group 0. Pattern vs. noise model : expected null (noise model should be blind). Swap count vs. excess hardware noise : confound check. Significant results ( 𝑝 < 0.01 ) in bold.                                        
+
+> Pattern count vs. TVD(noisy,real) Pattern count vs. TVD(ideal,noisy) Swap count vs. TVD(noisy,real) Backend Spearman 𝜌 𝑝 M-W 𝑈 𝑝 (1-sided) Spearman 𝜌 𝑝 Spearman 𝜌 𝑝
+> ibm_fez 0.515 0.0007 13.0 0.003 0.158 0.33 −0.492 0.001
+> ibm_marrakesh 0.711 <0.0001 2.0 0.0002 −0.066 0.69 −0.625 <0.0001
+> ibm_kingston 0.187 0.248 66.0 0.121 0.059 0.72 0.007 0.97
+
+Nonlinear scaling behavior. On both backends, the tran-sition from 0 to 1 pattern occurrence produces a small in-crease that falls within the per-group standard deviation (fez: +0.002, marrakesh: +0.001), while the transitions from 1 to 2 and from 2 to 3 produce substantially larger jumps (fez: +0.007 each step, marrakesh: +0.012 and +0.013). This nonlinear onset is consistent across both backends. A single pattern occurrence contributes hardware error on the order of the shot-noise floor (standard deviations range from 0.003 to 0.018), so its effect is difficult to distinguish from random variation. As occurrences accumulate, the cumulative excess grows well beyond this floor: on ibm_fez , from +0.002 (1 oc-currence) to +0.016 (3 occurrences); on ibm_marrakesh , from +0.001 to +0.026. The pattern does not need to be individually catastrophic to matter: its effect is small per occurrence but compounds across a circuit. 
+
+Cross-hardware control on ibm_kingston . To check whether the discovered patterns reflect chip-specific defects rather than universal gate-sequence properties, we ran the same ibm_fez scaling circuits (453 ops, pattern count 0– 3, 10 per group) on a third backend ( ibm_kingston , 156-qubit Heron) using the same qubit positions (97/106/107/108). Figure 5(c) shows no monotonic trend: 0.056 → 0.055 →
+
+0.053 → 0.059 . The overall change from 0 to 3 occurrences is +6%, well within the per-group standard deviation. The Spearman correlation is 𝜌 = 0.187 (𝑝 = 0.248 ), far from significant. The noise model predicts nearly identical error across all groups ( TVD (ideal , noisy ) ≈ 0.075 ). The pattern that causes 24% excess hardware noise on ibm_fez produces no measurable effect on a different chip at the same qubit positions, confirming that the pattern is backend-specific. This result also serves as a false-positive control: the same experimental methodology, applied to a backend where the pattern is not abnormal, correctly returns no signal. 
+
+## 5 Discussion 
+
+In this section, we discuss how QRisk integrates into broader compilation workflows (Section 5.1), what the discovered patterns may reveal about the underlying hardware (Sec-tion 5.2), and the limitations of the current transformation strategy (Section 5.3). 
+
+5.1 Scope and Integration 
+
+QRisk does not replace the noise model. It supplements it with empirical evidence about local gate sequences that the per-gate model cannot capture. The approach is most effec-tive when the compiled circuit contains patterns that can be disrupted by commuting gate swaps. QRisk acts as a post-compilation transformation layer: it does not modify the compiler’s mapping or routing decisions, only the gate  
+
+> 10 QRisk Conference’17, July 2017, Washington, DC, USA
+
+ordering in the final circuit. A future compiler could incor-porate pattern-derived risk directly into layout and routing decisions; the current design isolates the marginal value of the pattern database as a controlled first step. The pattern database is backend-specific and must be re-built for each target quantum computer. Our cross-hardware experiment (Section 4.4) confirms this: a pattern verified on 
+
+ibm_fez produces no effect on ibm_kingston at the same qubit positions. The database is also time-sensitive. Patterns persist across calibration windows over weeks in our ex-periments, but hardware upgrades or recalibrations could invalidate entries. Periodic re-validation is needed in a pro-duction deployment. 
+
+5.2 Physical Interpretation 
+
+The pattern database is empirical compiler knowledge, not a physical explanation of device behavior. A database en-try records that a specific gate subsequence on a specific qubit neighborhood has repeatedly produced an abnormal error rate. This evidence is operationally useful even without knowing the root cause. The physical mechanism likely involves one or more of: crosstalk between microwave drive lines on adjacent qubits [ 24 ], non-Markovian memory effects where residual qubit exci-tation from one gate affects the next [ 30 ], or coherent er-ror accumulation in specific gate orderings. The backend-specificity of the patterns (different chips produce different patterns on the same qubit positions) is consistent with chip-level fabrication variation. 
+
+5.3 Transformation Scope and Extensions 
+
+The online stage currently disrupts patterns using commut-ing gate swaps: a gate slides past consecutive neighbors via diagonal-basis commutation rules (Section 3.2). This ap-proach is sufficient for the patterns discovered in our evalua-tion, where at least one gate in each pattern has commuting neighbors that allow it to be moved outside the contigu-ous pattern. The transformation preserves the circuit’s gate composition and depth exactly. This strategy has a clear limitation: if a pattern contains no commuting gate pair, commuting gate swaps cannot dis-rupt it. For example, a pattern consisting entirely of non-commuting gates on the same qubit (e.g., sx followed by 
+
+cz on a shared qubit) would be immune to reordering. We have not encountered such patterns in our experiments, but they may arise on other backends or with different circuit families. 
+
+## 6 Related Work 
+
+In this section, we situate QRisk within four areas of related work: quantum program testing and debugging, hardware noise characterization, noise-aware compilation, and delta debugging. 
+
+Quantum program testing and debugging. Several lines of work address fault detection and localization in quan-tum programs, including assertion-based checking, meta-morphic testing [ 1, 26 ], differential testing [ 40 ], and failure localization [ 7, 21 , 31 ]. Ramalho et al. [ 29 ] survey the field. These techniques aim to diagnose faults in a single program or execution. QRisk shares the goal of reducing anomalous behavior to interpretable evidence, but uses the result differ-ently: the output is not a bug report but a reusable pattern database that guides future compilation. 
+
+Hardware noise characterization. Calibration data, pro-cess tomography, randomized benchmarking [ 6 , 9 ], and sim-ulator derived noise models [ 35 ] provide per-gate and per-qubit error estimates that underpin noise-aware compilation. Crosstalk characterization [ 24 , 30 ] has shown that simultane-ously driven qubits produce correlated errors not captured by independent noise channels, but this knowledge has not been systematically fed back into compilation decisions. QRisk 
+
+targets exactly this gap: it discovers context-dependent error patterns from real executions that calibration-based models miss. 
+
+Noise-aware compilation and candidate selection. Noise-aware compilation uses backend calibration data to guide qubit mapping, routing, and gate scheduling [ 17 , 23 , 25 , 32 ,37 , 43 ]. These techniques select low-error qubits and cou-plers based on per-gate error rates. ForeSight [ 10 ] generates multiple routing candidates and ranks them by estimated gate count to reduce SWAP overhead. QRisk differs in two ways: it scores circuits by hardware-derived pattern evidence rather than calibration estimates, and it captures structural risks (gate-sequence effects) that per-gate scoring cannot represent. 
+
+Delta debugging and program reduction. Delta debug-ging (DDMin) [ 41 ] finds a minimal failure-inducing subset of an input by systematically removing elements. Exten-sions include hierarchical reduction (HDD) [ 22 ], probabilistic search (ProbDD) [ 38 ], caching-based acceleration (RCC) [ 36 ], and syntax-aware reduction (Perses) [ 34 ] with later refine-ments [ 14 , 15 , 19 , 39 , 42 ]. QRisk inherits the core insight that large failing artifacts can be reduced to compact sus-picious fragments, but adapts the technique to a stochastic setting: the oracle compares output distributions rather than checking a binary pass/fail condition, the signal must be distinguished from shot noise and hardware drift, and the goal is not to minimize a single failing input but to extract a reusable pattern for compilation guidance. 
+
+## 7 Conclusion 
+
+Quantum compilers generate equivalent circuits but have no way to remember which gate sequences repeatedly cause excess noise on hardware. Calibration-based noise models 
+
+> 11
+
+Conference’17, July 2017, Washington, DC, USA Zhenyu Qi, Qian Zhang, Haotang Li, Sen He, and Jiyuan Wang 
+
+score each gate independently and cannot capture context-dependent effects. QRisk fills this gap by using delta de-bugging to isolate short gate sequences that produce excess hardware noise, validating their persistence across calibra-tion windows, and storing them in a backend-specific pattern database. At compilation time, QRisk scans a compiled cir-cuit for known patterns and applies targeted commuting gate swaps to disrupt them, producing a semantically equivalent circuit with fewer abnormal patterns. We evaluated QRisk on two IBM backends. On ibm_fez ,disrupting a 4-gate pattern reduces excess hardware noise by 24% (Spearman 𝜌 = 0.515 , 𝑝 = 0.0007 ). On ibm_marrakesh ,disrupting a different pattern reduces it by 45% ( 𝜌 = 0.711 ,
+
+𝑝 < 0.0001 ). Both patterns persist across multiple calibration windows over months, while the noise model predicts iden-tical error for all equivalent circuits. Testing the ibm_fez 
+
+pattern on a third backend ( ibm_kingston ) shows no effect, confirming that the patterns are backend-specific. Pattern-guided circuit transformation achieves these reductions with negligible classical overhead. 
+
+## References 
+
+[1] Rui Abreu, Jo ao P. Fernandes, Luis Llana, and Guilherme Tavares. 2022. Metamorphic Testing of Oracle Quantum Programs. In Proceedings of the 3rd International Workshop on Quantum Software Engineering (Q-SE) . ACM, New York, NY, USA, 16–23. doi: 10.1145/3528230.3529189 
+
+[2] Mazen AbuGhanem. 2025. IBM Quantum Computers: Evolution, Per-formance, and Future Directions. The Journal of Supercomputing 81, 5 (2025), 687. doi: 10.1007/s11227-025-07047-7 
+
+[3] Hammam M. Alghmadi, Mark D. Syer, Weiyi Shang, and Ahmed E. Hassan. 2016. An Automated Approach for Recommending When to Stop Performance Tests. In 2016 IEEE International Conference on Software Maintenance and Evolution (ICSME) . IEEE, Piscataway, NJ, USA, 279–289. [4] Frank Arute, Kunal Arya, Ryan Babbush, Dave Bacon, Joseph C Bardin, Rami Barends, Rupak Biswas, Sergio Boixo, Fernando GSL Brandao, David A Buell, et al . 2019. Quantum supremacy using a programmable superconducting processor. Nature 574, 7779 (2019), 505–510. [5] Jacob Biamonte, Peter Wittek, Nicola Pancotti, Patrick Rebentrost, Nathan Wiebe, and Seth Lloyd. 2017. Quantum machine learning. 
+
+Nature 549, 7671 (2017), 195–202. [6] Robin Blume-Kohout, Timothy Proctor, and Kevin Young. 2025. Quan-tum Characterization, Verification, and Validation. arXiv:2503.16383. [7] José Campos and André Souto. 2021. QBugs: A Collection of Re-producible Bugs in Quantum Algorithms and a Supporting Infras-tructure to Enable Controlled Quantum Software Testing and De-bugging Experiments. In IEEE/ACM International Workshop on Quan-tum Software Engineering (Q-SE) . IEEE, Piscataway, NJ, USA, 28–32. doi: 10.1109/Q-SE52541.2021.00013 
+
+[8] Yudong Cao, Jonathan Romero, Jonathan P Olson, Matthias Degroote, Peter D Johnson, Mária Kieferová, Ian D Kivlichan, Tim Menke, Borja Peropadre, Nicolas PD Sawaya, et al . 2019. Quantum chemistry in the age of quantum computing. Chemical reviews 119, 19 (2019), 10856– 10915. [9] Marcus P. da Silva, Olivier Landon-Cardinal, and David Poulin. 2011. Practical Characterization of Quantum Devices without Tomography. 
+
+Physical Review Letters 107 (2011), 210404. doi: 10.1103/PhysRevLett. 107.210404 
+
+[10] Poulami Das, Suhas K. Vittal, and Moinuddin Qureshi. 2022. ForeSight: Reducing SWAPs in NISQ Programs via Adaptive Multi-Candidate Evaluations. arXiv:2204.13142. [11] Lov K. Grover. 1996. A Fast Quantum Mechanical Algorithm for Database Search. In Proceedings of the 28th Annual ACM Symposium on Theory of Computing (STOC) . ACM, New York, NY, USA, 212–219. doi: 10.1145/237814.237866 
+
+[12] Sen He, Tianyi Liu, Palden Lama, Jaewoo Lee, In Kee Kim, and Wei Wang. 2021. Performance Testing for Cloud Computing with Depen-dent Data Bootstrapping. In The 36th IEEE/ACM International Confer-ence on Automated Software Engineering (ASE) . IEEE, Piscataway, NJ, USA, 666–678. [13] Sen He, Glenna Manns, John Saunders, Wei Wang, Lori Pollock, and Mary Lou Soffa. 2019. A Statistics-Based Performance Testing Method-ology for Cloud Applications. In Proceedings of the 2019 27th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering (ESEC/FSE) . ACM, New York, NY, USA, 188–199. doi: 10.1145/3338906.3338912 
+
+[14] Renáta Hodován and Ákos Kiss. 2016. Modernizing hierarchical delta debugging. In Proceedings of the 7th International Workshop on Au-tomating Test Case Design, Selection, and Evaluation . ACM, New York, NY, USA, 31–37. [15] Renáta Hodován, Ákos Kiss, and Tibor Gyimóthy. 2017. Coarse hi-erarchical delta debugging. In 2017 IEEE international conference on software maintenance and evolution (ICSME) . IEEE, Piscataway, NJ, USA, 194–203. [16] Fei Hua, Meng Wang, Gushu Li, Bo Peng, Chenxu Liu, Muqing Zheng, Samuel Stein, Yufei Ding, Eddy Z. Zhang, Travis Humble, and Ang Li. 2023. QASMTrans: A QASM Quantum Transpiler Framework for NISQ Devices. In Proceedings of the International Conference for High Performance Computing, Networking, Storage and Analysis (SC) . ACM, New York, NY, USA, 1468–1477. doi: 10.1145/3624062.3624222 
+
+[17] Yuqian Huo, Jinbiao Wei, Christopher Kverne, Mayur Akewar, Janki Bhimani, and Tirthak Patel. 2025. Revisiting Noise-adaptive Transpi-lation in Quantum Computing: How Much Impact Does it Have?. In 
+
+Proceedings of the International Conference on Computer-Aided Design (ICCAD) . ACM, New York, NY, USA, 1–9. arXiv:2507.01195. [18] Md Sakibul Islam and Protik Nag. 2022. Quantum Noise and Measuring Quantum Distance for NISQ Circuits. doi: 10.36227/techrxiv.21791987 
+
+TechRxiv. [19] Ákos Kiss, Renáta Hodován, and Tibor Gyimóthy. 2018. HDDr: a recursive variant of the hierarchical delta debugging algorithm. In 
+
+Proceedings of the 9th ACM SIGSOFT International Workshop on Au-tomating TEST Case Design, Selection, and Evaluation . ACM, New York, NY, USA, 16–22. [20] Philip Krantz, Morten Kjaergaard, Fei Yan, Terry P Orlando, Simon Gustavsson, and William D Oliver. 2019. A quantum engineer’s guide to superconducting qubits. Applied physics reviews 6, 2 (2019), 021318. [21] Andriy Miranskyy, Lei Zhang, and Javad Doliskani. 2021. On Testing and Debugging Quantum Software. arXiv:2103.09172. [22] Ghassan Misherghi and Zhendong Su. 2006. HDD: hierarchical delta debugging. In Proceedings of the 28th international conference on Soft-ware engineering . ACM, New York, NY, USA, 142–151. [23] Prakash Murali, Jonathan M. Baker, Ali Javadi-Abhari, Frederic T. Chong, and Margaret Martonosi. 2019. Noise-Adaptive Compiler Mappings for Noisy Intermediate-Scale Quantum Computers. In Pro-ceedings of the 24th International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS) . ACM, New York, NY, USA, 1015–1029. doi: 10.1145/3297858.3304075 
+
+[24] Prakash Murali, David C. McKay, Margaret Martonosi, and Ali Javadi-Abhari. 2020. Software Mitigation of Crosstalk on Noisy Intermediate-Scale Quantum Computers. In Proceedings of the 25th International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS) . ACM, New York, NY, USA, 1001–1016. doi: 10.1145/3373376.3378477 
+
+12 QRisk Conference’17, July 2017, Washington, DC, USA 
+
+[25] Siyuan Niu, Adrien Suau, Gabriel Staffelbach, and Aida Todri-Sanial. 2020. A Hardware-Aware Heuristic for the Qubit Mapping Problem in the NISQ Era. IEEE Transactions on Quantum Engineering 1 (2020), 1–14. doi: 10.1109/TQE.2020.3026544 
+
+[26] Matteo Paltenghi and Michael Pradel. 2023. MorphQ: Metamorphic Testing of the Qiskit Quantum Computing Platform. In Proceedings of the 45th International Conference on Software Engineering (ICSE) . IEEE, Piscataway, NJ, USA, 2413–2424. doi: 10.1109/ICSE48619.2023.00202 
+
+[27] John Preskill. 2018. Quantum Computing in the NISQ Era and Beyond. 
+
+Quantum 2 (2018), 79. doi: 10.22331/q-2018-08-06-79 
+
+[28] Qiskit contributors. 2024. Qiskit: An Open-Source Framework for Quantum Computing. doi: 10.5281/zenodo.2573505 
+
+[29] Neilson Carlos Leite Ramalho, Higor Amario de Souza, and Mar-cos Lordello Chaim. 2025. Testing and Debugging Quantum Programs: The Road to 2030. ACM Transactions on Software Engineering and Methodology 34, 5 (2025), 155:1–155:46. doi: 10.1145/3715106 
+
+[30] Kenneth Rudinger, Timothy Proctor, Dylan Langharst, Mohan Sarovar, Kevin Young, and Robin Blume-Kohout. 2019. Probing Context-Dependent Errors in Quantum Processors. Physical Review X 9 (2019), 021045. doi: 10.1103/PhysRevX.9.021045 
+
+[31] Naoto Sato and Ryota Katsube. 2024. Locating Buggy Segments in Quantum Program Debugging. In Proceedings of the ACM/IEEE In-ternational Conference on Software Engineering: Companion (ICSE-Companion) . ACM, New York, NY, USA, 26–31. doi: 10.1145/3639476. 3639761 
+
+[32] Asim Sharma and Avah Banerjee. 2023. Noise-Aware Token Swap-ping for Qubit Routing. In IEEE International Conference on Quantum Computing and Engineering (QCE) . IEEE, Piscataway, NJ, USA, 82–88. doi: 10.1109/QCE57702.2023.10313692 
+
+[33] Peter W Shor. 1999. Polynomial-time algorithms for prime factoriza-tion and discrete logarithms on a quantum computer. SIAM review 41, 2 (1999), 303–332. [34] Chengnian Sun, Yuanbo Li, Qirun Zhang, Tianxiao Gu, and Zhendong Su. 2018. Perses: Syntax-guided program reduction. In Proceedings of the 40th International Conference on Software Engineering . ACM, New York, NY, USA, 361–371. [35] Teruo Tanimoto, Shuhei Matsuo, Satoshi Kawakami, Yutaka Tabuchi, Masuo Hirokawa, and Koji Inoue. 2020. Practical Error Modeling toward Realistic NISQ Simulation. In IEEE Computer Society Annual Symposium on VLSI (ISVLSI) . IEEE, Piscataway, NJ, USA, 291–293. doi: 10.1109/ISVLSI49217.2020.00060 
+
+[36] Yongqiang Tian, Xueyan Zhang, Yiwen Dong, Zhenyang Xu, Mengxiao Zhang, Yu Jiang, Shing-Chi Cheung, and Chengnian Sun. 2023. On the Caching Schemes to Speed Up Program Reduction. ACM Transactions on Software Engineering and Methodology 33, 1 (2023), 1–30. [37] Friedrich Wagner, Daniel J. Egger, and Frauke Liers. 2025. Optimized Noise Suppression for Quantum Circuits. INFORMS Journal on Com-puting 37, 1 (2025), 22–41. doi: 10.1287/ijoc.2024.0551 
+
+[38] Guancheng Wang, Ruobing Shen, Junjie Chen, Yingfei Xiong, and Lu Zhang. 2021. Probabilistic delta debugging. In Proceedings of the 29th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering . ACM, New York, NY, USA, 881–892. [39] Jiyuan Wang, Yuxin Qiu, Ben Limpanukorn, Hong Jin Kang, Qian Zhang, and Miryung Kim. 2025. DuoReduce: Bug Isolation for Multi-layer Extensible Compilation. Proceedings of the ACM on Software Engineering 2, FSE (2025), 647–667. [40] Jiyuan Wang, Qian Zhang, Guoqing Harry Xu, and Miryung Kim. 2021. QDiff: Differential testing of quantum software stacks. In 2021 36th IEEE/ACM international conference on automated software engineering (ASE) . IEEE, Piscataway, NJ, USA, 692–704. [41] Andreas Zeller and Ralf Hildebrandt. 2002. Simplifying and Isolating Failure-Inducing Input. IEEE Transactions on Software Engineering 28, 2 (2002), 183–200. doi: 10.1109/32.988498 
+
+[42] Mengxiao Zhang, Zhenyang Xu, Yongqiang Tian, Yu Jiang, and Cheng-nian Sun. 2023. PPR: Pairwise Program Reduction. In Proceedings of the 31st ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering . ACM, New York, NY, USA, 338–349. [43] Chenghong Zhu, Xian Wu, Zhaohui Yang, Jingbo Wang, Anbang Wu, Shenggen Zheng, and Xin Wang. 2025. Quantum Compiler De-sign for Qubit Mapping and Routing: A Cross-Architectural Survey. arXiv:2505.16891. 13

@@ -1,0 +1,591 @@
+Title: Revisiting Auxiliary Losses for Conditional Depth Routing: An Empirical Study
+
+URL Source: https://arxiv.org/pdf/2604.17228v1
+
+Published Time: Tue, 21 Apr 2026 01:13:06 GMT
+
+Number of Pages: 23
+
+Markdown Content:
+# Revisiting Auxiliary Losses for Conditional Depth Routing: 
+
+An Empirical Study Qingwei Lin 
+
+Independent Researcher 
+
+1833340239@qq.com 
+
+Abstract 
+
+Conditional depth execution routes a subset of tokens through a lightweight cheap FFN while the remainder execute the standard full FFN at each controlled layer. The central difficulty is gate training : the gate decision must propagate through many layers before it influences the language modeling (LM) loss, so the resulting gradients are weak and noisy. Auxiliary losses are commonly stacked to stabilise training, yet the interactions among them—particularly between a predictive auxiliary and explicit score supervision—have not been systematically compared under controlled conditions. We evaluate two gate designs under a 157.5M-parameter decoder-only model with controller-only training, 50% full-path budget, and 3-seed runs on a fineweb-edu subset. The MLP gate (G1) maps the current hidden state directly to a utility score; the JEPA-guided gate (G3) introduces an action-conditional predictor that forecasts, in a low-dimensional latent space, the outcome of executing full versus cheap for each token, with alignment enforced against a fixed target projection head. Under the standard recipe that includes oracle-style utility regression and pairwise rank supervision (jointly util/rank ), G3 consistently improves early-to-mid optimisation dynamics relative to G1—lower average LM loss, faster threshold hits, 
+
+≈ 10 .3× lower training gradient norms—in 3/3 seeds, with the 20k-step endpoint LM within a preset 0.005 heuristic reference threshold. Ablations confirm that JEPA alignment is necessary for predictor non-collapse (A1) and that its weight is insensitive across λJEPA ∈ { 0.25 , 1.0, 2.0}
+
+(A4). A key finding emerges from ablation A3: simultaneously removing util/rank improves 
+
+best/average LM and threshold-hit speed in 3/3 seeds for both gate architectures; moreover, the early-to-mid optimisation advantage of G3 over G1 disappears, leaving the two gates indistinguishable on the reported LM metrics (though score-calibration behavior still differs). We trace this to a structural mismatch: the oracle label assumes “current layer forks; all subsequent layers execute full,” whereas under actual gated execution each subsequent controlled layer routes only a fraction ρ of its tokens through full, making the teacher off-policy. Under controller-only training this bias can accumulate, rendering util/rank a net-negative contribution under the current recipe (λutil = 1 .0, λrank = 0 .2). As a byproduct, removing util/rank cuts the training-time FLOPs proxy from ≈ 1.53 × to ≈ 1.07 × the full-only baseline (measured wall-clock on a single V100-32GB: 2.87h → 1.75h , ≈ 39% reduction) while simultaneously improving LM quality. All conclusions are strictly scoped to the studied regime and are not extrapolated to larger scales, joint backbone training, or alternative oracle definitions. 
+
+# 1 Introduction 
+
+A substantial portion of the inference cost of modern language models arises from the full-activation paradigm, under which every token executes the complete feed-forward network (FFN) at every layer. Conditional depth execution relaxes this constraint: at a subset of controlled layers , some 1
+
+> arXiv:2604.17228v1 [cs.LG] 19 Apr 2026
+
+tokens execute the standard full FFN while the remainder execute a cheaper alternative ( cheap FFN ), thereby improving the compute–quality trade-off under a fixed budget. The central difficulty of this framework resides not in the design of the cheap path, but in 
+
+gate/controller training . Although a budget loss can constrain the average full-path ratio, it cannot directly indicate whether a given token at a given layer warrants full computation. When the gate relies solely on indirect gradients propagated from the LM loss through a long chain of layers, training tends to be slow and unstable. To address this weak-supervision problem, prior work in conditional computation and routing has introduced various auxiliary signals to stabilize gate training, including budget/alive constraints [Ra-poso et al., 2024], router numerical-stability losses [Zoph et al., 2022], load-balancing losses [Fedus et al., 2022], and, in some cases, explicit router supervision or teacher-style signals. However, the pairwise interactions among these auxiliary signals in the specific setting of conditional depth routing—in particular, whether a predictive auxiliary and explicit score supervision are compatible, and whether their joint application is necessarily beneficial—have not, to our knowledge, been systematically compared under controlled conditions. 
+
+Scope and positioning. This paper evaluates a JEPA-inspired gate design for conditional depth routing and, through systematic ablation, discovers that the util/rank losses are net-negative under the tested recipe. The main experiments run in a small, controlled regime ( ≈ 157 .5M total parameters, ≈ 0.83 –0.85 M trainable controller parameters, with a supplementary G1-costmatch 
+
+control at ≈ 0.90 M; controller-only training, 50% budget; a 25% budget supplement is also reported). Throughout, we use the shorthand “ utility/rank ” for the joint Huber-regression and pairwise-rank losses on the oracle label u⋆ (defined in §3.3). The two families of auxiliary signals under study are: 
+
+• Predictive auxiliary (JEPA-inspired). We examine a JEPA-inspired variant that trains a predictor to forecast, in a low-dimensional latent space, the outcome of executing full versus 
+
+cheap for each token at each controlled layer. A fixed target projection head enforces alignment. This auxiliary shapes the future features on which the gate relies. To our knowledge, instantiating JEPA’s action-conditional latent-space prediction as an auxiliary supervision for conditional depth gates has not been systematically reported in the conditional computation literature; we treat it as a candidate auxiliary to be empirically evaluated , not as a default baseline. 
+
+• Oracle supervision (utility/rank). During training, a counterfactual trajectory (“current layer forks into full vs. cheap; all subsequent layers execute full”) is run online to construct a token-level utility label u⋆ = fCE cheap − fCE full . Huber regression and pairwise rank losses then explicitly pull the gate output toward u⋆. This auxiliary shapes the gate’s output score itself .Intuitively, the two families supply stronger training signals from the “feature” and “label” directions, respectively, and combining them would appear to be at least as effective as using either in isolation. We take this additivity expectation as our starting point and subject it to empirical scrutiny. We organise findings along two main lines—the G1 vs. G3 comparison and the A3 ablation discovery—with supporting mechanistic evidence: 
+
+• Main comparison (G1 vs. G3). Under the standard recipe with util/rank, the JEPA-guided gate (G3) consistently improves early-to-mid optimisation dynamics relative to the MLP gate (G1)—lower avg LM, faster threshold hits, ≈ 10 .3× lower gradient norms—in 3/3 seeds, with the 20k-step endpoint LM within the 0.005 heuristic reference threshold. JEPA alignment is necessary: without it, the predictor collapses (A1); its weight is insensitive in the range 0.25–2.0 (A4). 2• Key ablation finding (A3). Simultaneously removing util/rank improves LM in 3/3 seeds for both gate architectures ; moreover, the early-to-mid optimisation advantage of G3 over G1 disappears—per-seed LM differences fall within the 0.005 heuristic reference threshold, making the two gates indistinguishable on the reported LM metrics. Both the direction and the stability of this result contradict the starting intuition that util/rank is a “necessary auxiliary.” We trace this to a structural mismatch: the oracle’s “subsequent-all-full” assumption is off-policy relative to actual gated execution (§3.3). 
+
+• Supporting evidence (A2, 25% budget). Token-wise semantic pairing provides measurable but secondary benefit (A2); the G3 vs. G1 endpoint LM falls within the 0.005 margin at 25% budget as well, though with per-seed sign reversal. The contributions of this paper are: 1. A systematic evaluation of a JEPA-inspired gate for conditional depth routing. We compare the MLP gate (G1) and the JEPA-guided gate (G3) under identical conditions with 3-seed runs. G3 improves optimisation dynamics under the standard recipe; ablations A1 and A4 establish that JEPA alignment is a necessary but weight-insensitive condition for predictor non-collapse. As a minor observation, ℓ2 distance rather than cosine similarity is the appropriate collapse diagnostic for action-conditional predictors in this setup. 2. A recipe-level discovery that oracle-style util/rank is net-negative. Under the current recipe ( λutil = 1 .0, λrank = 0 .2, “subsequent-all-full” oracle), removing util/rank jointly improves best/avg LM and threshold-hit speed in 3/3 seeds; furthermore, the early-to-mid optimisation advantage of G3 over G1 disappears, indicating that JEPA’s LM benefit is at least partially coupled with the presence of util/rank. We provide a retrospective diagnosis—the off-policy teacher bias—as a structurally grounded working hypothesis, while explicitly listing alternative explanations (H3–H5) that our data cannot yet exclude. The distinction between “feature shaping” (JEPA) and “score anchoring” (util/rank) as two separable auxiliary roles emerges from this ablation. 3. Quantified efficiency observation and explicit scope. Removing util/rank cuts the training-time FLOPs proxy from ≈ 1.53 × to ≈ 1.07 × the full-only baseline (measured wall-clock: ≈ 39% 
+
+reduction), while inference-time compute is unchanged. All conclusions are strictly bounded to the ≈ 157 .5M / ≈ 0.83 –0.85 M trainable parameter, controller-only, 50% budget regime on a 
+
+fineweb-edu subset. We do not extrapolate to larger scales, joint backbone training, downstream benchmarks, or production serving scenarios. 
+
+# 2 Related Work 
+
+Conditional computation and dynamic depth. Adaptive Computation Time (ACT) [Graves, 2016] pioneered the idea of allocating different amounts of computation per token. Depth-Adaptive Transformer [Elbayad et al., 2020] and Confident Adaptive Language Modeling (CALM) [Schuster et al., 2022] extended this to Transformer language models via learnable early-exit mechanisms that save computation at fixed quality. LayerSkip [Elhoushi et al., 2024] combines training-time early exit with inference-time self-speculative decoding. Mixture-of-Depths (MoD) [Raposo et al., 2024] introduces token-level routing within the Transformer, selecting a subset of tokens for full forward computation at each layer; the router training procedure is formally similar to the controller training studied in this work. Rather than proposing a new routing paradigm, we evaluate a JEPA-inspired 3gate design and focus on a less directly examined question: when multiple auxiliary losses are simultaneously introduced for gate training within controlled layers, what are their interactions? Mixture-of-Experts and router training. Starting from the sparsely-gated mixture-of-experts layer [Shazeer et al., 2017] and its scaled realisations such as GShard [Lepikhin et al., 2021] and GLaM [Du et al., 2022], the MoE literature has developed an extensive discussion of router auxiliary losses: the load-balancing loss [Fedus et al., 2022], the router z-loss [Zoph et al., 2022], and expert-choice routing [Zhou et al., 2022] are all designed to stabilise router training and prevent collapse. Our budget/alive losses are formally close relatives of these auxiliary losses, whereas our utility/rank losses more closely resemble teacher–student-style explicit distillation. Consequently, our observations can also be read as evidence that in routing-based conditional computation more broadly, the distribution mismatch between an oracle-style teacher and on-policy execution may be an underappreciated problem. Joint Embedding Predictive Architecture (JEPA). LeCun [2022] proposed JEPA as a unified framework for learning world models—predicting the outcome of an action in latent space, with alignment between a predictor and a fixed target. I-JEPA [Assran et al., 2023] and V-JEPA [Bardes et al., 2024] realized this framework in visual self-supervised learning. In this paper, we adapt JEPA’s action-conditional latent-space prediction to the conditional depth gate: full and cheap are treated as two candidate actions, and the predictor produces low-dimensional outcome summaries for each path, upon which a decision head scores utility. We note that our JEPA variant does not constitute self-supervised representation learning in the strict sense—it serves as a predictive auxiliary for gate training, with both the predictor and the decision head optimized under the joint LM loss, while the target projection head remains fixed without an EMA teacher. 
+
+Relationship between G3 and related router designs. To clarify the formal distinction between our G3 and existing routing/early-exit methods, we provide the following comparison:                 
+
+> Method Explicit router supervision Router output form
+> MoD LM loss only Scalar logit, top-kselection CALM Self-supervised confidence head Scalar halt probability MoE balancing/z-loss Numerical stability (not a policy teacher) Expert router logits
+> G3 + JEPA (ours) Action-conditional latent prediction +
+> fixed-target alignment Two vectors qa∈Rds; decision head scores on top; top-kselection
+> References. MoD: Raposo et al. [2024]. CALM: Schuster et al. [2022]. MoE balancing/z-loss: Fedus et al. [2022], Zoph et al. [2022].
+
+Thus G3 is formally closer to an “action-conditional local world model,” while utility/rank supervision corresponds to an oracle-style policy teacher. Placing these two families on the same platform and disentangling their effects is the specific contribution of this paper, rather than proposing a new routing paradigm. 
+
+We scope our novelty claim precisely as follows: to our knowledge, the specific combination of “action-conditional latent-space prediction + fixed target alignment + a decision head based on differences between qfull and qcheap ” has not been systematically reported as auxiliary supervision for conditional depth gates. The qualifier “combination” is essential: the MoD router can be described 4as a scalar form of action-conditional predictor, and the CALM confidence head can be viewed as a self-supervised head using later-layer consistency as signal—both share structural similarities with G3 at their respective levels of abstraction. We do not claim “the first use of action-conditional prediction in routing” at this broader level of abstraction, as MoD, CALM, and related works have precedent. Our claim is narrower: the above three-element combination is used as auxiliary supervision alongside an oracle-style policy teacher (utility/rank) on the same platform, yielding 
+
+non-trivial interaction evidence (§5.4). The scientific contribution thus rests on: (a) the specific combination; (b) same-platform comparison; and (c) empirical evidence of interactions with the oracle-style teacher—not on introducing a new routing paradigm. 
+
+# 3 Methods 
+
+Terminology (controller, gate, router). Throughout this paper, “ controller ” denotes the full trainable module that computes the token-level utility score ui (i.e. , the MLP head in G1 or the predictor + decision head in G3), while “ gate ” and “ router ” are used interchangeably for the top-k execution decision on top of ui, following the conventions of Raposo et al. [2024] and Fedus et al. [2022] respectively. Sentences of the form “the gate learns . . . ” therefore always refer to the controller’s output, not to an additional trainable module. 
+
+3.1 Conditional Depth Language Model and 50% Budget 
+
+Consider a model with L decoder layers, of which the last C layers are controlled layers . In each controlled layer i, the attention sub-layer remains unchanged; the FFN sub-layer is replaced with a conditional execution structure. For notational clarity and to maintain isomorphism with the implementation, we write out the attention residual sub-layer and the conditional FFN residual sub-layer explicitly. Let hin  
+
+> i
+
+denote the input to layer i. The attention residual sub-layer output is 
+
+ai = hin  
+
+> i
+
++ Attn  LN 1(hin  
+
+> i
+
+). (1) Within the same FFN residual sub-layer, the forward pass branches between full and cheap paths according to a token-level execution mask mi:
+
+hfull  
+
+> i
+
+= ai + FFN full 
+
+ LN 2(ai), (2) 
+
+hcheap  
+
+> i
+
+= ai + FFN cheap 
+
+ LN 2,cheap (ai), (3) 
+
+hi = mi · hfull  
+
+> i
+
++ (1 − mi) · hcheap  
+
+> i
+
+, (4) where mi ∈ { 0, 1} is the token-level execution mask (strictly binary at inference; replaced by the straight-through surrogate mst  
+
+> i
+
+during training to maintain a differentiable channel from LM loss to the gate, in the spirit of the straight-through estimator of Bengio et al. [2013] and the continuous relaxation used in Jang et al. [2017]). The full FFN is the standard feed-forward network; the cheap FFN is a low-rank approximation: 
+
+FFN cheap (x) = Wdown SiLU( Wup x), Wup ∈ Rr×d, Wdown ∈ Rd×r, r ≪ dff . (5) Here LN 2,cheap is a dedicated LayerNorm for the cheap path, with parameters not shared with the full path’s LN 2. Wdown is initialized to all zeros, so that FFN cheap outputs strictly zero at the start of training (regardless of the affine parameters in LN 2,cheap ); the cheap path therefore acts as an identity mapping within this residual sub-layer until the gate has learned meaningful routing decisions. 5The controller first outputs a real-valued utility score ui representing the unnormalized decision score for executing full FFN . A soft gate 
+
+pi = σ(ui/τ ) (6) constructs a differentiable budget surrogate, where τ is the gate temperature. The probability pi is used only for budget/alive losses and does not directly determine the execution path. The actual execution mask uses exact top-k: for a sequence of length T , at each controlled layer we select 
+
+k = ⌈ρT ⌉ (7) tokens with the highest utility scores for full FFN execution; the remainder execute cheap FFN . In this paper, ρ = 0 .5.
+
+Straight-through implementation detail. During training, the hard top-k mask is mhard  
+
+> i
+
+∈{0, 1}, where mhard  
+
+> i
+
+= 1 if and only if token i’s utility score ui ranks in the top k. The soft probability is pi = σ(ui/τ ). We construct a surrogate that equals the hard mask in the forward pass and routes gradients through pi in the backward pass: 
+
+mst  
+
+> i
+
+= sg( mhard  
+
+> i
+
+− pi) + pi, (8) where sg( ·) denotes stop-gradient. The actual mixture uses mst  
+
+> i
+
+:
+
+hi = mst  
+
+> i
+
+· hfull  
+
+> i
+
++ (1 − mst  
+
+> i
+
+) · hcheap  
+
+> i
+
+. (9) The forward computation is therefore identical to hard top-k routing; the backward pass propagates LM loss gradients to ui through the differentiable path pi = σ(ui/τ ), which is the sole channel from LM loss to the gate. Note that during training both full and cheap paths are computed for every 
+
+token (regardless of the top-k selection), because the straight-through mixture and the JEPA target construction (§3.2) both require access to both branch outputs. At inference, only the hard top-k
+
+rule is used and only the selected path is executed. 
+
+3.2 Two Gate Training Methods 
+
+We compare two gate/controller training methods; all other settings are held constant. 
+
+MLP gate (G1, baseline). A two-layer MLP maps the current hidden state directly to a utility score: 
+
+ui = W2 SiLU( W1 hi), (10) where W1 ∈ R(d/ 4) ×d and W2 ∈ R1×(d/ 4) , with hidden dimension dmodel /4.
+
+JEPA-guided gate (G3). A shared predictor P is introduced. The predictor is a two-layer MLP that takes the concatenation of a compressed context and an action embedding, producing low-dimensional outcome summaries for the full and cheap paths: 
+
+ci = Wc sg( hi), (11) 
+
+qa = P ([ ci; ea]) , a ∈ { full , cheap }, (12) 6solid arrows: controller forward / gradient path; dashed arrows: JEPA alignment to fixed target               
+
+> hi(sg)
+> efull
+> echeap
+> Wc
+> Predictor P
+> (shared)
+> qfull
+> qcheap
+> Decision head D
+> D(qf,qc, Δ q)
+> utility uitop-k
+> gate mi
+> Fixed target projection T(no-grad)
+> za= sg( T(h*
+> a,i)), for a∈ {full, cheap}
+> concat
+> concat align
+
+Figure 1: Architecture of the JEPA-guided gate (G3). Context projection Wc and the two discrete action embeddings efull , echeap feed the shared predictor P , yielding qfull , q cheap . The decision head 
+
+D maps (qfull , q cheap , q full − qcheap ) to the scalar utility score ui, which is then consumed by the top-k
+
+gate/router to produce the execution mask mi. The fixed target projection T (requires_grad=False )receives stop-gradient inputs from the post-execution hidden state h∗ 
+
+> a,i
+
+and produces zfull , z cheap for JEPA alignment; no EMA teacher is used. Solid arrows mark the controller forward/gradient path; dashed arrows mark the JEPA alignment to the fixed target. where P : Rdc+da → Rds consists of Linear → SiLU → Linear , qa ∈ Rds , and sg (·) denotes stop-gradient so that the JEPA branch does not back-propagate into the backbone representation. The decision head generates a utility score from 
+
+ui = D(qfull , q cheap , q full − qcheap ). (13) With future_horizon = 1 , the predictor forecasts the outcome of executing full or cheap FFN at the current controlled layer, not at subsequent layers. The predictor’s direct supervision comes from the JEPA alignment loss: 
+
+LJEPA =  1 − cos( qfull , z full ) +  1 − cos( qcheap , z cheap ), (14) where za = sg  T (h∗
+
+> a,i
+
+), T : Rd → Rds is a fixed target projection head (orthogonally initialized, 
+
+requires_grad=False ), and h∗ 
+
+> a,i
+
+is the hidden state obtained after token i actually executes path a
+
+at the current layer. The target side does not participate in training; the predictor is trained to unilaterally align with the fixed target. No EMA teacher is employed. 
+
+3.3 Online Utility/Rank Supervision 
+
+In addition to JEPA alignment, training optionally employs a set of auxiliary losses based on online utility labels. The motivation is that under frozen-backbone, controller-only training the gradient from the LM loss to the gate must traverse multiple layers, resulting in a weak and noisy signal; an explicit teacher signal acting directly on the gate output could, in principle, accelerate convergence. 7Initial design rationale for the “subsequent-all-full” oracle. The specific label definition used below (“current layer forks into full /cheap ; all subsequent controlled layers execute full ”) was adopted as the first-version oracle for three coupled reasons, not as a claim that it is the unique correct definition. (i) It is tractable and deterministic: given the frozen backbone, the counterfactual trajectory for a single-layer decision can be computed by a fixed number of extra forward passes, independently of the current gate policy. (ii) It isolates the marginal value of the current routing decision by neutralising the confounding effect of subsequent-layer routing choices; this is the most natural way to obtain a token-level “worth-computing” label without introducing a second gate into the teacher. (iii) It avoids making the teacher a moving target: its definition does not depend on the evolving gate policy, which simplifies both implementation and interpretation of the training signal. Under these criteria the oracle is a reasonable initial choice; however, the same three properties also make the teacher structurally off-policy, as we now analyse, and this is the observation that motivates the retrospective diagnosis in §6.2. 
+
+Utility label definition. For controlled layer l, position t, define 
+
+u⋆l,t = fCE cheap  
+
+> l,t
+
+− fCE full  
+
+> l,t
+
+, (15) where fCE is a backward-looking weighted-window cross-entropy: 
+
+fCE l,t = 
+
+> W−1
+
+X
+
+> δ=0
+
+γδ CE l,t +δ. (16) The label is computed by forking the token’s trajectory at layer l—one branch executes full , the other executes cheap at the current layer— then forcing all subsequent controlled layers to execute 
+
+full , thereby measuring only the local marginal difference of this single-layer decision. Thus u⋆ > 0
+
+indicates that executing full at this layer reduces the downstream window CE, while u⋆ ≈ 0 suggests that cheap suffices. 
+
+Off-policy teacher bias. This label construction constitutes an off-policy teacher : it assumes a counterfactual trajectory (“current layer forks; all subsequent layers execute full”), whereas training actually follows an on-policy execution (“current layer chosen by gate; subsequent layers also chosen by gate”). Two structural characteristics of this bias deserve attention: 1. The bias is directional, not random. Because the counterfactual trajectory assumes all subsequent layers execute full , any information loss from executing cheap at the current layer can be partially compensated by subsequent full layers. Under actual on-policy execution, ρ = 0 .5
+
+of subsequent tokens still execute cheap, making compensation weaker. Consequently, u⋆ tends to 
+
+systematically underestimate the relative disadvantage of executing cheap under real conditions—a directional, non-random bias. 2. Under controller-only training, this bias may accumulate over the course of training. 
+
+The counterfactual world assumed by the teacher (“all subsequent full”) does not change with training, while the student (gate policy) evolves from initialization toward a non-trivial routing policy over 20k steps. The distributional distance between teacher and student therefore tends to grow monotonically rather than fluctuate randomly .We revisit this bias in light of the A3 ablation results in §5.4, and list on-policy utility (using the actual gate policy for trajectory rollout) as a necessary future experiment in §7. The observation 8u⋆                
+
+> l,t=̃ CE cheap
+> l,t−̃ CE full
+> l,t
+> Teacher (off-policy): all subsequent controlled layers forced to full
+> Student (on-policy): subsequent controlled layers route only ρthrough full ⇒structural mismatch (see Results, A3)
+> controlled
+> layers
+> 1, ..., l-1
+> controlled
+> layer l
+> (fork)
+> current:
+> full
+> subsequent controlled
+> layers: full ̃CE full
+> l,t
+> current:
+> cheap
+> subsequent controlled
+> layers: full ̃CE cheap
+> l,t
+> full path
+> cheap path
+
+Figure 2: Counterfactual fork used to construct the utility label u⋆. At controlled layer l and position t, the trajectory is forked: one branch executes full at the current layer, the other executes 
+
+cheap . The teacher then forces every subsequent controlled layer l+1, . . . , C to execute full on both branches, so the two branches produce windowed cross-entropies fCE full  
+
+> l,t
+
+and fCE cheap  
+
+> l,t
+
+whose difference defines u⋆l,t . Under actual gated execution, only a fraction ρ of subsequent tokens is routed through full ; the teacher is therefore structurally off-policy with respect to the student, which is the source of the mismatch revisited in §5.4. that utility/rank is harmful in §5.4 is strictly scoped to the current label definition and cannot be directly extrapolated to all utility-style teachers. Conceptually, the “subsequent-all-full” teacher / gated-execution student gap is a close analogue of the training–inference mismatch studied under scheduled sampling for sequence prediction [Bengio et al., 2015] and the covariate-shift / compounding-error analysis of Ross et al. [2011]; we do not claim that these references prove the A3 mechanism, but they provide useful conceptual support for treating the mismatch as a candidate 
+
+driver rather than an a posteriori rationalisation. 
+
+Two auxiliary losses based on this label: 
+
+Lutil = Huber( ui, u ⋆l,t ), (17) 
+
+Lrank = E(i,j )
+
+softplus  − sign( u⋆i − u⋆j )( ui − uj ) . (18) In implementation, to limit extra computation, online utility labels use a two-phase sparse strategy: (i) during the first Swarmup steps, no labels are computed and the gate trains only with LM + budget + alive; (ii) thereafter, labels are recomputed every I steps, with Lutil = Lrank = 0 on non-refresh steps (stale labels are not cached or reused). 
+
+3.4 Total Loss and Ablation Design 
+
+The total training loss is: 
+
+L = LLM + λJEPA LJEPA + λutil Lutil + λrank Lrank + λbLbudget + λaLalive , (19) 9where 
+
+Lbudget = 1
+
+C
+
+> C
+
+X
+
+> l=1
+
+ ¯pl − ρ2, (20) 
+
+Lalive = 1
+
+C
+
+> C
+
+X
+
+> l=1
+
+ReLU  pmin − ¯pl
+
+, (21) and ¯pl is the batch-averaged gate probability at controlled layer l.All experiments use controller-only trainable scope: only the cheap path and control-related modules are trained— cheap FFN , the cheap-path-specific LayerNorm LN 2,cheap , the decision head, and (for G3 only) the context projection Wc, action embeddings ea, and predictor P . All other parameters—token/position embeddings, all normal blocks, the attention and full FFN in controlled layers, full-path LayerNorms, and the LM head—are frozen. The cheap FFN is classified as “control-related” because it is an alternative branch activated only when the gate selects cheap , not the always-executed full-FFN backbone. This design ensures that any observed differences can be attributed to the training of the gate, controller, and cheap path rather than to whole-model relearning. To systematically disentangle the effects of each auxiliary loss, we design four ablation groups (all starting from G3): 
+
+• A1 (jepa-zero-arch): Retain the G3 architecture but set λJEPA = 0 . The predictor remains in the forward pass but receives no direct alignment constraint, updating only through indirect gradients from util/rank/LM. 
+
+• A2 (shuffled-target): Retain the JEPA loss but replace each token’s real full /cheap target pro-jection with a derangement (fixed-point-free permutation) across the batch × sequence dimension. The predictor still converges toward a real target projection, but one that does not correspond to the current token’s actual execution outcome. 
+
+• A3 (no-util-loss): Set λutil = λrank = 0 , applied to both the G3 architecture (A3-G3) and the G1 architecture (A3-G1). The budget executor is unaffected; the top-k rule is retained. 
+
+• A4 (weight-sweep): Fix all other settings and set λJEPA to 0.25 and 2.0 (default 1.0). 
+
+# 4 Experimental Setup 
+
+Model. Decoder-only Transformer, 12 layers, hidden dimension 640, 10 attention heads, FFN hidden dimension 2560; vocabulary size 151,665 (Qwen2.5-0.5B tokenizer). Total parameters 
+
+≈ 157 .5M (G1: 157,469,124; G3: 157,530,948; the difference arises from the predictor and action embeddings). Trainable controller parameters: 828,484 (MLP gate) / 849,348 (JEPA-guided gate); all other parameters are frozen. The last 4 layers are controlled layers, with cheap-path rank 
+
+r = 80 , predictor context dimension dc = 128 , summary dimension ds = 64 , and action embedding dimension da = 16 .
+
+Data. We use the sample-10BT subset of HuggingFaceFW/fineweb-edu [Penedo et al., 2024]. For reproducibility, we extract the first 300,000 non-empty text samples in their original streaming order, write them as a fixed local JSONL subset, then train; 290,000 samples serve as the training set and 10,000 as the validation set. Sequence length is 256, tokenized with the Qwen2.5-0.5B 10 tokenizer [Qwen Team, 2024] (vocabulary size 151,665). No cross-corpus contamination check, cross-domain evaluation, or larger-scale data validation has been performed; all conclusions hold only on this fixed subset. 
+
+Training. Controller-only training (the precise trainable scope is defined in §3.4), initialized from a shared pretrained checkpoint from an earlier full-only training phase. Optimizer: AdamW [Loshchilov and Hutter, 2019]; learning rate 2 × 10 −4; weight decay 0.01; gradient clipping threshold 1.0; linear warmup for 1,000 steps followed by cosine decay to lr × 0.01 ; bf16 mixed precision. Batch size 16; 20,000 training steps; validation every 500 steps (up to 16 batches, 256 samples per evaluation). Budget parameter ρ = 0 .5; gate temperature τ = 2 .0; minimum alive ratio pmin = 0 .05 . Standard recipe loss weights: λJEPA = 1 .0, λutil = 1 .0, λrank = 0 .2, λb = 1 .0, λa = 0 .5. Utility label: window W = 8 , decay γ = 0 .5, warmup Swarmup = 100 , refresh interval I = 5 .
+
+Parameter count. MLP gate trainable parameters: 828,484; JEPA-guided gate: 849,348 (differ-ence ≈ 2.5% , from predictor and action embeddings). To rule out parameter count as a confound, we include a G1-costmatch control with an enlarged MLP gate hidden dimension (trainable parameters: 902,956, comparable to or slightly exceeding G3). 
+
+Metrics. We use dynamic/cumulative metrics as primary references and single-point metrics 
+
+as supplements, reducing the risk of cherry-picking the luckiest checkpoint: 
+
+• Primary (dynamic/cumulative): validation eval lm_loss averaged over the 0–10k and 0–20k step windows ( avg_lm_0_10k , avg_lm_0_20k ); first step to hit fixed thresholds (5.075 / 5.070 / 5.065); training grad_norm mean (used only jointly with diagnostic quantities). 
+
+• Supplementary (single-point): 20k-step endpoint eval lm_loss ; minimum eval lm_loss over the entire run ( best_eval_lm ). 
+
+• Diagnostic: gate activation probability; actual full ratio; predictor output ℓ2 distance and cosine similarity ( diag_qf_qc_l2 , diag_qf_qc_cos ); utility score variance ( diag_util_score_var ). 
+
+0.005 heuristic reference threshold. The 0.005 threshold is defined only on the 20k-step endpoint eval lm_loss single-point metric: two configurations are termed “within the heuristic reference threshold” if and only if their endpoint eval lm_loss difference satisfies |∆| ≤ 0.005 . This value was set before observing experimental results, based on the inter-seed fluctuation magnitude in pilot training (one short run each of G1 and G3); it is a heuristic rather than a statistically derived non-inferiority bound. It is not applied to best_eval_lm , avg_lm , hit_step , or any non-LM metric. When per-seed |∆| values for best_eval_lm are compared against 0.005 (as in §5.4), this should be understood as a rough order-of-magnitude reference, not a formal non-inferiority test. 
+
+Threshold provenance. The thresholds 5.075 / 5.070 / 5.065 were selected based on pilot training (one short run each of G1 and G3) prior to the main experiment, designed to span “easy / medium / hard to hit” tiers within the observed eval LM range. They were fixed before the main experiment summary data were generated. 
+
+Cross-experiment comparison metric. We uniformly use eval lm_loss ; the mixed total_loss 
+
+is not used because auxiliary loss weights differ across experiments. 11 Table 1: Main comparison under the standard recipe: G1 vs. G3 (50% budget, 3 seeds, mean ± std). “best lm” omits the leading “5.” ( e.g. , .0636 = 5 .0636 ); “avg 10k”/“avg 20k” are mean eval lm over steps 0–10k / 0–20k; “hit X” is the first step at which eval lm crosses threshold 5.0X; “grad” is the training-time grad_norm mean. All metrics are “lower is better.”                      
+
+> Config best lm avg 10k avg 20k hit 75 hit 70 hit 65 grad G1-base .0636 ±.0005 .0843 ±.0005 .0747 ±.0005 6333 ±289 9167 ±577 14167 ±1258 83 .33 ±12 .29
+> G3 .0614 ±.0002 .0776 ±.0005 .0707 ±.0005 4833 ±289 8333 ±289 12667 ±764 8.06 ±0.23
+
+Compute proxy definition. All “training-time compute” and “inference-time compute” numbers in this paper are relative cost proxies in units of FFN-equivalent token-layers, not wall-clock time .The full-path cost per FFN execution unit is 1; the cheap-path cost is r/d ff ≈ 0.031 . Controller, predictor, and target projection overhead are included in training cost by FLOPs equivalence; oracle utility label construction (every I= 5 steps) is similarly included. For calibration, we additionally report measured wall-clock for the full 20k-step runs used in §5.4: on a single NVIDIA V100 (32 GB) with 32 GB system memory, G3 takes ≈ 2.87h and A3-G3 takes ≈ 1.75h (≈ 39% reduction). The proxy and the measured wall-clock are directionally consistent but not numerically identical (proxy: 
+
+30 .0% ; measured: ≈ 39% ), because the proxy does not model kernel-launch overheads, data-loading costs, or the torch.no_grad() forwards performed during online label construction. We therefore report the FLOPs proxy and the wall-clock number side-by-side rather than conflating them into a single efficiency claim. 
+
+Random seeds (per-group declaration). Main comparison (G1-base vs. G3), ablations A1 / A2 / A4 / A3-G3 / A3-G1: 3 seeds (42, 123, 7) . Supplementary control G1-costmatch : 1 seed (42) only ; conclusions involving this group are marked “single-seed preliminary observation.” 25% budget supplementary experiment (§5.6): 2 seeds (42, 123) ; evidence level explicitly lower than the main experiment. This section is the sole authoritative statement on seed coverage; any simplified wording elsewhere defers to this section. 
+
+# 5 Results 
+
+5.1 G1 vs. G3 Under the Standard Recipe 
+
+Table 1 reports the three-seed mean comparison under the standard recipe (all auxiliary losses active). Under identical 50% budget and identical other settings, the JEPA-guided gate (G3) achieves better best / avg / hit metrics than the MLP gate (G1) across 3/3 seeds, with consistent direction. The training-time grad_norm mean decreases substantially ( ≈ 10 .3×; interpretation requires joint reading with diagnostics in §5.2 and §6.4). The 20k-step endpoint LM falls within the preset 0.005 heuristic reference threshold ( ∆ = −0.0021 ). 
+
+Ruling out parameter count as a confound (single-seed preliminary observation). 
+
+G1-costmatch (enlarged MLP gate hidden dimension; trainable parameters 902,956, compara-ble to G3’s 849,348) has been run for seed 42 only . Under this seed, G1-costmatch achieves best eval lm = 5 .0628 , between same-seed G1 ( 5.0642 ) and G3 ( 5.0613 ), not matching G3 . This is directional evidence that the G3 improvement cannot be fully explained by controller parameter count, but with only 1 seed, the evidence level is lower than the main comparison. 12 Figure 3: Validation eval lm_loss learning curves for four core configurations at 50% budget (3 seeds; solid line = mean, shaded region = ±1 std). The gray horizontal band marks ±0.005 
+
+around the G3 endpoint mean as a heuristic reference (for endpoint eval lm_loss only; not a formal non-inferiority test). Key reading points: (a) G3 consistently outperforms G1 in the early-to-mid training phase under the standard recipe (§5.1); (b) at the endpoint, G1 enters the upper edge of the equivalence band—the G3 vs. G1 endpoint LM difference falls within the 0.005 margin; (c) A3-G3 and A3-G1 nearly overlap after ≈ 7k steps, with endpoints at the lower edge of the band—their LM difference is not meaningfully detectable (§5.4); (d) both A3 curves consistently outperform the standard-recipe G3 curve throughout the main training phase. Thus, under the standard recipe, the JEPA-guided gate improves gate/controller optimization dynamics relative to the MLP gate, with endpoint LM within the heuristic reference threshold. Section 5.4 will revisit this comparison after removing util/rank. 
+
+5.2 A1: The Predictor Requires Direct Supervision to Avoid Representation Collapse 
+
+Removing JEPA direct supervision (A1) yields consistent degradation across 3 seeds. A1’s best eval lm degrades by +0 .0121 relative to G3; avg lm (0–10k) degrades by +0 .0072 ; the first hit of 5.075 shifts from 4,833 to 18,333 steps, and no seed hits 5.070 within 20k steps. The critical diagnostic: A1’s final diag_qf_qc_l2 is merely 0.004 –0.008 , while A2 (which retains JEPA loss) shows 0.82 –0.90 . That is, without JEPA alignment, the predictor outputs for 
+
+full and cheap nearly collapse —the “two-action comparison” feature on which the gate depends is effectively constant. Simultaneously, diag_util_score_var drops to the 10 −5 order, indicating that utility scores themselves are near-constant; top-k ranking under these conditions is dominated by random noise. 13 Table 2: A1 ablation and main comparison (3 seeds, mean ± std). “best lm” omits the leading “5.”; “ℓ2” and “cos” are diag_qf_qc_l2 / diag_qf_qc_cos (predictor collapse diagnostics); “—” = not applicable.                         
+
+> Config best lm avg 10k avg 20k hit 75 hit 70 grad ℓ2cos G3 .0614 ±.0002 .0776 ±.0005 .0707 ±.0005 4833 8333 8.06 ——A1 .0735 ±.0019 .0848 ±.0007 .0808 ±.0004 18333 —2.27 0.005 1.001
+
+Table 3: A2 ablation (3 seeds, mean ± std). Column shorthand follows Table 1; “ ℓ2” is diag_qf_qc_l2 .Hit 75 is omitted: per-seed values for A2 and G3 differ by ≤500 steps, making the column uninfor-mative for this comparison; hit 70 and hit 65 show the meaningful separation. All metrics are “lower is better.”                   
+
+> Config best lm avg 10k avg 20k hit 70 hit 65 ℓ2
+> G3 .0614 ±.0002 .0776 ±.0005 .0707 ±.0005 8333 12667 —A2 .0645 ±.0000 .0785 ±.0001 .0724 ±.0002 9667 16167 0.850
+
+A note on diagnostic choice. We also monitor diag_qf_qc_cos but find it ≈ 1.0 across all runs (including non-collapsed ones), with the collapsed A1 runs recording ≈ 1.002 ; under bf16, a cosine reading of 1.0 ± 0.002 lies within the expected numerical-artefact range and we do not interpret this as a physically meaningful super-unity similarity. In the current architecture, the action information encoded by the predictor resides primarily in the magnitude and small orthogonal components of 
+
+qf , q c, with directions nearly collinear. Subsequent work on action-conditional predictors should use ℓ2 distance, not cosine similarity, as the primary collapse diagnostic —a minor but potentially useful observation. 
+
+Interpretation. A1 demonstrates that the predictor cannot acquire useful representations through indirect gradients alone under controller-only training; direct JEPA alignment is a necessary condition for this architecture to function. However, A1 alone does not prove that the representation provided by JEPA is the main source of LM improvement—this requires joint consideration with A2 and A3. Note: A1’s grad_norm is paradoxically the lowest (2.27 ), but this reflects parameter-space degeneracy from predictor collapse (near-zero score variance) rather than healthier optimization. Gradient norms should always be read jointly with LM metrics and predictor diagnostics. 
+
+5.3 A2: Disrupting Token-Wise Pairing Causes Mild but Consistent Degradation 
+
+With JEPA loss retained but target projections randomly deranged (A2), degradation is much smaller than A1 but directionally consistent across 3/3 seeds. A2 vs. G3: best eval lm degrades by +0 .0030 ; avg lm (0–10k) is nearly flat; stricter thresholds 5.070/5.065 are delayed to 9,667/16,167 steps. Diagnostics confirm that A2 does not exhibit representation collapse: diag_qf_qc_l2 = 0 .82 –
+
+0.90 , far above A1’s near-zero level. This is consistent with the predictor still converging toward “some real target projection”—just one that does not correspond to the current token’s own execution outcome. 
+
+Interpretation. Two observations merit separate consideration. First, A2 does not collapse, indicating that a shuffled target still provides a sufficiently “structured” auxiliary objective to 14 Table 4: A3 ablation (3 seeds, mean ± std, 50% budget). Column shorthand follows Table 1; “comp.” is the training-time FFN-equivalent FLOPs proxy compute_vs_full ; “wall (h)” is measured per 20k-step run. All metrics are “lower is better.”                                       
+
+> Config best lm avg 10k avg 20k hit 70 hit 65 grad comp. wall (h) G1-base .0636 ±.0005 .0843 ±.0005 .0747 ±.0005 9167 14167 83.33 1.513 —G3 .0614 ±.0002 .0776 ±.0005 .0707 ±.0005 8333 12667 8.06 1.527 2.87 A3-G3 .0597 ±.0004 .0743 ±.0004 .0678 ±.0004 6167 9833 0.51 1.068 1.75 A3-G1 .0589 ±.0003 .0729 ±.0002 .0667 ±.0002 4667 8333 0.48 1.054 —
+
+maintain non-trivial predictor outputs—in stark contrast to A1. Second, the mild degradation relative to G3 shows that strict token-wise pairing does provide measurable benefit under the full recipe (with util/rank), but its magnitude is smaller than the choice of “whether JEPA alignment exists at all” (A1 vs. G3). Importantly, A2 was conducted with utility/rank retained , so it cannot cleanly separate (a) the intrinsic benefit of strict semantic pairing from (b) utility/rank’s partial compensation for misaligned targets. Full separation requires an A5 cross-ablation (shuffled-target +
+
+no-util/rank), listed as future work in §7. 
+
+5.4 A3: Removing Util/Rank Improves All Primary Metrics 
+
+This finding directly contradicts the intuition that “stacking more auxiliary supervision is generally better,” and also revises the G1 vs. G3 comparison from §5.1: without util/rank, the two gates become indistinguishable in LM. The data show: 
+
+(i) Removing util/rank consistently improves LM for both architectures. A3-G3 vs. G3: best eval lm improves in 3/3 seeds (paired mean ∆ ≈ − 0.0018 ); avg lm and all three threshold hit steps likewise improve. A3-G1 vs. G1 shows the same direction with a larger effect (paired mean ∆ ≈ − 0.0047 ). Both paired mean deltas fall within |∆| < 0.005 , so under the strict §4 definition of the 0.005 margin (applicable only to endpoint eval lm_loss ), we do not claim A3’s LM improvement as “detectable past the 0.005 threshold.” Instead, we characterize it as directionally stable : the improvement is consistent across all metrics × all 3 seeds. 
+
+(ii) Without util/rank, simple MLP gate and JEPA-guided gate are indistinguishable in LM. A3-G1 vs. A3-G3 (best eval lm, negative = A3-G1 better): per-seed ∆ values are −0.0008 ,
+
+−0.0004 , and −0.0012 ; direction is consistent in 3/3 seeds toward A3-G1, but all |∆| < 0.005 . The strictly claimable statement is: “In 3/3 seeds, the A3-G1 vs. A3-G3 best eval lm per-seed |∆| ∈ [0 .0004 , 0.0012] , all 
+
+< 0.005 . Under the current recipe, the JEPA predictive auxiliary does not provide detectable additional LM benefit. (This claim is strictly scoped to the A3 recipe without util/rank; the JEPA value under the standard recipe is given in §5.1.)” 
+
+(iii) Score calibration behavior differs between architectures, but routing outcomes are identical. A3-G3’s mean_gate_prob stabilizes at ≈ 0.496 across seeds; A3-G1 shows marked divergence ( 0.622 /0.372 /0.370 for seeds 42 / 123 / 7). Despite the ≈ 0.25 inter-seed swing in absolute score scale, all seeds maintain full_ratio precisely at 0.5 due to the hard top-k constraint. 15 This confirms that the absolute score scale has no effect on routing outcomes—only relative ordering matters—consistent with working hypothesis (H2) below. 
+
+(iv) Training-time overhead drops, but the claim is proxy-first. A3 skips oracle utility label construction. The training-time compute_vs_full of G3 drops from 1.527 to 1.068 for A3-G3 and to 1.054 for A3-G1, while inference-time infer_vs_full is unchanged ( ≈ 0.547 –0.553 ). In our setup, the corresponding measured wall-clock for a full 20k-step run drops from ≈ 2.87h (G3) to 
+
+≈ 1.75h (A3-G3), or ≈ 39% . The FLOPs proxy and wall-clock are directionally consistent but not numerically identical: the proxy predicts a 30 .0% reduction whereas the measured reduction is 39% ,reflecting implementation-specific overheads (kernel-launch costs, online-label forward/backward bookkeeping) that the proxy does not model. The correct reading is therefore: under this regime, 
+
+removing util/rank improves LM while directionally reducing training-time cost ; we report both the FLOPs proxy and the wall-clock number rather than conflating them into a single engineering claim. 
+
+Interpretation. The strictly claimable statement is the phenomenon itself: “Under the current standard recipe (λutil = 1 .0, λrank = 0 .2, “subsequent-all-full” oracle label definition), simultaneously introducing utility regression and pairwise rank constitutes a net-negative contribution to LM in 3/3 seeds, and the JEPA architecture provides no detectable LM benefit under this recipe.” Regarding why net-negative, we propose two mutually compatible working hypotheses —noting that our experimental matrix cannot directly distinguish them from other candidates :(H1) Off-policy teacher–on-policy execution distribution mismatch. As discussed in §3.3, the utility label’s counterfactual trajectory assumes “all subsequent full,” and this bias may accumulate over training under controller-only settings. λutil = 1 .0 (same magnitude as LM loss) may push scores toward a structurally biased target, limiting the LM loss’s ability to freely shape scores. (H2) Top-k routing is insensitive to absolute score scale. Routing depends only on top-
+
+k; absolute score values do not affect execution—consistent with the observation in (iii). Utility/rank anchors the absolute scale and pairwise absolute differences to u⋆’s numerical scale, which is not what top-k routing requires. These are not the only candidate explanations . At least the following alternatives cannot be ruled out with the current data: (H3) The current weight combination (λutil , λ rank ) = (1 .0, 0.2) itself lies in an “excessively strong util/rank” region. (H4) The Huber term and LM term exhibit local gradient-direction conflict at the token level (a mechanism separate from teacher–student distribution mismatch). (H5) The oracle label definition (“subsequent all full”) itself introduces excessive bias (§3.3). Distinguishing (H1)–(H5) requires three types of experiments absent from this paper: (a) λutil 
+
+sweep; (b) on-policy utility; (c) separate util-only vs. rank-only ablation. All are listed as future work in §7. A retrospective diagnosis of why the “subsequent-all-full” oracle is a reasonable initial design yet structurally off-policy is deferred to §6.2. 16 Table 5: λJEPA sweep (3 seeds, mean ± std). Column shorthand follows Table 1. All metrics are “lower is better.”             
+
+> λJEPA best lm avg 10k avg 20k 0.25 .0606 ±.0005 .0787 ±.0006 .0709 ±.0005
+> 1.0 (= G3) .0614 ±.0002 .0776 ±.0005 .0707 ±.0005
+> 2.0 .0617 ±.0004 .0775 ±.0006 .0708 ±.0005
+
+Table 6: 25% budget supplement (2 seeds). Column shorthand follows Table 1. All metrics are “lower is better.”                   
+
+> Config best lm avg 10k avg 20k hit 75 hit 70 grad G1-base .0599 ±.0000 .0889 ±.0010 .0753 ±.0006 4500 7500 138.65 G3 .0604 ±.0003 .0790 ±.0005 .0707 ±.0004 3500 7750 47.80
+
+5.5 A4: Prediction Supervision Weight Is Insensitive 
+
+Adjusting λJEPA from 1.0 to 0.25 or 2.0, the three-seed aggregate results are nearly unchanged: Differences across all three settings are within same-seed standard deviations, in stark contrast to A1’s marked degradation. This indicates that, under the current architecture and recipe, what matters is whether the JEPA alignment constraint is present, not its precise weight :once imposed, the predictive supervision constrains the predictor to a non-degenerate, full/cheap-discriminable low-dimensional space, enabling the decision head to produce informative scores. This is consistent with the collapse diagnostic from A1. Note that this sweep was conducted under the standard recipe (with util/rank); whether the same insensitivity holds in the A3 recipe (without util/rank) has not been tested. 
+
+5.6 25% Budget Preliminary Supplement (2 Seeds, Lower Evidence Level) 
+
+To check whether the optimization dynamics difference from §5.1 appears only at 50% budget, we run G1-base × 2 seeds and G3 × 2 seeds at 25% budget (each controlled layer routes only 25% of tokens to full). With only 2 seeds, this section’s conclusions carry lower evidence weight than the main experiment. 
+
+At 25% budget, the G3 vs. G1 best eval lm per-seed differences are {+0 .0003 , +0 .0007 } (sign: G3 slightly worse ), both ≪ 0.005 ; the corresponding endpoint eval lm_loss per-seed differences are {+0 .0003 , +0 .0008 }, also well within the 0.005 heuristic reference threshold. G3 shows better avg lm (0–10k) by ≈ − 0.010 and earlier hit at the looser threshold 5.075 (3,500 vs. 4,500), but does 
+
+not lead at the stricter threshold 5.070 ( 7,750 ± 354 vs. 7,500 ± 0). We interpret the 25% budget results as: G3 still shows better early-to-mid optimization trend and lower grad_norm 
+
+at a tighter budget, but “earlier threshold hit” holds only for looser thresholds, not universally .
+
+Important caveat. Combining this section with §5.1: the G3 vs. G1 endpoint eval lm_loss 
+
+difference is not monotonic across ρ. At ρ = 0 .5, per-seed differences favor G3; at ρ = 0 .25 , per-seed signs reverse—but both fall within the 0.005 heuristic reference threshold. The more accurate reading is “within the heuristic reference threshold at both budgets,” rather than “G3 monotonically improves G1 in endpoint LM.” The A3 ablation at 25% budget has not been completed; whether the A3 phenomenon replicates at tighter budgets is an open question. 17 6 Discussion 
+
+6.1 Two Distinct Roles of Auxiliary Losses 
+
+Synthesizing the evidence from §5, the auxiliary losses serve two separable, non-interchangeable 
+
+roles in gate training: 
+
+• Feature shaping (borne by the JEPA loss). The JEPA alignment constraint enforces that the two action-conditional outputs of the predictor, qfull and qcheap , remain non-degenerate. The target za
+
+is constructed from the current token’s within-layer execution outcome—a local, current-layer, action-conditional branch target . While not strictly on-policy in the RL sense, it does not 
+
+involve the long-horizon counterfactual rollout used by the utility label, and therefore introduces less distributional shift. A1 proves this role cannot be replaced by indirect gradients; A2 shows that strict token-wise pairing strengthens it but is not strictly necessary; A4 shows that once the constraint exists, its weight is insensitive in the 0.25–2.0 range. 
+
+• Score anchoring (borne by util/rank). Through an oracle-style, explicit long-horizon coun-terfactual teacher, the utility/rank losses anchor the numerical scale of the gate output to the weighted-window CE difference. As established in §5.4, this role constitutes a net-negative con-tribution to LM under the current recipe. Top-k routing requires only relative ordering, not numerical scale; and the teacher–execution distribution mismatch (§3.3) may actively harm LM optimization. 
+
+Convergent picture from A1 and A3. Section 5.1 establishes that G3 improves the optimisation dynamics of G1 under the standard recipe, and §5.4 establishes that once util/rank is removed, the LM difference between G3 and G1 falls within the heuristic reference threshold. Both facts are supported by data and mutually compatible. Together, they yield a more precise description: “JEPA alignment guarantees that the two action-conditional outputs of the pre-dictor remain non-collapsed and discriminable (A1 provides the counter-evidence; A4 shows that this property is maintained across a wide λJEPA range). Whether this discriminability translates into detectable LM benefit depends on whether util/rank is simultaneously present in the recipe : when present, it appears as improved early-to-mid optimisation dynamics (§5.1); when absent, only differences on the order of the 0.005 margin remain (§5.4).” A natural working hypothesis is that JEPA alignment acts as a buffer for the biased oracle teacher—the LM value of JEPA partly derives from mitigating the off-policy bias of util/rank rather than from independently providing new training signal. This requires two independent experiments to verify: (a) adding/removing JEPA in a recipe with no oracle teacher (A6); (b) adding/removing JEPA in a recipe with an unbiased on-policy teacher. Both are listed in §7; until they are completed, the “buffer” interpretation remains a hypothesis. We therefore revise the positioning of util/rank: under the current regime, they should be treated as an optional, candidate-for-removal auxiliary rather than a default additive component. Whether they remain net-negative under other oracle definitions, larger scales, or joint backbone training is an open question. 
+
+6.2 Retrospective Diagnosis of the Oracle Design 
+
+The “subsequent-all-full” oracle introduced in §3.3 was not a speculative design choice selected in hindsight. It was adopted because it is tractable, isolates the current-layer marginal value, and 18 avoids coupling the teacher to an evolving gate policy—criteria that make it a reasonable first-version label when an explicit teacher is desired. The A3 result (§5.4) is the post-hoc observation that the same property making the oracle tractable—assuming all subsequent layers execute full —also makes it structurally off-policy with respect to actual gated execution, which at each subsequent controlled layer routes only a fraction ρ of tokens through full . Under this asymmetry the teacher can systematically underestimate the relative cost of executing cheap , and under controller-only training the distributional distance between teacher and student tends to grow over 20k steps rather than fluctuate randomly (§3.3). We therefore frame util/rank as a reasonable initial design whose net effect turns out to be negative under the current recipe, with a structurally grounded but not yet causally demonstrated explanation . Concretely: (H1)/(H5)—off-policy / oracle-definition-driven mismatch—are consistent with this diagnosis; (H3)—a too-large weight— remains a simpler alternative that our data cannot exclude; the two explanations are not mutually exclusive. The conceptual analogy to training–inference mismatch in sequential prediction [Bengio et al., 2015] and to covariate shift in imitation learning [Ross et al., 2011] supports treating the mismatch as a plausible driver, but we do not claim that these works prove the A3 mechanism. 
+
+6.3 Connection to Related Work 
+
+The observation that auxiliary losses can produce a net-negative effect on LM quality in routing training finds complementary support in the MoE literature. Router z-loss [Zoph et al., 2022] and load-balancing loss [Fedus et al., 2022] are numerical stability constraints rather than policy quality constraints. Our utility/rank losses belong to the latter category: they attempt to directly specify “which token is worth computing.” Our experiments suggest that when the LM loss already provides on-policy gradients and the hard top-k routing is insensitive to absolute score scale, such direct specification—under the current weights and oracle definition—may actually restrict the optimization space. This distinction suggests that future router auxiliary loss design should 
+
+differentiate “stability-oriented” from “policy-quality-oriented” auxiliaries : the former are often harmless and necessary; the latter require more careful verification that the teacher definition is consistent with on-policy execution and that the weight is appropriately calibrated. A complementary line of work in the MoE literature pushes even further, advocating auxiliary-loss-free load balancing so that routing gradients come exclusively from the task loss [Wang et al., 2024]; while their setting is expert routing rather than depth routing, the underlying concern—that explicit routing auxiliaries may introduce undesired gradients—is structurally related to our A3 observation. 
+
+6.4 Gradient Norms Require Joint Interpretation with Diagnostics 
+
+As noted in §5.2, A1 has the lowest grad_norm —a symptom of predictor collapse, not healthier optimization. Similarly, A3’s gradient norm drops from G3’s 8.06 to 0.51, concurrent with LM improvement and non-collapsed diagnostics—this is genuinely “cleaner optimization.” Relying on gradient norms as a standalone metric is misleading ; they become meaningful only when interpreted jointly with LM metrics, predictor diagnostics, and gate behavior. 
+
+6.5 Limitations 
+
+• Scale. All experiments are at ≈ 157 .5M total / ≈ 0.83 –0.85 M trainable parameters, controller-only. Whether the gradient chain from LM loss to gate—which grows with depth—renews the value of explicit score teachers at larger scale is an open question. 19 Figure 4: Training grad_norm curves for four core configurations (log-y; solid = mean, shaded = 
+
+±1 std; rolling-mean window = 200 steps). Three tiers are clearly separated: G1 ∼ 80 , G3 ∼ 8,A3-G3/A3-G1 ∼ 0.5. A1 is excluded from this figure because its low gradient norm ( ∼ 2.3) arises from predictor collapse (§5.2), qualitatively different from the “lower norms with better LM and non-collapsed diagnostics” shown here. 
+
+• Budget range. Only 50% (main) and 25% (supplement) budget points. The G3 vs. G1 endpoint LM direction is non-monotonic across ρ (both within 0.005, but paired signs reverse at 25%), suggesting budget dependence may be more complex than initially assumed. 
+
+• λutil / λrank not swept. A4 sweeps only λJEPA . The A3 finding therefore cannot be distinguished from the explanation that (1 .0, 0.2) happens to lie in an “excessively strong” region (H3). This is the most direct methodological gap. 
+
+• G1-costmatch single seed. Only seed 42 completed; seeds 123 and 7 remain pending. 
+
+• No external benchmarks. Evaluation is limited to eval lm_loss and derived metrics; down-stream task validation is left to future work. 
+
+• A2 cross-ablation not conducted. A2 retains util/rank, so the separate contribution of semantic pairing vs. util/rank compensation cannot be cleanly isolated. 
+
+• Compute cost is proxy only. All cost figures are FFN-equivalent token-layer proxies; no real latency/throughput measurements are included. 
+
+• Oracle definition not varied. Only “subsequent all full” was tested; whether on-policy or TD-style utility would also yield net-negative results is unknown. 
+
+# 7 Conclusion and Future Work 
+
+This paper evaluates a JEPA-inspired gate for conditional depth routing and, through systematic ablation, discovers a recipe-level interaction between two auxiliary-loss families. All experiments run on a single controlled platform ( ≈ 157 .5M total parameters, ≈ 0.83 –0.85 M trainable controller parameters with a supplementary G1-costmatch at ≈ 0.90 M; controller-only, 50% budget). 20 Main conclusions (from the 50% budget, 3-seed main experiment unless otherwise noted): 1. G3 improves optimisation dynamics under the standard recipe. The JEPA-guided gate achieves lower avg LM, faster threshold hits, and ≈ 10 .3× lower gradient norms relative to the MLP gate in 3/3 seeds. The 20k-step endpoint LM falls within the 0.005 heuristic reference threshold at 50% budget; the 25% budget supplement (2 seeds, lower evidence level) shows the same direction with per-seed sign reversal. JEPA alignment is necessary for predictor non-collapse (A1) and weight-insensitive across {0.25 , 1.0, 2.0} (A4); ℓ2 distance rather than cosine similarity is the appropriate collapse diagnostic for action-conditional predictors in this setup. 2. Removing util/rank improves LM and reveals G1–G3 equivalence (A3). Under the current recipe ( λutil = 1 .0, λrank = 0 .2, “subsequent-all-full” oracle), simultaneously removing utility regression and rank supervision: (a) consistently improves best/avg/hit metrics in 3/3 seeds for both gates; (b) collapses the A3-G1 vs. A3-G3 per-seed best eval lm difference to 
+
+|∆| ∈ [0 .0004 , 0.0012] , all < 0.005 ; (c) reduces the training-time FLOPs proxy from ≈ 1.53 ×
+
+to ≈ 1.07 × (measured wall-clock: ≈ 39% reduction). The off-policy teacher bias (§3.3) is the structurally grounded working hypothesis; weight choice (H3) remains an alternative our data cannot exclude. 
+
+Coverage of the JEPA × util/rank matrix. Viewing JEPA architecture (on/off) and util/rank (on/off) as two dimensions, this paper covers 3.5 of the 4 cells:      
+
+> util/rank: on util/rank: off JEPA: on G3 (§5.1) A3-G3 (§5.4)
+> JEPA: off A1 / G1 (§5.2, 5.1) A3-G1 (§5.4)
+
+JEPA’s independent LM contribution (A3-G3 vs. A3-G1) is not detectable ( |∆| < 0.005 ); its independent representation contribution is confirmed (A1 collapse vs. non-collapse). 
+
+Future work (ordered by directness to the main findings): 
+
+• λutil / λrank sweep. Sweep λutil ∈ { 0, 0.1, 0.25 , 0.5, 1.0} at fixed λrank = 0 .2, and vice versa. This is the most critical missing experiment: it determines whether A3 reflects inherent harm (H1/H2) or merely excessive weight (H3). 
+
+• On-policy utility. Replace the off-policy oracle with utility computed under the actual gate policy, testing whether the distributional mismatch is the primary driver of A3. 
+
+• Cross-ablation A5. Shuffled-target + no-util/rank, isolating semantic pairing from util/rank compensation. 
+
+• Isolated predictor value A6. A1 + no-util/rank, testing whether the predictor architecture provides any LM benefit without any oracle teacher (verifying the “buffer hypothesis” from §6.1). 
+
+• Util vs. rank decomposition. Retain only util or only rank to determine whether the net-negative contribution is driven by Huber regression, ranking, or their interaction. 
+
+• Budget sweep. ρ ∈ { 0.10 , 0.25 , 0.50 , 0.75 }, confirming whether the non-monotonic G3 vs. G1 endpoint LM direction is systematic. 
+
+• Scale extension. Replicate key comparisons at 0.5B / 1B parameters. 21 • Joint training. Unfreeze the backbone; test whether gate and representation co-optimization alters the findings. 
+
+Stance. This paper contributes reproducible empirical observations about (a) a JEPA-inspired gate design for conditional depth routing and (b) auxiliary-loss interaction in that setting. We do not advocate any particular gate training configuration as a recommended default; the finding that util/rank is net-negative should be treated as a recipe-level working hypothesis awaiting further verification via the experiments listed above. 
+
+# References 
+
+Mahmoud Assran, Quentin Duval, Ishan Misra, Piotr Bojanowski, Pascal Vincent, Michael Rabbat, Yann LeCun, and Nicolas Ballas. Self-supervised learning from images with a joint-embedding predictive architecture. In IEEE/CVF Conference on Computer Vision and Pattern Recognition ,2023. Adrien Bardes, Quentin Garrido, Jean Ponce, Xinlei Chen, Michael Rabbat, Yann LeCun, Mahmoud Assran, and Nicolas Ballas. V-JEPA: Video joint-embedding predictive architecture. arXiv preprint arXiv:2404.16930 , 2024. Samy Bengio, Oriol Vinyals, Navdeep Jaitly, and Noam Shazeer. Scheduled sampling for sequence prediction with recurrent neural networks. In Advances in Neural Information Processing Systems ,2015. Yoshua Bengio, Nicholas Léonard, and Aaron Courville. Estimating or propagating gradients through stochastic neurons for conditional computation. arXiv preprint arXiv:1308.3432 , 2013. Nan Du, Yanping Huang, Andrew M. Dai, Simon Tong, Dmitry Lepikhin, Yuanzhong Xu, Maxim Krikun, Yanqi Zhou, Adams Wei Yu, Orhan Firat, Barret Zoph, Liam Fedus, Maarten P. Bosma, Zongwei Zhou, Tao Wang, Yu Emma Wang, Kellie Webster, Marie Pellat, Kevin Robinson, Kathleen Meier-Hellstern, Toju Duke, Lucas Dixon, Kun Zhang, Quoc V. Le, Yonghui Wu, Zhifeng Chen, and Claire Cui. GLaM: Efficient scaling of language models with mixture-of-experts. In 
+
+International Conference on Machine Learning , 2022. Maha Elbayad, Jiatao Gu, Edouard Grave, and Michael Auli. Depth-adaptive transformer. In 
+
+International Conference on Learning Representations , 2020. Mostafa Elhoushi, Akshat Shrivastava, Diana Liskovich, et al. LayerSkip: Enabling early exit inference and self-speculative decoding. In Proceedings of the Association for Computational Linguistics , 2024. William Fedus, Barret Zoph, and Noam Shazeer. Switch transformers: Scaling to trillion parameter models with simple and efficient sparsity. Journal of Machine Learning Research , 23(120):1–39, 2022. Alex Graves. Adaptive computation time for recurrent neural networks. arXiv preprint arXiv:1603.08983 , 2016. Eric Jang, Shixiang Gu, and Ben Poole. Categorical reparameterization with Gumbel-Softmax. In 
+
+International Conference on Learning Representations , 2017. 22 Yann LeCun. A path towards autonomous machine intelligence. OpenReview preprint , 2022. Dmitry Lepikhin, HyoukJoong Lee, Yuanzhong Xu, Dehao Chen, Orhan Firat, Yanping Huang, Maxim Krikun, Noam Shazeer, and Zhifeng Chen. GShard: Scaling giant models with conditional computation and automatic sharding. In International Conference on Learning Representations ,2021. Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. In International Conference on Learning Representations , 2019. Guilherme Penedo, Hynek Kydlíček, Loubna Ben Allal, Anton Lozhkov, Margaret Mitchell, Colin Raffel, Leandro von Werra, and Thomas Wolf. The FineWeb datasets: Decanting the web for the finest text data at scale. In Advances in Neural Information Processing Systems , 2024. Qwen Team. Qwen2.5 technical report. arXiv preprint arXiv:2412.15115 , 2024. David Raposo, Sam Ritter, Blake Richards, Timothy Lillicrap, Peter C Humphreys, and Adam Santoro. Mixture-of-depths: Dynamically allocating compute in transformer-based language models. arXiv preprint arXiv:2404.02258 , 2024. Stéphane Ross, Geoffrey J. Gordon, and J. Andrew Bagnell. A reduction of imitation learning and structured prediction to no-regret online learning. In Proceedings of the 14th International Conference on Artificial Intelligence and Statistics (AISTATS) , 2011. Tal Schuster, Adam Fisch, Jai Gupta, Mostafa Dehghani, Dara Bahri, Vinh Q Tran, Yi Tay, and Donald Metzler. Confident adaptive language modeling. In Advances in Neural Information Processing Systems , 2022. Noam Shazeer, Azalia Mirhoseini, Krzysztof Maziarz, Andy Davis, Quoc V. Le, Geoffrey Hinton, and Jeff Dean. Outrageously large neural networks: The sparsely-gated mixture-of-experts layer. In International Conference on Learning Representations , 2017. Lean Wang, Huazuo Gao, Chenggang Zhao, Xu Sun, and Damai Dai. Auxiliary-loss-free load balancing strategy for mixture-of-experts. arXiv preprint arXiv:2408.15664 , 2024. Yanqi Zhou, Tao Lei, Hanxiao Liu, Nan Du, Yanping Huang, Vincent Y. Zhao, Andrew M. Dai, Zhifeng Chen, Quoc V. Le, and James Laudon. Mixture-of-experts with expert choice routing. In 
+
+Advances in Neural Information Processing Systems , 2022. Barret Zoph, Irwan Bello, Sameer Kumar, Nan Du, Yanping Huang, Jeff Dean, Noam Shazeer, and William Fedus. ST-MoE: Designing stable and transferable sparse expert models. arXiv preprint arXiv:2202.08906 , 2022. 23
