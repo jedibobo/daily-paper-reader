@@ -1,0 +1,503 @@
+Title: VerilogCL: A Contrastive Learning Framework for Robust LLM-Based Verilog Generation
+
+URL Source: https://arxiv.org/pdf/2604.18162v1
+
+Published Time: Tue, 21 Apr 2026 02:25:13 GMT
+
+Number of Pages: 9
+
+Markdown Content:
+# VerilogCL: A Contrastive Learning Framework for Robust LLM-Based Verilog Generation 
+
+# Yan Tan, Tong Liu, Xiangchen Meng and Yangdi Lyu †
+
+Microelectronics Thrust, Hong Kong University of Science and Technology (Guangzhou) 
+
+## Abstract 
+
+Large Language Models (LLMs) have recently achieved strong per-formance in software code generation. However, applying them to hardware description languages (HDLs), such as Verilog, re-mains challenging because high-quality training data are relatively scarce. In practice, LLM-generated Verilog often contains syntactic or structural errors that either cause compilation failures or pro-duce functionally incorrect designs, which limit its reliability in hardware design workflows. In this work, we propose VerilogCL, an integrated framework that enhances Verilog code generation by explicitly learning the boundary between correct and erroneous RTL through contrastive learning and proactive error screening. Our approach introduces minimal-error data augmentation, generating paired training sam-ples of correct RTL and minimally perturbed erroneous RTL to teach the model to recognize fine-grained distinctions between correct and erroneous code. We then apply contrastive learning to learn a clearer validity boundary in the representation space, improving the separation between correct and erroneous RTL code. In addition, we introduce a proactive screening module that com-bines semantic embeddings with token-level uncertainty features to filter low-confidence candidates during generation. Experiments on public benchmarks, including VerilogEval and RTLLM, show that our 7B-parameter model outperforms the evaluated open-source, Verilog-specialized, and commercial baselines in both compilation success rate and functional correctness. 
+
+## Keywords 
+
+LLM-Generated Verilog, Contrastive Learning, Syntactic and Func-tional Correctness 
+
+## 1 Introduction 
+
+Large language models (LLMs), such as CodeLlama [ 1] and its variants [ 2 , 3], have achieved significant success in software devel-opment by enhancing productivity through automated code gener-ation. This success is largely built on their training over extensive open-source codebases, primarily in popular languages like Python and C++ [ 4, 5]. Building on these advancements, researchers are increasingly exploring the use of LLMs for generating hardware description languages (HDLs). Early results suggest that LLMs can produce basic HDL structures and simple modules, indicating their potential as assistants for front-end digital design [ 6– 11 ]. How-ever, reliable RTL generation remains far more challenging than conventional software code generation [12]. A major challenge is the limited availability of high-quality HDL training data. Unlike software repositories, publicly available Ver-ilog corpora are limited in scale, uneven in quality, and often lack the supervision needed for robust model adaptation. More impor-tantly, Verilog is not merely a language for sequential computation; it is used to describe hardware structure, timing behavior, and par-allel signal interactions. As a result, even small local deviations can either make the code syntactically invalid or introduce subtle functional bugs that are difficult to detect before simulation and synthesis. For instance, the improper mixing of non-blocking and blocking assignments within sequential logic, or the confusion be-tween logical and bitwise operators, may still pass compilation, yet they often lead to functionally incorrect RTL during simulation or synthesis. Prompt      
+
+> Natural Language
+> Specification
+> (e.g.,“4 -bit
+> adder”)
+> Generated
+> Code
+> Pass
+> Fail
+> Error Feedback
+> (e.g. syntax error messages, failed test cases)
+> Internal
+> Representations Token
+> Generator
+> Transformer
+> Blocks module adder (
+> input [3:0] a, b,
+> output [4:0] sum
+> );
+> ...
+> endmodule
+> Validator
+
+Figure 1: Existing LLM-Based Verilog Code Generation 
+
+Hardware bugs are far more costly than software bugs because they can propagate into expensive EDA and manufacturing itera-tions. Accordingly, prior work has introduced error-feedback mech-anisms that rely on external validation and compiler diagnostics to repair generated RTL [ 11 , 13 – 16 ]. However, these methods re-main largely post hoc: they repair errors after generation instead of improving the model’s representation of the boundary between correct and erroneous Verilog. Consequently, they still depend on an inefficient generate-compile-debug loop. We therefore argue that recurring errors stem not only from limited training data, but also from insufficient representation of fine-grained RTL validity boundaries. To address this issue, we propose VerilogCL, a framework for robust Verilog generation that combines contrastive learning with inference-time candidate screening. Rather than relying solely on larger training corpora or iterative post-generation repair, Ver-ilogCL is designed to improve the model’s ability to distinguish correct RTL from minimally perturbed erroneous variants. We first construct minimal-error pairs, where each correct Verilog sample is matched with a counterpart containing a single well-defined perturbation. These pairs are used for contrastive training to pull correct samples closer together in representation space while push-ing erroneous ones farther apart. In addition, we combine semantic representations with token-level uncertainty features to train a lightweight classifier for proactive screening during generation. Together, these components improve robustness by reducing error-prone continuations and increasing the likelihood of generating compilable and functionally correct RTL. 
+
+> arXiv:2604.18162v1 [cs.AR] 20 Apr 2026 Yan Tan, Tong Liu, Xiangchen Meng and Yangdi Lyu †
+
+Our main contributions are summarized as follows. 
+
+• We propose a novel data augmentation strategy that con-structs paired samples consisting of correct RTL and mini-mally perturbed erroneous counterparts. 
+
+• We employ contrastive learning to refine the LLM’s repre-sentation space, enforcing a clear boundary between correct and erroneous code representations. 
+
+• We design a proactive screening mechanism based on hy-brid features that combines internal semantic embeddings with statistical features derived from token-level uncer-tainty. 
+
+• Experimental results demonstrate that this framework sig-nificantly reduces errors in generated Verilog code and im-proves generation quality and reduces downstream invalid candidates. 
+
+## 2 Background and Related Work 2.1 Verilog Code Generation with LLMs 
+
+Recent advances in LLMs have shown strong potential for automat-ing the generation of hardware description languages (HDLs), in-cluding Verilog. However, applying LLMs to RTL generation re-mains fundamentally challenging because it requires precise reason-ing over structure, timing, and parallel behavior, while high-quality training data are still limited [12, 17]. 
+
+2.1.1 Data-Centric Approaches . Data-centric approaches mainly improve generation by constructing hardware-specific datasets or applying augmentation. VerilogEval [ 9] provides a curated super-vised benchmark, while RTLCoder [ 10 ] and OriGen [ 11 ] further enrich training with aligned natural language–Verilog pairs or code-to-code augmentation. However, these methods largely treat Ver-ilog as a text generation task and do not explicitly teach models to separate correct RTL from minimally perturbed erroneous RTL variants. 
+
+2.1.2 Correction-Centric Approaches . Correction-centric ap-proaches improve correctness through post-generation repair or inference-time control. Works such as AutoChip [ 13 ], RTLFixer [ 14 ], and OriGen [ 11 ] use compiler feedback for iterative correction. Fur-thermore, some methods incorporate retrieval [ 17 , 18 ], multi-stage debugging [ 16 ], or agentic workflows [ 19 , 20 ] to improve repair efficiency. Other studies move error handling into decoding, such as validity-aware temperature adaptation and AST-guided speculative decoding [ 21 , 22 ]. However, these approaches mainly suppress or repair errors at the output level, rather than explicitly improving the model’s internal representation of the boundary between correct and erroneous RTL. In summary, existing LLM-based Verilog generation methods mainly improve performance from two directions. Data-centric approaches enhance domain adaptation through curated super-vision, augmentation, and fine-tuning, but they do not explicitly model the boundary between correct and erroneous RTL. This leaves an important gap: robust Verilog generation requires not only better supervision and stronger repair mechanisms, but also representation-level learning of syntactic and structural boundaries. 
+
+## 2.2 Contrastive Learning 
+
+Contrastive learning aims to bring representations of similar sam-ples closer while pushing dissimilar ones apart, and has been widely used in representation learning [ 23 – 25 ]. In code-related tasks, it has proven effective for capturing structural and semantic rela-tionships across programs [ 26 , 27 ]. For example, UniXcoder [ 28 ]aligns representations across natural language, code, and structural signals, improving transferability and code understanding. These properties suggest that contrastive learning is suitable for modeling the fine-grained validity boundary required in Verilog generation. Despite recent progress, existing contrastive learning studies mainly target general code semantics, program similarity, or multi-modal alignment, rather than validity-aware representation learn-ing for HDL generation. In Verilog generation, however, the critical challenge is ensuring that generated RTL strictly satisfies syntactic and structural constraints. To address this gap, we introduce con-trastive learning in a validity-aware manner: instead of improving general code representations alone, we construct minimally per-turbed correct/error pairs to explicitly teach the model to improve separability between correct and erroneous RTL. Unlike prior meth-ods that rely on external correction or decoding-time constraints, VerilogCL reshapes the latent representation space itself, enabling the model to internalize Verilog’s syntactic and structural bound-aries and reduce recurring errors at their source. 
+
+## 3 Methodology 3.1 Overview 
+
+We propose VerilogCL, a validity-aware contrastive learning frame-work designed to improve the quality of LLM-generated Verilog, as illustrated in Figure 2. The framework consists of three compo-nents. First, we construct minimal-error variants to augment the training data and expose the model to fine-grained RTL validity cues. Second, we apply contrastive learning to reshape the model’s representation space, making the boundary between correct and erroneous RTL more explicit. Third, we combine hidden-state se-mantic features with uncertainty-based statistical features to train a classifier for inference-time proactive validity screening. 
+
+## 3.2 Data Augmentation 
+
+Unlike natural language tasks supported by large-scale corpora, publicly available Verilog datasets are relatively limited in scale and diversity, making it difficult for LLMs to learn fine-grained syntactic and structural constraints through simple memorization alone. To address this, we construct a minimal-error contrastive dataset that explicitly distinguishes correct RTL from closely related erroneous variants, enabling the model to learn a sharper boundary between correct and erroneous RTL. Our dataset covers two representative classes of RTL designs: combinational logic and sequential logic. The combinational subset includes Boolean operations, arithmetic circuits, multiplexers, and codec-related modules, while the sequen-tial subset includes stateful elements such as D flip-flops, counters, memories, and finite state machines (FSMs). The detailed module categories are summarized in Table 1. For each reference design, we construct contrastive samples con-sisting of one anchor, multiple positives, and multiple negatives. VerilogCL: A Contrastive Learning Framework for Robust LLM-Based Verilog Generation Prompt Statistical   
+
+> Features
+> Semantic
+> Features
+> Classifier
+> Head
+> Screening
+> RTL Code Mutate Check
+
+Data Augmentation Proactive Error Screening Contrastive Learning     
+
+> Textbook
+> Positive
+> Code
+> Positive
+> Code
+> Negative
+> Code
+> Positive
+> Code
+> Positive
+> Code
+> Positive
+> Code Output
+> Valid Code
+> Discard
+> Error Code
+> Transformer
+> Blocks Token
+> Generator
+> Representation Space
+> After CL
+> (Separated Cluster)
+> Enhance Decision Boundary
+> Before CL
+> (Mixed Cluster)
+
+Figure 2: Overview of VerilogCL. The framework combines minimal-error augmentation, contrastive learning, and proactive error screening to shift part of error handling from post-hoc repair to generation-stage risk identification. Table 1: RTL Module Categories Used in Data Augmentation Category Module Name Description Combinational 
+
+Boolean Functions and_gate, or_gate, not_gate, xor_gate Arithmetic half_adder, full_adder, comparator Data Path mux Codecs decoder, encoder 
+
+Sequential 
+
+Storage d_flip_flop Counters counter Memory ram, rom FSMs traffic_light_controller The anchor is a verified correct Verilog implementation. Positive samples are generated from the anchor using semantics-preserving transformations, such as variable renaming and equivalent logic restructuring, and are validated by equivalence checking. Negative samples are generated using script-based mutation rules derived from predefined Verilog error categories, including punctuation errors, keyword-related errors, operator misuse, declaration errors, and structural errors, as summarized in Table 2. The mutation rules were designed to reflect common failure patterns observed in pre-liminary generations of the base model and prior RTL-generation studies. Each negative sample introduces a single controlled per-turbation, so that it remains close to the anchor while differing in RTL correctness. To ensure data quality, all mutated candidates are validated through compilation and simulation-based checking, and we retain only those that consistently produce compilation failures or func-tional mismatches. For each anchor design and each error category, we generate multiple mutated candidates, yielding a controlled set of erroneous RTL variants. Several mutation categories, such as operator misuse and declaration-related width inconsistencies, are associated not only with compilation errors but also with down-stream functional mismatches. This construction provides struc-tured supervision for contrastive learning by presenting the model with the differences between correct and erroneous RTL. 
+
+Table 2: Verilog error categories used in minimal-error data augmentation. Error Type Specific Errors Punctuation errors 
+
+Missing semicolons; missing commas in lists; extra commas at the end of lists; missing colons in width specifiers. 
+
+Keyword errors 
+
+Keyword typos; block delimiter mismatch; parentheses, brackets, or braces mismatch. 
+
+Operator errors 
+
+Assignment operator confusion; logical opera-tor misuse; bitwise operator misuse; equality operator confusion. 
+
+Declaration errors 
+
+Missing signal declaration; incorrect signal type declaration; repeated signal declaration; missing or incorrect port direction declaration. 
+
+Structural errors 
+
+Assign statements outside module scope; mul-tiple drivers for the same signal. 
+
+## 3.3 Contrastive Learning Framework 
+
+The goal of the contrastive learning framework is to sharpen the representation-space boundary between correct and erroneous RTL. By introducing Verilog-specific validity cues, the framework en-courages the model to better distinguish valid RTL from erroneous variants and to capture the syntactic and structural constraints that are important for correct RTL generation, rather than relying primarily on memorization over limited-domain training data. To explicitly separate correct and erroneous RTL in the latent space, we adopt a triplet margin loss. Given an input Verilog se-quence 𝑥 , we first obtain the final-layer hidden states of the back-bone LLM, 
+
+𝐻 𝑥 ∈ R𝐿 ×𝐷 ,
+
+where 𝐿 denotes the sequence length and 𝐷 denotes the hidden di-mension. We then apply max pooling over the sequence dimension to obtain a fixed-length sequence representation: 
+
+𝑓 (𝑥 ) = MaxPool (𝐻 𝑥 ) ∈ R𝐷 .
+
+Here, 𝑓 (·) serves as the embedding function used in contrastive learning. We use the same pooled semantic representation in both the contrastive learning stage and the downstream screening mod-ule, ensuring representation consistency across training and infer-ence. Yan Tan, Tong Liu, Xiangchen Meng and Yangdi Lyu †Positive  
+
+> Code LLM
+> Maximize
+> Minimize
+> Negative
+> Code
+> Anchor
+> Code RTL Code
+> Mutate
+> Check
+> Positive
+> Embedding
+> Negative
+> Embedding
+> Anchor
+> Embedding
+
+Figure 3: Triplet construction for minimal-error contrastive learning. A correct RTL sample serves as the anchor. Semantics-preserving transformations produce the positive sample, while a single injected error produces the negative sample. 
+
+Based on this representation, we define the triplet margin loss as 
+
+𝐿 𝐶𝐿 = max  0, ∥𝑓 (𝑎 ) − 𝑓 (𝑝 )∥ 2 − ∥ 𝑓 (𝑎 ) − 𝑓 (𝑛 )∥ 2 + 𝑚 ,
+
+where 𝑚 is the margin hyperparameter, and (𝑎, 𝑝, 𝑛 ) denotes a triplet sample, as illustrated in Figure 3: 
+
+• 𝑎 (Anchor): a verified correct Verilog implementation; 
+
+• 𝑝 (Positive): a semantics-preserving transformation of the anchor, such as variable renaming or equivalent logic re-structuring; 
+
+• 𝑛 (Negative): a minimally perturbed erroneous variant ob-tained by injecting a single well-defined error into the an-chor, such as a mismatched keyword, an incorrect signal declaration, or an operator misuse. Minimizing 𝐿 𝐶𝐿 during training ensures that embeddings of cor-rect RTL remain closer to the anchor than embeddings of erroneous RTL. This design is particularly suitable for Verilog generation, where many failures arise from small but validity-critical local de-viations rather than large semantic changes. By constructing nega-tives with controlled minimal perturbations, the triplet objective explicitly teaches the model to capture fine-grained validity bound-aries in RTL representation space. Moreover, several injected error types, such as operator misuse, declaration inconsistencies, and width-related errors, are closely related to downstream functional failures. Therefore, improving representation separability along these validity-related boundaries may also benefit correctness. To efficiently adapt the pretrained LLM to the Verilog domain, we use Low-Rank Adaptation (LoRA). LoRA inserts trainable low-rank matrices into selected transformer layers, enabling targeted adaptation without updating the full parameter set. During training, triplets consisting of an anchor, a positive sample, and a negative sample are used to optimize the triplet margin loss. This parameter-efficient adaptation refines the representation space to better cap-ture Verilog domain validity distinctions while reducing the risk of overfitting under limited-domain data. 
+
+## 3.4 Proactive Error Screening 
+
+Most existing LLM-based RTL generation frameworks detect errors only after a complete candidate has been generated and validated by external tools such as compilers or simulators. This post-hoc para-digm is inefficient because local decoding errors can propagate into full-sequence compilation failures or functionally invalid designs. To mitigate this issue, we introduce a proactive error screening module that identifies high-risk partial continuations directly from the model’s internal signals before downstream validation. The screening module is trained in a second stage after con-trastive learning. We first fine-tune the LLM with the contrastive loss, then freeze the adapted model and extract semantic features for correct and erroneous RTL samples. These semantic features are combined with token-level uncertainty statistics to train a light-weight binary classifier. During inference, the adapted LLM gen-erates RTL candidates, and the classifier is invoked at predefined statement boundaries to reject high-risk local continuations. 
+
+3.4.1 Hybrid Feature Representation . A key challenge in LLM-based code generation is that semantic similarity does not neces-sarily imply syntactic validity or functional correctness. In Verilog, two code snippets may express nearly identical design intent while differing only by a small syntactic or structural error, such as a missing delimiter, an incorrect declaration, or a width mismatch. As a result, hidden-state representations alone are often insufficient for distinguishing valid code from minimally erroneous variants. To address this issue, we construct a hybrid representation that combines semantic features from hidden states with uncertainty-based statistical features derived from token-level output probabili-ties. Given the final hidden states 𝐻 ∈ R𝐵 ×𝐿 ×𝐷 , where 𝐵 is the batch size, 𝐿 is the sequence length, and 𝐷 is the hidden dimension, we apply max-pooling over the sequence dimension for each sample to obtain a semantic representation. 
+
+𝑣 sem = MaxPool (𝐻 ) ∈ R𝐷 .
+
+Semantic features capture global structural and contextual infor-mation from the generated RTL sequence. We further extract statistical features 𝑣 stat from the generation probabilities, including sequence-level uncertainty, local confidence fluctuations, and token-specific uncertainty patterns. These features summarize sequence-level uncertainty, local confidence fluctua-tions, and token-specific uncertainty patterns derived from the model’s output scores. Table 3 summarizes the statistical features used in this study. The final hybrid representation is formed by concatenation: 
+
+𝑣 hybrid = [𝑣 sem ; 𝑣 stat ].
+
+3.4.2 Classifier Head . After contrastive training, we freeze the adapted LLM and extract hybrid features from the augmented sam-ples to train the classifier head separately. The classifier head is de-signed to predict whether a given Verilog code snippet is correct or erroneous based on the hybrid feature representation. The classifier consists of a projection head followed by a linear classification layer with sigmoid activation. The projection head reduces the dimen-sionality of the concatenated hybrid vector 𝑣 hybrid = [𝑣 sem ; 𝑣 stat ] to a compact latent representation, and the final layer outputs 𝑃 (𝑦 = 1),VerilogCL: A Contrastive Learning Framework for Robust LLM-Based Verilog Generation 
+
+Table 3: Statistical uncertainty features included in ( 𝑣 stat ). Feature Type Feature Name 
+
+> Aggregate Uncertainty Features avg_nll avg_entropy max_nll max_entropy std_nll low_confidence_token_count Spike Detection Features spike_num mean_spike_value std_spike_value max_spike_value max_spike_token_uncertainty Token-Specific Features punct_mean_nll keyword_mean_nll last_k_mean_nll
+
+the predicted probability that the input snippet is valid. The classi-fier is trained with valid code as positive samples and minimal-error variants as negative samples. The training objective minimizes the binary cross-entropy loss: 
+
+𝐿 𝐶𝑙𝑠 = − 1
+
+𝑁 
+
+> 𝑁
+
+∑︁ 
+
+> 𝑖 =1
+
+[𝑦 𝑖 log ( ˆ𝑦 𝑖 ) + ( 1 − 𝑦 𝑖 ) log (1 − ˆ𝑦 𝑖 )] ,
+
+where 𝑦 𝑖 is the true label (1 for valid, 0 for erroneous), and ˆ𝑦 𝑖 is the predicted probability of validity. 
+
+3.4.3 Error Screening . During autoregressive decoding, the clas-sifier is applied whenever the current partial sequence reaches a statement boundary. In our implementation, statement bound-aries are defined by common Verilog delimiters such as “;”, “end”, “endcase”, and “endmodule”. When decoding reaches a predefined statement boundary, the classifier evaluates the hybrid feature rep-resentation 𝑣 hybrid and produces a validity score. If the score ex-ceeds a preset threshold, decoding proceeds normally. Otherwise, the current partial continuation is marked as high risk, and the decoder rejects the current local continuation and resamples once from the current boundary under the same sampling configuration. This design enables the model to intervene at error-sensitive state-ment boundaries, thereby reducing the likelihood that local errors propagate into full-sequence compilation failures or functionally incorrect RTL implementations. Proactive error screening therefore acts as an online risk-control mechanism that complements contrastive learning. Contrastive learning improves the separability between correct and erroneous RTL in latent space, while the screening module uses this improved representation together with uncertainty cues to reduce the chance that local decoding errors accumulate into invalid final outputs. Algorithm 1 summarizes the inference-time proactive valid-ity screening procedure. During generation, whenever decoding reaches a predefined statement boundary, semantic and statistical features are extracted from the current partial sequence and com-bined into a hybrid representation for classifier-based confidence estimation. This strategy reduces wasted downstream compilation on erroneous RTL candidates by steering inference toward higher-quality accepted samples. 
+
+Algorithm 1 Proactive Validity Screening in VerilogCL 
+
+Require: Input prompt 𝑥 , Verilog generator 𝑀 , screening classifier 
+
+𝐶 , threshold 𝜏 , maximum generation length 𝑇 
+
+Ensure: Generated Verilog code 𝑦  
+
+> 1:
+
+Initialize generated sequence 𝑦 ← ∅  
+
+> 2:
+
+for 𝑡 = 1 to 𝑇 do ⊲ Autoregressive decoding  
+
+> 3:
+
+Decode one step conditioned on (𝑥, 𝑦 ), and obtain the up-dated sequence 𝑦 , hidden states 𝐻 , and output scores 𝑆  
+
+> 4:
+
+if 𝑦 reaches a statement boundary then 
+
+⊲ Feature extraction  
+
+> 5:
+
+Extract semantic feature via max-pooling:  
+
+> 6:
+
+𝑣 sem ← MaxPool (𝐻 ) 
+
+> 7:
+
+Extract statistical features from output scores:  
+
+> 8:
+
+𝑣 stat ← ComputeStats (𝑆 ) 
+
+> 9:
+
+Construct hybrid feature: 𝑣 hybrid ← [ 𝑣 sem ; 𝑣 stat ]
+
+⊲ Proactive classifier screening  
+
+> 10:
+
+Compute validity score:  
+
+> 11:
+
+𝑠 ← 𝐶 (𝑣 hybrid ) 
+
+> 12:
+
+if 𝑠 < 𝜏 then  
+
+> 13:
+
+Reject the current local continuation and resample once from the current boundary  
+
+> 14:
+
+end if  
+
+> 15:
+
+end if  
+
+> 16:
+
+if 𝑦 reaches EOS then ⊲ Return final output  
+
+> 17:
+
+return 𝑦  
+
+> 18:
+
+end if  
+
+> 19:
+
+end for  
+
+> 20:
+
+return 𝑦 
+
+## 4 Experiments 4.1 Experimental Setup 
+
+We used DeepSeek-Coder-7B-Instruct-v1.5 [ 2] as the base model in all experiments. To adapt it efficiently to the Verilog domain, we fine-tune it with LoRA in bfloat16 precision. LoRA adapters are applied to the attention projection layers with rank 32 and dropout 0.05. Training uses AdamW with a learning rate of 3 × 10 −5, batch size 8, and 10 epochs. At inference time, we use temperature 0.7 and top-p sampling with 𝑝 = 0.95 . All experiments are conducted on a single NVIDIA A30 GPU. We construct the augmented dataset from verified reference im-plementations spanning 15 module categories (Table 1). Negative samples are generated by rule-based error injection according to the categories in Table 2, with ten candidate variants per error type. To ensure data quality, all mutated candidates were subjected to compilation and simulation-based functional validation, and we retained only those variants that consistently produced either compilation failures or functional mismatches. Positive samples are generated by semantics-preserving transformations, such as variable renaming and equivalent logic restructuring, and are veri-fied against the anchor designs using Yosys [ 29 ]. The final dataset contains approximately 3,000 contrastive training triplets. To evaluate the performance of Verilog generation, we selected two representative benchmarks: VerilogEval [ 9] and RTLLM [ 30 ]. These datasets were specifically designed to evaluate the functional correctness and quality of Verilog code generated by language Yan Tan, Tong Liu, Xiangchen Meng and Yangdi Lyu †
+
+models. For evaluation, we strictly used the official benchmark testbenches, and all simulations were executed with Synopsys VCS. 
+
+## 4.2 Contrastive Learning Evaluation 
+
+To evaluate the impact of contrastive learning on representation quality, we visualize the semantic embeddings of correct and erro-neous RTL samples before and after contrastive training using PCA. As shown in Figure 4, substantial overlap exists between correct (“OK”) and erroneous (“Error”) samples before contrastive learning. After contrastive training, the two groups become much more sep-arable in the PCA projection, forming clearer clusters with reduced overlap. This improved separability suggests that contrastive learning reshapes the semantic representation space to better distinguish differences between correct and erroneous RTL. In other words, code snippets that are semantically similar but differ in validity are more effectively separated after contrastive training. This im-proved representation quality provides a stronger foundation for the downstream screening classifier, which further incorporates uncertainty-based statistical features for more reliable proactive error screening during generation. 40 20 0 20 40     
+
+> 20
+> 0
+> 20
+> Error
+> OK
+> (a) Before Contrastive Learning 10 50510
+> 0
+> 5
+> 10
+> 15
+> 20
+> Error
+> OK
+> (b) After Contrastive Learning
+
+Figure 4: PCA visualization of semantic embeddings before and after contrastive learning. 0.0 0.2 0.4 0.6 0.8 1.0 
+
+> Threshold Value: filter when P(OK) < threshold
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> F1 score
+> F1
+> Best threshold: 0.507
+
+Figure 5: Validation-set F1 score under different screening thresholds on 𝑃 (OK ). The dashed line marks the optimal threshold 𝜏 = 0.507 .
+
+## 4.3 Proactive Error Screening Results 
+
+We next evaluate the classifier used in the proactive screening module. The classifier is trained on the minimal-error paired dataset using hybrid features that combine semantic embeddings from LLM hidden states with uncertainty-based statistical features from token probabilities. The extracted features are split into 80% training and 20% validation sets. We train the classifier with a learning rate of 1e-4, batch size 8, dropout 0.1, and 100 epochs. We first investigate the effect of different screening thresholds on classification performance on the validation set. As shown in Figure 5, the weighted F1 score on the validation set reaches its peak value of 92.58% at a threshold of approximately 0.507. Performance remains relatively stable over a wide threshold range from 0.2 to 0.9, suggesting that the classifier is not overly sensitive to the exact threshold setting. For simplicity, we therefore set the screening threshold to 𝜏 = 0.5 in all subsequent experiments. Table 4 summarizes the classification results on the validation set before and after contrastive training. Using the same classifier archi-tecture and training protocol, we observe substantial improvements when the hybrid features are extracted from the contrastive-tuned model rather than the base model. Accuracy increases from 79.5% to 92.5%, and F1 improves from 79.96% to 92.58%. 
+
+Table 4: Classification performance before and after con-trastive learning. Metric Before contrastive learning After contrastive learning Precision 80.91% 92.80% 
+
+Recall 79.50% 92.50% 
+
+F1-score 79.96% 92.58% 
+
+Accuracy 79.50% 92.50% These results indicate that contrastive learning improves the sep-arability of the hybrid feature space and strengthens the classifier’s ability to distinguish valid from erroneous partial continuations. VerilogCL: A Contrastive Learning Framework for Robust LLM-Based Verilog Generation 
+
+Table 5: Comparison of functional correctness on VerilogEval [ 9] and RTLLM [ 30 ]. The top scores ranked 1 st , 2 nd , and 3 rd in each column are highlighted in Red , Blue , and Green , respectively.                                                                                                                         
+
+> Category Model VerilogEval-human VerilogEval-machine RTLLM v1.1 RTLLM v2.0 (%) (%) (%) (%) pass@1 pass@5 pass@10 pass@1 pass@5 pass@10 pass@5 pass@5 Verilog-Specific LLMs
+> VerilogEval [9] 28.8 45.9 52.3 46.2 67.3 73.7 N/A N/A CodeGen-6B MEV-LLM [31] 42.9 48.0 54.4 57.3 61.5 66.4 N/A N/A BetterV-CodeQwen [17] 46.1 53.7 58.2 68.1 79.4 84.5 N/A N/A RTLCoder [10] 41.6 50.1 53.4 61.2 76.5 81.8 41.7 53.6 OriGen [11] 54.4 60.1 64.2 74.1 82.4 85.7 65.5 58.8
+> Commercial LLMs
+> Claude3-Sonnet [32] 46.1 56.0 60.3 58.4 71.8 74.8 58.6 54.4 GPT-3.5 [33] 35.6 48.8 52.6 49.4 72.7 77.6 44.8 36.2 GPT-4 [34] 43.5 55.8 58.9 60.0 70.6 73.5 65.5 58.7
+> Open Source LLMs
+> CodeLlama-7B-Instruct [1] 18.2 22.7 24.3 43.1 47.1 47.7 34.5 33.1 CodeQwen1.5-7B-Chat [3] 22.4 41.1 46.2 45.1 70.2 77.6 37.9 36.4 DeepSeek-Coder-7B-Instruct-v1.5 [2] 31.7 42.8 46.8 55.7 73.9 77.6 37.9 45.0
+> Ours
+> DeepSeek-7B+Contrastive 39.6 54.2 57.1 71.2 82.5 85.2 62.5 54.7 DeepSeek-7B+Classifier 35.6 53.1 56.4 67.7 83.9 86.7 49.8 50.1 DeepSeek-7B+Contrastive+Classifier 55.3 60.3 65.2 74.5 85.4 87.4 70.5 61.9
+
+This improvement is important for inference-time screening, whose goal is not to certify final functional correctness, but to identify local high-risk continuations early and reduce error propagation during decoding. As a result, the screening module provides a stronger basis for improving downstream generation quality. 
+
+## 4.4 Functional Correctness of Verilog Code 
+
+Following VerilogEval [ 9 ], we use the metric pass@k to evaluate the functional correctness of the generated Verilog code. pass@k 
+
+represents the expected probability of at least one answer passing the functional evaluation when randomly choosing 𝑘 answers from 
+
+𝑛 candidates: pass@k := EProblems 
+
+"
+
+1 −
+
+ 𝑛 −𝑐 𝑘 
+
+ 𝑛 𝑘 
+
+#
+
+(1) where 𝑛 represents the total number of generated samples for a given problem, 𝑐 denotes the number of correct samples, and 𝑘 
+
+specifies the number of selected code samples. We set 𝑛 = 10 
+
+according to the original settings. Table 5 summarizes the functional correctness results on the eval-uated benchmarks. Our full model, DeepSeek-Coder-7B-Instruct-v1.5 with contrastive learning and classifier-based screening, achieves the best overall performance among all compared methods. It ob-tains the highest pass@1 on VerilogEval-human and VerilogEval-machine, reaching 55.3% and 74.5%, respectively. On RTLLM v1.1 and RTLLM v2.0, where pass@5 is reported, our method also ranks first with 70.5% and 61.9%, respectively. Compared with the base DeepSeek-7B model, our full method improves pass@1 by 23.6 points on VerilogEval-human and 18.8 points on VerilogEval-machine, while improving pass@5 by 32.6 points on RTLLM v1.1 and 16.9 points on RTLLM v2.0. These results show that our method consis-tently improves functional correctness across different benchmarks. We attribute these gains to two complementary factors. First, sev-eral mutation types used in contrastive learning, such as operator misuse, declaration inconsistencies, and width-related errors, are closely related to downstream functional failures in RTL. By explic-itly separating these cases from correct code in the representation space, contrastive learning helps the model learn the boundaries between correct and erroneous RTL. Second, the proactive screen-ing module steers decoding toward more reliable continuations by combining hidden-state semantics with token-level uncertainty features. This reduces the chance of following low-confidence con-tinuations that often lead to erroneous RTL, thereby improving the overall quality of accepted outputs. 
+
+## 4.5 Success Rate Evaluation 
+
+To evaluate generation quality, we report success rate , defined as the percentage of generated Verilog candidates that satisfy a given evaluation criterion. For each benchmark problem, we generate 
+
+𝑁 total = 10 candidates. The success rate is computed as 
+
+Success Rate = 𝑁 success 
+
+𝑁 total 
+
+× 100% , (2) where 𝑁 success denotes the number of generated candidates that satisfy the target criterion, and 𝑁 total denotes the total number of generated candidates. In this work, the criterion is either successful compilation or passing the official benchmark testbench. We com-pare VerilogCL against commercial LLMs, general open-source code models, and recent Verilog-oriented methods. Among the latter, OriGen [ 11 ] and RTLCoder [ 10 ] represent feedback-based RTL gen-eration methods, while DecoRTL [ 21 ] represents a validity-aware decoding approach. 
+
+4.5.1 Compilation Success Rate . Figure 6a compares compi-lation success rates on the RTLLM v1.1 benchmark. VerilogCL Yan Tan, Tong Liu, Xiangchen Meng and Yangdi Lyu †
+
+achieves the highest compilation success rate among the evalu-ated methods, reaching 0.94 and outperforming RTLCoder (0.71), OriGen (0.78), DecoRTL (0.80), and all other baselines. Compared with the original DeepSeek-7B baseline (0.71), VerilogCL improves compilation success rate by 23 percentage points. These results indicate that our method is particularly effective at increasing the probability of generating compilable Verilog candidates. 
+
+4.5.2 Functional Success Rate . Figure 6b compares functional success rates on the RTLLM v1.1 benchmark. Compared with com-pilation success rate, functional success rate is consistently lower across all evaluated methods, showing that successful compilation alone does not guarantee correct RTL behavior under simulation. Nevertheless, VerilogCL still achieves the best functional success rate, reaching 0.57 and outperforming DecoRTL (0.54), GPT-4 (0.52), Claude3-Sonnet (0.47), OriGen (0.37), and RTLCoder (0.34). Com-pared with the DeepSeek-7B baseline (0.32), VerilogCL improves functional success rate by 25 percentage points. This result sug-gests that the proposed framework improves not only syntactic reliability but also the likelihood of generating functionally correct RTL candidates. Llama-7B Qwen1.5-7B DeepSeek-7B GPT-3.5 GPT-4 Claude3-Sonnet OriGen RTLCoder DecoRTL VerilogCL 0.20 
+
+0.40 
+
+0.60 
+
+0.80 
+
+1.00 
+
+0.35 
+
+0.54 
+
+0.71 0.65 
+
+0.78 0.76 0.78 0.71 
+
+0.8
+
+0.94 
+
+(a) Compilation success rate on RTLLM v1.1. 
+
+> Llama-7B
+> Qwen1.5-7B
+> DeepSeek-7B
+> GPT-3.5
+> GPT-4
+> Claude3-Sonnet
+> OriGen
+> RTLCoder
+> DecoRTL
+> VerilogCL
+
+0.00 
+
+0.20 
+
+0.40 
+
+0.60 
+
+0.80 
+
+0.17 
+
+0.32 0.32 0.34 
+
+0.52 0.47 
+
+0.37 0.34 
+
+0.54 0.57 
+
+(b) Functional success rate on RTLLM v1.1. 
+
+Figure 6: Success rate comparison on the RTLLM v1.1 bench-mark. Table 6: Ablation study of compilation success rate and func-tional success rate on the RTLLM benchmarks. Base denotes DeepSeek-Coder-7B-Instruct-v1.5. Benchmark Setting Compilation Functional 
+
+RTLLM v1.1 Base 70.7% 32.1% Base+Contrastive 78.8% 39.4% Base+Classifier 74.5% 36.2% Base+Both 94.0% 56.6% RTLLM v2.0 Base 69.8% 36.4% Base+Contrastive 83.0% 39.4% Base+Classifier 78.8% 39.0% Base+Both 89.3% 49.8% 
+
+4.5.3 Ablation Analysis . To understand the contribution of each component, we perform an ablation study on RTLLM v1.1 and RTLLM v2.0 using compilation and functional success rates. As shown in Table 6, both contrastive learning and classifier-based screening improve over the base model, and their combination yields the best performance on both benchmarks. On RTLLM v1.1, the full method improves the baseline from 70.7% / 32.1% to 94.0% / 56.6%; on RTLLM v2.0, it improves from 69.8% / 36.4% to 89.3% / 49.8%, in compilation / functional success rate, respectively. These results indicate that the two components are complementary: con-trastive learning improves feature quality and separability, while classifier-based screening reduces error-prone continuations during decoding. 
+
+## 5 Conclusion and Future Work 
+
+We present VerilogCL, a framework for improving the robustness of LLM-based Verilog generation through validity-aware contrastive learning and proactive error screening. By explicitly contrasting correct RTL with minimally perturbed erroneous variants, Ver-ilogCL improves the model’s ability to capture validity-relevant distinctions in representation space. Combined with inference-time screening based on semantic and uncertainty-aware features, this leads to fewer error-prone continuations during decoding. Experi-ments on VerilogEval and RTLLM show that the proposed frame-work substantially improves syntactic and functional correctness. Future work will extend VerilogCL in two directions. First, we plan to apply the framework to more complex RTL generation set-tings, such as multi-module designs and longer-horizon generation tasks. Second, we will explore the integration of formal verification and design-aware objectives, including power, performance, and area (PPA), to support more reliable and implementation-aware RTL generation. 
+
+## References       
+
+> [1] B. Roziere, J. Gehring, F. Gloeckle, S. Sootla, I. Gat, X. E. Tan, Y. Adi, J. Liu, R. Sauvestre, T. Remez et al. , “Code Llama: Open foundation models for code,”
+> arXiv preprint arXiv:2308.12950 , 2023. [2] D. Guo, Q. Zhu, D. Yang, Z. Xie, K. Dong, W. Zhang, G. Chen, X. Bi, Y. Wu, Y. Li
+> et al. , “DeepSeek-Coder: When the large language model meets programming – the rise of code intelligence,” arXiv preprint arXiv:2401.14196 , 2024. [3] J. Bai, S. Bai, Y. Chu, Z. Cui, K. Dang, X. Deng, Y. Fan, W. Ge, Y. Han, F. Huang
+> et al. , “Qwen technical report,” arXiv preprint arXiv:2309.16609 , 2023.
+
+VerilogCL: A Contrastive Learning Framework for Robust LLM-Based Verilog Generation 
+
+[4] A. Mastropaolo, L. Pascarella, E. Guglielmi, M. Ciniselli, S. Scalabrino, R. Oliveto, and G. Bavota, “On the robustness of code generation techniques: An empirical study on github copilot,” in 2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE) . IEEE, 2023, pp. 2149–2160. [5] E. Nijkamp, H. Hayashi, C. Xiong, S. Savarese, and Y. Zhou, “Codegen2: Lessons for training llms on programming and natural languages,” arXiv preprint arXiv:2305.02309 , 2023. [6] S. Thakur, B. Ahmad, Z. Fan, H. Pearce, B. Tan, R. Karri, B. Dolan-Gavitt, and S. Garg, “Benchmarking large language models for automated verilog rtl code generation,” in 2023 Design, Automation & Test in Europe Conference & Exhibition (DATE) . IEEE, 2023, pp. 1–6. [7] E. Dehaerne, B. Dey, S. Halder, and S. De Gendt, “A deep learning framework for verilog autocompletion towards design and verification automation,” arXiv preprint arXiv:2304.13840 , 2023. [8] S. Liu, Y. Lu, W. Fang, M. Li, and Z. Xie, “OpenLLM-RTL: Open dataset and bench-mark for llm-aided design rtl generation(invited),” in 2024 IEEE/ACM International Conference on Computer-Aided Design (ICCAD) . ACM, 2024. [9] M. Liu, N. Pinckney, B. Khailany, and H. Ren, “Verilogeval: Evaluating large language models for verilog code generation,” in 2023 IEEE/ACM International Conference on Computer Aided Design (ICCAD) . IEEE, 2023, pp. 1–8. [10] S. Liu, W. Fang, Y. Lu, Q. Zhang, H. Zhang, and Z. Xie, “RtlCoder: Outperforming gpt-3.5 in design rtl generation with our open-source dataset and lightweight solution,” in 2024 IEEE LLM Aided Design Workshop (LAD) . IEEE, 2024, pp. 1–5. [11] F. Cui, C. Yin, K. Zhou, Y. Xiao, G. Sun, Q. Xu, Q. Guo, D. Song, D. Lin, X. Zhang 
+
+et al. , “OriGen: Enhancing rtl code generation with code-to-code augmentation and self-reflection,” arXiv preprint arXiv:2407.16237 , 2024. [12] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. D. O. Pinto, J. Kaplan, H. Edwards, Y. Burda, N. Joseph, G. Brockman et al. , “Evaluating large language models trained on code,” arXiv preprint arXiv:2107.03374 , 2021. [13] S. Thakur, J. Blocklove, H. Pearce, B. Tan, S. Garg, and R. Karri, “Autochip: Automating hdl generation using llm feedback,” arXiv preprint arXiv:2311.04887 ,2023. [14] Y. Tsai, M. Liu, and H. Ren, “RTLFixer: Automatically fixing rtl syntax errors with large language model,” in Proceedings of the 61st ACM/IEEE Design Automation Conference , 2024, pp. 1–6. [15] C.-T. Ho, H. Ren, and B. Khailany, “Verilogcoder: Autonomous verilog coding agents with graph-based planning and abstract syntax tree (ast)-based waveform tracing tool,” arXiv preprint arXiv:2408.08927 , 2024. [16] J. Wang, S. Liu, Y. Lu, and Z. Xie, “HLSDebugger: Identification and correction of logic bugs in hls code with llm solutions,” arXiv preprint arXiv:2507.21485 , 2025. [17] Z. Pei, H.-L. Zhen, M. Yuan, Y. Huang, and B. Yu, “Betterv: Controlled verilog generation with discriminative guidance,” arXiv preprint arXiv:2402.03375 , 2024. [18] K. Chang, Y. Wang, H. Ren, M. Wang, S. Liang, Y. Han, H. Li, and X. Li, “Chipgpt: How far are we from natural language hardware design,” arXiv preprint arXiv:2305.14019 , 2023. [19] Y. Zhao, H. Zhang, H. Huang, Z. Yu, and J. Zhao, “Mage: A multi-agent engine for automated rtl code generation,” in 2025 62nd ACM/IEEE Design Automation Conference (DAC) , 2025, pp. 1–7. [20] Y. Wei, Z. Huang, L. He, L. Huang, T.-J. Lin, and W. W. Xing, “Vflow: Discovering optimal agentic workflows for verilog generation,” in 2026 31st Asia and South Pacific Design Automation Conference (ASP-DAC) , 2026, pp. 355–361. [21] M. Akyash, K. Azar, and H. Kamali, “DecoRTL: A run-time decoding framework for rtl code generation with llms,” in 2025 IEEE/ACM International Conference On Computer Aided Design (ICCAD) , 2025, pp. 1–9. [22] C. Xu, Y. Liu, Y. Zhou, S. Huang, N. Xu, and Q. Xu, “Speculative decoding for verilog: Speed and quality, all in one,” in 2025 62nd ACM/IEEE Design Automation Conference (DAC) , 2025, pp. 1–7. [23] X. Chen, S. Xie, and K. He, “An empirical study of training self-supervised vision transformers,” in Proceedings of the IEEE/CVF international conference on computer vision , 2021, pp. 9640–9649. [24] M. Ye, X. Zhang, P. C. Yuen, and S.-F. Chang, “Unsupervised embedding learning via invariant and spreading instance feature,” in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , 2019, pp. 6210–6219. [25] T. Chen, S. Kornblith, K. Swersky, M. Norouzi, and G. E. Hinton, “Big self-supervised models are strong semi-supervised learners,” Advances in neural information processing systems , vol. 33, pp. 22 243–22 255, 2020. [26] P. Jain, A. Jain, T. Zhang, P. Abbeel, J. Gonzalez, and I. Stoica, “Contrastive code representation learning,” in Proceedings of the 2021 conference on empirical methods in natural language processing , 2021, pp. 5954–5971. [27] D. Zhang, W. U. Ahmad, M. Tan, H. Ding, R. Nallapati, D. Roth, X. Ma, and B. Xiang, “Code representation learning at scale,” in The Twelfth International Conference on Learning Representations , 2024. [Online]. Available: https://openreview.net/forum?id=vfzRRjumpX [28] D. Guo, S. Lu, N. Duan, Y. Wang, M. Zhou, and J. Yin, “Unixcoder: Unified cross-modal pre-training for code representation,” arXiv preprint arXiv:2203.03850 ,2022. [29] C. Wolf, “Yosys open synthesis suite,” https://yosyshq.net/yosys/, 2013. [30] Y. Lu, S. Liu, Q. Zhang, and Z. Xie, “RTLLM: An open-source benchmark for design rtl generation with large language model,” in 2024 29th Asia and South Pacific Design Automation Conference (ASP-DAC) . IEEE, 2024, pp. 722–727. [31] B. Nadimi and H. Zheng, “A multi-expert large language model architecture for verilog code generation,” in 2024 IEEE LLM Aided Design Workshop (LAD) . IEEE, 2024, pp. 1–5. [32] Anthropic, “Introducing the next generation of claude,” https://www.anthropic. com/, 2024. [33] OpenAI, “GPT-3.5-Turbo,” 2023, accessed: 2024. [Online]. Available: https: //platform.openai.com/docs/models/gpt-3-5 [34] ——, “GPT-4 Technical Report,” 2023, accessed: 2024. [Online]. Available: https://openai.com/research/gpt-4

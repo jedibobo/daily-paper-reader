@@ -6,79 +6,74 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-27
-- 运行时间：2026-04-27 20:13:03 UTC
+- 最新运行日期：2026-04-28
+- 运行时间：2026-04-28 20:27:36 UTC
 - 运行状态：成功
-- 本次总论文数：19
-- 精读区：8
+- 本次总论文数：17
+- 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日精选19篇前沿论文，深度聚焦大模型在边缘侧的部署加速与长文本推理优化。
-重点推荐多LoRA基础模型在边缘端的加速方案，以及针对苹果芯片和无线网络环境的低延迟Transformer架构。
-建议关注KV缓存稀疏化与长上下文解码技术，这是提升端侧大模型实用性的关键突破口。
-- 详情：[/202604/27/README](/202604/27/README)
+- 今日共生成 17 篇推荐（精读 6 篇，速读 11 篇）
+- 精读：《Compilation and Execution of an Embeddable YOLO-NAS on the VTA》（10.0/10）, 《Deployment-Aligned Low-Precision Neural Architecture Search for Spaceborne Edge AI》（10.0/10）
+- 速读：《From Natural Language to Silicon: The Representation Bottleneck in LLM Hardware Design》（8.0/10）, 《UCCL-Zip: Lossless Compression Supercharged GPU Communication》（8.0/10）, 《Towards Joint Quantization and Token Pruning of Vision-Language Models》（8.0/10）
+- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
+- 详情：[/202604/28/README](/202604/28/README)
 
 ### 精读区论文标签
-1. [Unlocking the Edge deployment and ondevice acceleration of multi-LoRA enabled one-for-all foundational LLM](/202604/27/2604.18655v2-unlocking-the-edge-deployment-and-ondevice-acceleration-of-multi-lora-enabled-one-for-all-foundational-llm)  
+1. [Compilation and Execution of an Embeddable YOLO-NAS on the VTA](/202604/28/2604.24455v1-compilation-and-execution-of-an-embeddable-yolo-nas-on-the-vta)  
+   标签：评分：10.0/10、query:hwnas
+   evidence：在 VTA 上编译 YOLO-NAS 并实现自动化编译链
+2. [Deployment-Aligned Low-Precision Neural Architecture Search for Spaceborne Edge AI](/202604/28/2604.24492v1-deployment-aligned-low-precision-neural-architecture-search-for-spaceborne-edge-ai)  
+   标签：评分：10.0/10、query:hwnas
+   evidence：面向星载边缘AI的部署对齐硬件感知NAS
+3. [SparKV: Overhead-Aware KV Cache Loading for Efficient On-Device LLM Inference](/202604/28/2604.21231v1-sparkv-overhead-aware-kv-cache-loading-for-efficient-on-device-llm-inference)  
    标签：评分：9.0/10、query:hwnas
-   evidence：用于高效设备端LLM推理的硬件感知框架
-2. [Transformer Architecture with Minimal Inference Latency for Multi-Modal Wireless Networks](/202604/27/2604.18965v1-transformer-architecture-with-minimal-inference-latency-for-multi-modal-wireless-networks)  
+   evidence：针对高效端侧LLM推理的开销感知型KV缓存加载
+4. [Bridging the Training-Deployment Gap: Gated Encoding and Multi-Scale Refinement for Efficient Quantization-Aware Image Enhancement](/202604/28/2604.21743v1-bridging-the-training-deployment-gap-gated-encoding-and-multi-scale-refinement-for-efficient-quantization-aware-image-enhancement)  
    标签：评分：9.0/10、query:hwnas
-   evidence：无线网络中极低的推理延迟和内存占用
-3. [MCAP: Deployment-Time Layer Profiling for Memory-Constrained LLM Inference](/202604/27/2604.21026v1-mcap-deployment-time-layer-profiling-for-memory-constrained-llm-inference)  
+   evidence：针对移动部署的高效量化感知模型设计
+5. [A Multiplication-Free Spike-Time Learning Algorithm and its Efficient FPGA Implementation for On-Chip SNN Training](/202604/28/2604.23218v1-a-multiplication-free-spike-time-learning-algorithm-and-its-efficient-fpga-implementation-for-on-chip-snn-training)  
    标签：评分：9.0/10、query:hwnas
-   evidence：目标设备上的动态精度和内存放置决策
-4. [SPAC: Automating FPGA-based Network Switches with Protocol Adaptive Customization](/202604/27/2604.21881v1-spac-automating-fpga-based-network-switches-with-protocol-adaptive-customization)  
+   evidence：适用于高效FPGA实现的无乘法算法
+6. [BitRL: Reinforcement Learning with 1-bit Quantized Language Models for Resource-Constrained Edge Deployment](/202604/28/2604.24273v1-bitrl-reinforcement-learning-with-1-bit-quantized-language-models-for-resource-constrained-edge-deployment)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对FPGA交换机的协议-架构协同设计
-5. [Focus Session: Hardware and Software Techniques for Accelerating Multimodal Foundation Models](/202604/27/2604.21952v1-focus-session-hardware-and-software-techniques-for-accelerating-multimodal-foundation-models)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：Transformer块的硬件和软件协同设计
-6. [Hardware-Software Co-Design for Event-Driven SNN Deployment on Low-Cost Neuromorphic FPGAs](/202604/27/2604.22179v1-hardware-software-co-design-for-event-driven-snn-deployment-on-low-cost-neuromorphic-fpgas)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：用于在FPGA上部署SNN的软硬件协同设计框架
-7. [HGQ-LUT: Fast LUT-Aware Training and Efficient Architectures for DNN Inference](/202604/27/2604.22293v1-hgq-lut-fast-lut-aware-training-and-efficient-architectures-for-dnn-inference)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对FPGA硬件效率的查找表感知训练与高效架构
-8. [Microarchitectural Co-Optimization for Sustained Throughput of RISC-V Multi-Lane Chaining Vector Processors](/202604/27/2604.22314v1-microarchitectural-co-optimization-for-sustained-throughput-of-risc-v-multi-lane-chaining-vector-processors)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：旨在持续吞吐量的微架构协同优化
+   evidence：用于资源受限边缘部署的1比特量化模型
 
 ### 速读区论文标签
-1. [HieraSparse: Hierarchical Semi-Structured Sparse KV Attention](/202604/27/2604.16864v1-hierasparse-hierarchical-semi-structured-sparse-kv-attention)  
+1. [From Natural Language to Silicon: The Representation Bottleneck in LLM Hardware Design](/202604/28/2604.17097v1-from-natural-language-to-silicon-the-representation-bottleneck-in-llm-hardware-design)  
    标签：评分：8.0/10、query:hwnas
-   evidence：利用GPU稀疏张量核心加速KV缓存的内核
-2. [SinkRouter: Sink-Aware Routing for Efficient Long-Context Decoding in Large Language and Multimodal Models](/202604/27/2604.16883v1-sinkrouter-sink-aware-routing-for-efficient-long-context-decoding-in-large-language-and-multimodal-models)  
+   evidence：基于大模型的硬件设计与硅级中间表示编译
+2. [UCCL-Zip: Lossless Compression Supercharged GPU Communication](/202604/28/2604.17172v2-uccl-zip-lossless-compression-supercharged-gpu-communication)  
    标签：评分：8.0/10、query:hwnas
-   evidence：内存受限的注意力机制与KV缓存优化
-3. [Open-TQ-Metal: Fused Compressed-Domain Attention for Long-Context LLM Inference on Apple Silicon](/202604/27/2604.16957v1-open-tq-metal-fused-compressed-domain-attention-for-long-context-llm-inference-on-apple-silicon)  
+   evidence：将无损压缩直接集成到GPU通信原语中
+3. [Towards Joint Quantization and Token Pruning of Vision-Language Models](/202604/28/2604.17320v1-towards-joint-quantization-and-token-pruning-of-vision-language-models)  
    标签：评分：8.0/10、query:hwnas
-   evidence：内存带宽优化与自定义计算着色器
-4. [E2AFS: Energy-Efficient Approximate Floating Point Square Rooter for Error Tolerant Computing](/202604/27/2604.16964v1-e2afs-energy-efficient-approximate-floating-point-square-rooter-for-error-tolerant-computing)  
+   evidence：联合量化与令牌剪枝以实现高效推理
+4. [MoE-nD: Per-Layer Mixture-of-Experts Routing for Multi-Axis KV Cache Compression](/202604/28/2604.17695v1-moe-nd-per-layer-mixture-of-experts-routing-for-multi-axis-kv-cache-compression)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于边缘AI的节能浮点架构
-5. [CCCL: In-GPU Compression-Coupled Collective Communication](/202604/27/2604.17172v1-cccl-in-gpu-compression-coupled-collective-communication)  
+   evidence：全局内存预算下的逐层KV缓存压缩路由
+5. [FlashFPS: Efficient Farthest Point Sampling for Large-Scale Point Clouds via Pruning and Caching](/202604/28/2604.17720v1-flashfps-efficient-farthest-point-sampling-for-large-scale-point-clouds-via-pruning-and-caching)  
    标签：评分：7.0/10、query:hwnas
-   evidence：压缩耦合的集合通信，旨在减少内存访问并优化带宽
-6. [LASER: Low-Rank Activation SVD for Efficient Recursion](/202604/27/2604.17224v1-laser-low-rank-activation-svd-for-efficient-recursion)  
+   evidence：优化核心操作以减少推理延迟和计算冗余
+6. [Efficient Federated RLHF via Zeroth-Order Policy Optimization](/202604/28/2604.17747v1-efficient-federated-rlhf-via-zeroth-order-policy-optimization)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对高效递归架构的动态压缩框架
-7. [The First Challenge on Mobile Real-World Image Super-Resolution at NTIRE 2026: Benchmark Results and Method Overview](/202604/27/2604.17306v1-the-first-challenge-on-mobile-real-world-image-super-resolution-at-ntire-2026-benchmark-results-and-method-overview)  
+   evidence：针对边缘设备的低通信、计算和内存复杂度设计
+7. [VerilogCL: A Contrastive Learning Framework for Robust LLM-Based Verilog Generation](/202604/28/2604.18162v1-verilogcl-a-contrastive-learning-framework-for-robust-llm-based-verilog-generation)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对移动设备超分辨率的高效网络设计，通过加速比进行评估
-8. [LLM-Guided Strategy Synthesis for Scalable Equality Saturation](/202604/27/2604.17364v1-llm-guided-strategy-synthesis-for-scalable-equality-saturation)  
+   evidence：硬件设计工作流中的自动Verilog生成
+8. [LiquidTAD: An Efficient Method for Temporal Action Detection via Liquid Neural Dynamics](/202604/28/2604.18274v1-liquidtad-an-efficient-method-for-temporal-action-detection-via-liquid-neural-dynamics)  
    标签：评分：7.0/10、query:hwnas
-   evidence：使用LLM引导的策略合成自动化基于e-graph的编译器
-9. [Revisiting Auxiliary Losses for Conditional Depth Routing: An Empirical Study](/202604/27/2604.17228v1-revisiting-auxiliary-losses-for-conditional-depth-routing-an-empirical-study)  
+   evidence：资源受限环境下的参数高效框架
+9. [SLO-Guard: Crash-Aware, Budget-Consistent Autotuning for SLO-Constrained LLM Serving](/202604/28/2604.17627v1-slo-guard-crash-aware-budget-consistent-autotuning-for-slo-constrained-llm-serving)  
    标签：评分：6.0/10、query:hwnas
-   evidence：条件深度执行以实现轻量化计算
-10. [Compiling Deterministic Structure into SLM Harnesses](/202604/27/2604.17450v1-compiling-deterministic-structure-into-slm-harnesses)  
+   evidence：针对延迟受限的LLM推理进行自动调优和预算一致性优化
+10. [Co-evolving Agent Architectures and Interpretable Reasoning for Automated Optimization](/202604/28/2604.17708v1-co-evolving-agent-architectures-and-interpretable-reasoning-for-automated-optimization)  
    标签：评分：6.0/10、query:hwnas
-   evidence：将智能体工作流编译为小模型的确定性执行计划
-11. [Isolating Recurring Execution-Dependent Abnormal Patterns on NISQ Quantum Devices](/202604/27/2604.17519v1-isolating-recurring-execution-dependent-abnormal-patterns-on-nisq-quantum-devices)  
+   evidence：协同演化智能体架构和自动化优化工作流
+11. [How Much Cache Does Reasoning Need? Depth-Cache Tradeoffs in KV-Compressed Transformers](/202604/28/2604.17935v1-how-much-cache-does-reasoning-need-depth-cache-tradeoffs-in-kv-compressed-transformers)  
    标签：评分：6.0/10、query:hwnas
-   evidence：编译器对硬件特定异常模式的感知
+   evidence：KV缓存内存瓶颈与压缩权衡的理论研究
 
 
 <div class="dpr-home-promo-card">
