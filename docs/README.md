@@ -6,8 +6,8 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-28
-- 运行时间：2026-04-28 20:27:36 UTC
+- 最新运行日期：2026-04-29
+- 运行时间：2026-04-29 21:11:39 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
@@ -15,65 +15,65 @@
 
 ### 今日简报（AI）
 - 今日共生成 17 篇推荐（精读 6 篇，速读 11 篇）
-- 精读：《Compilation and Execution of an Embeddable YOLO-NAS on the VTA》（10.0/10）, 《Deployment-Aligned Low-Precision Neural Architecture Search for Spaceborne Edge AI》（10.0/10）
-- 速读：《From Natural Language to Silicon: The Representation Bottleneck in LLM Hardware Design》（8.0/10）, 《UCCL-Zip: Lossless Compression Supercharged GPU Communication》（8.0/10）, 《Towards Joint Quantization and Token Pruning of Vision-Language Models》（8.0/10）
+- 精读：《Cloud to Edge: Benchmarking LLM Inference On Hardware-Accelerated Single-Board Computers》（9.0/10）, 《Salca: A Sparsity-Aware Hardware Accelerator for Efficient Long-Context Attention Decoding》（9.0/10）
+- 速读：《WISV: Wireless-Informed Semantic Verification for Distributed Speculative Decoding in Device-Edge LLM Inference》（8.0/10）, 《GPUOS: A GPU Operating System Primitive for Transparent Operation Fusion》（8.0/10）, 《LoRaQ: Optimized Low Rank Approximation for 4-bit Quantization》（8.0/10）
 - 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202604/28/README](/202604/28/README)
+- 详情：[/202604/29/README](/202604/29/README)
 
 ### 精读区论文标签
-1. [Compilation and Execution of an Embeddable YOLO-NAS on the VTA](/202604/28/2604.24455v1-compilation-and-execution-of-an-embeddable-yolo-nas-on-the-vta)  
-   标签：评分：10.0/10、query:hwnas
-   evidence：在 VTA 上编译 YOLO-NAS 并实现自动化编译链
-2. [Deployment-Aligned Low-Precision Neural Architecture Search for Spaceborne Edge AI](/202604/28/2604.24492v1-deployment-aligned-low-precision-neural-architecture-search-for-spaceborne-edge-ai)  
-   标签：评分：10.0/10、query:hwnas
-   evidence：面向星载边缘AI的部署对齐硬件感知NAS
-3. [SparKV: Overhead-Aware KV Cache Loading for Efficient On-Device LLM Inference](/202604/28/2604.21231v1-sparkv-overhead-aware-kv-cache-loading-for-efficient-on-device-llm-inference)  
+1. [Cloud to Edge: Benchmarking LLM Inference On Hardware-Accelerated Single-Board Computers](/202604/29/2604.24785v1-cloud-to-edge-benchmarking-llm-inference-on-hardware-accelerated-single-board-computers)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对高效端侧LLM推理的开销感知型KV缓存加载
-4. [Bridging the Training-Deployment Gap: Gated Encoding and Multi-Scale Refinement for Efficient Quantization-Aware Image Enhancement](/202604/28/2604.21743v1-bridging-the-training-deployment-gap-gated-encoding-and-multi-scale-refinement-for-efficient-quantization-aware-image-enhancement)  
+   evidence：在硬件加速单板计算机上进行大模型推理基准测试
+2. [Salca: A Sparsity-Aware Hardware Accelerator for Efficient Long-Context Attention Decoding](/202604/29/2604.24820v1-salca-a-sparsity-aware-hardware-accelerator-for-efficient-long-context-attention-decoding)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对移动部署的高效量化感知模型设计
-5. [A Multiplication-Free Spike-Time Learning Algorithm and its Efficient FPGA Implementation for On-Chip SNN Training](/202604/28/2604.23218v1-a-multiplication-free-spike-time-learning-algorithm-and-its-efficient-fpga-implementation-for-on-chip-snn-training)  
+   evidence：针对内存和计算效率的软硬件协同设计
+3. [Hardware Generation and Exploration of Lookup Table-Based Accelerators for 1.58-bit LLM Inference](/202604/29/2604.25183v1-hardware-generation-and-exploration-of-lookup-table-based-accelerators-for-158-bit-llm-inference)  
    标签：评分：9.0/10、query:hwnas
-   evidence：适用于高效FPGA实现的无乘法算法
-6. [BitRL: Reinforcement Learning with 1-bit Quantized Language Models for Resource-Constrained Edge Deployment](/202604/28/2604.24273v1-bitrl-reinforcement-learning-with-1-bit-quantized-language-models-for-resource-constrained-edge-deployment)  
+   evidence：针对1.58位大模型加速器的硬件生成与探索
+4. [DenseScout: Algorithm-System Co-design for Budgeted Tiny Object Selection on Edge Platforms](/202604/29/2604.25300v1-densescout-algorithm-system-co-design-for-budgeted-tiny-object-selection-on-edge-platforms)  
    标签：评分：9.0/10、query:hwnas
-   evidence：用于资源受限边缘部署的1比特量化模型
+   evidence：针对具有计算和延迟约束的边缘平台的算法-系统联合协同设计
+5. [TetrisG-SDK: Efficient Convolutional Layer Mapping with Adaptive Windows and Grouped Convolutions for Fast In-Memory Computing](/202604/29/2604.25377v1-tetrisg-sdk-efficient-convolutional-layer-mapping-with-adaptive-windows-and-grouped-convolutions-for-fast-in-memory-computing)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：存内计算的高效卷积层映射
+6. [NVLLM: A 3D NAND-Centric Architecture Enabling Edge on-Device LLM Inference](/202604/29/2604.25699v1-nvllm-a-3d-nand-centric-architecture-enabling-edge-on-device-llm-inference)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：以3D NAND为中心的边缘大模型推理架构
 
 ### 速读区论文标签
-1. [From Natural Language to Silicon: The Representation Bottleneck in LLM Hardware Design](/202604/28/2604.17097v1-from-natural-language-to-silicon-the-representation-bottleneck-in-llm-hardware-design)  
+1. [WISV: Wireless-Informed Semantic Verification for Distributed Speculative Decoding in Device-Edge LLM Inference](/202604/29/2604.17701v1-wisv-wireless-informed-semantic-verification-for-distributed-speculative-decoding-in-device-edge-llm-inference)  
    标签：评分：8.0/10、query:hwnas
-   evidence：基于大模型的硬件设计与硅级中间表示编译
-2. [UCCL-Zip: Lossless Compression Supercharged GPU Communication](/202604/28/2604.17172v2-uccl-zip-lossless-compression-supercharged-gpu-communication)  
+   evidence：用于资源利用的分布式设备-边缘投机解码
+2. [GPUOS: A GPU Operating System Primitive for Transparent Operation Fusion](/202604/29/2604.17861v1-gpuos-a-gpu-operating-system-primitive-for-transparent-operation-fusion)  
    标签：评分：8.0/10、query:hwnas
-   evidence：将无损压缩直接集成到GPU通信原语中
-3. [Towards Joint Quantization and Token Pruning of Vision-Language Models](/202604/28/2604.17320v1-towards-joint-quantization-and-token-pruning-of-vision-language-models)  
+   evidence：通过即时编译和持久内核架构减少启动开销，从而最大化计算利用率
+3. [LoRaQ: Optimized Low Rank Approximation for 4-bit Quantization](/202604/29/2604.18117v1-loraq-optimized-low-rank-approximation-for-4-bit-quantization)  
    标签：评分：8.0/10、query:hwnas
-   evidence：联合量化与令牌剪枝以实现高效推理
-4. [MoE-nD: Per-Layer Mixture-of-Experts Routing for Multi-Axis KV Cache Compression](/202604/28/2604.17695v1-moe-nd-per-layer-mixture-of-experts-routing-for-multi-axis-kv-cache-compression)  
+   evidence：通过4位量化在资源受限硬件上部署大型模型
+4. [Programmable recirculating bricks mesh architecture for photonic neural networks](/202604/29/2604.18160v1-programmable-recirculating-bricks-mesh-architecture-for-photonic-neural-networks)  
    标签：评分：8.0/10、query:hwnas
-   evidence：全局内存预算下的逐层KV缓存压缩路由
-5. [FlashFPS: Efficient Farthest Point Sampling for Large-Scale Point Clouds via Pruning and Caching](/202604/28/2604.17720v1-flashfps-efficient-farthest-point-sampling-for-large-scale-point-clouds-via-pruning-and-caching)  
+   evidence：用于能效AI计算的可编程光子网格
+5. [LogosKG: Hardware-Optimized Scalable and Interpretable Knowledge Graph Retrieval](/202604/29/2604.18913v1-logoskg-hardware-optimized-scalable-and-interpretable-knowledge-graph-retrieval)  
    标签：评分：7.0/10、query:hwnas
-   evidence：优化核心操作以减少推理延迟和计算冗余
-6. [Efficient Federated RLHF via Zeroth-Order Policy Optimization](/202604/28/2604.17747v1-efficient-federated-rlhf-via-zeroth-order-policy-optimization)  
+   evidence：针对图检索的硬件对齐框架和硬件高效操作
+6. [Ocean: Fast Estimation-Based Sparse General Matrix-Matrix Multiplication on GPU](/202604/29/2604.19004v1-ocean-fast-estimation-based-sparse-general-matrix-matrix-multiplication-on-gpu)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对边缘设备的低通信、计算和内存复杂度设计
-7. [VerilogCL: A Contrastive Learning Framework for Robust LLM-Based Verilog Generation](/202604/28/2604.18162v1-verilogcl-a-contrastive-learning-framework-for-robust-llm-based-verilog-generation)  
+   evidence：优化GPU计算利用率的稀疏矩阵乘法
+7. [ST-Prune: Training-Free Spatio-Temporal Token Pruning for Vision-Language Models in Autonomous Driving](/202604/29/2604.19145v1-st-prune-training-free-spatio-temporal-token-pruning-for-vision-language-models-in-autonomous-driving)  
    标签：评分：7.0/10、query:hwnas
-   evidence：硬件设计工作流中的自动Verilog生成
-8. [LiquidTAD: An Efficient Method for Temporal Action Detection via Liquid Neural Dynamics](/202604/28/2604.18274v1-liquidtad-an-efficient-method-for-temporal-action-detection-via-liquid-neural-dynamics)  
+   evidence：无训练Token剪枝以减少自动驾驶中的计算开销
+8. [UniEP: Unified Expert-Parallel MoE MegaKernel for LLM Training](/202604/29/2604.19241v1-uniep-unified-expert-parallel-moe-megakernel-for-llm-training)  
    标签：评分：7.0/10、query:hwnas
-   evidence：资源受限环境下的参数高效框架
-9. [SLO-Guard: Crash-Aware, Budget-Consistent Autotuning for SLO-Constrained LLM Serving](/202604/28/2604.17627v1-slo-guard-crash-aware-budget-consistent-autotuning-for-slo-constrained-llm-serving)  
+   evidence：优化MoE模型的计算-通信重叠和算子效率
+9. [Adaptive Slicing-Assisted Hyper Inference for Enhanced Small Object Detection in High-Resolution Imagery](/202604/29/2604.19233v1-adaptive-slicing-assisted-hyper-inference-for-enhanced-small-object-detection-in-high-resolution-imagery)  
    标签：评分：6.0/10、query:hwnas
-   evidence：针对延迟受限的LLM推理进行自动调优和预算一致性优化
-10. [Co-evolving Agent Architectures and Interpretable Reasoning for Automated Optimization](/202604/28/2604.17708v1-co-evolving-agent-architectures-and-interpretable-reasoning-for-automated-optimization)  
+   evidence：自适应切片减少航空影像的冗余计算
+10. [Quantization robustness from dense representations of sparse functions in high-capacity kernel associative memory](/202604/29/2604.20333v1-quantization-robustness-from-dense-representations-of-sparse-functions-in-high-capacity-kernel-associative-memory)  
    标签：评分：6.0/10、query:hwnas
-   evidence：协同演化智能体架构和自动化优化工作流
-11. [How Much Cache Does Reasoning Need? Depth-Cache Tradeoffs in KV-Compressed Transformers](/202604/28/2604.17935v1-how-much-cache-does-reasoning-need-depth-cache-tradeoffs-in-kv-compressed-transformers)  
+   evidence：通过量化和剪枝研究可压缩性以提高硬件效率
+11. [LayerTracer: A Joint Task-Particle and Vulnerable-Layer Analysis framework for Arbitrary Large Language Model Architectures](/202604/29/2604.20556v1-layertracer-a-joint-task-particle-and-vulnerable-layer-analysis-framework-for-arbitrary-large-language-model-architectures)  
    标签：评分：6.0/10、query:hwnas
-   evidence：KV缓存内存瓶颈与压缩权衡的理论研究
+   evidence：混合架构设计与模型优化的分析框架
 
 
 <div class="dpr-home-promo-card">
