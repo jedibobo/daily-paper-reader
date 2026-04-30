@@ -6,74 +6,94 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-29
-- 运行时间：2026-04-29 21:11:39 UTC
+- 最新运行日期：2026-04-30
+- 运行时间：2026-04-30 20:21:04 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
+- 本次总论文数：24
+- 精读区：13
 - 速读区：11
 
 ### 今日简报（AI）
-- 今日共生成 17 篇推荐（精读 6 篇，速读 11 篇）
-- 精读：《Cloud to Edge: Benchmarking LLM Inference On Hardware-Accelerated Single-Board Computers》（9.0/10）, 《Salca: A Sparsity-Aware Hardware Accelerator for Efficient Long-Context Attention Decoding》（9.0/10）
-- 速读：《WISV: Wireless-Informed Semantic Verification for Distributed Speculative Decoding in Device-Edge LLM Inference》（8.0/10）, 《GPUOS: A GPU Operating System Primitive for Transparent Operation Fusion》（8.0/10）, 《LoRaQ: Optimized Low Rank Approximation for 4-bit Quantization》（8.0/10）
-- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202604/29/README](/202604/29/README)
+今日深度解析 24 篇前沿论文，聚焦超高分辨率遥感检测与存内计算架构的性能突破。
+重点推荐 UHR-DETR 对遥感小目标的精准捕捉，以及通过随机存内逻辑实现内存级并行度的最大化。
+建议关注 CPU-GPU 混合推理与低资源视觉语言模型，把握软硬协同优化的高效计算趋势。
+- 详情：[/202604/30/README](/202604/30/README)
 
 ### 精读区论文标签
-1. [Cloud to Edge: Benchmarking LLM Inference On Hardware-Accelerated Single-Board Computers](/202604/29/2604.24785v1-cloud-to-edge-benchmarking-llm-inference-on-hardware-accelerated-single-board-computers)  
+1. [UHR-DETR: Efficient End-to-End Small Object Detection for Ultra-High-Resolution Remote Sensing Imagery](/202604/30/2604.21435v1-uhr-detr-efficient-end-to-end-small-object-detection-for-ultra-high-resolution-remote-sensing-imagery)  
    标签：评分：9.0/10、query:hwnas
-   evidence：在硬件加速单板计算机上进行大模型推理基准测试
-2. [Salca: A Sparsity-Aware Hardware Accelerator for Efficient Long-Context Attention Decoding](/202604/29/2604.24820v1-salca-a-sparsity-aware-hardware-accelerator-for-efficient-long-context-attention-decoding)  
+   evidence：解决内存瓶颈的高效遥感目标检测
+2. [Maximizing Memory-Level Parallelism via Integrated Stochastic Logic-in-Memory Architectures](/202604/30/2604.23146v1-maximizing-memory-level-parallelism-via-integrated-stochastic-logic-in-memory-architectures)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对内存和计算效率的软硬件协同设计
-3. [Hardware Generation and Exploration of Lookup Table-Based Accelerators for 1.58-bit LLM Inference](/202604/29/2604.25183v1-hardware-generation-and-exploration-of-lookup-table-based-accelerators-for-158-bit-llm-inference)  
+   evidence：针对数据密集型工作负载的存内逻辑架构
+3. [BSViT: A Burst Spiking Vision Transformer for Expressive and Efficient Visual Representation Learning](/202604/30/2604.23165v1-bsvit-a-burst-spiking-vision-transformer-for-expressive-and-efficient-visual-representation-learning)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对1.58位大模型加速器的硬件生成与探索
-4. [DenseScout: Algorithm-System Co-design for Budgeted Tiny Object Selection on Edge Platforms](/202604/29/2604.25300v1-densescout-algorithm-system-co-design-for-budgeted-tiny-object-selection-on-edge-platforms)  
+   evidence：能效高的脉冲视觉Transformer
+4. [Efficient VQ-QAT and Mixed Vector/Linear quantized Neural Networks](/202604/30/2604.23172v1-efficient-vq-qat-and-mixed-vectorlinear-quantized-neural-networks)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对具有计算和延迟约束的边缘平台的算法-系统联合协同设计
-5. [TetrisG-SDK: Efficient Convolutional Layer Mapping with Adaptive Windows and Grouped Convolutions for Fast In-Memory Computing](/202604/29/2604.25377v1-tetrisg-sdk-efficient-convolutional-layer-mapping-with-adaptive-windows-and-grouped-convolutions-for-fast-in-memory-computing)  
+   evidence：使用可微分NAS选择逐层量化配置
+5. [Hardware-Efficient Softmax and Layer Normalization with Guaranteed Normalization for Edge Devices](/202604/30/2604.23647v1-hardware-efficient-softmax-and-layer-normalization-with-guaranteed-normalization-for-edge-devices)  
    标签：评分：9.0/10、query:hwnas
-   evidence：存内计算的高效卷积层映射
-6. [NVLLM: A 3D NAND-Centric Architecture Enabling Edge on-Device LLM Inference](/202604/29/2604.25699v1-nvllm-a-3d-nand-centric-architecture-enabling-edge-on-device-llm-inference)  
+   evidence：边缘设备的高效硬件非GEMM运算
+6. [Characterizing Vision-Language-Action Models across XPUs: Constraints and Acceleration for On-Robot Deployment](/202604/30/2604.24447v1-characterizing-vision-language-action-models-across-xpus-constraints-and-acceleration-for-on-robot-deployment)  
    标签：评分：9.0/10、query:hwnas
-   evidence：以3D NAND为中心的边缘大模型推理架构
+   evidence：低成本机器人部署的模型-硬件协同特性分析
+7. [minAction.net: Energy-First Neural Architecture Design -- From Biological Principles to Systematic Validation](/202604/30/2604.24805v1-minactionnet-energy-first-neural-architecture-design----from-biological-principles-to-systematic-validation)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：内在能量约束下的能量感知学习和架构设计
+8. [Feasible-First Exploration for Constrained ML Deployment Optimization in Crash-Prone Hierarchical Search Spaces](/202604/30/2604.25073v1-feasible-first-exploration-for-constrained-ml-deployment-optimization-in-crash-prone-hierarchical-search-spaces)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：在延迟和内存约束下对模型族、量化和运行时后端进行联合优化
+9. [FusionCIM: Accelerating LLM Inference with Fusion-Driven Computing-in-Memory Architecture](/202604/30/2604.25317v1-fusioncim-accelerating-llm-inference-with-fusion-driven-computing-in-memory-architecture)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：算子融合驱动的存内计算加速器架构
+10. [At the Edge of the Heart: ULP FPGA-Based CNN for On-Device Cardiac Feature Extraction in Smart Health Sensors for Astronauts](/202604/30/2604.25799v1-at-the-edge-of-the-heart-ulp-fpga-based-cnn-for-on-device-cardiac-feature-extraction-in-smart-health-sensors-for-astronauts)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：适用于太空环境和宇航员的超低功耗FPGA方案
+11. [RaMP: Runtime-Aware Megakernel Polymorphism for Mixture-of-Experts](/202604/30/2604.26039v1-ramp-runtime-aware-megakernel-polymorphism-for-mixture-of-experts)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：通过运行时感知调度最大化内核吞吐量
+12. [Sparse-on-Dense: Area and Energy-Efficient Computing of Sparse Neural Networks on Dense Matrix Multiplication Accelerators](/202604/30/2604.26587v1-sparse-on-dense-area-and-energy-efficient-computing-of-sparse-neural-networks-on-dense-matrix-multiplication-accelerators)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：稀疏神经网络的硬件和软件协同设计
+13. [Exploring the Efficiency of 3D-Stacked AI Chip Architecture for LLM Inference with Voxel](/202604/30/2604.26821v1-exploring-the-efficiency-of-3d-stacked-ai-chip-architecture-for-llm-inference-with-voxel)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：从机器学习编译器优化到硬件架构的交织因素
 
 ### 速读区论文标签
-1. [WISV: Wireless-Informed Semantic Verification for Distributed Speculative Decoding in Device-Edge LLM Inference](/202604/29/2604.17701v1-wisv-wireless-informed-semantic-verification-for-distributed-speculative-decoding-in-device-edge-llm-inference)  
+1. [ESsEN: Training Compact Discriminative Vision-Language Transformers in a Low-Resource Setting](/202604/30/2604.18452v1-essen-training-compact-discriminative-vision-language-transformers-in-a-low-resource-setting)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于资源利用的分布式设备-边缘投机解码
-2. [GPUOS: A GPU Operating System Primitive for Transparent Operation Fusion](/202604/29/2604.17861v1-gpuos-a-gpu-operating-system-primitive-for-transparent-operation-fusion)  
+   evidence：适用于边缘设备和机器人平台的轻量级模型
+2. [Joint Scheduling of Multi-Band Radar Sensing and DNN Inference for Cross-Stage Parallelism](/202604/30/2604.18520v1-joint-scheduling-of-multi-band-radar-sensing-and-dnn-inference-for-cross-stage-parallelism)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过即时编译和持久内核架构减少启动开销，从而最大化计算利用率
-3. [LoRaQ: Optimized Low Rank Approximation for 4-bit Quantization](/202604/29/2604.18117v1-loraq-optimized-low-rank-approximation-for-4-bit-quantization)  
+   evidence：联合调度以最小化延迟并提高计算利用率
+3. [HybridGen: Efficient LLM Generative Inference via CPU-GPU Hybrid Computing](/202604/30/2604.18529v1-hybridgen-efficient-llm-generative-inference-via-cpu-gpu-hybrid-computing)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过4位量化在资源受限硬件上部署大型模型
-4. [Programmable recirculating bricks mesh architecture for photonic neural networks](/202604/29/2604.18160v1-programmable-recirculating-bricks-mesh-architecture-for-photonic-neural-networks)  
+   evidence：针对内存密集型LLM推理的CPU-GPU混合计算
+4. [ARGUS: Agentic GPU Optimization Guided by Data-Flow Invariants](/202604/30/2604.18616v1-argus-agentic-gpu-optimization-guided-by-data-flow-invariants)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于能效AI计算的可编程光子网格
-5. [LogosKG: Hardware-Optimized Scalable and Interpretable Knowledge Graph Retrieval](/202604/29/2604.18913v1-logoskg-hardware-optimized-scalable-and-interpretable-knowledge-graph-retrieval)  
+   evidence：由数据流不变性和指令调度引导的智能体GPU优化
+5. [EnergAIzer: Fast and Accurate GPU Power Estimation Framework for AI Workloads](/202604/30/2604.20105v1-energaizer-fast-and-accurate-gpu-power-estimation-framework-for-ai-workloads)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对图检索的硬件对齐框架和硬件高效操作
-6. [Ocean: Fast Estimation-Based Sparse General Matrix-Matrix Multiplication on GPU](/202604/29/2604.19004v1-ocean-fast-estimation-based-sparse-general-matrix-matrix-multiplication-on-gpu)  
+   evidence：预测硬件利用率以进行功耗评估
+6. [MCAP: Deployment-Time Layer Profiling for Memory-Constrained LLM Inference](/202604/30/2604.21026v2-mcap-deployment-time-layer-profiling-for-memory-constrained-llm-inference)  
    标签：评分：7.0/10、query:hwnas
-   evidence：优化GPU计算利用率的稀疏矩阵乘法
-7. [ST-Prune: Training-Free Spatio-Temporal Token Pruning for Vision-Language Models in Autonomous Driving](/202604/29/2604.19145v1-st-prune-training-free-spatio-temporal-token-pruning-for-vision-language-models-in-autonomous-driving)  
+   evidence：异构硬件上受内存限制的大模型推理动态放置
+7. [Efficient Batch Search Algorithm for B+ Tree Index Structures with Level-Wise Traversal on FPGAs](/202604/30/2604.21117v1-efficient-batch-search-algorithm-for-b-tree-index-structures-with-level-wise-traversal-on-fpgas)  
    标签：评分：7.0/10、query:hwnas
-   evidence：无训练Token剪枝以减少自动驾驶中的计算开销
-8. [UniEP: Unified Expert-Parallel MoE MegaKernel for LLM Training](/202604/29/2604.19241v1-uniep-unified-expert-parallel-moe-megakernel-for-llm-training)  
+   evidence：在FPGA上优化执行以减少全局内存访问并提高重用率
+8. [Enabling Mixed criticality applications for the Versal AI-Engines](/202604/30/2604.21124v1-enabling-mixed-criticality-applications-for-the-versal-ai-engines)  
    标签：评分：7.0/10、query:hwnas
-   evidence：优化MoE模型的计算-通信重叠和算子效率
-9. [Adaptive Slicing-Assisted Hyper Inference for Enhanced Small Object Detection in High-Resolution Imagery](/202604/29/2604.19233v1-adaptive-slicing-assisted-hyper-inference-for-enhanced-small-object-detection-in-high-resolution-imagery)  
+   evidence：异构SoC中AI引擎的动态任务映射
+9. [A GPU-Accelerated Framework for Multi-Attribute Range Filtered Approximate Nearest Neighbor Search](/202604/30/2604.20121v1-a-gpu-accelerated-framework-for-multi-attribute-range-filtered-approximate-nearest-neighbor-search)  
    标签：评分：6.0/10、query:hwnas
-   evidence：自适应切片减少航空影像的冗余计算
-10. [Quantization robustness from dense representations of sparse functions in high-capacity kernel associative memory](/202604/29/2604.20333v1-quantization-robustness-from-dense-representations-of-sparse-functions-in-high-capacity-kernel-associative-memory)  
+   evidence：针对GPU加速的硬件感知执行流水线
+10. [A GPU-Accelerated Framework for Multi-Attribute Range Filtered Approximate Nearest Neighbor Search](/202604/30/2604.20121v2-a-gpu-accelerated-framework-for-multi-attribute-range-filtered-approximate-nearest-neighbor-search)  
    标签：评分：6.0/10、query:hwnas
-   evidence：通过量化和剪枝研究可压缩性以提高硬件效率
-11. [LayerTracer: A Joint Task-Particle and Vulnerable-Layer Analysis framework for Arbitrary Large Language Model Architectures](/202604/29/2604.20556v1-layertracer-a-joint-task-particle-and-vulnerable-layer-analysis-framework-for-arbitrary-large-language-model-architectures)  
+   evidence：针对GPU加速搜索的硬件感知执行流水线
+11. [A Novel Low-Power Cache Architecture Based on 6-Transistor SRAM Cells](/202604/30/2604.20176v1-a-novel-low-power-cache-architecture-based-on-6-transistor-sram-cells)  
    标签：评分：6.0/10、query:hwnas
-   evidence：混合架构设计与模型优化的分析框架
+   evidence：用于软硬件协同设计的低功耗缓存架构
 
 
 <div class="dpr-home-promo-card">
