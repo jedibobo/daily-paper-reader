@@ -1,0 +1,598 @@
+Title: FPGA-based Matched Filter Group Optimisation for SKA Pulsar Search Engine
+
+URL Source: https://arxiv.org/pdf/2604.22124v1
+
+Published Time: Mon, 27 Apr 2026 00:13:16 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# FPGA-based Matched Filter Group Optimisation for SKA Pulsar Search Engine 
+
+Haomiao Wang ∗, Ben Stappers †, Prabu Thiagaraj ‡, and Oliver Sinnen ∗∗PARC Lab, University of Auckland 
+
+†Jodrell Bank Centre for Astrophysics, University of Manchester 
+
+‡ Raman Research Institute, University of Manchester hwan938@aucklanduni.ac.nz, ben.stappers@manchester.ac.uk prabuthiagaraj@gmail.com, o.sinnen@auckland.ac.nz 
+
+Abstract 
+
+Pulsar search is one of the main tasks for the Square Kilometre Array (SKA), implemented in the central signal processor (CSP) sub-element. As most the characteristics of undiscovered pulsars are unknown by definition, exhaustive searches over a multi-dimensional parameter space are employed. One main compute-intensive task of the pulsar search modules in the CPS is the matched filter group, which convolves the input signals with a group of large FIR filters. High-performance designs on FPGAs have been proposed that can process multiple large filters efficiently. But given that in many applications, including the here targeted pulsar search, FIR filters have many different sizes, there is further potential for optimisation. This paper investigates the optimisation of matched filtering designs. While the results are tranferable to other domains, we are motivated by the needs of the SKA pulsar search engine. The influence of changing number of filters and the difference in sizes is analysed. The generic design in time-domain (TD) is optimised by employing the longest processing time (LPT) first rule to distribute filter templates across filter processing pipelines. For the Fourier-domain (FD), the relationship between the required off-chip memory space and speedup over the generic design is investigated. To put the results into relation with with GPU design, we compared with a well-optimised design for top-end GPUs (NVIDIA Tesal P100). While a mid-range Intel Arria 10 is up to 7.5x slower than the P100, the performance per watt is slightly better on the Arria 10. 
+
+I. I NTRODUCTION 
+
+The scale of the Square Kilometre Array (SKA) 1 is tens of times larger than existing radio telescope arrays, and so is the number of signals that will be received and processed by the SKA [4]. This is a big challenge for the SKA central signal processor (CSP). One of the main elements in the CSP is the pulsar search engine (PSS) that employs several approaches to search for different types of pulsars. Since the characteristic sof undiscovered pulsars are unknown by definition, the PSS has to brute force search a wide range of values for each relevant parameter. The matched filtering technique is an important and efficient signal processing approach to recover the specific polluted signals from raw received signals [15]. Apart from other signal processing areas, it is widely employed in the pulsar search modules. For the SKA1-MID pulsar search engine [14], it appears in many modules such as single pulsar detection (SPDT), Fourier domain acceleration search (FDAS), and folding and optimisation (FLDO). However, the employed matched filter groups are not the same, which is also true for the number of filters and the incremental of the number of filter coefficients/taps. An important feature of the SKA pulsar search module is that the input data size is hundreds of times larger than the output data size, and the input data cannot be stored in FPGA on-chip memory. For example, the input signals sizes to SPDT, TDAS, and FDAS are millions of points. However, the output signals are all a list of pulsar candidates, whose sizes are less than 1% of those of input signals. Because of the huge amount of workload and restricting time limitation (new signals/data is constantly coming in), the needed throughput is high, and high-end acceleration devices are required. This makes high-end FPGAs interesting and efficient candidates for hardware acceleration of matched filter group processing. In this research, we investigate the FPGA-based optimisation of matched filtering designs with different sizes. The main contributions are as follows:  
+
+> •
+
+Analysing and modelling of of matched filter groups of different sizes in time-domain and Fourier-domain;  
+
+> •
+
+Optimising the general FPGA-based time-domain and Fourier-domain matched filter group designs using load balance algorithms;  
+
+> •
+
+Providing the best domain and parameters for any matched filter group based on the execution latency and logic resources on a specific device;  
+
+> •
+
+Evaluation of the best design space parameters for time-domain designs and Fourier-domain designs; evaluation of the benefit of optimised matched filter groups designs in comparison to commonly used generic implementations; comparison of the best performing FPGA design with well-optimised design on high-end GPU. 
+
+> 1
+
+www.skatelescope.org 
+
+> arXiv:2604.22124v1 [astro-ph.IM] 24 Apr 2026
+
+The rest of the paper is organized as follows. Section II gives background on matched filtering in radio astronomy and FPGA as an accelerator. Section III discusses matched filtering, the design goals, and gives a theoretical analysis. In Section IV, the proposed designs for matched filter groups are discussed, and the load balance algorithm is employed for multiple processing units. Section V presents the evaluation and discusses the results. Finally, the conclusions are given in Section VI. II. R ELATED WORK 
+
+A. FPGA as an Accelerator 
+
+Most of the real-time compute-intensive applications in radio astronomy projects cannot be handled by general high-end processors, and acceleration devices are widely employed [12]. High-end GPUs are strong competitors tohigh-end FPGAs in hardware acceleration [16]. Because FPGAs have advantages over GPUs in terms of power efficiency, i.e. in performance per watt, they are adopted in many digital signal processing modules of science projects. For the high-speed data-filtering in the CERN project [18], an FPGA is 3.4x times better than a high-end GPU (Titan X Pascal) and 2.3x times better in terms of performance/watt. Hundreds of Xilinx Virtex-4 FPGAs are installed to accelerate the correlator of the SKAMP project [3]. An FPGA-based accelerator appears in the FX correlator of the radio telescope MeerKAT as well [12]. In [16], high-end FPGA platforms are employed to handle digital channelised receivers. 
+
+B. Convolution Acceleration 
+
+High-end FPGAs are widely employed as accelerators in the machine learning area [11] such as the convolutional neural networks (CNN) [23] and deep learning [2]. The main compute-intensive task for these applicationsis convolution. Although some accelerations are for 2D convolution, FPGAs also provide good performance for accelerating 1D convolution. In [6], this is evaluated on different hardware platforms, and FPGA devices perform better than CPUs and GPUs when there are several hundred filter coefficients (or taps). In [22], efficient FIR filter designs for FPGAsare investigated in both time-domain and Fourier-domain, and multiple FPGA devices can provide better performance in terms of execution latency, while consuming less energy than a GPU. Regarding the matched filter technique in pulsar search, it is widely employed and implemented using FPGAs [15]. III. M ATCHED FILTERING 
+
+A matched filter group is employed to correlate a group of known templates with unknown signals to detect the presence of a template in the signals [19]. For pulsar search, the characteristics of an undiscovered pulsar are unknown, and a group of predicted templates are employed. In essence, the signal array is convolved with Nf ilter templates, which can be presented as 
+
+y[i][ j] = 
+
+> T ap i
+
+X
+
+> k=1
+
+x[j − k]h[i][ k], (1) 
+
+f or i = 1 , 2, ...N f ilter and j = 1 , 2, ...N input 
+
+where y is the filter output plane, x is the input array, h are the coefficient arrays, and T ap i is the length of the ith filter (coefficients are sometimes called taps and both words are used interchangeably in the following). Regarding the input and coefficient arrays in the SKA project, all the data types are complex single-precision floating-point (SF) numbers. The lengths from filter 1 to filter Nf ilter varies, and the filter lengths are given by 
+
+T ap i+1 = T ap i + Ninc 
+
+T ap i = T ap 1 + Ninc (i − 1) ,
+
+where Ninc is tap incremental, i.e. the difference in size of two consecutive filters. There are three factors that charac-terise a matched filter group: 1) the number of filters Nf ilter , 2) the tap incremental Ninc , and 3) range of filter lengths [T ap 1, T ap Nf ilter ]. In this research, we use M F − (Nf ilter , N inc , T ap 1) to represent a matched filter group; T ap Nf ilter can be calculated from the other values. Table I summarises the parameters of a matched filter group and lists the general range of each parameter considered in this work. Table I MATCHED FILTER GROUP PARAMETERS 
+
+Parameter Description Range 
+
+Nf ilter Number of FIR filters [1 , 1000] 
+
+T ap i Length of the ith FIR filter [1 , 1000] 
+
+Ninc Value of tap incremental [1 , 10] 
+
+Ninput Length of input array [2 10 , 230 ]Input data Pad with zero Length = Ncoef ‐1 Output data Coefficients C_1 C_2 C_N . . . Input data Zero Length = N tap /N ‐1 Output data_i Output data_1 Output data Output data_N . . . +Length = N tap /N Convolve with FIR filter Split Convolve with subset coefficient group i Output data_2 PD_3 PD_2 Input Data Zero Length =N tap ID_1 ID_2 ID_3 ID_N ... ID_i PD_i Convolution with FIR filter Discard the N tap elements Output Data PD_1 ... PD_N Split the input into N small groups 
+
+Figure 1. Process flow of the overlap-add algorithm (top) and the overlap-save algorithm (bottom) 
+
+A. FIR Filter and Algorithms 
+
+The matched filter group can be seen as a group of FIR filters. Each filter of the group can be implemented in both time-domain (TDFIR), Equation 1, and Fourier-domain (FDFIR), Equation 2. 
+
+x ∗ h = F−1{F{ x} · F{ h}} , (2) where F{·} and F−1{·} are Fourier transform and inverse Fourier transform [17], respectively. For the large tap TDFIR, the overlap-add (OLA) algorithm [17], illustrated in Figure 1(top), can be employed to split the FIR taps into a group of small filters, each of size NOLA −tap , when not all taps can processed simultaneously, e.g. due to the lack of resources in an FPGA. Correspondingly for the FDFIR filter, the overlap-save (OLS) algorithm [17], illustrated in Figure 1(bottom), can be employed to divide the input array into a set of small input arrays [13] when the number of inputs, i.e. FFT points, is too large, such as several millions. 
+
+B. Design Goals 
+
+For FPGA-based acceleration, the initial FPGA configuration time can be over one second, and even the partial reconfiguration takes tens to a hundred of ms . To avoid reconfiguration, all filters of the group are implemented using a single FPGA image (bitstream file). In a generic implementation [22], [21], the number of filter taps of all filters are the same, which is Ntap Nf ilter ,and one design can implement all filters. If a filter is smaller, i.e. has less taps, than Ntap Nf ilter , it is padded with zeros to make its length to Ntap Nf ilter . Since many filters are padded, a large proportion of operations are unnecessary. In this research, we investigate the optimisation of the generic FPGA-based matched filtering implementation. The main goal is to propose a generalised design for any given matched filter group targetting a specific FPGA. 
+
+C. Theoretical Analysis 1) Time-Domain (TD) Filtering: Based on Section III, the total number of taps of an entire filter group is 
+
+> Nf ilter
+
+X
+
+> i=1
+
+T ap i = Nf ilter T ap 1 + Ninc Nf ilter (Nf ilter − 1) 2 .
+
+For a generic matched filter group implementation, the filter lengths are padded to be the same as T ap Nf ilter , and the sum of all taps is 
+
+T ap Nf ilter Nf ilter = Nf ilter T ap 1 + Ninc Nf ilter (Nf ilter − 1) .
+
+The difference of these two values is Ninc Nf ilter (Nf ilter − 1) /2, which is up to half of T ap Nf ilter Nf ilter .Figure 2. Reduced taps plotted over tap incremental and number of filters applying Naive TD (left) and differently sized OLA algorithms for Ninc = 10 ,(right) 
+
+While the total number of taps that can be saved is a function of Ninc and Nf ilter , it can be observed in Figure 2 (left) that the ratio of saved taps to total taps is not affected by Ninc . For Ninc = 10 , the relationship between the ratio of saved taps (operations) and the number of FIR filters is presented in Figure 2 (right). As the number of FIR filters increases, the ratio of saved taps approaches 0.5, which means up to 50% of operations can be saved. As mentioned before, the OLA algorithm is employed when the number of taps of a filter is large and not all can be processed at the same time. Each filter is split into a set of small filters of length NOLA −tap ,see Figure 1. By employing the OLA algorithm, the total number of taps is reduced from T ap Nf ilter Nf ilter to 
+
+> Nf ilter
+
+X
+
+> i=1
+
+ Ntap i
+
+NOLA −tap 
+
+
+
+NOLA −tap .
+
+This accounts for the fact that Ntap i is in general not perfectly divisible by NOLA −tap and the last small filter needs to be padded with zeros. In Figure 2 (right) the smaller the NOLA −tap , the larger the ratio of saved operations and naturally maximised when NOLA −tap is 1. 
+
+2) Fourier-Domain (FD) Filtering: In a straight-forward FDFIR, the filter is padded to the same length as the input, whose length in this work is several orders of magnitudes larger than the filter length. In such an approach, the original filter length does not influence the execution time for a single filter. However, the resulting very long Fourier transform makes this approach inefficient for large input sizes [21]. Using instead the OLS algorithm, the input array is split into a set of chunks, and the length for each chunk is NOLS −F T ,which is the Fourier transform length of the OLS algorithm as well. Each chunk needs to be overlapped with its neighbourhood chunks and the length of the overlap is the same as the filter length, see Figure 1. For an FIR filter i, the required number of chunks NOLS −chunk Ni is 
+
+l Ninput  
+
+> NOLS −F T −T ap i
+
+m
+
+. In generic matched filter group implementation, however, the number of chunks for every FIR filter is always the same, namely NOLS −chunk Nf ilter =
+
+l Ninput  
+
+> NOLS −F T −T ap Nf ilter
+
+m
+
+. The total number of wasted chunks in a generic implementation is therefore 
+
+Nf ilter NOLS −chunk Nf ilter −
+
+> Nf ilter
+
+X
+
+> i=1
+
+ Ninput 
+
+NOLS −F T − T ap i
+
+
+
+,
+
+where T ap Nf ilter has to be smaller than NOLS −F T for all Nf ilter filters. For a specific M F , the larger the NOLS −F T over T ap Nf ilter , the less unnecessary operations. In a practical implementation, however, a long FFT engine often performs significantly worse than a short FFT engine. To search for the most suitable 
+
+NOLS −F T for a M F , the analysis has to be based on the performance of the specific device, which will be discussed in Section V. IV. O PTIMISATION AND IMPLEMENTATION 
+
+In this research, it is assumed that the size of input signals is larger than the device on-chip memory size and the input signals have to be stored in off-chip memory during processing. The coefficient array of the filters can be stored in both off-chip memory and on-chip memory based on its size. The structure of the proposed architectures is depicted in Figure 3, where 
+
+Npu is the number of processing units. It equals Npu −OLA when employing TD-OLA and equals Npu −OLS when employing FD-OLS. FPGA Node i
+
+FIR filter processor 1
+
+FIR filter processor 2
+
+FIR filter 
+
+processor Npu 
+
+> ...
+
+FPGA Node i
+
+NOLA-TAP -tap filter j
+
+Intermediate array ja 
+
+Coefficient array j
+
+Input array (Ninput )
+
+Off-chip memory Off-chip memory 
+
+NOLS-FT -point 
+
+FFT Engine k
+
+Output array kFourier transformed coefficient array k
+
+> Fourier transformed
+> Input array ( Ninput )
+
+Off-chip memory 
+
+Off-chip memory 
+
+Dot product 
+
+FPGA Node i
+
+TD-OLA-based FIR filter processor j
+
+FD-OLS-based FIR filter processor k
+
+Intermediate 
+
+array jb Figure 3. Architecture of multiple OLA-TD and multiple OLS-FD implementations on one FPGA node Filter(N filter )
+
+Filter(N filter -1) 
+
+Filter(N filter -N pu +1) 
+
+> ...
+
+Filter(N filter -2N pu +2) 
+
+Filter(N filter -N pu )
+
+> ...
+
+Filter(N filter -2N pu )
+
+> ...
+
+# ... 
+
+# ... 
+
+# ... 
+
+Process unit 1 
+
+Process unit 2 
+
+Process unit N pu 
+
+... 
+
+Ntapi /N OLA-tap sub-filters 
+
+Time 
+
+Filter(N filter -3N pu +1) 
+
+Filter(N filter -2N pu -1) 
+
+Filter(N filter -2N pu +1) 
+
+Figure 4. Processing order of TD-OLA-based matched filter group by employing the LPT rule 
+
+A. TD-OLA 
+
+According to Section III, in TD-OLA based implementation, FIR filters are assigned to processing units, and each filter consists of a set of sub-filters. All sub-filters have the same size, but the number of sub-filters depends on the filter. Each processing unit works on its sub-filters and sharing the streamed through input. This repeats unit all filters and their sub-filters have been processed. This naturally leads to a load balancing problem, as all processing units should be employed for the entire time. Hence filters, with their different number of sub-filters, need to be allocated to the PUs such that each processing unit gets (more or less) an equal amount of total sub-filters. 
+
+1) Load Balancing: The problem of assigning filters to processing units corresponds to a classical scheduling problem of scheduling independent tasks of different sizes onto homogeneous processors. This is an NP-hard optimisation problem, hence no algorithm with polynomial time complexity is know for the general case. A simple heuristic is to sort the tasks (here filters) by their size in non-increasing order and to allocate each task (filter) on the least loaded processor. This heuristic is called the longest processing time rule (LPT) [8], [7], which is a 4/3-approximation algorithm, which means that the total execution time of a solution of this algorithm is not longer than 4/3 times the optimal execution time. As per the definition of the filters in Section III, for any filter i in the matched filter group, where i̸ = Nf ilter , Ntap i <Ntap i+1 , so the inverse index order is an LPT order. For OLA-TD, the execution time of the ith filter contains 
+
+l Ntap i
+
+> NOLA −tap
+
+m
+
+sub-filters, and the execution latency of each segment is the same. 
+
+2) Implementation: For the TD-OLA algorithm, Npu −OLA filters, whose lengths are all NOLA −tap , are implemented in one FPGA image. The details of one FIR filter processor using TD-OLA algorithm is depicted in Figure 3. Each processor needs two buffers in off-chip memory to store the intermediate arrays, whose length is 2Ninput . To avoid simultaneous reading and writing to the same buffer, which leads to large initiation interval (II), two buffers are employed.Based on the analysis in Section III-C, the smaller the NOLA −tap , the less the number of invalid operations and required logic resources. However, the decrease of NOLA −tap leads to the increase of Npu −OLA in order to perform the same number of operations simultaneously, Algorithm 1 Search for the best tap size NOLA −tap −opt for the TD-OLA based implementation on a specific FPGA 
+
+Require: M F − (Nf ilter , N inc , T ap 1), NF P GA −tap , NOLA −omb .
+
+Ensure: NOLA −omb ⩾ 1.1 : Array OLA −tap ← zero (1 , N F P GA −tap ) {array to store maximum launch times for all NOLA −tap sizes} 2 : for NOLA −tap = 1 to NF P GA −tap do {iterate over all possible NOLA −tap sizes} 3 : Npu −OLA ← ⌊ NF P GA −tap /N OLA −tap ⌋ {number of processing units} 4 : Array launch ← zero (1 , N pu −OLA ) {array to store allocated launch times for this NOLA −tap }5 : if Npu −OLA ⩽ NOLA −omb do 
+
+6 : for j = Nf ilter to 1 do {use LPT heuristic to allocate filters to processing units} 7 : Nlaunch −temp ← ⌈ T ap j /N OLA −tap ⌉ {launch times for jth FIR filter} 8 : index ←get index of min (Array launch ) {index of pu with least launch times} 9 : Array launch (index ) ← Array launch (index ) + Nlaunch −temp {allocate filter to that pu }10: end for 
+
+11: end if 
+
+12: Array OLA −tap (NOLA −tap ) ← max( Array launch )13: end for 
+
+14: return index of min( Array OLA −tap ) > 0 {return best NOLA −tap −best } 
+
+> Figure 5. Launch times for FPGAs that can parallelise 64 taps (left) and 256 taps (right)
+
+because the total number of simultaneous operations is proportional to Npu −OLA × NOLA −tap . An increase of Npu −OLA will make the off-chip memory bandwidth become the main factor that limits the performance as each processing unit creates a separate output. The number of DSP blocks on an FPGA and off-chip memory bandwidth are two main factors that affect the best Npu −OLA , especially, when the data types of input signals and coefficient arrays are floating-point. For a given data type, the bandwidth needed for each process unit is fixed. The maximum number of process units that are supported by a specific device NOLA −omb can be calculated based on the device off-chip memory bandwidth and the needed bandwidth for each process unit. The process flow of searching for the optimal NOLA −tap is illustrated in Algorithm 1, where 
+
+NF P GA −tap is the maximum number of taps that can be processed in parallel by a specific FPGA. To illustrate the interplay of the number of processing units and the size of NOLA −tap , Figure 5 depicts the total number of launch times for an FPGA that can parallelise 64 FIR taps (left, NF P GA −tap = 64 ) and 256 taps (right, NF P GA −tap = 256 ). Here, the off-chip memory bandwidth was considered to be not limiting. The best NOLA −tap for each number of filters Nf ilter 
+
+in the group is connected using the red line, which is the index of the smallest value in each column. For the NF P GA −tap = 64 
+
+FPGA, when Nf ilter is larger than 14, the NOLA −tap −best is smaller than 8. For the NF P GA −tap = 256 FPGA, when Nf ilter 
+
+is larger than 30, the NOLA −tap −opt is smaller than 16. 
+
+B. FD-OLS 
+
+For FD-OLS based implementation, Npu −OLS FIR filters are processed in parallel and they all share the same padded input array. The optimisation problem is to balance the overall size of the padded input arrays and the total number of processing chunks for a single process unit, which is to balance the memory cost and processing time as well. 
+
+1) Filter Size Optimisation: In order to optimised the FD-OLS design for a matched filter group, two main factors need to be considered: 1) off-chip memory size and 2) control of loading padded input signals for multiple filters in parallel. Filter i+1        
+
+> Filter i-1
+> Filter i
+> Input Signals coefficients Padding (0+0i)
+> NOLS-FT
+> NTAP_Filter_i+1 NOLS-FT x4
+> NOLS-FT x3
+> NOLS-FT x3
+> Padded
+> Input i+1
+> Padded
+> Input i
+> Padded
+> Input i-1
+> Original Input Figure 6. Example of padded input group for FD-OLS method
+
+a) Required off-chip memory: For the generic FD-OLS implementation (only considering one filter size, namely T ap Nf ilter ), the input chunk size for all filters is the same and the resulting total input size is 
+
+ Ninput 
+
+NOLS −F T − T ap Nf ilter 
+
+
+
+NOLS −F T .
+
+In contrast to the TD-OLA method, where all filters are of different sizes but the input is the same, here each filter needs a dedicated padded input chunk and the total input size is increased to 
+
+> Nf ilter
+
+X
+
+> i=1
+
+ Ninput 
+
+NOLS −F T − T ap i
+
+
+
+NOLS −F T ,
+
+which can even be larger than the outputs of all filters combined, i.e. the output plane. If Nf ilter is too large, the off-chip memory size will limit the implementation as not all inputs can fit there. Hence it will be practical to find a trade-off between different input sizes to waste less operations and the needed off-chip memory. 
+
+b) Loading control: Regarding the control of loading, when there are millions of input signals, thousands of segments have to be processed with each filter and each length is NOLS −F T . Even though the execution latency of each segment is the same, thousands of segments have to be finished in one launch instead of processing one or several segments per launch. The main reason is that the launch overhead is over 10x times slower than that of Fourier transform NOLS −F T points. Although the LPT rule could be employed for multiple FD-OLS, the FPGA would have to load padded input chunks for different filters in parallel and the complexity of the ensuing loading control system is a problem that would affect the efficiency of the design. For illustration, look at an example with three filters (filter i−1, filter i, and filter i+1 ) in Figure 6. The padded input i+1 
+
+(following the OLS method, see Figure 1) is compatible with filters whose length is shorter than Ntap i+1 , such as filter i and filter i−1, but the padded input i−1 only fits for filter i−1. One disadvantage regarding the number of chunks in Figure 6 is that the needed space for filter i and filter i−1 are both 3NOLS −F T , but it is 4NOLS −F T for filter i+1 . More chunks means consuming more off-chip memory space and longer execution time. However, a dedicated padded input for each filter costs more off-chip memory. As a trade-off, in this research, we propose the method that Nshare Npu −OLS filters share the same padded input chunks, where Npu −OLS is the number of processing units and Nshare is an integer constant and Nshare ⩾ 1. For each Nshare Npu −OLS 
+
+filters, i.e. a sub-group, the lengths of all filters are padded to the same as the longest filter in these Nshare Npu −OLS filters. In this case, the number of chunks for each process unit is the same and it is unnecessary to load different padded input chunks for each process unit, one chunk is shared by all processing units. 
+
+2) Implementation: The architecture of the FPGA-based implementation is given in Figure 3. For a single processor, it consists of two parts: dot product and NOLS −F T -point FFT engine. It has two significant differences to the TD-OLA implementation: 1) the input signals and coefficient arrays have to be Fourier transformed before processing, and 2) the output from the FFT engine can be sent directly to off-chip memory without loading and adding the output from the previous block (as necessary with OLS). In this section, we investigate the relationship between the size of the padded input chunks and the execution time of the FD-OLS based implementation. The number of processing units Npu −OLS on a specific FPGA is restricted by the number of available logic resources and it will be evaluated in Section V-B. When Nshare Npu −OLS filters, which is a sub-group, share the same padded input chunks, there will be ⌈Nf ilter /(Nshare Npu −OLS )⌉ different padded input sets in total. The size of each padded input set is different and each of them is larger than that of original input data. Algorithm 2 Searching for the best time-efficient Nshare 
+
+Require: M F − (Nf ilter , N inc , T ap 1), Ninput , Npu −OLS , NOLS −F T .
+
+Ensure: NOLS −F T ⩾ T ap Nf ilter , Nshare Npu −OLS ⩽ Nf ilter .1 : Nshare −max ← ⌈ Nf ilter /N pu −OLS ⌉ {maximum Nshare }2 : Array totalchunk ← zero (Nshare −max ) {array of number of chunks for each Nshare }3 : for Nshare = 1 to Nshare −max do 
+
+4 : Ninputgroup ← ⌈ Nf ilter /(Nshare Npu −OLS )⌉ {number of filter sub-groups} 5 : for j = 1 to Ninputgroup do 
+
+6 : Nchunk −temp ← Nshare 
+
+Ninput /(NOLS −F T − T ap Nf ilter −(j−1) Nshare Npu −OLS )
+
+{number of input chunks of jth filter sub-group} 7 : Array totalchunk (Nshare ) ← Array totalchunk (Nshare ) + Nchunk −temp {total number of chunks for current Nshare }8 : end for 
+
+9 : end for 
+
+10: return index of min( Array totalchunk ) {best time-efficient Nshare }
+
+Algorithm 3 Searching for the best area-efficient Nshare 
+
+Require: M F − (Nf ilter , N inc , T ap 1), Ninput , Npu −OLS , NOLS −F T .
+
+Ensure: NOLS −F T ⩾ T ap Nf ilter , Nshare Npu −OLS ⩽ Nf ilter .1 : Nshare −max ← ⌈ Nf ilter /N pu −OLS ⌉ {maximum Nshare }2 : Array totalsize ← zero (Nshare −max ) {array of number of chunks for each Nshare }3 : for Nshare = 1 to Nshare −max do 
+
+4 : Ninputgroup ← ⌈ Nf ilter /(Nshare Npu −OLS )⌉ {number of filter sub-groups} 5 : Nsize −temp ← 0
+
+6 : for j = 1 to (Ninputgroup − 1) do 
+
+7 : Nsize −temp ← Nsize −temp + (1 + Nshare Npu −OLS ) Ninput /(NOLS −F T − T ap Nf ilter −(j−1) Nshare Npu −OLS )
+
+{number of input and output chunks of jth filter sub-group} 8 : end for 
+
+9 : Nsize −temp ← Nsize −temp + ( Nshare Ninputgroup Npu −OLS − Nf ilter + 1) ×Ninput /(NOLS −F T − T ap Nf ilter −(Ninputgroup −1) Nshare Npu −OLS )
+
+10: Array totalsize (Nshare ) ← Array totalsize (Nshare ) + Nsize −temp 
+
+11: end for 
+
+12: return index of min( Array totalsize ) {return best area-efficient Nshare }There are two main factors that influence the execution times: 1) the length of the overlapped part ( T ap i) and 2) the number of chunks for each sub-group 
+
+NOLS −chunk i =
+
+ Ninput 
+
+NOLS −F T − T ap i
+
+
+
+, where FIR filter i is the largest filter in the sub-group of filters.. These two factors for all Ninputgroup filter sub-groups, where Ninoutgroup = Nf ilter /N share Npu −OLS , are not the same and these changes can be implemented in the host programs, which is processed by CPU. The overlap can be simply created using memory copying, e.g. using the memcpy function in C/C++. Regarding the second factor, this just changes the iteration bounds of the loop. The only parameter that can be adjusted for a given M F on a specific FPGA is Nshare . Based on requirements such as execution time or memory space, the best Nshare is different. Two algorithms are proposed, a time-efficient one, minimizing the execution time and an area-efficient one, minimising the required memory space. The details of time-efficient Nshare are in Algorithm 2 and area-efficient Nshare are in Algorithm 3. Taking the M F in [21] as an example, which is M F − (42 , 10 , 1) , and the input signal is 221 values long, the number of process units is Npu −OLS = 3 , and the FFT length with the best performance is NOLS −F T = 2 , 048 . The proposed method is compared with the generic implementation in [21]. The speedup in terms of execution latency and the increase of needed off-chip memory size are given in Figure 7. As can be seen, the speedup is the highest when every three filters, i.e. 
+
+Nshare = 1 , share one padded input, which is 1.12x faster. However, it costs about 15% more memory space. When 21 filters share one padded input, i.e. Nshare = 7 , the speedup is only 1.06x, but up to 4% memory space can be saved. In the generic implementation, all 42 filters share one padded input, which corresponds to Nshare = 14 in Figure 7. 0 2 4 6 8 10 12 14 
+
+Nshare                                                          
+
+> 0.95 11.05 1.1 1.15 1.2
+> Speedups or ratio of saved space
+> Increase of needed off-chip memory Speedup over general implementation Figure 7. Speedup and saved memory space by changing the number of shared padded inputs through Nshare
+> Table II SPECIFICATIONS OF THE EMPLOYED FPGA PLATFORMS
+> Device Terasic DE5-Net Nallatech 385A Xeon+FPGA Xilinx VCU1525 (S5 )(A10 )(X+A10 )(U9 )Hardware Intel Stratix V Intel Arria 10 Intel Arria 10 Xilinx Virtex UltraScale+ 5SGXA7 GX1150 GX1150 XCVU9P Technology 28 nm 20 nm 20 nm 16 nm
+> Compute resource 622,000 LEs 1,506,000 LEs 1,506,000 LEs 2,586,000 LEs 256 DSP blocks 1,518 DSP blocks 1,518 DSP blocks 6,840 DSP blocks On-chip memory size 50 M b 53 M b 53 M b 345.9 M b
+> Off-chip memory size 2 x 2GB DDR3 2 x 4GB DDR3 –4 x 16 GB DDR4 OpenCL global 25 ,600 M B/s 35 ,128 M B/s 25 ,000 M B/s
+> memory bandwidth Max clock frequency 600 M Hz 1.5 GHz 1.5 GHz
+> Max power consumption —75W –225W
+
+V. E XPERIMENTS AND RESULTS 
+
+In this section we perform various experimental evaluations of the proposed approaches. Our objective is i) to evaluate the applicability of the approaches on different FPGA platforms, ii) to determine the best performing parameters for the different approaches, iii) to demonstrate the benefit of the optimised approaches over the generic implementation iv) to compare the performance with GPU-optimised implementations. 
+
+A. Experimental Setup 
+
+Four types of FPGA devices are employed in the experimental evaluation , which are Terasic DE5 board with Intel Stratix V, referred to as S5 , Nallatech 385A card with Intel Arria 10, referred to as A10 , Intel Xeon Scalable processor with an in-package Arria 10, referred to as X + A10 , and Xilinx VCU1525 with Virtex UltraScale+, referred to as U9 . Their technical specifications are given in Table II. X+A10 is from the Intel Hardware Accelerator Research Program (HARP), and the FPGA is connected with the CPU through both the PCI express (PCIe) bus and the QPI bus. The S5, A10, and U9 cards are connected to the host processor through the PCIe bus. For different FPGA series and devices, the high-level synthesis approach OpenCL [10] is employed to enable the fast coverage of different design approaches and design space parameters. All Intel FPGA-based OpenCL kernels are compiled using the Intel OpenCL offline compiler (AOC) version 16.0.0.211. For Xilinx UltraScale+ FPGA based OpenCL kernels, they are compiled with Xilinx SDx for OpenCL (XOCC) version 2018.2. All evaluated kernels on Intel FPGAs are the same and they are compiled with the same commands. Essentially the same kernel codes are evaluated on Xilinx FPGA, with differences in the compiler directives and optimizations. The used optimization features for both compiler are given in Table III. The main difference is that Xilinx does not provide optimization features for floating-point operations. Table III OPTIMIZATION FEATURES OF INTEL FPGA-BASED AND XILINX -BASED OPEN CL DEVELOPMENT 
+
+Optimization Features Intel (AOC) Xilinx (XOCC) Pipe Channel and Pipe Pipe Loop unroll #pragma unroll __attribute__((opencl_unroll_hint)) Pipelining Automatically __attribute__((xcl_pipeline_loop)) __attribute__((xcl_dataflow)) Kernel Vectorization __attribute__((num_simd_work_item)) __attribute__((vec_type_hint)) Floating-point balanced tree (–fp-relaxed) No related attributes operations rounding operations (–fpc) Multiple memory banks -no-interleaving=<global_memory_type> --max_memory_ports –sp .... Local memory partition __attribute__((<memory_type>, ...)) __attribute__((xcl_array_partition)) llllllllllllll ll                               
+
+> 12.5% 25% 37.5% 50% 62.5% 75% 87.5% 100% 10% 20% 30% 40% 50% 60%
+> Usage of DSP blocks Resource Utilization
+> lLogic cell−−S5 RAM block−−S5 Logic cell−−A10 RAM block−−A10 Logic cell−−X+A10 RAM block−−X+A10 llllllllllllllll
+> 12.5% 25% 37.5% 50% 62.5% 75% 87.5% 100% 50 100 150 200 250 300 350 400 450
+> Usage of DSP blocks Frequency and performance
+> lFrequency−−S5 (MHz) Performance−−S5 (GFLOPS) Frequency−−A10 (MHz) Performance−−A10 (GFLOPS) Frequency−−X+A10 (MHz) Performance−−X+A10
+
+Figure 8. Resource usage (left) and performance (right) over DSP block usage 
+
+B. Resource Usage and Performance 
+
+In this section, we evaluate the resource usage and performance of the multiple TD-OLA-( NOLA −tap ) structure and the multiple FD-OLS-( NOLS −F T ) structure on employed FPGAs. The basic single TDFIR is evaluated before investigating multiple OLA-TD and the basic single FDFIR is evaluated before investigating multiple OLS-FD. The data types of input signals and coefficients are both complex single-precision floating point. The performance in terms of GF LOP S of the FD designs is not compared with the results of TD designs, because due to the very different approaches and the required total computations it is not meaningful to do that. 
+
+1) TD-OLA – Single: The usage of DSP block plays an important role in implementing TD filters and it is the first resource type that is used up as the the number parallelised TD taps is increased. The change of resource usages in terms of logic cells and RAM blocks is therefore plotted over the usage of DSP blocks in Figure 8(left) and the kernel frequencies and performance in GF LOP S are given in Figure 8 (right). For A10 and X+A10, the usage of logic cells and RAM blocks are less than 40% for an DSP block usage of over 80%. The kernel frequency for all implementations ranges from 200 M Hz to 300 M Hz and decreases as DSP block usage increases. The maximum performance of A10 and X+A10 are around 420 GF LOP S , and 120 GF LOP S for S5. Although A10 and X+A10 have enough DSP blocks to parallelise a 256-tap filter, the AOC compiler cannot generate the bitstream file when the length is larger than 240 on A10 and 208 on X+A10. For the Xilinx FPGA, the compilation period for kernels with floating point operations is a barrier for the efficient employment for TD filters. Already for an FIR with 128 parallelised -taps, the compilation time is up to 10 hours. For longer FIR filters such as a 256-tap filter, the compiler does not finish within 24 hours. A possible explanation is that Xilinx FPGAs and XOCC do not have dedicated optimisations for floating point operations and a lack of floating point hardware blocks. The performance of a 64-tap filter and a 128-tap filter on U9 are 120 GF LOP S and 244 GF LOP S , respectively, and the kernel frequencies are both 233 M Hz .To further explore the behaviour of the U9, we change the data type to integer (32-bit), for which the bitstream file can be generated in several hours and the corresponding results are given in Table IV. For a 256-tap filter, the kernel frequency is only 140 M Hz and the performance is 252 GOP S .Table IV DETAILS OF BASIC TDFIR USING XILINX U9 Filter DSP block Frequency Performance II taps % (M Hz ) (GOP S , 32-bit) 16 3.8 250 14 164 15.1 275 123 1128 30.1 240 207 1256 60.2 140 252 1Table V PROCESS UNITS FOR ALGORITHMS ON A SPECIFIC DEVICE                                                                   
+
+> Device S5 A10
+> NOLA −tap 816 32 64 16 32 64 128
+> Npu −OLA 842115 731Logic cells (%) 71 68 64 50 47 33 25 21 DSP block (%) 100 100 100 100 94 88 76 50 RAM block (%) 38 32 26 20 64 35 23 17 Frequency ( M Hz )212 223 226 232 153 191 213 258 Bits/clock cycle 576 320 192 128 1,024 512 256 128 Bandwidth ( M Bytes/s )15,264 8,920 5,424 3,712 19,584 12,224 6,816 4,128
+
+2) TD-OLA – Multiple: Now we evaluate multiple TD-OLA filters, informed by the resource consumption limits measured in the previous experiments.There are two parameters that can be varied: the number of parallelised taps per filter, NOLA −tap 
+
+and the number of parallel processing units Npu −OLA . The aim is to select combinations of these two parameters which (almost) exhaust the FPGA resources. Results are given in Table V. As recommended by FPGA best practice guides, all considered NOLA −tap values are powers of two [1]. For each such value we determine the maximum number of processing units Npu −OLA that still fits on the FPGA. This implies that compilation was not successful for larger Npu −OLA (e.g. Npu −OLA = 2 for NOLA −tap did not successfully compile). For both S5 and A10, the kernel frequency drops as Npu −OLA increases. As can be seen the usage of DSP block is proportional to the the product of Npu −OLA and NOLA −tap . However, the usage of logic cell and RAM block increases with 
+
+Npu −OLA .When considering the required bandwidth (in stream mode) for the different parameter combinations, we observe for all designs that it is smaller than the maximum OpenCL global memory bandwidth as listed in Table II. In this case, the device off-chip memory bandwidth is not a performance barrier for most of M F . In Figure 5 we studied analytically the value of 
+
+NOLA −tap over the number of filters. As the frequency of all designs varies slightly in real implementations and the Npu −OLA 
+
+might be different from the theoretical analysis in Figure 5 for some designs due to the fact that some values cannot be compiled/synthesised (e.g. A10 cannot parallelise 256-taps), the best valueof NOLA −tap for some M F s might change.Details are depicted in Figure 9, based on results of Table V, where the blue line is showing the values from Figure 5. On S5, 
+
+NOLA −tap −opt increases from 8 to 16 for M F s with less than 160 filters and 64 for M F s with more than 160 filters. In terms of the NOLA −tap −opt on A10, it is increased from 16 to 32 for most of the M F s. 
+
+3) FD-OLS – FFT: For the FD-OLS implementation (as can be seen in Figure 3), the central element is the FFT engine, and we evaluate the resource usage and performance of the FFT engine in this section. Three types of FFT engines are evaluated, which are 4-point FFT engine, 8-point FFT engine, and 16-point FFT engines. An x-point FFT engine can process x points in parallel. The resource usage and performance of 8-point engine are presented in Figure 10. The pipelined 8-point FFT engine is evaluated on all FPGA platforms (Table II) including U9. On the U9, the evaluated length ranges from 26 to 29 only. When the FFT length is larger than 210 , the array for processing cannot be instantiated using registers and the II becomes larger than 1, loop pipelining cannot be achieved. Besides this issue, the input signals have to be reordered to achieve stream mode on U9. In general, it can be seen that there is an increase for all types of resources (Logic cell, DSP block, and RAM block) when the FFT length grows from 212 to ≥ 213 . Regarding the logic cells, their usage for all devices drops when the FFT length increases from 29 to 210 .The frequency and performance of 4-point and 16-point FFT engines are given in Figure 11. For most of the kernels, the frequency ranges from 180 M Hz to 300 M Hz . Except for 210 16-point FFT engine on X+A10, the performance of 16-point FFT engine is higher than that of 4-point FFT engine. The A10 performs best and among these Intel devices and S5 performs better than X+A10. 
+
+4) FD-OLS – Multiple: Using the performance and resource usage results of a single FFT engine in Section V-B3, we evaluate now multiple OLS-FD filters. First, we determine the maximum number of processing units Npu −OLS that can be 200 400 600 800 1000 
+
+Number of FIR filters 
+
+10 20 30 40 50 60 70 
+
+> Value of OLA-tap
+
+Maximum parallelised tap = 64 
+
+NOLA-tap-opt based on real results NOLA-tap-opt based on analysis 200 400 600 800 1000 
+
+Number of FIR filters 
+
+20 40 60 80 100 120 
+
+> Value of OLA-tap
+
+Maximum parallelised tap = 256 
+
+NOLA-tap-opt based on real results NOLA-tap-opt based on analysis Figure 9. NOLA −tap −opt based on evaluation of implementations for S5 (left) and A10 (right) llllll ll ll l
+
+2 6 27 28 2 9 210 211 212 213 214 215 216 20% 40% 60% 80% 100% 
+
+FFT length Resource Utilization  
+
+> l
+
+Logic cell−−S5 DSP block−−S5 RAM block−−S5 Logic cell−−A10 DSP block−−A10 RAM block−−A10 Logic cell−−X+A10 DSP block−−X+A10 RAM block−−X+A10 l llllll llll
+
+2 6 27 28 2 9 210 211 212 213 214 215 216 20 40 60 80 100 
+
+FFT length Performance(GFLOPS)  
+
+> l
+
+S5 A10 X+A10 U9 
+
+Figure 10. Resource usage (left) and performance (right) of 8-point FFT engine lll lll l
+
+2 6 27 28 29 2 10 2 11 212 180 200 220 240 260 280 300 320 
+
+FFT length Kernel Frequency (MHz)  
+
+> l
+
+S5−16−point A10−16−point X+A10−16−point S5−4−point A10−4−point X+A10−4−point llllll l
+
+2 6 27 28 29 2 10 2 11 212 020 40 60 80 100 
+
+FFT length Kernel Performance (GFLOPS)  l S5−16−point A10−16−point X+A10−16−point S5−4−point A10−4−point X+A10−4−point 
+
+Figure 11. Frequency (left) and performance (right) of 4-point and 16-point FFT engines Table VI REQUIRED OFF -CHIP MEMORY BANDWIDTH FOR AN FFT ENGINE 
+
+FFT engine 4-point 8-point 16-point 
+
+1st +1 1st +1 1st +1 
+
+Bits/clock cycle 512 256 1,024 512 2,048 1,024 Required bandwidth 12,800 6,400 25,600 12,800 51,200 25,600 (M Bytes/s )
+
+Npu −OLS 
+
+S5 3-4 1-2 1A10 3-4 1-3 1X+A10 3-4 1-2 1llllll                    
+
+> 26272829210 211 212 30 40 50 60 70
+> FFT length Performance(GFLOPS)
+> lS5−−x3 S5−−x4 A10−−x3 A10−−x4 X+A10−−x3 X+A10−−x4 lllll
+> 26272829210 211 212 20 40 60 80
+> FFT length Performance(GFLOPS)
+> lS5−−x1 S5−−x2 A10−−x1 A10−−x2 A10−−x3 X+A10−−x1 X+A10−−x2
+
+Figure 12. Performance of multiple FD-OLS implementations using 4-point (left) and 8-point (right) FFT engines 
+
+instantiated without breaching the maximum bandwidth limit of the targetted FPGA device. The required off-chip memory bandwidth for the three types of FFT engines is shown in Table VI, where all FFT engines share the same padded inputs. The required bandwidth is calculated on the assumption that the kernel can achieve stream mode and is running at 200 M Hz .If the frequency is higher than 200 M Hz , the required bandwidth increases as well. The maximum Npu −OLS for a specific device can then be determined from the the device’s maximum OpenCL global memory bandwidth given in Table II. With the Npu −OLS from Table VI, the performance of the designs with different parameters are now evaluated. The results are plotted in Figure 12 (4-point and 8-point FFT engines) and Figure 13 (16-point FFT engine). Not all of the designs can be compiled successfully, in some cases even when the estimated resource usage is less than 100%, but there was not clear pattern or other indicator from the complier to why that happened. Although multiple FFT engines are implemented in parallel, the performance in terms of GF LOP S is about the same as that of the performance of a single FFT engine. The main reason is that a low occupancy percentage, which is less than 50% for most of the kernels. A low occupancy percentage implies that data cannot be loaded or stored efficiently [9], and it is caused by a large number of streamed points per clock cycle required by the kernel. Using the results of Figure 12 and Figure 13, the FFT engine and Npu −OLS that provide the best performance for a specific lll        
+
+> 26272829210 211 010 20 30 40 50
+> FFT length Performance(GFLOPS)
+> lS5−−x1 A10−−x1 X+A10−−x1
+
+Figure 13. Performance of multiple FD-OLS implementations using 16-point FFT engine Table VII PERFORMANCE OF THE BEST DESIGNS                                                                                                     
+
+> Device FD-OLS-( NOLS −F T )64 128 256 512 1,024 2,048 4,096 S5
+> Npu −OLS 4232333FFT engine 4-point 8-point 4-point 8-point 4-point 4-point 4-point
+> fmax (M Hz )217.6 216.7 217.8 218.2 219.7 204.3 186.9 Performance (GF LOP S )27.35 36.4 47.6 62.2 54.5 59.0 57.1 A10
+> Npu −OLS 3442343FFT engine 4-point 4-point 4-point 8-point 4-point 4-point 4-point
+> fmax (M Hz )248.1 183.0 203.4 199.2 197.0 179.6 200.0 Performance (GF LOP S )28.9 33.6 52.5 64.1 72.5 66.4 74.5
+> X+A10
+> Npu −OLS 1131142FFT engine 16-point 16-point 4-point 8-point 8-point 4-point 8-point
+> fmax (M Hz )201.9 180.6 216.67 222.9 229.2 218.8 151.6 Performance (GF LOP S )27.8 33.6 50.3 60.8 73.9 74.2 27.7 200 400 600 800 1000
+
+Number of FIR filters     
+
+> 10 15 20 25 30
+> Log 2Ninput
+> 050 100 150 200 250 200 400 600 800 1000
+
+Number of FIR filters  
+
+> 10 15 20 25 30
+> Log 2Ninput
+> 050 100 150 200 250 300
+> Figure 14. Speedup of FD designs over TD designs on S5 (left) and A10 (right)
+
+NOLS −F T are recorded in Table VII. Following the analysis in Section III-C, the larger the value of NOLS −F T /T ap Nf ilter , the more operations can be saved. The optimal design for a specific matched filter group might not be the design with the highest 
+
+GF LOP S in Table VII. Taking S5 as an example, although NOLS −F T = 512 based design provides a better performance than other designs, NOLS −F T = 2 , 048 or NOLS −F T = 4 , 096 based designs might be faster if T ap Nf ilter is close to 512. . Regarding A10, the best performing design has the largest NOLS −F T among the eventuated designs. In terms of X+A10, the 
+
+NOLS −F T = 2 , 048 based design is over 2x times faster than NOLS −F T = 4 , 096 based design, so it is the fastest among the evaluated designs. 
+
+C. Comparison 
+
+For the generic matched filter group implementation, the actual OpenCL kernel is the same as that of the optimised design. The essential difference is the number of launch times, which has been discussed in Section IV. In this section, we therefore focus on the TD vs. FD and FPGA vs. GPU comparisons. 
+
+1) TD vs. FD: Using the best NOLA −tap from Figure 9 and the evaluation results in Table VII, the TD and FD designs are compared in Figure 14, depicting a colour map of the execution time speedup of FD over TD. The designs on both S5 and A10 use NOLS −F T = 4096 , and all Npu −OLS processing units share the same padded input. For most of the M F s, the TD design performs worse than the FD design. The TD design only beats the FD design for few M F s with Ninput = 1024 .When Nf ilter is over a hundred and Ninput is large than 211 , the FD design is up to 250x times faster than the TD design on S5 and up to 300x times faster on A10. The execution time of pre-processing, such as Fourier transforming the input signals and coefficient arrays are not considered. The required off-chip memory is affected by the input size and the number of filters, but also differs between the designs due to padding For S5 and A10, the required memory of the FD designs relative to that of the TD designs is shown in Figure 15. It can be seen that most FD designs need over 1.5x the off-chip memory of TD designs. 
+
+2) FPGA vs. GPU: Based on the results in Section V-C1, the proposed FD design on A10 (FD-OLS with 4-point FFT engine, NOLS −F T = 4 , 096 and Npu −OLS = 3 ) is compared with optimised designs for high-end GPUs, implementing the 200 400 600 800 1000   
+
+> Number of FIR filters
+> 10 15 20 25 30
+> Log 2Ninput
+> 012345Figure 15. Required off-chip memory of FD designs relative to corresponding TD designs
+> Figure 16. Speedup of a single P100 card [5] over a single A10 card
+
+same matched filter groups. In [5], the latest NVIDIA Pascal GPU architecture with Tesla P100 card is employed to evaluated a group of M F s, whose Nf ilter ranges from 64 to 256 and Ninput ranges from 220 to 224 . The power spectrum is calculated after Fourier transforming and a custom GPU-based FFT engine, which is well-optimised for high-end GPUs, was develop in [5]. As can be seen in Figure 16, a single P100 card performs up to 7.5x times faster than a single A10 card. The performance lead drops to 6x-6.5x when the number of filters in the group becomes quite large. The main advantages of P100 is that the supported memory bandwidth is over 10x times faster than that of A10. It is assumed that the TDP value is employed as GPU power consumption due to the lack of other information. For most designs on A10, the required power is less than 35 W [20], which is over 8.5x times lower than the TDP of P100, which is 
+
+300 W , hence one can assume that the performance per/watt of the FPGA A10 and GPU P100 is comparable. In terms of the price, P100 is 1.2x times more expensive than that of A10 card, which is over 5,000 USD at the time of writing.. VI. C ONCLUSIONS 
+
+This paper proposed optimised designs for multiple complex floating-point filters of different sizes. We analytically studied matched filter groups, where all filters have different sizes within a given range, in both time-domain and Fourier-domain, using the overlap-add algorithm and the overlap-save algorithm. Both TD-OLA and FD-OLS processing can be significantly improved compared to a generic implementation with a single (maximum) filter size, when optimising for the varying size range. A load balancing algorithms was employed to process multiple filters for TD-OLA designs and FD-OLS designs were significantly enhanced carefully determining the best filter sizes and sub-grouping filters to share the same padded input. The proposed designs were evaluated on four types of FPGA devices. The best solution for a matched filter group on a specific device was determined. When comparing frequency domain with time domain designs, the multiple FD-OLS designs can be over 250x times faster than the multiple TD-OLA designs, while using 1.5x times the off-chip memory. Lastly, we set the performance of the FPGA design in relation to optimised designs for top-end GPUs. While our proposed FPGA design on a mid-range FPGA was up to 7.5x times slower than the well-optimised design on the top-end GPU, the performance per watt was slightly in favour of our FPGA implementation. ACKNOWLEDGMENT 
+
+The authors acknowledge discussions with the TDT, a collaboration between Manchester and Oxford Universities, and MPIfR Bonn and the work benefited from their collaboration. We gratefully acknowledge that this research was financially supported by the SKA funding of the New Zealand government through the Ministry of Business, Innovation and Employment (MBIE). REFERENCES [1] Altera. Altera SDK for OpenCL Best Practices Guide, 2016. [2] Utku Aydonat, Shane O’Connell, Davor Capalija, Andrew C Ling, and Gordon R Chiu. An OpenCL deep learning accelerator on arria 10. In Proceedings of the 2017 ACM/SIGDA International Symposium on Field-Programmable Gate Arrays , pages 55–64. ACM, 2017. [3] Ludovico De Souza, John D Bunton, Duncan Campbell-Wilson, Roger J Cappallo, and Bart Kincaid. A radio astronomy correlator optimized for the xilinx virtex-4 sx fpga. In 2007 International Conference on Field Programmable Logic and Applications , pages 62–67. IEEE, 2007. [4] Peter Dewdney, Peter Hall, R Schillizzi, and J Lazio. The square kilometre array. Proceedings of the Institute of Electrical and Electronics Engineers IEEE , 97(8):1482–1496, 2009. [5] Sofia Dimoudi, Karel Adamek, Prabu Thiagaraj, Scott M Ransom, Aris Karastergiou, and Wesley Armour. A gpu implementation of the correlation technique for real-time fourier domain pulsar acceleration searches. The Astrophysical Journal Supplement Series , 239(2):28, 2018. [6] Jeremy Fowers, Greg Brown, John Wernsing, and Greg Stitt. A performance and energy comparison of convolution on gpus, fpgas, and multicore processors. ACM Transactions on Architecture and Code Optimization (TACO) , 9(4):25, 2013. [7] Ronald L. Graham. Bounds on multiprocessing timing anomalies. SIAM journal on Applied Mathematics , 17(2):416–429, 1969. [8] Ronald L Graham, Eugene L Lawler, Jan Karel Lenstra, and AHG Rinnooy Kan. Optimization and approximation in deterministic sequencing and scheduling: a survey. In Annals of discrete mathematics , volume 5, pages 287–326. Elsevier, 1979. [9] Intel. Intel FPGA SDK OpenCL best pratices guide, 2019. [10] Aaftab Munshi. The opencl specification. In 2009 IEEE Hot Chips 21 Symposium (HCS) , pages 1–314. IEEE, 2009. [11] Hiroki Nakahara, Haruyoshi Yonekawa, and Shimpei Sato. An object detector based on multiscale sliding window search using a fully pipelined binarized cnn on an fpga. In 2017 International Conference on Field Programmable Technology (ICFPT) , pages 168–175. IEEE, 2017. [12] Aaron Parsons, Dan Werthimer, Donald Backer, Tim Bastian, Geoffrey Bower, Walter Brisken, Henry Chen, Adam Deller, Terry Filiba, Dale Gary, et al. Digital instrumentation for the radio astronomy community. In astro2010: The Astronomy and Astrophysics Decadal Survey , volume 2010, 2009. [13] Karas Pavel and Svoboda David. Algorithms for efficient computation of convolution. In Design and Architectures for Digital Signal Processing .IntechOpen, 2013. [14] Scott Ransom. Presto: Pulsar exploration and search toolkit. Astrophysics source code library , 2011. [15] Scott M Ransom, Stephen S Eikenberry, and John Middleditch. Fourier techniques for very long astrophysical time-series analysis. The Astronomical Journal , 124(3):1788, 2002. [16] MA Sanchez, Mario Garrido, Marisa López-Vallejo, Jesús Grajal, and Carlos López-Barrio. Digital channelised receivers on fpgas platforms. In IEEE International Radar Conference, 2005. , pages 816–821. IEEE, 2005. [17] Steven W Smith et al. The scientist and engineer’s guide to digital signal processing. 1997. [18] Srikanth Sridharan, Paolo Durante, Christian Faerber, and Niko Neufeld. Accelerating particle identification for high-speed data-filtering using opencl on fpgas and other architectures. In 2016 26th International Conference on Field Programmable Logic and Applications (FPL) , pages 1–7. IEEE, 2016. [19] George Turin. An introduction to matched filters. IRE transactions on Information theory , 6(3):311–329, 1960. [20] Haomiao Wang, Prabu Thiagaraj, and Oliver Sinnen. Combining multiple optimized fpga-based pulsar search modules using opencl. Journal of Astronomical Instrumentation .[21] Haomiao Wang, Prabu Thiagaraj, and Oliver Sinnen. Fpga-based acceleration of ft convolution for pulsar search using opencl. ACM Transactions on Reconfigurable Technology and Systems (TRETS) , 11(4):24, 2019. [22] Haomiao Wang, Ming Zhang, Prabu Thiagaraj, and Oliver Sinnen. Fpga-based acceleration of fdas module using opencl. In 2016 International Conference on Field-Programmable Technology (FPT) , pages 53–60. IEEE, 2016. [23] Hanqing Zeng, Ren Chen, Chi Zhang, and Viktor Prasanna. A framework for generating high throughput cnn implementations on fpgas. In Proceedings of the 2018 ACM/SIGDA International Symposium on Field-Programmable Gate Arrays , pages 117–126. ACM, 2018.

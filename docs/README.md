@@ -6,74 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-01
-- 运行时间：2026-05-01 20:26:10 UTC
+- 最新运行日期：2026-05-02
+- 运行时间：2026-05-02 19:50:14 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-- 今日共生成 17 篇推荐（精读 6 篇，速读 11 篇）
-- 精读：《EdgeSpike: Spiking Neural Networks for Low-Power Autonomous Sensing in Edge IoT Architectures》（10.0/10）, 《A comprehensive evaluation of spatial co-execution on GPUs using MPS and MIG technologies》（9.0/10）
-- 速读：《EfficientPENet: Real-Time Depth Completion from Sparse LiDAR via Lightweight Multi-Modal Fusion》（8.0/10）, 《SAW-INT4: System-Aware 4-Bit KV-Cache Quantization for Real-World LLM Serving》（8.0/10）, 《LBLLM: Lightweight Binarization of Large Language Models via Three-Stage Distillation》（8.0/10）
-- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202605/01/README](/202605/01/README)
+今日聚焦移动端 LLM 推理加速，深度解析 AHASD 异步异构架构等 17 篇前沿成果。
+重点关注 AHASD 如何通过自适应投机采样突破手机端算力瓶颈，以及 MoE 分布式训练中的近零成本负载均衡方案。
+建议开发者深入研究端侧异构计算与 MLIR 编译优化，以应对大模型在复杂硬件上的部署挑战。
+- 详情：[/202605/02/README](/202605/02/README)
 
 ### 精读区论文标签
-1. [EdgeSpike: Spiking Neural Networks for Low-Power Autonomous Sensing in Edge IoT Architectures](/202605/01/2604.27004v1-edgespike-spiking-neural-networks-for-low-power-autonomous-sensing-in-edge-iot-architectures)  
-   标签：评分：10.0/10、query:hwnas
-   evidence：针对边缘物联网设备的受能量和内存预算约束的硬件感知NAS
-2. [A comprehensive evaluation of spatial co-execution on GPUs using MPS and MIG technologies](/202605/01/2604.22430v1-a-comprehensive-evaluation-of-spatial-co-execution-on-gpus-using-mps-and-mig-technologies)  
+1. [AHASD: Asynchronous Heterogeneous Architecture for LLM Adaptive Drafting Speculative Decoding on Mobile Devices](/202605/02/2604.25326v1-ahasd-asynchronous-heterogeneous-architecture-for-llm-adaptive-drafting-speculative-decoding-on-mobile-devices)  
    标签：评分：9.0/10、query:hwnas
-   evidence：通过空间共享方法缓解GPU计算资源利用不足的问题
-3. [minAction.net: Energy-First Neural Architecture Design -- From Biological Principles to Systematic Validation](/202605/01/2604.24805v2-minactionnet-energy-first-neural-architecture-design----from-biological-principles-to-systematic-validation)  
+   evidence：移动端NPU-PIM系统的异构架构
+2. [AHASD: Asynchronous Heterogeneous Architecture for LLM Adaptive Drafting Speculative Decoding on Mobile Devices](/202605/02/2604.25326v3-ahasd-asynchronous-heterogeneous-architecture-for-llm-adaptive-drafting-speculative-decoding-on-mobile-devices)  
    标签：评分：9.0/10、query:hwnas
-   evidence：专注于能源感知神经架构设计和内部计算成本优化。
-4. [QFlash: Bridging Quantization and Memory Efficiency in Vision Transformer Attention](/202605/01/2604.25306v1-qflash-bridging-quantization-and-memory-efficiency-in-vision-transformer-attention)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：视觉Transformer注意力的内存效率
-5. [AHASD: Asynchronous Heterogeneous Architecture for LLM Adaptive Drafting Speculative Decoding on Mobile Devices](/202605/01/2604.25326v2-ahasd-asynchronous-heterogeneous-architecture-for-llm-adaptive-drafting-speculative-decoding-on-mobile-devices)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对移动端NPU-PIM系统的异构架构，以及提升LLM推理效率的任务级解耦技术。
-6. [VitaLLM: A Versatile, Ultra-Compact Ternary LLM Accelerator with Dependency-Aware Scheduling](/202605/01/2604.27396v1-vitallm-a-versatile-ultra-compact-ternary-llm-accelerator-with-dependency-aware-scheduling)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对三值LLM推理的软硬件协同设计加速器
+   evidence：针对移动端NPU-PIM系统的异构架构设计
+3. [SAGE: Training-Free Semantic Evidence Composition for Edge-Cloud Inference under Hard Uplink Budgets](/202605/02/2604.19623v1-sage-training-free-semantic-evidence-composition-for-edge-cloud-inference-under-hard-uplink-budgets)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：硬上行链路预算下的边云混合推理
+4. [Micro Language Models Enable Instant Responses](/202605/02/2604.19642v1-micro-language-models-enable-instant-responses)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：针对功耗和计算受限边缘设备的超紧凑模型
+5. [Depth-Aware Rover: A Study of Edge AI and Monocular Vision for Real-World Implementation](/202605/02/2604.22331v1-depth-aware-rover-a-study-of-edge-ai-and-monocular-vision-for-real-world-implementation)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：月球车导航的边缘AI实现
+6. [A comprehensive evaluation of spatial co-execution on GPUs using MPS and MIG technologies](/202605/02/2604.22430v2-a-comprehensive-evaluation-of-spatial-co-execution-on-gpus-using-mps-and-mig-technologies)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：缓解GPU计算资源的低利用率问题
 
 ### 速读区论文标签
-1. [EfficientPENet: Real-Time Depth Completion from Sparse LiDAR via Lightweight Multi-Modal Fusion](/202605/01/2604.18790v1-efficientpenet-real-time-depth-completion-from-sparse-lidar-via-lightweight-multi-modal-fusion)  
+1. [FEPLB: Exploiting Copy Engines for Nearly Free MoE Load Balancing in Distributed Training](/202605/02/2604.19654v1-feplb-exploiting-copy-engines-for-nearly-free-moe-load-balancing-in-distributed-training)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于嵌入式硬件实时部署的轻量级骨干网络
-2. [SAW-INT4: System-Aware 4-Bit KV-Cache Quantization for Real-World LLM Serving](/202605/01/2604.19157v1-saw-int4-system-aware-4-bit-kv-cache-quantization-for-real-world-llm-serving)  
+   evidence：利用空闲硬件拷贝引擎进行负载均衡，以最大化计算利用率
+2. [Demonstrating a Future for MLIR-native DSL Compilers on a NumPy-like Example](/202605/02/2604.19906v2-demonstrating-a-future-for-mlir-native-dsl-compilers-on-a-numpy-like-example)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对内存布局限制的系统感知KV缓存量化
-3. [LBLLM: Lightweight Binarization of Large Language Models via Three-Stage Distillation](/202605/01/2604.19167v1-lbllm-lightweight-binarization-of-large-language-models-via-three-stage-distillation)  
+   evidence：用于数值张量内核卸载的MLIR原生DSL编译器
+3. [Design Space Exploration for ReRAM-based Architectures to Address Scaling Non-idealities](/202605/02/2604.20178v1-design-space-exploration-for-reram-based-architectures-to-address-scaling-non-idealities)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限环境的轻量化二值化框架
-4. [Are Large Language Models Economically Viable for Industry Deployment?](/202605/01/2604.19342v1-are-large-language-models-economically-viable-for-industry-deployment)  
+   evidence：基于ReRAM架构的设计空间探索
+4. [Lightweight Low-SNR-Robust Semantic Communication System for Autonomous Driving](/202605/02/2604.20278v1-lightweight-low-snr-robust-semantic-communication-system-for-autonomous-driving)  
    标签：评分：8.0/10、query:hwnas
-   evidence：在能源、延迟和硬件利用率方面对大语言模型进行基准测试
-5. [Sparse Forcing: Native Trainable Sparse Attention for Real-time Autoregressive Diffusion Video Generation](/202605/01/2604.21221v1-sparse-forcing-native-trainable-sparse-attention-for-real-time-autoregressive-diffusion-video-generation)  
+   evidence：针对受限车载终端资源的结构化剪枝
+5. [LayerBoost: Layer-Aware Attention Reduction for Efficient LLMs](/202605/02/2604.22050v1-layerboost-layer-aware-attention-reduction-for-efficient-llms)  
    标签：评分：7.0/10、query:hwnas
-   evidence：通过稀疏注意力机制降低解码延迟和KV缓存内存占用
-6. [Scalable Photonic Neural Networks via Surrogate Scattering-Matrix Inverse Design](/202605/01/2604.21301v1-scalable-photonic-neural-networks-via-surrogate-scattering-matrix-inverse-design)  
+   evidence：针对高效大语言模型推理的层感知注意力削减
+6. [Guess-Verify-Refine: Data-Aware Top-K for Sparse-Attention Decoding on Blackwell via Temporal Correlation](/202605/02/2604.22312v1-guess-verify-refine-data-aware-top-k-for-sparse-attention-decoding-on-blackwell-via-temporal-correlation)  
    标签：评分：7.0/10、query:hwnas
-   evidence：面向光学神经网络硬件的制造感知设计
-7. [A Deployable Embodied Vision-Language Navigation System with Hierarchical Cognition and Context-Aware Exploration](/202605/01/2604.21363v1-a-deployable-embodied-vision-language-navigation-system-with-hierarchical-cognition-and-context-aware-exploration)  
+   evidence：在英伟达Blackwell硬件上优化Top-K选择
+7. [Selective Depthwise Separable Convolution for Lightweight Joint Source-Channel Coding in Wireless Image Transmission](/202605/02/2604.22338v1-selective-depthwise-separable-convolution-for-lightweight-joint-source-channel-coding-in-wireless-image-transmission)  
    标签：评分：7.0/10、query:hwnas
-   evidence：侧重于在嵌入式平台严格的计算、内存和能源限制下实现高效部署。
-8. [You Only Gaussian Once: Controllable 3D Gaussian Splatting for Ultra-Densely Sampled Scenes](/202605/01/2604.21400v1-you-only-gaussian-once-controllable-3d-gaussian-splatting-for-ultra-densely-sampled-scenes)  
+   evidence：通过选择性替换降低计算复杂度的轻量级框架
+8. [SpikingBrain2.0: Brain-Inspired Foundation Models for Efficient Long-Context and Cross-Platform Inference](/202605/02/2604.22575v1-spikingbrain20-brain-inspired-foundation-models-for-efficient-long-context-and-cross-platform-inference)  
    标签：评分：7.0/10、query:hwnas
-   evidence：硬件受限资源分配的预算感知平衡
-9. [The Recurrent Transformer: Greater Effective Depth and Efficient Decoding](/202605/01/2604.21215v1-the-recurrent-transformer-greater-effective-depth-and-efficient-decoding)  
+   evidence：跨平台推理的高效架构
+9. [LTBs-KAN: Linear-Time B-splines Kolmogorov-Arnold Networks](/202605/02/2604.22034v1-ltbs-kan-linear-time-b-splines-kolmogorov-arnold-networks)  
    标签：评分：6.0/10、query:hwnas
-   evidence：高效解码与现代加速器利用
-10. [Teacher-Guided Routing for Sparse Vision Mixture-of-Experts](/202605/01/2604.21330v1-teacher-guided-routing-for-sparse-vision-mixture-of-experts)  
+   evidence：减少计算负担和模型参数
+10. [An End-to-End Ukrainian RAG for Local Deployment. Optimized Hybrid Search and Lightweight Generation](/202605/02/2604.22095v1-an-end-to-end-ukrainian-rag-for-local-deployment-optimized-hybrid-search-and-lightweight-generation)  
    标签：评分：6.0/10、query:hwnas
-   evidence：稀疏混合专家模型用于降低计算成本
-11. [Dilated CNNs for Periodic Signal Processing: A Low-Complexity Approach](/202605/01/2604.21651v1-dilated-cnns-for-periodic-signal-processing-a-low-complexity-approach)  
+   evidence：资源受限硬件上的轻量级部署
+11. [FPGA-based Matched Filter Group Optimisation for SKA Pulsar Search Engine](/202605/02/2604.22124v1-fpga-based-matched-filter-group-optimisation-for-ska-pulsar-search-engine)  
    标签：评分：6.0/10、query:hwnas
-   evidence：针对严格功耗和资源限制的低复杂度方法
+   evidence：基于FPGA的计算密集型信号处理硬件优化
 
 
 <div class="dpr-home-promo-card">

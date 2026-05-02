@@ -1,0 +1,736 @@
+Title: SpikingBrain2.0: Brain-Inspired Foundation Models for Efficient Long-Context and Cross-Platform Inference
+
+URL Source: https://arxiv.org/pdf/2604.22575v1
+
+Published Time: Mon, 27 Apr 2026 00:58:36 GMT
+
+Number of Pages: 34
+
+Markdown Content:
+# SpikingBrain2.0: Brain-Inspired Foundation Models for Effi-cient Long-Context and Cross-Platform Inference 
+
+Yuqi Pan 1, Jinghao Zhuang 1, Yupeng Feng 1, Fangzhi Zhong 1, Siyu Ding 1, Xuerui Qiu 1,Shaowei Gu 1, Bohan Sun 1, Zhiyong Qin 1, Yibo Zhong 1‡, Lingtao Ouyang 1‡, Kun Yang 1‡,Zehao Liu 1,4, Yuhong Chou 1,4, Shurong Wang 1, Anjie Hu 1, Han Xu 1, Bo Xu 1,2†, Guoqi Li 1,2,3†
+
+> 1
+
+Institute of Automation, Chinese Academy of Sciences 2Beijing Key Laboratory of Brain-Inspired General Intelligence Large Model 3Key Laboratory of Brain Cognition and Brain-inspired Intelligence Technology 
+
+> 4
+
+The Hong Kong Polytechnic University 
+
+# Abstract 
+
+Scaling context length is reshaping the development paradigm of large models. However, conventional full-attention Transformers encounter prohibitive computational costs and inference bottlenecks as sequence lengths grow. A critical challenge remains: how to architect foundation models that sustain high performance and long-context efficiency while minimizing incremental training overhead. Building on the integration of brain-inspired mechanisms and efficient large-model design, we introduce SpikingBrain2.0 (SpB2.0) , a 5B model that substantially advances the architecture and training pipeline of its predecessor. Our contributions are two-fold: i) Architectural Innovation: We propose Dual-Space Sparse Attention (DSSA), an inter-layer hybrid of Sparse Softmax Attention (MoBA) with Sparse Linear Attention (SSE). This brain-analogous sparse memory paradigm achieves a superior performance-efficiency trade-off for long-context modeling. In addition, SpB2.0 supports two quantization paths: INT8-Spiking coding enables sparse event-driven computation as an alternative to dense matrix multiplication, while FP8 coding targets practical acceleration on modern GPU platforms. ii) Enhanced Training Strategy: We develop an optimized Transformer-to-Hybrid (T2H) conversion pipeline. By leveraging a curated set of open-source data, we implement dual conversion paths for LLMs and VLMs, facilitating seamless architectural migration. Empirically, SpB2.0-5B and SpB2.0-VL-5B recover most of the capability of the base Transformer (Qwen3-4B) with a total training cost of fewer than 7k A100 GPU hours. SpB2.0 achieves a 10.13 × TTFT speedup at 4M context length under sequence parallelism, and under vLLM it supports serving beyond 10M tokens on 8 A100 GPUs, where the full-attention baseline exceeds memory limits. SpB2.0 also shows strong cross-platform compatibility, enabling FP8 inference on conventional GPUs (2.52 ×
+
+speedup at 250k context) and asynchronous event-driven execution on neuromorphic chips (64.31% spike-sequence sparsity, with 70.6% and 46.5% area and power reduction at 500MHz, respectively). Overall, SpikingBrain2.0 offers a practical pathway for developing lightweight, multimodal, spiking hybrid models, validating the immense potential of synergizing brain-inspired mechanisms with efficient foundation architectures for resource-constrained and edge-computing environments. 
+
+# 1 Introduction 
+
+Recent breakthroughs in large-scale foundation models have been driven not only by the scaling of data and parameters but also by the rapid expansion of context windows (Anthropic, 2026; Team et al., 2024; Liu et al., 2025a; Team et al., 2025a; Blakeman et al., 2025; Team et al., 2026). As autonomous agents, codebase  
+
+> †Corresponding authors: xubo@ia.ac.cn and guoqi.li@ia.ac.cn. Code: https://github.com/BICLab/SpikingBrain2.0 .
+> ‡Work done during internship.
+
+1
+
+> arXiv:2604.22575v1 [cs.LG] 24 Apr 2026
+
+understanding, long-document analysis, and complex multimodal workflows become increasingly prevalent, efficient processing of long sequences has become a core requirement rather than an optional capability (Liu et al., 2025b). However, as sequence lengths scale, conventional full-attention Transformers face intrinsic limitations characterized by quadratic computational complexity and prohibitive memory overhead. This creates a significant bottleneck for deployment, particularly in resource-constrained environments or real-time applications. Consequently, a pivotal research frontier has emerged: how to architect foundation models that achieve both high-fidelity long-context modeling and superior inference efficiency, while maintaining a manageable training budget. To address this challenge, we extend our exploration of integrating brain-inspired mechanisms with efficient large-model architectures and introduce SpikingBrain2.0 (SpB2.0, Figure 1) , a 5B hybrid spiking model series comprising SpB2.0-5B and SpB2.0-VL-5B. Compared to its predecessor (Pan et al., 2025b), SpB2.0 offers substantial upgrades in both architectural design and training efficiency. From the architectural perspective, the dominant computational bottleneck of standard Transformers shifts from feed-forward matrix multiplications to attention operations as sequence length increases. SpB2.0 mitigates this through two complementary designs: i) Dual-Space Sparse Attention (DSSA). We introduce an inter-layer hybrid attention architecture, termed DSSA, that combines Sparse Softmax Attention (MoBA (Lu et al., 2025)) and Sparse Linear Attention (SSE (Pan et al., 2025a)) at a 1:3 ratio, aiming to better balance long-context capability and computational efficiency. Specifically, SSE operates sparsely over compressed state representations, while MoBA performs sparse computation over the exact, uncompressed KV cache. This brain-analogous sparsity of both mechanisms also helps mitigate attentional distraction and noise. ii) Dual-Path Activation Coding . To accelerate matrix multiplication (MatMul) across different hardware platforms and computing paradigms, we explore multiple quantization strategies. For event-driven neuromorphic hardware (Roy et al., 2019; Schuman et al., 2022; Frenkel et al., 2023), we apply integer quantization together with spike-sequence expansion (Xu et al., 2026b;a), replacing dense MatMuls with sparse integer accumulation. For synchronous GPU execution, we adopt FP8 quantization to accelerate MatMuls by leveraging dedicated Tensor Cores on NVIDIA Hopper GPUs. From the training perspective, continued training offers an efficient pathway for architectural migration under a limited training budget (Kasai et al., 2021), enabling substantial efficiency gains without extensive retraining. Accordingly, SpB2.0 adopts an efficient Transformer-to-Hybrid (T2H) conversion pipeline, with two dedicated paths for LLMs and VLMs, respectively: i) LLM conversion. We employ a multi-stage pipeline consisting of short-context distillation, three-stage long-context extension to 512k, general supervised fine-tuning (SFT), and reasoning-oriented SFT, supplemented by a preliminary exploration of on-policy distillation. Starting from Qwen3-4B-Instruct (Yang et al., 2025a) and using a fully open-source data mixture, the total training cost is approximately 4,656 A100 GPU hours (14B CPT tokens versus 150B in SpB1.0). ii) 
+
+VLM conversion. We adopt a two-stage pipeline consisting of knowledge distillation and instruction SFT. Starting from Qwen3-4B-VL-Instruction (Bai et al., 2025a) and using open-source datasets, the total training cost is approximately 1,977 A100 GPU hours. Based on this architecture and conversion pipeline, we develop the SpikingBrain2.0 model series and demonstrate several key advantages: 
+
+• Long-Context Efficiency : i) Under HuggingFace sequence-parallel inference, SpB2.0 achieves up to 10.13 × Time-to-First-Token (TTFT) speedup over the base Transformer at 4M context length. ii) Under vLLM tensor-parallel inference, it delivers 4.5 ×, 1.12 ×, and 4.3 × speedups in TTFT, Time-Per-Output-Token (TPOT), and end-to-end latency, respectively, at 512k length. iii) Owing to its reduced memory footprint, SpB2.0 also supports higher request concurrency and can serve sequences beyond 10M tokens on 8 A100 GPUs with chunked prefill. 
+
+• Competitive Performance : i) Despite relying solely on open-source data for lightweight conversion, SpB2.0 achieves performance comparable to Qwen3-4B on a broad set of general benchmarks (average 
+
+>95%) while consistently outperforming Qwen2.5-3B; its post-SFT performance also approaches that of Qwen3 and surpasses the larger SpB1.0-7B. ii) In the multimodal setting, SpB2.0-VL attains performance comparable to strong full-attention baselines such as Qwen2.5-VL-3B, effectively recovering the overall capability of Qwen3-VL-4B. 2• Minimal Training Overhead : The complete conversion of both the LLM and VLM models requires fewer than 7k A100 GPU hours in total and can be completed within 9 days on 32 A100 GPUs, while delivering competitive performance together with substantial efficiency gains. We further summarize several practical takeaways from this conversion process. 
+
+• Cross-Hardware Compatibility : By combining complementary quantization strategies, SpB2.0 can be deployed across diverse hardware platforms, including both GPUs and neuromorphic chips. i) The FP8 path achieves 2.52 × TTFT speedup at 250k length with only 0.24% accuracy loss. ii) The INT8-Spiking path attains 64.31% spike-sequence sparsity with only a 0.69% performance drop, while simulation further shows significant hardware-efficiency gains over the INT8 baseline: area is reduced by 70.6%, and power is reduced by 48.1% and 46.5% at 250MHz and 500MHz, respectively. Overall, SpikingBrain2.0 provides a practical and lightweight path to develop multimodal, efficient spiking hybrid foundation models. More broadly, it further validates the potential of deeply integrating brain-inspired mechanisms with efficient large model architectures. Such designs are particularly appealing for long-context workloads, edge deployment, and resource-constrained scenarios, where efficient large-model inference is increasingly critical. 
+
+# 2 Preliminary 
+
+This section introduces the background necessary for understanding SpikingBrain2.0. We first review attention mechanisms relevant to this work, including MoBA and SSE (Section 2.1). We then describe the Transformer-to-Hybrid conversion paradigm (Section 2.2), followed by a brief overview of spiking neural networks (Section 2.3). Finally, we revisit SpikingBrain1.0, the predecessor of this work, which provides an initial attempt to integrate brain-inspired mechanisms into large models (Section 2.4). A summary of the notations used throughout the paper is provided in Appendix A. 
+
+2.1 Different Attention Mechanisms 
+
+Modern autoregressive foundation models can be viewed as sequence modeling systems. Inputs from different modalities are first tokenized into a sequence of representations [x1, . . . , xt, . . . , xn], over which the model progressively refines latent features to perform downstream tasks. Within this framework, causal attention serves as the core mechanism for information interaction along the sequence dimension. Given an input representation xt, the model projects it into a query, key, and value triplet. At time step t,the query qt interacts with historical keys and values ks, vs for s ≤ t to produce the output representation ot.
+
+Full Attention (FA) In standard Transformers (Vaswani et al., 2017), the most common attention mechanism is softmax-based full attention, which computes exact pairwise interactions: 
+
+O = softmax( QK ⊤ + log M)V; ot =
+
+∑ts=1 exp( qtk⊤ 
+
+> s
+
+)vs
+
+∑ts=1 exp( qtk⊤ 
+
+> s
+
+) . (1) Although FA provides precise sequence modeling, it becomes increasingly inefficient for long contexts. During training, it incurs quadratic computational complexity O(n2) (left formulation). During inference, memory usage grows linearly with sequence length because all historical KV pairs must be retained in the KV cache (right formulation). Consequently, pure FA becomes increasingly impractical as context length scales. To address this limitation, two major families of efficient attention mechanisms have been widely studied: linear attention and sparse attention. They reduce the burden of long-context serving through different design principles and offer distinct trade-offs between efficiency and performance. 
+
+Linear Attention (LA) Linear attention removes the softmax normalization from the attention map (Katharopoulos et al., 2020; Sun et al., 2023; Yang et al., 2024b; Dao & Gu, 2024; Yang et al., 32024c). In its recurrent form, historical KV information is compressed into a fixed-size state matrix St ∈ Rc×d
+
+through an outer-product update: 
+
+O = ( QK ⊤ ⊙ M)V; ot = qtSt, where St = St−1 + k⊤ 
+
+> t
+
+vt. (2) This formulation reduces both computational and memory overhead. During training, LA achieves linear complexity O(n) (left formulation). During inference, it requires constant memory because the KV cache is replaced by the recurrent state matrix (right formulation). While LA scales favorably with sequence length, its limited state capacity often leads to degraded performance on long-context tasks that require complex reasoning or precise information retrieval (Arora et al., 2024a;b; Jelassi et al., 2024). 
+
+Sparse State Expansion (SSE) To alleviate the recall limitations of vanilla LA, SSE (Pan et al., 2025a) expands the linear-attention state into multiple partitions with shared attention parameters. At each step, a gating vector et is computed, and only the top-k partitions are selected for sparse state updates: 
+
+et = softmax( xtWe), T = {i | eit ∈ top - k(et)}, (3) 
+
+Sit =
+
+{
+
+Sit−1 + eit · k⊤ 
+
+> t
+
+vt, for i ∈ T 
+
+Sit−1, for i / ∈ T (4) 
+
+ot = ∑
+
+> i∈T
+
+eit · qtSit. (5) To stabilize training of the sparse component, SSE introduces an always-selected partition and adopts a LoRA-based parameterization strategy. This design increases the effective state capacity of LA while keeping both computational and parameter overhead nearly constant, thereby improving long-context recall. 
+
+Sparse Attention (SA) Unlike FA, sparse attention computes attention over only a subset of historical tokens rather than the entire KV history (Xiao et al., 2024; Li et al., 2024d; Tang et al., 2024; Yuan et al., 2025). Such methods rely on selection strategies to identify the most relevant KV pairs. In this work, we focus on input-dependent block-sparse attention, with Mixture of Block Attention (MoBA) (Lu et al., 2025) as a representative example. Specifically, the query qt first interacts with block-pooled keys to produce selection scores, after which the top-k KV blocks are chosen for exact attention computation: 
+
+et = softmax( qt block _pool( Kt)) , T = {i | eit ∈ top - k(et)}, (6) 
+
+O = softmax( QK ⊤ 
+
+> i∈T
+
++ log M)Vi∈T . (7) MoBA-style sparse attention reduces computation proportionally, resulting in subquadratic training complexity 
+
+O(n2/b + nkb ), where b denotes the block size and k denotes the number of selected blocks. However, because the full KV cache must still be preserved during inference, memory usage continues to grow linearly with sequence length. 
+
+Sliding-Window Attention (SWA) SWA (Beltagy et al., 2020; Child et al., 2019; Jiang et al., 2023) is a special case of input-independent sparse attention. Instead of dynamically selecting historical tokens, each query attends only to a local window of preceding tokens: 
+
+ot =
+
+∑ts=t−w+1 exp( qtk⊤ 
+
+> s
+
+)vs
+
+∑ts=t−w+1 exp( qtk⊤ 
+
+> s
+
+) . (8) 4SWA reduces both computation and memory cost. Training complexity becomes linear in sequence length, and inference memory remains constant since only KV pairs within the local window are retained. However, similar to LA, SWA often suffers from substantial degradation in long-context scenarios, and for the same effective state size, this degradation can be even more severe (Arora et al., 2024b). 
+
+Hybrid Attention Hybrid attention combines multiple attention mechanisms within a single network to better balance efficiency and modeling capability. Two common paradigms are: i) inter-layer sequential hybridization (Lieber et al., 2024; Ren et al., 2024; De et al., 2024), in which different attention mechanisms are assigned to different layers; and ii) intra-layer parallel hybridization (Dong et al., 2024; Zuo et al., 2025; Li et al., 2025c), in which multiple attention mechanisms operate in parallel within the same layer. SpikingBrain2.0 adopts a hybrid design that combines LA and SA, following a similar intuition to prior works (Chen et al., 2021a; Hou et al., 2025; Zhang et al., 2025b; Team et al., 2026). 
+
+2.2 Transformer-to-Hybrid Conversion 
+
+Most open-source large models are built on the Full Attention (FA) Transformer architecture, largely because of its mature ecosystem and stable training behavior. In addition, the majority of pretraining is typically conducted at relatively short context lengths (e.g., 4k or 8k tokens), under which standard FA Transformers can deliver strong performance without severe efficiency constraints. However, as model development progresses to later stages—such as long-context extension, post-training compute scaling, and inference serving—the cost of scaling context length gradually becomes a major bottleneck for Transformer architectures. This motivates a central question: how can a pretrained Transformer be efficiently converted into a more efficient hybrid model through continued training, while preserving its original capabilities and incurring minimal additional cost? This paradigm is commonly referred to as Transformer-to-Hybrid (T2H) conversion. To improve the efficiency of T2H conversion, prior studies have explored multi-stage pipelines to increase training token efficiency. Early methods mainly relied on continual training over general-domain data (Kasai et al., 2021; Mercat et al., 2024; Zhang et al., 2024c). Later work introduced a range of distillation techniques, including attention weights transfer (Zhang et al., 2024b), layer-wise output alignment (Zhang et al., 2024a), and end-to-end logits-based knowledge distillation (Wang et al., 2024; Bick et al., 2025), to accelerate convergence and improve capability recovery. Empirical evidence also shows that the architectural gap between the source Transformer and the target hybrid model is a key factor in conversion efficiency. In particular, architectures that retain SWA, SA, or FA components tend to converge much faster than pure LA models (Zhang et al., 2024a; Lan et al., 2025; Tao et al., 2025). To further reduce this mismatch, several studies have also investigated hybrid layer arrangements (Gu et al., 2025; Yang et al., 2025b; Li et al., 2025a). Recently, T2H-style pipelines have been adopted in many industrial-scale foundation models to improve long-context efficiency without extensive re-pretraining (Liu et al., 2025a; Team et al., 2025b; 2026), highlighting the practical effectiveness of this paradigm. SpikingBrain2.0 follows the same paradigm and improves T2H conversion through a combination of distillation strategies, hybrid layer arrangements, training data selection, and auxiliary SWA/FA modules. 
+
+2.3 Spiking Neural Networks 
+
+Traditional artificial neural networks (ANNs) primarily rely on dense matrix multiplication as their basic computational primitive. At the neuron level, this corresponds to computing weighted sums of inputs to produce output activations. In contrast, biological neurons exhibit substantially richer electrophysiological dynamics, which are often modeled by nonlinear differential equations (Li et al., 2024c). To better capture such dynamics, spiking neural networks (SNNs) are built from spiking neuron models such as the Leaky Integrate-and-Fire (LIF) neuron (Maass, 1997; Yao et al., 2023; 2024a). A spiking neuron maintains an internal state, often referred to as the membrane potential, which integrates information over both spatial and temporal dimensions. When the membrane potential exceeds a predefined threshold, the neuron emits a spike to downstream neurons; otherwise, the potential gradually decays. This formulation is 5more biologically plausible and naturally supports event-driven computation, which can provide substantial energy-efficiency benefits during deployment. In particular, neurons update their states only when spikes are received and remain idle otherwise. As a result, SNNs deployed on neuromorphic hardware can achieve significantly lower energy consumption (Davies et al., 2018; Roy et al., 2019; Pei et al., 2019; Schuman et al., 2022; Frenkel et al., 2023; Yao et al., 2024b). However, scaling SNNs to large foundation models introduces additional requirements, including high parallelism to match modern GPU-based training infrastructure and sufficient information precision to support stable optimization. These requirements make conventional spiking neuron models, with their nonlinear recurrent dynamics and discrete spike transmission, poorly suited to large-scale training (Luo et al., 2025; Yao et al., 2025; Huang et al., 2026). To address this limitation, recent work has explored spiking coding schemes that quantize activations while simplifying neuron dynamics in large-model settings (Xing et al., 2024; Pan et al., 2025b; Huang et al., 2026). By removing complex mechanisms such as nonlinear hard resets and detailed ion-channel dynamics, these approaches make computation more compatible with efficient GPU training. At the same time, they preserve the spiking property of activations, allowing activations to be expanded into sparse event sequences during inference and thereby retaining the energy-efficiency benefits of neuromorphic hardware. Under this design, part of the computation in large models can be shifted from dense MatMul operations to sparse additions. By controlling the sparsity of the event representation, such systems can in principle achieve substantial gains in energy efficiency, making them especially attractive for edge and neuromorphic deployment. 
+
+2.4 SpikingBrain1.0 
+
+SpikingBrain1.0 (SpB1.0 (Pan et al., 2025b)) is our initial effort to integrate brain-inspired mechanisms into large-scale models through a three-level co-design framework spanning model architecture, training pipeline, and system engineering. At the architectural level, SpB1.0 combines hybrid attention, Mixture-of-Experts (MoE) modules, and adaptive spiking coding. At the training level, it adopts an efficient conversion-based pipeline compatible with existing LLMs. At the system level, it includes customized training frameworks, operator libraries, and parallelization strategies tailored to the MetaX hardware platform. Based on this framework, SpB1.0 develops two language models: SpikingBrain1.0-7B, a linear LLM, and SpikingBrain1.0-76B, a hybrid-linear MoE LLM. The primary objective of SpB1.0 is to improve long-context efficiency while moving toward more biologically inspired information processing paradigms. In particular, SpikingBrain1.0-7B achieves over 100 × TTFT speedup on 4M-token inputs, together with more than 40 ×
+
+theoretical energy reduction relative to FP16 MAC-based computation, demonstrating its potential for energy-efficient large-model deployment. 
+
+# 3 Model Architecture 
+
+Figure 1 illustrates the overall architecture of SpikingBrain2.0. At a high level, SpB2.0 adopts a Dual-Space Sparse Attention design, a non-uniform inter-layer hybrid of Sparse Softmax Attention (MoBA (Lu et al., 2025)) and Sparse Linear Attention (SSE (Pan et al., 2025a)) (Section 3.2), while retaining Full Attention (FA) only in the final layer. For the linear-attention layers, we further introduce an auxiliary SWA branch with a small window size, randomly dropped during training 1. The feed-forward blocks follow the standard SwiGLU design. For linear projections, we incorporate multiple quantization strategies for activation coding to enable efficient MatMul computation across different hardware platforms and computing paradigms (Section 3.3). 
+
+3.1 Design Considerations 
+
+Targeting Computational Bottlenecks Across Sequence Lengths In standard Transformer architec-tures, the dominant computational bottleneck shifts from feed-forward matrix multiplications (MatMuls) to attention operations as sequence length increases. Designing efficient solutions across different sequence-length regimes is therefore a central consideration in SpB2.0. To address this challenge, SpB2.0 adopts two 
+
+> 1This dropout is applied only during LLM training, whereas SpB2.0-VL retains the SWA branch throughout training.
+
+6Transformable 
+
+Embed 
+
+Text Tokenizer 
+
+Visual Encoder 
+
+SSE-SWA Block 
+
+MoBA Block 
+
+Full Attention Block 
+
+Head       
+
+> Top-kLocal KV
+> Norm Norm
+> Dropout SWA SSE
+> Top-kShared State S
+> Non-uniform Layer Interleaving 26 91
+
+FP8 (3.0) INT8 (3) 
+
+> Neuromorphic Hardware
+
+GPU 
+
+FP8 /INT8 Weight Activation Sparse Softmax Attention (MoBA) Sparse Linear Attention (SSE) 
+
+SpikingBrain2.0 - 5B 
+
+> Forward Pass Backward Pass Multi-head
+
+Linear Projections (During Inference) Different Quanti-zation Strategies 
+
+Dual-Path Activation Coding Architecture Dual-Space Sparse Attention (DSSA) 
+
+Spikes  
+
+> ()
+
+Figure 1: Architecture of SpikingBrain2.0-5B (SpB2.0). SpB2.0 adopts a 1:3 inter-layer hybrid design, termed DSSA, that combines MoBA and SSE, together with dual-path activation-coding strategies for linear projections. This design allows SpB2.0 to address the dominant computational bottlenecks of standard Transformers across different sequence-length regimes and hardware platforms. complementary designs. First, it replaces full attention with an inter-layer hybrid attention architecture to improve efficiency under long contexts. Second, it introduces multiple quantization strategies, implemented as activation coding, to accelerate 16-bit dense MatMuls across different hardware platforms in short-context regimes. Together, these designs target the dominant bottlenecks in both short- and long-context settings, making SpB2.0 suitable for efficient deployment across diverse practical scenarios. 
+
+Toward a Better Long-Context Efficiency–Performance Trade-off Balancing modeling performance and computational efficiency under long contexts is another key consideration in our architectural design. In SpB1.0-7B, we adopted an inter-layer hybrid architecture composed of LA and SWA-4k. Its linear complexity provided excellent efficiency, but the limited state capacity of LA constrained long-context modeling. In SpB1.0-76B, we instead used a mixture of LA, SWA, and FA with carefully chosen layer ratios. Although this design improved long-context capability, the inclusion of multiple FA layers limited the overall efficiency gain. To move toward a better operating point, SpB2.0 combines Sparse Attention (SA) with Linear Attention (LA), aiming to achieve both strong long-context modeling fidelity and high computational efficiency. Specifically, we retain only a single FA layer and pair Sparse State Expansion (SSE), a stronger long-context variant of vanilla LA, with SA modules to compensate for the performance loss that may arise from reducing FA layers. Prior studies (Pan et al., 2025a) show that SSE-hybrids achieve higher recall after conversion than LA-hybrids, suggesting that stronger LA designs can reduce reliance on FA layers in hybrid architectures and thereby improve efficiency. From the efficiency perspective, SSE, as an LA mechanism, reduces both computation and I/O, leading to lower latency and memory usage. MoBA, as an SA mechanism, reduces computation and I/O while retaining the same KV-cache storage footprint as FA. For the auxiliary SWA branch, we use a small window size comparable to the LA state size (i.e., 64-256 tokens), enabling highly efficient local attention computation. Overall, the SpB2.0 architecture provides a more favorable trade-off between long-context modeling performance and computational efficiency, enabling efficient long-context processing without substantially sacrificing precision. 
+
+Sparse Memory Modeling Importantly, both attention modules, SSE and MoBA, introduce intrinsic sparsity, which helps mitigate attention distraction caused by noisy long sequences (Pan et al., 2025a). 7Replaced Layer Index (from shallow to deep) 
+
+Identifying MoBA Layers via Performance Sensitvity LongBench Score 
+
+> MMLU Score
+> Selected as MoBA (e.g. Layer #24)
+
+SSE-SWA Block 
+
+MoBA Block 
+
+Full Attention Block 
+
+Resulting Layer Assignment 
+
+> [35]
+> (last layer)
+> [0,1,2,3,6,12,17,21,24]
+> (selected by sensitivity)
+> [4,5,7,8,...,33,34]
+> (all remaining 26 layers)
+> Located at which layer(s)? Which kind of block?
+
+Figure 2: Layerwise performance sensitivity and resulting layer assignment for SpB2.0-5B. Left: 
+
+each point denotes the performance of a candidate model obtained by replacing a single FA layer with SSE. Dashed lines indicate the Qwen3 baseline performance on MMLU and LongBench. Layers whose replacement causes sharp degradation are selected as MoBA layers. Right: the resulting hybrid layer assignment, where the final layer is retained as FA, the sensitivity-selected layers are assigned to MoBA, and the remaining layers are converted to SSE-SWA. Conceptually, SSE performs sparse computation over compressed state representations, whereas MoBA performs sparse computation over the exact, uncompressed KV cache. The two mechanisms are therefore naturally complementary and share a common sparse-memory intuition. This sparse-memory design also aligns with brain-inspired memory mechanisms, which often rely on selective gating and competitive inhibition to regulate signal flow and suppress noise, as in interactions between the hippocampus and neocortex. In this sense, the hybrid sparse-memory design of SpB2.0 is not only computationally efficient, but also conceptually consistent with biologically analogous principles of memory organization. 
+
+3.2 Hybrid Model Architectures with DSSA 3.2.1 SpikingBrain2.0-5B Language Model 
+
+SpB2.0-5B language model is obtained by converting Qwen3-4B-Instruct-2507 (Yang et al., 2025a) into a DSSA-based model via our Transformer-to-Hybrid pipeline, featuring an inter-layer hybrid of Sparse Softmax Attention and Sparse Linear Attention. The model contains 36 layers (indexed from 0 to 35), of which 9 are replaced with MoBA attention, specifically layers [0,1,2,3,6,12,17,21,24]. These layers are selected using a greedy, training-free layer selection strategy. Concretely, we first replace the FA module in each layer with SSE individually, yielding 36 candidate models. We then evaluate all candidates in parallel on LongBench (32k) and MMLU. As shown in Figure 2, performance degrades progressively as the replaced layer moves toward the bottom. This trend likely arises because earlier layers dominate residual information flow and their outputs propagate through all subsequent layers. Based on this observation, we analyze the performance curve from deeper to shallower layers and identify layers that exhibit sharp degradation. These layers are selected as MoBA layers, as replacing them with LA would substantially degrade context modeling. Empirically, this efficient training-free selection strategy yields better capability recovery than uniform layer interleaving, as shown in Table 1. In addition to these MoBA layers, we retain the final layer (layer 35) as FA. This design is motivated by observations from MoBA (Lu et al., 2025), which suggest that sparse attention may lead to suboptimal SFT performance due to sparse gradient propagation. Retaining the final layer as FA helps stabilize training. The remaining 26 layers are converted to SSE. During conversion, we replace the original GQA with MHA by repeating the KV projections. Empirically, we find that compressed linear attention suffers more severe recall degradation under GQA than softmax attention, likely because LA performs retrieval through a single 8Table 1: Layer selection comparison. Selected layers outperform uniform interleaving after SFT with 100k samples on MMLU, LB-32k (LongBench 32k), and IFEval.            
+
+> Train loss MMLU LB-32k IFEval Uniform 0.875 55.23 13.65 40.53
+> Selected 0.846 60.32 14.06 47.72
+
+Table 2: SSE configuration comparison. Under N4k2 settings after SFT with 100k samples, SSE-GDN shows better convergence than SSE-GLA, while the ReLU feature map brings no consistent gains.          
+
+> Train loss MMLU SSE-GLA 0.955 44.97 SSE-GLA-ReLU 0.990 45.69
+> SSE-GDN 0.871 49.67
+> SSE-GDN-ReLU 0.880 48.34
+
+matrix multiplication and therefore has weaker query expressiveness. Specifically, we adopt SSE-GDN, which consistently yields better post-conversion performance than SSE-GLA (Table 2). For the QK feature map, we use SiLU, as our experiments show that the widely used non-negative ReLU feature map does not improve capability recovery (Table 2). We also exclude short convolutions, as they further increase architectural deviation from the base Transformer. For SSE layers, we introduce an auxiliary SWA branch with window size 128 and randomly drop it during training with a dropout rate of 0.5. This design is motivated by the complementary properties of LA and SWA. Under a comparable state size, pure LA offers stronger out-of-window retrieval but converges more slowly, whereas small-window SWA accelerates convergence at the cost of recall. Following prior work (Benfeghoul et al., 2025), we therefore apply dropout to the SWA branch to reduce interference with the main LA pathway and avoid computational shortcuts that may weaken LA learning. The outputs of the two branches, after output projection, are first normalized with RMSNorm, which we term merge norm , and then summed. This design aligns activation scales and improves stability during the early stage of conversion training. As shown in Table 22, the combination of these techniques, including a small SWA window, branch dropout, and merge norm, effectively prevents degradation of the LA branch. In particular, when evaluated with SSE-only inference, the model retains most of the capability of the full model, whereas SWA-only inference leads to a substantial performance drop. Finally, MoBA, FA, and SWA retain RoPE and QK-Norm, while SSE-GDN does not use positional encoding and instead applies L2 normalization to the query and key vectors. 
+
+3.2.2 SpikingBrain2.0-5B Vision-Language Model 
+
+SpikingBrain2.0-VL-5B (SpB2.0-VL) is obtained by converting Qwen3-4B-VL-Instruction (Bai et al., 2025a). Its language backbone follows the same architecture as SpB2.0-5B, including the hybrid attention design, layer arrangement, and detailed SSE configuration. The visual encoder is kept identical to that of Qwen3-VL, and visual features are injected into the language backbone through the DeepStack feature injection mechanism (Meng et al., 2024). Compared with the LLM configuration, several adjustments are introduced to better support multimodal tasks. Specifically, for the language backbone of the VLM, the auxiliary SWA branch uses a larger window size of 256, random dropout on the SWA branch is disabled during training, and a larger top-k value is used for MoBA, as discussed in Section 4.2. These modifications are motivated by the observation that vision-language tasks typically require more precise and more global token interactions than pure language modeling. As a result, VLMs rely more heavily on dense token-level interactions, which are more naturally captured by softmax-based attention mechanisms. 
+
+3.3 Quantization and Activation Coding 
+
+To support diverse hardware platforms and computing paradigms, SpikingBrain2.0 adopts two complementary quantization paths, whose overall design is illustrated in Figure 3. The INT8-Spiking path preserves and validates the brain-inspired properties of our framework, including adaptive-threshold spiking and event-driven computation, with minimal accuracy loss. In parallel, the FP8 path targets contemporary GPU infrastructure 95 2 8INT8 
+
+> t
+
+NVIDIA Hopper Tensor Core Neuromorphic Asynchronous Compute Array Activation Vector    
+
+> dense matmul
+> 5 0 .2 0 .8 0 .
+> Weight Matrix
+> sparse async matmul
+> FP8 E4M3
+> t
+> t
+> SHIFT ADD ADD ADD SHIFT SHIFT SHIFT SHIFT SHIFT SHIFT
+> Weight (INT8)
+> Activation  (Spike )Result
+
+Shift-Add Accumulation   
+
+> Adaptive-threshold Spike Coding (1)
+> (00000101) 2(00000010) 2(00001000) 2
+> Bitwise Coding (2)
+> Expand into Virtual Timesteps (3)
+> Event Driven Sparse Accumulation (4)
+> shift-add accumulation DeepGEMM &Customized-oriented Deployment Steps (1)-(4)
+
+FP8 Format Integer-Spiking Format 
+
+> Practical inference acceleration GPU-oriented deployment
+> High spike-sequence sparsity for event-driven execution Significant area and power savings
+
+Figure 3: Dual quantization paths in SpikingBrain2.0. The FP8 path targets practical inference acceleration by executing FP8 MatMul on NVIDIA Hopper Tensor Cores. The INT8-Spiking path converts activations into sparse spike sequences, enabling sparse event-driven accumulation on asynchronous neuromor-phic hardware. Together, the two paths support efficient deployment across both mainstream GPU platforms and neuromorphic systems. and provides strong practical efficiency. Together, these two quantization strategies enable SpB2.0 to bridge biologically inspired spiking computation with efficient deployment on modern hardware. 
+
+3.3.1 Integer–Spiking Format for Neuromorphic Hardware 
+
+As the biologically inspired cornerstone of SpikingBrain2.0 (SpB2.0), the Integer-Spiking quantization path inherits and extends the spiking coding mechanism of SpB1.0, formalizing it into a quantization-native framework that bridges integer arithmetic with event-driven neuromorphic computation. This design is rooted in a key insight: integer activations and sparse spiking events are mathematically isomorphic, such that an integer value can be directly mapped to the cumulative count of spiking events over time. Specifically, integer-valued activations, obtained through Adaptive-threshold Spiking Coding from SpB1.0 (Pan et al., 2025b) (Figure 3, step (1)), can be expanded into multi-timestep sparse event sequences through dedicated encoding schemes such as bitwise coding (Xu et al., 2026a) (Figure 3, steps (2)-(3)): each bit in the 8-bit integer represents the firing potential (1) or resting potential (0) at the corresponding virtual timestep. This encoding ensures that the expanded event sequence retains high sparsity, as most bits in quantized integers are zero for typical inputs, a property that is also consistent with biological neural systems, where most neurons remain inactive at a given moment. Such sparsity is critical for neuromorphic hardware, which leverages asynchronous event-driven processing to skip computations at non-spiking timesteps, thereby substantially reducing energy consumption compared to dense synchronous computation (Figure 3, step (4)). For the implementation of quantization, we adopt a fine-grained recipe: 
+
+• Weights : 128 ×128 block-level INT8 quantization. For each block, we optimize the clipping coefficient via greedy search to minimize the local mean squared error (MSE) between full-precision and quantized weights. This block-wise design balances quantization accuracy and computational efficiency. 
+
+• Activations : 1 ×128 group-level INT8 quantization. The computation of each group is equivalent to implementing the Adaptive-threshold Spiking Neuron mechanism, and with bitwise coding, each INT8 value can be converted into a signed 7-step spike sequence. This finer-grained grouping is more conducive to 10 preserving quantization accuracy while retaining the core adaptive-threshold logic, avoiding over-excitation or quiescence without relying on explicit decay factors typical in neuromorphic modeling. This INT8-Spiking pipeline strictly preserves the biological plausibility of SpB1.0, including adaptive spiking dynamics and event-driven computation, while achieving a mere 0.69% accuracy drop relative to the full-precision baseline shown in Section 5.4.1. Unlike dense floating-point matrix multiplications in traditional LLMs, our framework can replace core computations with sparse integer additions with suitable neuromorphic hardware—each operation corresponds to a spiking event’s contribution, inspired by the energy-efficient signal propagation in biological brains. Designed explicitly for emerging neuromorphic hardware, this path enables seamless deployment on asyn-chronous event-driven architectures, reducing hardware overhead while maximizing energy efficiency. When combined with the GPU-optimized FP8 path, it allows SpB2.0 to span from biologically inspired neuro-morphic systems to mainstream computing platforms, delivering a versatile solution for both fundamental brain-inspired research and practical LLM deployment. 
+
+Hardware Implementation To support Integer–Spiking Format computation, we design a dedicated hardware architecture that maps dense INT8 matrix multiplication to sparse Integer–Spiking matrix compu-tation. The architecture consists of independent on-chip data/weight buffers, a 128 ×128 compute array, an accumulator, and a control module. The compute array consists of 128 parallel 128-input pipelined adder trees. Each adder tree has an independent weight input while sharing activation inputs. At runtime, the control module reads weights and activations, applies bitwise coding to generate spike sequences, and feeds them serially into the compute units. The compute units perform sparse accumulation. The accumulator uses shift-add across temporal steps and directly sums results across tiled blocks. The measured area and practical power results are reported in Section 5.4.2. 
+
+3.3.2 FP8 Format for Industrial GPUs 
+
+Since neuromorphic hardware is not yet widely available, most LLM development and deployment still rely on GPUs operating in a synchronous computing paradigm. To evaluate efficiency on modern industrial hardware, we develop a GPU-friendly FP8 variant of SpB2.0. Specifically, we implement the activation coding path in the FP8 E4M3 format and leverage Tensor Cores on NVIDIA Hopper GPUs using DeepGEMM and customized Triton kernels. These kernels support weight and activation quantization, fused SwiGLU with quantized output, and fused RMSNorm with quantized output. We further replace the standard self-attention operator with SageAttention2 (Zhang et al., 2025a) to improve efficiency. This FP8 implementation serves as a practical performance proxy for modern GPU platforms, while reducing the accuracy gap to only 0.24%, as shown in Section 5.4. At the same time, several small projection components in SSE, such as QK-LoRA and selective gating, as well as MoBA quantization, exhibit relatively high implementation complexity but unfavorable gain-overhead ratios. These components are therefore retained in BF16 precision to preserve computational fidelity. 
+
+# 4 Training Pipeline 
+
+The objective of Transformer-to-Hybrid (T2H) conversion in SpikingBrain2.0 is to recover model capability at minimal additional training cost while remaining applicable to both language-only and vision-language models. This design enables substantial efficiency gains without extensive retraining. As illustrated in Figure 4, we develop two dedicated conversion pipelines tailored for LLMs (Section 4.1) and VLMs (Section 4.2). Compared with SpB1.0, the proposed framework extends to a broader modality setting and improves token efficiency. 
+
+4.1 LLM Conversion 
+
+We initialize SpB2.0-5B from Qwen3-4B-Instruct-2507. Most parameters are inherited from the base Transformer, while newly introduced parameters are randomly initialized. As summarized in Table 3, we 11 Qwen3-4B-Instruct-2507 
+
+Knowledge Distillation Instruction SFT Short-context Distillation Long-context Extension General SFT Reasoning SFT Key Advantages: 
+
+Qwen3-VL-4B-Instruct 
+
+LLM Conversion Pipeline: 
+
+VLM Conversion Pipeline:     
+
+> Applicable to both LLMs and VLMs About 10× higher token efficiency than SpikingBrain1.0
+> Completed within 9 days on 32 NVIDIA A100 GPUs
+
+Figure 4: Training pipelines for Transformer-to-Hybrid (T2H) conversion in SpikingBrain2.0. 
+
+SpB2.0 adopts dedicated conversion paths for LLMs and VLMs, enabling efficient architectural migration across both language-only and vision-language settings. Table 3: Training configurations for each stage of LLM T2H conversion. G/R-SFT: general/reasoning SFT; LR: learning rate; Const/Cos: constant/cosine-decay learning-rate schedule.                                                                                                  
+
+> Distillation LongCT1 LongCT2 LongCT3 G-SFT R-SFT
+> Peak LR 3×10 −53×10 −63×10 −63×10 −65×10 −65×10 −6
+> End LR 3×10 −63×10 −63×10 −63×10 −65×10 −75×10 −7
+> LR schedule Cos Const Const Const Cos Cos Optimizer AdamW ( β1= 0 .9,β2= 0 .95 )Weight decay 0.1 Grad clip 1.0 Sequence length 8k 64k 256k 512k 8k 24k Batch size (samples) 64 16 4264 32 Training tokens (B) 3335\\Training samples 400k 50k 12k 9.6k 500k 500k Auxloss weight 0.001 SWA dropout rate 0.5 MoBA chunk size 512 1k 4k 4k 4k 4k MoBA topk 4812 12 12 12 GPU hours of A100 400 448 608 1536 384 1280
+
+then perform a multi-stage conversion pipeline consisting of short-context distillation, long-context extension to 512k, general supervised fine-tuning (SFT), and reasoning-oriented SFT. Across all stages, we carefully control the training token budget to ensure effective capability recovery while maintaining high training efficiency. In addition, we conduct a preliminary study on on-policy distillation, providing initial evidence for the feasibility of applying RL-style optimization to SpB2.0. The total training cost of SpB2.0-5B conversion is approximately 4,656 A100 GPU hours. As a result, the full development pipeline, from the base pretrained model to the long-context and instruction-tuned versions, can be completed within one week on 32 A100 GPUs. 
+
+Short-context distillation Because the architecture changes substantially after conversion, resulting in an initial training loss above 10, we first perform distillation on high-quality generic data using the original Transformer as the teacher. This stage aims to rapidly recover the model’s general language modeling capability while enabling a smooth adaptation to the target architecture. We combine layer-wise output alignment via MSE with end-to-end logits-based knowledge distillation, using the following objective: 
+
+L = LCE + c · L aux + α · L KD + β · |L KD /LMSE | · L MSE . (9) The definitions of these loss terms are provided in Appendix B. During distillation, we set α = β = 0 .1,which empirically performs better than setting both coefficients to 1. For the KD loss, we select the top-128 12 logits and renormalize them to form the teacher distribution. For the MSE term, we average the alignment loss across all layers using attention outputs. The MoBA selection ratio is set to 25%, corresponding to 2k selected tokens. At this stage, we train on a high-quality continual-training mixture composed of Nemotron-Pretraining-SFT-v1 (Basant et al., 2025) and a high-quality subset of Nemotron-CC-v2 (Basant et al., 2025) (sampled from Diverse-QA and High-Quality) at a ratio of 1:3. All short-context samples are packed into 8k sequences. In total, we use 400k samples (approximately 3B tokens) for distillation. We further evaluate dataset sizes from 200k to 600k samples and find that 400k is an effective turning point, beyond which performance gains begin to saturate, as shown in Figure 5. This result suggests that most knowledge transfer has already been completed. After this stage, the model recovers more than 95% of the original MMLU score (69.86 vs. 72.45). 200 300 400 500 600 
+
+> Training Samples (k)
+> 67
+> 68
+> 69
+> 70
+> 71
+> 72
+> 73
+> 74
+> MMLU Score
+> Saturation Point
+> (400k Samples)
+> Recovered 96.4% Score
+> CPT (Distillation) Performance vs. Training Data Size
+> Our Distilled Model
+> Original Baseline (72.45)
+> Baseline @ 200k CPT (71.83)
+
+Figure 5: MMLU score versus distillation training data size. Dashed lines indicate the Qwen3 MMLU baselines, including the original score and the score after training on our 200k CT dataset. 
+
+Long-context extension After short-context distillation, we conduct progressive long-context continual training to restore the long-context capa-bility of the target hybrid model. Even when the base Transformer already supports long contexts, conversion followed only by short-context CPT is insufficient to recover this capability; high-quality long-context data are still required to reactivate it. We therefore adopt three stages of progressive length expansion: 64k, 256k, and 512k. During training, we jointly increase the MoBA chunk size and top-k value, resulting in activation ratios of 12.5%, 18.8%, and 9.4%, respectively. Concur-rently, the sequence-parallel degree is increased from 4 to 8 and then to 16 using Ulysses (Jacobs et al., 2023). Unlike SpB1.0, which relies on unmasked concate-nated short texts, we train on naturally long doc-uments with variable lengths. Specifically, we use the ProLong (Gao et al., 2025) dataset and replace its short-text mixture (originally from FineWeb-Edu) with the same high-quality Nemotron-CC subset used in the previous stage. Across the three stages, we train on 11B tokens with a constant learning rate, including 5B tokens at the 512k stage. Compared with a 3B-token variant, this setting yields similar pretrained performance but noticeably better post-SFT performance on tasks such as LongBench and GSM8K. As shown in Table 21, long-context capability improves steadily across the three stages, while short-context benchmarks such as MMLU decrease only slightly. 
+
+General SFT After long-context training, we perform general SFT to strengthen instruction-following (IF) capability. This stage does not include explicit CoT data. We observe that, even when converting from an instruction-tuned base model, IF performance degrades substantially after continual training if no SFT is applied. This degradation is particularly visible on generative benchmarks such as LongBench. To improve data diversity, we mix several SFT datasets covering chat, mathematics, and code tasks. Training is conducted at an 8k sequence length for one epoch over 500k samples. Increasing the number of epochs does not yield meaningful downstream gains. We also experiment with long-context checkpoint merging, which slightly improves pretrained performance but does not translate into consistent gains after SFT. 
+
+Reasoning-oriented SFT To equip the model with explicit CoT reasoning capability, we perform an additional reasoning-oriented SFT stage after general SFT. We use a mixture of datasets covering mathematics, code, science, dialogue, and safety tasks. Training is conducted with a 24k sequence length, as more than 99% of the collected samples fall within this range, using 500k samples for one epoch. After this stage, the model is able to generate explicit reasoning traces and achieves improved performance on reasoning-intensive tasks such as mathematics and coding. 13 On-policy Distillation (OPD) Following Reasoning SFT, we investigate on-policy distillation (Agarwal et al., 2024; Lu & Lab, 2025) to further enhance complex reasoning. We employ Qwen3-4B-Thinking-2507 as the teacher and the non-RL SpB2.0-5B as the student, performing distillation on the deduplicated DAPO-Math-17k dataset with a reverse KL objective. During this process, the student generates responses on-policy and aligns its logits with those of the teacher. OPD is particularly effective in this setting for two primary reasons: first, the T2H conversion ensures vocabulary consistency between the teacher and student; second, the Qwen3-Thinking model has undergone additional post-training stages, exhibiting superior reasoning ability (e.g., higher AIME performance) and thus serving as a high-quality distillation target. Compared to vanilla RL-based methods such as GRPO (Shao et al., 2024) and DAPO (Yu et al., 2025) that rely on sparse rewards, we find that OPD yields more stable performance improvements. Training is implemented using the verl framework on 16 A100 GPUs, with vLLM for rollout and FSDP as the training backend, together with the one-step-wise strategy for computational efficiency. We set the logits Top-k to 64 and cap the maximum response length at 9k tokens. The model is trained for 290 steps (approximately 18k samples). The KL loss converges stably, and the resulting model shows clear improvements in advanced mathematical reasoning and coding tasks. These results provide preliminary evidence for the efficacy of RL-style optimization on SpB2.0, with larger-scale RL exploration left for future work. 
+
+Key Findings from LLM T2H Conversion 
+
+During the development of the LLM T2H pipeline, we conducted extensive experiments and obtained several practical insights beyond simple hyperparameter tuning. 
+
+• A CPT warm-up stage is essential, and pure SFT-based conversion cannot effectively recover model capability. Unlike some prior studies (Zhang et al., 2024a; Wang et al., 2024), we find that pure SFT yields only limited recovery of general capabilities, often accompanied by noticeable performance degradation and poor token efficiency. Empirically, 100k SFT samples achieve performance comparable to only 10k CPT samples. We hypothesize that the learning signal provided by SFT is too sparse for architectural conversion, making a CPT warm-up stage necessary. 
+
+• Distillation is much more effective during CPT than during SFT. Although distillation can reduce SFT loss, directly applying distillation in the SFT stage does not consistently improve downstream performance and may even degrade it. In contrast, distillation during CPT consistently improves benchmark performance. 
+
+• Data quality is critical for CPT. High-quality data subsets yield substantially better results than generic pretraining data. We evaluate multiple datasets, including DCLM, Nemotron-CC, and its high-quality subsets, and find that higher-quality data significantly accelerates capability recovery under a limited training budget. 
+
+• General-domain capability can be largely recovered with a surprisingly small token budget. In SpB1.0, we used roughly 100B tokens for CPT, but our experiments reveal considerable room for compression. In SpB2.0, using only 1.5B and 3B CPT tokens already recovers 94.3% and 96.4% of the original MMLU score, respectively. Achieving this level of recovery, however, depends on both high-quality data and accurate layer selection. 
+
+• Long-context training is necessary after conversion. Training only on short sequences restores short-context capability but fails to generalize to longer sequence lengths, even when the base model already supports long contexts. Proper long-context training stages are therefore required to activate the hybrid model’s long-context capability. 
+
+4.2 VLM Conversion 
+
+Unlike conventional VLM construction, which typically combines a pretrained LLM with a vision encoder (Liu et al., 2023; Li et al., 2024a), SpikingBrain2.0-VL (SpB2.0-VL) is obtained through T2H conversion from Qwen3-4B-VL-Instruction. As a result, SpB2.0-VL inherits a certain level of the visual understanding 14 capability of the original model, allowing us to avoid large-scale vision-language alignment training from scratch. Instead, the main challenge is to mitigate the capability perturbation introduced by architectural conversion. During conversion, we inherit most parameters from Qwen3-VL, including the vision encoder, while randomly initializing the newly introduced modules. To restore and stabilize model performance after conversion, we adopt a two-stage training pipeline consisting of knowledge distillation followed by instruction supervised fine-tuning (Instruction SFT), as summarized in Table 4. The total training cost of SpB2.0-VL conversion is approximately 1,977 A100 GPU hours. As a result, the full development pipeline can be completed within one week on 16 A100 GPUs. Table 4: Training configurations for each stage of VLM T2H conversion. KD: knowledge distillation; VE: vision encoder; LR: learning rate; Cos: cosine-decay learning-rate schedule.                                        
+
+> KD instruct-SFT
+> Backbone LR 5×10 −55×10 −5
+> VE LR 1×10 −51×10 −5
+> LR schedule Cos Cos Optimizer AdamW ( β1= 0 .9,β2= 0 .99 )Weight decay 0.1 Grad clip 1.0 Max sequence length 8k 8k Packing length \16k Batch size (samples) 512 \Batch size (packages) \64 Training tokens (B) 26.5 Training samples 770k 6m Auxloss weight 0.001 SWA dropout rate 0MoBA chunk size 512 MoBA topk 8GPU hours of A100 672 1305
+
+Knowledge Distillation Due to the substantial architectural modifications introduced during conversion, including MoBA and SSE modules, SpB2.0-VL starts with a relatively high training loss. To facilitate a smooth transition to the target architecture, we first perform knowledge distillation on LLaVA-NeXT-Data (Liu et al., 2024a), using the original Qwen3-VL as the teacher. The objective of this stage is to rapidly recover multimodal modeling and visual understanding capability under short contexts. Following the distillation scheme used for LLM conversion, we combine layer-wise representation alignment with end-to-end logits distillation: 
+
+L = α · L KD + β · L MSE . (10) During VLM distillation, we set α = β = 1 . For the KD loss, we select the top-128 teacher logits and renormalize them to form the teacher distribution. For the MSE loss, we align the final layer outputs and average the losses across all layers. Since VLMs require stronger global and fine-grained modeling than pure LLMs, we slightly increase the MoBA top-k to 8, corresponding to 4k selected tokens, and enlarge the SWA window size to 256. We do not apply varlen packing in this stage. Training uses a global batch size of 512 on 32 A100 GPUs, with a per-device batch size of 8 and gradient accumulation of 2, at a maximum sequence length of 8k. In total, we use 770k samples (approximately 2B tokens) for distillation. After this stage, the model recovers over 95% of the original MMStar score (49.27 vs. 51.40). 15 Instruction SFT After knowledge distillation, we perform instruction SFT to restore instruction-following capability. This stage is divided into two sub-stages: 2M General SFT and 4M Visual SFT. Both use data from LLaVA-OneVision-1.5-Instruct-Data (An et al., 2025), but differ primarily in dataset composition. The 2M General SFT stage mixes image-text and text-only instruction data, allowing the model to jointly recover language-only and multimodal instruction-following capability. The 4M Visual SFT stage focuses on VQA-style data and further incorporates additional OCR and PixMo (Deitke et al., 2025) datasets to strengthen OCR and visual reasoning capability. We use different learning rates for different model components: 5 × 10 −5 for the LLM backbone and projector, and 1 × 10 −5 for the vision encoder, together with a cosine learning-rate schedule. We also evaluate alternative settings, such as using a uniform learning rate of 1 × 10 −5 or 5 × 10 −5 for all components, and find that the adopted configuration substantially improves training stability while maintaining fast convergence. The MoBA activation ratio remains unchanged from the distillation stage. During Instruct SFT, we apply varlen packing by grouping samples of different lengths into 16k sequences. We further use online packing, in which samples are packed dynamically during training. This avoids offline preprocessing and provides greater flexibility when adjusting dataset mixtures. In total, instruction SFT uses 6M samples, corresponding to approximately 6.5B tokens. Training on 32 A100 GPUs requires approximately 6.8 hours per million samples. 
+
+Key Findings from VLM T2H Conversion 
+
+During the development of the VLM T2H pipeline, we conducted extensive experiments and obtained several practical insights beyond routine hyperparameter tuning. 
+
+• Mid-training followed by SFT is more effective than pure SFT. Before introducing knowledge distillation, we also explored a mid-training stage based on image-caption pairs. Under the same overall data budget, adding mid-training consistently led to better capability recovery than using SFT alone. We attribute this improvement to the denser and more informative supervision provided by caption-style data. 
+
+• Knowledge distillation is more effective than mid-training. Compared with mid-training under the same data budget, knowledge distillation yields stronger capability recovery, and the advantage persists after subsequent SFT stages. We hypothesize that layer-wise distillation signals play an important role in effectively optimizing newly initialized parameters. 
+
+• Learning-rate selection is critical. In the LA layers, the normalization modules in the SSE and SWA branches are newly initialized, and their gradients are typically smaller than those of other parameters. When the learning rate is too small (e.g., 1 × 10 −5 or 3 × 10 −5), these normalization weights remain close to their initial values. Conversely, excessively large learning rates lead to unstable optimization. Empirically, we find that 5 × 10 −5 provides the best balance for the LLM backbone. 
+
+• Dataset composition strongly affects capability recovery. Increasing the proportion of OCR-related data improves OCR performance, while incorporating PixMo data enhances visual reasoning capability. More broadly, we find that introducing task-specific data in later SFT stages is an effective way to strengthen the corresponding domain capabilities. 
+
+# 5 Results 
+
+Based on the proposed architecture and training pipeline, we develop the SpikingBrain2.0 model family. In this section, we comprehensively evaluate the models from three perspectives: capability, efficiency, and cross-hardware compatibility. We show that both SpB2.0-5B (Section 5.1) and SpB2.0-VL-5B (Section 5.2) achieve competitive performance, effectively recovering the capability of their base Transformers at very low training cost (fewer than 7k A100 GPU hours in total). At the same time, SpB2.0 delivers substantial efficiency gains for long-context 16 inference, including improvements in prefilling (TTFT), decoding (TPOT), end-to-end latency, and serving throughput (Section 5.3). For the proposed quantization strategies, we show that both quantization paths incur only minimal performance degradation while also delivering clear efficiency benefits: the FP8 path provides practical inference speedup on H100 GPUs, whereas the INT8-Spiking path yields significant hardware-efficiency gains over the INT8 baseline (Section 5.4). 
+
+5.1 LLM Performance 
+
+A primary objective of SpikingBrain2.0 is to recover the overall capability of the base Transformer at minimal additional training cost, while remaining competitive with strong open-source models of similar scale. To evaluate this goal, we assess SpB2.0-5B across three stages: the pretrained model, the instruction-tuned model, and the reasoning model. 
+
+Pretrained Model Performance To evaluate the general language modeling capability of the pretrained SpB2.0 model, we use the checkpoint obtained after the LongCT-512k stage, which has undergone only 14B tokens of continued training following conversion. We compare SpB2.0 against several strong open-source models, including Gemma3 (Sellergren et al., 2025), Llama3.2 (AI at Meta, 2024), Qwen2.5 (Yang et al., 2024a), and Qwen3 (Yang et al., 2025a). Details of the benchmark settings are provided in Appendix C.1. As shown in Table 5, SpB2.0 achieves overall performance comparable to other Transformer baselines and remains very close to Qwen3-4B-base. Additional comparisons with the base transformer Qwen3-4B-Instruct and the previous SpB1.0-7B are provided in Appendix C.3. Notably, SpB2.0 even surpasses the base transformer model on several tasks. Table 5: Comparison of SpB2.0-5B with other strong open-source base models. The best and second-best results are highlighted in bold and underline, respectively.                                                  
+
+> Gemma3-4B Llama3.2-3B Qwen2.5-3B Qwen3-4B SpB2.0-5B (+14B tokens)
+> MMLU 59.70 56.71 65.89 73.09 68.99 ARC-C 50.85 45.76 50.51 57.39 51.53 HellaSwag 70.26 69.32 67.71 67.92 66.41 Winogrande 72.77 72.38 69.46 70.48 68.35 PIQA 79.05 76.12 78.35 78.18 77.26 BBH 51.35 43.74 55.70 62.11 65.88
+> GSM8K 47.69 27.85 75.13 85.22 81.20 RULER-32k 43.44 51.38 58.95 62.28 50.87
+> Avg. 59.39 55.41 65.21 69.58 66.31
+
+Instruction-Tuned Model Performance To evaluate instruction-following and basic reasoning ability after SFT, we compare SpB2.0 with strong Transformer baselines as well as SpB1.0-7B-Instruct on a set of instruction-oriented generative benchmarks. We report results using the checkpoint obtained after the general SFT stage. As shown in Table 6, SpB2.0 achieves overall performance exceeding Qwen2.5-3B and consistently outperforms the larger SpB1.0-7B model on most benchmarks. With the exception of IFEval and MATH, its results on the remaining benchmarks stay close to those of Qwen3-4B. These results indicate that SpB2.0 retains competitive post-SFT capability despite the relatively limited training data budget used in the preceding CPT stage. We attribute the remaining gap primarily to the restricted SFT data budget and data quality, especially relative to the proprietary datasets used by other models. 
+
+Reasoning Model Performance To evaluate reasoning ability with explicit chain-of-thought (CoT), we use the checkpoint after reasoning-oriented SFT (denoted as SpB2.0-5B-Thinking) and compare it against 17 Table 6: Comparison of SpB2.0-5B with other strong open-source instruction-tuned models. The best and second-best results are highlighted in bold and underline, respectively.                                          
+
+> Gemma-3-4B Llama3.2-3B Qwen2.5-3B Qwen3-4B (2507) SpB1.0-7B SpB2.0-5B (General SFT)
+> MMLU 58.44 60.08 66.43 72.45 66.34 69.06 IFEval 75.05 69.50 58.60 80.96 43.07 68.76 GSM8K 84.76 77.71 74.07 89.16 66.87 80.97 MATH -35.22 63.16 72.28 -52.32 HumanEval 72.56 56.71 74.39 86.59 40.24 71.34 LongBench-32k 41.35 33.73 28.22 40.00 27.50 37.04
+
+several strong Transformer baselines, including Qwen3-4B-Thinking, DeepSeek-R1-Distill-Qwen-7B, and DeepSeek-R1-Distill-Llama-8B (Guo et al., 2025). The evaluation covers a set of benchmarks known to benefit from CoT reasoning, while also including MMLU to verify that reasoning-oriented training does not cause catastrophic forgetting of general knowledge. As shown in Table 7, SpB2.0-5B-Thinking achieves overall performance comparable to Qwen3-Thinking and outperforms the R1-distilled models on most benchmarks, except for the more challenging AIME. We attribute the remaining gap on AIME primarily to the lack of training samples of comparable difficulty in the data mixture. Furthermore, we evaluate SpB2.0-5B-OPD trained via on-policy distillation. We observe that even with a limited number of training samples, the model exhibits measurable improvements in reasoning performance, highlighted by notable gains on AIME’24/25. This result provides preliminary evidence for the effectiveness of on-policy RL-style optimization on SpB2.0. Table 7: Comparison of SpB2.0-5B with other strong open-source reasoning models. The best and second-best results are highlighted in bold and underline, respectively.                                         
+
+> DeepSeek-R1-Distill-Qwen-7B DeepSeek-R1-Distill-Llama-8B Qwen3-4B-Thinking (2507) SpB2.0-5B-Thinking SpB2.0-5B-OPD
+> MMLU 54.32 56.02 68.57 68.43 68.72
+> BBH 55.77 60.67 72.78 69.16 65.14 GSM8K 80.29 65.73 89.08 83.62 86.20 MATH 52.80 44.20 49.80 52.20 50.20 HumanEval -51.22 77.44 75.61 79.27
+> MBPP 50.20 44.40 58.20 58.00 55.10 AIME’24 43.33 30.00 76.67 33.33 46.67 AIME’25 30.00 20.00 73.33 23.33 43.33
+
+5.2 VLM Performance 
+
+To evaluate the multimodal capability of SpB2.0-VL-5B after instruction SFT, we conduct experiments on a comprehensive suite of multimodal benchmarks; details of the evaluation settings are provided in Appendix C.2. We compare SpB2.0-VL-5B with a range of widely used open-source baselines, including strong Transformer-based VLMs (Bai et al., 2025b;a; Chen et al., 2024b; Li et al., 2024a; Marafioti et al., 2025) as well as representative hybrid and linear architectures (Li et al., 2025b; Zhao et al., 2025; Tao et al., 2025). As shown in Table 8, although SpB2.0-VL-5B is trained without extensive large-scale alignment, it achieves performance comparable to strong Transformer baselines such as Qwen2.5-VL-3B and LLaVA-OneVision-7B, and largely recovers the capability of the base Qwen3-VL-4B. A noticeable gap relative to the base Transformer 18 Table 8: Comparison of SpB2.0-VL-5B with other strong open-source VLMs on multimodal benchmarks. Green and yellow rows denote Transformer and hybrid baselines, respectively. a Results are taken from the OpenVLM Leaderboard (OpenCompass, 2025). b Results are taken from the InfiniteVL (Tao et al., 2025) paper.                                                                                                             
+
+> Qwen2.5-VL-3B Qwen3-VL-4B InternVL2-4B a
+> LLaVA-OneVision-7B SmolVLM2-2.2B MaTVLM-3B b
+> Cobra-3B b
+> InfiniteVL-4B b
+> SpB2.0-VL-5B
+> AI2D 80.51 84.00 79.0 82.51 69.92 58.9 46.8 77.2 80.73 ChartQA 84.12 84.44 -80.36 65.40 20.0 17.9 82.0 77.64 DocVQA 93.01 94.73 -86.98 70.75 33.0 24.0 91.7 86.90 MMBench 76.88 83.58 73.6 80.57 67.48 69.4 55.9 79.0 78.39 MME 2144.75 2371.74 2064.6 1987.63 1770.07 1771 1346 2126 1981.99 MMMU(val) 51.11 55.78 48.0 49.00 -34.4 31.5 44.0 50.33 MMStar 55.80 64.40 53.9 61.87 45.73 37.5 34.7 55.6 55.40 OCRBench 82.60 84.50 78.4 63.50 67.70 35.1 30.7 79.8 75.10 RealWorldQA 65.10 71.90 60.5 69.54 56.99 52.3 51.0 67.3 67.19 SEEDBench IMG 73.88 78.46 73.2 76.64 70.69 65.6 63.3 72.9 76.08 ScienceQA 79.54 93.42 96.3 94.71 86.60 65.9 69.3 93.4 81.55 TextVQA 79.29 81.86 -75.92 68.81 53.2 42.9 78.5 71.72
+
+nevertheless remains. We expect this gap to be further reduced with higher-quality domain-specific data and a larger distillation and SFT training budget. 
+
+5.3 Long-context Efficiency 
+
+In this section, we evaluate the long-context serving efficiency of SpB2.0. The results show that SpB2.0 delivers substantial efficiency gains while maintaining competitive capability under a very low training budget. We consider two widely used deployment settings: HuggingFace sequence parallelism (Section 5.3.1) and vLLM tensor parallelism (Section 5.3.2). We report multiple serving metrics, including prefilling latency (time-to-first-token, TTFT), decoding latency (time-per-output-token, TPOT), end-to-end latency, and throughput. 
+
+5.3.1 Speedup under HuggingFace Sequence Parallelism 
+
+We first evaluate SpB2.0-5B under a standard HuggingFace setup with full sequence parallelism (SP), and compare its TTFT against the baseline Qwen3-4B, since TTFT is a key metric for real-world user experience. We fix the batch size to 1 and proportionally scale both the input sequence length and the SP degree, increasing the sequence length from 250k to 4M tokens while maintaining a constant per-GPU token budget of 125k. Both models use Ulysses for all-to-all communication. All experiments are conducted on H100 80GB GPUs. As shown in Table 9, SpB2.0 achieves a 10.13 × TTFT speedup over the base Transformer at 4M context length. The observed scaling trend is consistent with theoretical complexity. For full-attention-based Qwen3, quadratic attention cost leads to approximately linear growth in TTFT as both sequence length and GPU count increase proportionally. In contrast, the hybrid attention in SpB2.0 exhibits sub-quadratic compute growth and correspondingly sub-linear TTFT scaling. As a result, the relative TTFT advantage of SpB2.0 becomes larger at longer context lengths, making it particularly suitable for ultra-long-context serving. 
+
+5.3.2 Speedup under vLLM Tensor Parallelism 
+
+TTFT, TPOT, and End-to-End Latency Given the extensive system-level optimizations in vLLM for practical deployment, we further evaluate SpB2.0 under this framework and compare its serving efficiency with Qwen3-4B. All experiments are conducted on 8 A100 80GB GPUs with tensor parallelism (TP = 8). As summarized in Table 11, the efficiency advantage of SpB2.0 continues to increase with sequence length. Without chunked prefill, when the prompt length increases from 128k to 512k tokens with the output length 19 Table 9: TTFT comparison between Qwen3-4B and SpB2.0-5B under Hug-gingFace sequence parallelism. Length GPUs (SP Degree) Qwen3 SpB2.0 Speedup                     
+
+> 250K 228932 15734 1.84 ×
+> 500K 457314 18290 3.13 ×
+> 1M 8115121 22950 5.02 ×
+> 2M 16 236265 33100 7.14 ×
+> 4M 32 470505 46455 10.13 ×
+
+Table 10: Serving throughput comparison between SpB2.0-5B and Qwen3-4B under vLLM tensor par-allelism. Prompt Throughput (tokens/s) Generation Throughput (tokens/s) Concurrent Requests SpB2.0-5B 48671.09 47.53 76       
+
+> Qwen3-4B 30927.56 30.20 24
+> Speedup 1.57 ×1.57 ×3.17 ×
+
+Table 11: Long-context inference latency comparison between SpB2.0-5B and Qwen3-4B under vLLM tensor parallelism. TTFT denotes time to first token, TPOT denotes time per output token, and End2End denotes total generation latency. Qwen3-4B exceeds GPU memory limits beyond 4M tokens.                                                  
+
+> SpB2.0-5B Qwen3-4B Prompt Length TTFT (s) TPOT (s) End2End (s) TTFT (s) TPOT (s) End2End (s)
+> 128K 3.0947 0.0090 3.9857 4.9580 0.0063 5.5835 256K 6.5905 0.0093 7.5113 17.8807 0.0080 18.6771 512K 15.0288 0.0105 15.9903 67.5043 0.0118 68.6767
+> Enable chunked prefill for longer context
+> 1M 120.5183 0.0119 121.6955 247.5864 0.0146 249.0308 2M 368.2790 0.0148 369.7411 953.9603 0.0251 956.4483 4M 1250.8069 0.0206 1252.8452 OOM 8M 4582.5763 0.0332 4585.8591 OOM 10M 6567.2947 0.0467 6571.9159 OOM
+
+fixed at 100 tokens, SpB2.0 achieves progressively larger gains. At 512k context length, it delivers 4.5 ×,1.12 ×, and 4.3 × speedups in TTFT, TPOT, and end-to-end latency, respectively. For prompt lengths beyond 512k, we enable chunked prefill due to memory constraints. Even at 2M context length, SpB2.0 still provides substantial acceleration across all three metrics. Notably, beyond 4M tokens, Qwen3 exceeds memory limits, whereas SpB2.0 continues to support serving at lengths above 10M tokens. Compared with Qwen3, SpB2.0 also introduces several sources of overhead, including additional QKV projections in LA-SWA layers and extra TP communication from merge norm. As a result, decoding speedups become more pronounced only at longer context lengths. In addition, under chunked prefill, the measured speedup remains below the theoretical bound due to current limitations in MoBA paged-attention implementations. We expect further engineering optimization to unlock additional efficiency gains. 
+
+Throughput Improvement Leveraging the reduced memory footprint of the hybrid architecture, we further evaluate serving throughput under the vLLM framework. The experiment uses 128k input tokens and 128 output tokens. As shown in Table 10, SpB2.0 supports 3.17 × higher request concurrency due to its lower KV-cache memory usage, resulting in a 1.57 × improvement in prompt and generation throughput. With further optimization of the vLLM implementation, the concurrency gain is expected to move closer to the theoretical upper bound of 4 ×.
+
+5.4 Quantization Performance 5.4.1 Capability Preservation under Quantization 
+
+We evaluate the pretrained SpikingBrain2.0-5B model on eight general benchmarks to assess the impact of quantization on model capability. As shown in Table 12, the Qwen3-4B baseline achieves an average score of 0.6588, while full-precision SpB2.0 attains a competitive average score of 0.6392. Among the quantized variants, the INT8 model (SpB2.0-AINT8-WINT8) achieves an average score of 0.6348, corresponding to only 20 Table 12: Quantization comparison of SpB2.0 on language benchmarks. We compare the full-precision model with its INT8 and FP8 variants across eight language benchmarks. Avg. denotes the average score over all benchmarks.                                             
+
+> ARC-E ARC-C HellaSwag BoolQA OpenbookQA PiQA Winogrande MMLU Avg. Qwen3-4B 0.8043 0.5384 0.6854 0.8502 0.3000 0.7492 0.6598 0.6834 0.6588
+> SpB2.0 0.8144 0.5273 0.6771 0.7627 0.3040 0.7617 0.6417 0.6244 0.6392
+> SpB2.0-AINT8-WINT8 0.8116 0.5188 0.6758 0.7489 0.3040 0.7617 0.6354 0.6218 0.6348
+> SpB2.0-AFP8-WFP8 0.8144 0.5245 0.6740 0.7572 0.3100 0.7639 0.6353 0.6219 0.6377
+
+Table 13: TTFT comparison between full-precision SpB2.0-BF16 and SpB2.0-AFP8-WFP8. Length GPUs (SP Degree) SpB2.0-BF16 SpB2.0-AFP8-WFP8 Speedup                     
+
+> 250K 215734 6248 2.52 ×
+> 500K 418290 17772 1.03 ×
+> 1M 822950 20442 1.12 ×
+> 2M 16 33100 25463 1.30 ×
+> 4M 32 46455 31095 1.49 ×
+
+a 0.69% performance drop relative to full-precision SpB2.0. Measurements show that the firing rate of its spike sequences is merely 35.69% (i.e., a spike sequence sparsity of 64.31%). The FP8 model (SpB2.0-AFP8-WFP8) further reduces the performance drop, reaching an average score of 0.6377 with only a 0.24% drop. These results show that both quantization paths preserve the core capability of SpikingBrain2.0 with minimal degradation. In particular, the INT8 path validates the feasibility of neuromorphic-oriented deployment, while the FP8 path provides a practical solution for efficient deployment on modern GPUs. 
+
+5.4.2 Efficiency Gains from Quantization 
+
+FP8 Format The FP8 quantization path provides practical inference acceleration on NVIDIA Hopper GPUs, making it a viable deployment option on existing hardware. To evaluate this benefit, we compare SpB2.0-AFP8-WFP8 with its full-precision counterpart under the HuggingFace sequence-parallel (SP) setting, using TTFT as the primary metric across different input lengths. As shown in Table 13, the FP8 variant consistently achieves substantial speedup over the BF16 baseline at all tested sequence lengths. In particular, under the 250k (SP=2) setting, the TTFT speedup reaches 2.52 ×. After FP8 quantization, SpB2.0 achieves up to 15.13 × TTFT speedup over full-precision Qwen3-4B at 4M context length 2.
+
+INT8–Spiking Format We implement a hardware prototype of the proposed architecture in Section 3.3.1, which reads weights and input data from external interfaces, performs tiled Integer–Spiking matrix multipli-cation, and outputs final results. For comparison, we also implement an INT8 matrix-multiplication baseline. Both designs are synthesized with 28nm technology using Synopsys Design Compiler to obtain area and timing metrics. We then perform gate-level simulation using post-synthesis netlists and real network inputs, and annotate switching activities to estimate power under realistic workloads. For a fair comparison, area is reported using the 500MHz synthesis netlist, while power is reported at both 250MHz and 500MHz. As shown in Table 14, the Integer–Spiking implementation based on the Adaptive Spiking Coding scheme and dedicated hardware architecture provides stable and significant hardware-efficiency gains over the INT8 baseline: area is reduced by 70.6%, and power is reduced by 48.1% and 46.5% at 250MHz and 500MHz, respectively (corresponding normalized ratios: 0.294 ×, 0.519 ×, and 0.535 ×). These results indicate strong potential for resource-constrained edge deployments. 
+
+> 2Qwen3 can also benefit from FP8 quantization. Therefore, this comparison reflects the combined advantage of the SpB2.0 architecture and the FP8 inference path, rather than the effect of quantization alone.
+
+21 Table 14: Hardware area and power comparison between the INT8 baseline and the proposed Integer-Spiking design. Metric INT8 Baseline Integer-Spiking Normalized Ratio          
+
+> Power @250MHz (mW) 310 161 0.519 ×
+> Power @500MHz (mW) 593 317 0.535 ×
+> Area ( μm2)2,168,626 636,541 0.294 ×
+
+# 6 Conclusion 
+
+In this paper, we present SpikingBrain2.0, a hybrid spiking foundation model family designed to improve long-context efficiency with minimal additional training cost. SpB2.0 combines an inter-layer hybrid attention architecture termed Dual-Space Sparse Attention (DSSA), integrating MoBA and SSE, with hardware-oriented activation coding to address the dominant computational bottlenecks across different sequence-length regimes and deployment platforms. To support efficient architectural migration, we further develop optimized Transformer-to-Hybrid conversion pipelines for both LLMs and VLMs using only open-source data. Extensive experiments show that SpB2.0-5B and SpB2.0-VL-5B recover most of the capability of their base Transformers while delivering substantial long-context inference gains, including strong improvements in TTFT, TPOT, end-to-end latency, serving throughput, and maximum supported context length. In addition, the proposed quantization strategies enable efficient deployment across heterogeneous hardware platforms, including modern GPUs and neuromorphic hardware, with only minimal performance degradation. Overall, SpikingBrain2.0 demonstrates that sparse-memory design, efficient hybrid attention, spiking coding, and lightweight conversion training can be effectively combined in a unified foundation-model framework. We hope this work provides a practical step toward efficient multimodal large models for long-context, edge, and resource-constrained applications. 22 References 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos Garea, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In The twelfth international conference on learning representations , 2024. AI at Meta. Llama 3.2: Revolutionizing edge ai and vision with open, customizable models. https://ai. meta.com/blog/llama-3-2-connect-2024-vision-edge-mobile-devices/ , September 2024. Accessed: 2026-03-25. Xiang An, Yin Xie, Kaicheng Yang, Wenkang Zhang, Xiuwei Zhao, Zheng Cheng, Yirui Wang, Songcen Xu, Changrui Chen, Didi Zhu, et al. Llava-onevision-1.5: Fully open framework for democratized multimodal training. arXiv preprint arXiv:2509.23661 , 2025. Anthropic. 1m context is now generally available for opus 4.6 and sonnet 4.6. https://claude.com/blog/ 1m-context-ga , 2026. Accessed: March 13, 2026. Simran Arora, Sabri Eyuboglu, Aman Timalsina, Isys Johnson, Michael Poli, James Zou, Atri Rudra, and Christopher Ré. Zoology: Measuring and improving recall in efficient language models. In Proceedings of 12th International Conference on Learning Representations (ICLR) . ICLR, 2024a. Simran Arora, Sabri Eyuboglu, Michael Zhang, Aman Timalsina, Silas Alberti, James Zou, Atri Rudra, and Christopher Re. Simple linear attention language models balance the recall-throughput tradeoff. In 
+
+International Conference on Machine Learning , pp. 1763–1840. PMLR, 2024b. Shuai Bai, Yuxuan Cai, Ruizhe Chen, Keqin Chen, Xionghui Chen, Zesen Cheng, Lianghao Deng, Wei Ding, Chang Gao, Chunjiang Ge, et al. Qwen3-vl technical report. arXiv preprint arXiv:2511.21631 , 2025a. Shuai Bai, Keqin Chen, Xuejing Liu, Jialin Wang, Wenbin Ge, Sibo Song, Kai Dang, Peng Wang, Shijie Wang, Jun Tang, Humen Zhong, Yuanzhi Zhu, Mingkun Yang, Zhaohai Li, Jianqiang Wan, Pengfei Wang, Wei Ding, Zheren Fu, Yiheng Xu, Jiabo Ye, Xi Zhang, Tianbao Xie, Zesen Cheng, Hang Zhang, Zhibo Yang, Haiyang Xu, and Junyang Lin. Qwen2.5-vl technical report. ArXiv , abs/2502.13923, 2025b. URL 
+
+https://api.semanticscholar.org/CorpusID:276449796 .Yushi Bai, Xin Lv, Jiajie Zhang, Hongchang Lyu, Jiankai Tang, Zhidian Huang, Zhengxiao Du, Xiao Liu, Aohan Zeng, Lei Hou, Yuxiao Dong, Jie Tang, and Juanzi Li. LongBench: A bilingual, multitask benchmark for long context understanding. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 3119–3137, Bangkok, Thailand, August 2024. Association for Computational Linguistics. doi: 10.18653/v1/2024.acl-long.172. URL https: //aclanthology.org/2024.acl-long.172 .Aarti Basant, Abhijit Khairnar, Abhijit Paithankar, Abhinav Khattar, Adithya Renduchintala, Aditya Malte, Akhiad Bercovich, Akshay Hazare, Alejandra Rico, Aleksander Ficek, et al. Nvidia nemotron nano 2: An accurate and efficient hybrid mamba-transformer reasoning model. arXiv preprint arXiv:2508.14444 , 2025. Iz Beltagy, Matthew E Peters, and Arman Cohan. Longformer: The long-document transformer. arXiv preprint arXiv:2004.05150 , 2020. Martin Benfeghoul, Teresa Delgado, Adnan Oomerjee, Haitham Bou Ammar, Jun Wang, and Zafeirios Fountas. Untangling component imbalance in hybrid linear attention conversion methods. arXiv preprint arXiv:2510.05901 , 2025. Aviv Bick, Tobias Katsch, Nimit Sharad Sohoni, Arjun D Desai, and Albert Gu. Llamba: Scaling distilled recurrent models for efficient language processing. In First Workshop on Scalable Optimization for Efficient and Adaptive Foundation Models , 2025. Yonatan Bisk, Rowan Zellers, Ronan Le Bras, Jianfeng Gao, and Yejin Choi. Piqa: Reasoning about physical commonsense in natural language. In Thirty-Fourth AAAI Conference on Artificial Intelligence , 2020. 23 Aaron Blakeman, Aaron Grattafiori, Aarti Basant, Abhibha Gupta, Abhinav Khattar, Adi Renduchin-tala, Aditya Vavre, Akanksha Shukla, Akhiad Bercovich, Aleksander Ficek, et al. Nemotron 3 nano: Open, efficient mixture-of-experts hybrid mamba-transformer model for agentic reasoning. arXiv preprint arXiv:2512.20848 , 2025. Beidi Chen, Tri Dao, Eric Winsor, Zhao Song, Atri Rudra, and Christopher Ré. Scatterbrain: Unifying sparse and low-rank attention. Advances in Neural Information Processing Systems , 34:17413–17426, 2021a. Lin Chen, Jinsong Li, Xiaoyi Dong, Pan Zhang, Yuhang Zang, Zehui Chen, Haodong Duan, Jiaqi Wang, Yu Qiao, Dahua Lin, et al. Are we on the right way for evaluating large vision-language models? Advances in Neural Information Processing Systems , 37:27056–27087, 2024a. Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde de Oliveira Pinto, Jared Kaplan, Harri Edwards, Yuri Burda, Nicholas Joseph, Greg Brockman, Alex Ray, Raul Puri, Gretchen Krueger, Michael Petrov, Heidy Khlaaf, Girish Sastry, Pamela Mishkin, Brooke Chan, Scott Gray, Nick Ryder, Mikhail Pavlov, Alethea Power, Lukasz Kaiser, Mohammad Bavarian, Clemens Winter, Philippe Tillet, Felipe Petroski Such, Dave Cummings, Matthias Plappert, Fotios Chantzis, Elizabeth Barnes, Ariel Herbert-Voss, William Hebgen Guss, Alex Nichol, Alex Paino, Nikolas Tezak, Jie Tang, Igor Babuschkin, Suchir Balaji, Shantanu Jain, William Saunders, Christopher Hesse, Andrew N. Carr, Jan Leike, Josh Achiam, Vedant Misra, Evan Morikawa, Alec Radford, Matthew Knight, Miles Brundage, Mira Murati, Katie Mayer, Peter Welinder, Bob McGrew, Dario Amodei, Sam McCandlish, Ilya Sutskever, and Wojciech Zaremba. Evaluating large language models trained on code. arXiv preprint arXiv:2107.03374 , 2021b. Zhe Chen, Weiyun Wang, Hao Tian, Shenglong Ye, Zhangwei Gao, Erfei Cui, Wenwen Tong, Kongzhi Hu, Jiapeng Luo, Zheng Ma, et al. How far are we to gpt-4v? closing the gap to commercial multimodal models with open-source suites. arXiv preprint arXiv:2404.16821 , 2024b. Rewon Child, Scott Gray, Alec Radford, and Ilya Sutskever. Generating long sequences with sparse transformers. arXiv preprint arXiv:1904.10509 , 2019. Peter Clark, Isaac Cowhey, Oren Etzioni, Tushar Khot, Ashish Sabharwal, Carissa Schoenick, and Oyvind Tafjord. Think you have solved question answering? try arc, the ai2 reasoning challenge. arXiv:1803.05457v1 ,2018. Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, Christopher Hesse, and John Schulman. Training verifiers to solve math word problems. arXiv preprint arXiv:2110.14168 , 2021. Tri Dao and Albert Gu. Transformers are ssms: generalized models and efficient algorithms through structured state space duality. In Proceedings of the 41st International Conference on Machine Learning ,pp. 10041–10071, 2024. Mike Davies, Narayan Srinivasa, Tsung-Han Lin, Gautham Chinya, Yongqiang Cao, Sri Harsha Choday, Georgios Dimou, Prasad Joshi, Nabil Imam, Shweta Jain, et al. Loihi: A neuromorphic manycore processor with on-chip learning. Ieee micro , 38(1):82–99, 2018. Soham De, Samuel L Smith, Anushan Fernando, Aleksandar Botev, George Cristian-Muraru, Albert Gu, Ruba Haroun, Leonard Berrada, Yutian Chen, Srivatsan Srinivasan, et al. Griffin: Mixing gated linear recurrences with local attention for efficient language models. arXiv preprint arXiv:2402.19427 , 2024. Matt Deitke, Christopher Clark, Sangho Lee, Rohun Tripathi, Yue Yang, Jae Sung Park, Mohammadreza Salehi, Niklas Muennighoff, Kyle Lo, Luca Soldaini, et al. Molmo and pixmo: Open weights and open data for state-of-the-art vision-language models. In Proceedings of the Computer Vision and Pattern Recognition Conference , pp. 91–104, 2025. Xin Dong, Yonggan Fu, Shizhe Diao, Wonmin Byeon, Zijia Chen, Ameya Sunil Mahabaleshwarkar, Shih-Yang Liu, Matthijs Van Keirsbilck, Min-Hung Chen, Yoshi Suhara, et al. Hymba: A hybrid-head architecture for small language models. arXiv preprint arXiv:2411.13676 , 2024. 24 Charlotte Frenkel, David Bol, and Giacomo Indiveri. Bottom-up and top-down approaches for the design of neuromorphic processing systems: Tradeoffs and synergies between natural and artificial intelligence. 
+
+Proceedings of the IEEE , 111(6):623–652, 2023. Chaoyou Fu, Peixian Chen, Yunhang Shen, Yulei Qin, Mengdan Zhang, Xu Lin, Jinrui Yang, Xiawu Zheng, Ke Li, Xing Sun, et al. Mme: A comprehensive evaluation benchmark for multimodal large language models. In The Thirty-ninth Annual Conference on Neural Information Processing Systems Datasets and Benchmarks Track , 2025. Tianyu Gao, Alexander Wettig, Howard Yen, and Danqi Chen. How to train long-context language models (effectively). In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 7376–7399, 2025. Yuxian Gu, Qinghao Hu, Shang Yang, Haocheng Xi, Junyu Chen, Song Han, and Han Cai. Jet-nemotron: Efficient language model with post neural architecture search. arXiv preprint arXiv:2508.15884 , 2025. Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang, Qihao Zhu, Runxin Xu, Ruoyu Zhang, Shirong Ma, Xiao Bi, et al. Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning. arXiv preprint arXiv:2501.12948 , 2025. Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou, Mantas Mazeika, Dawn Song, and Jacob Steinhardt. Measuring massive multitask language understanding. Proceedings of the International Conference on Learning Representations (ICLR) , 2021a. Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song, and Jacob Steinhardt. Measuring mathematical problem solving with the math dataset. NeurIPS , 2021b. Haowen Hou, Zhiyi Huang, Kaifeng Tan, Rongchang Lu, and Fei Richard Yu. Rwkv-x: A linear complexity hybrid language model. arXiv preprint arXiv:2504.21463 , 2025. Cheng-Ping Hsieh, Simeng Sun, Samuel Kriman, Shantanu Acharya, Dima Rekesh, Fei Jia, Yang Zhang, and Boris Ginsburg. Ruler: What’s the real context size of your long-context language models? arXiv preprint arXiv:2404.06654 , 2024. Yanbin Huang, Man Yao, Yuqi Pan, Changze Lv, Siyuan Xu, Xiaoqing Zheng, Bo Xu, and Guoqi Li. Parallel training in spiking neural networks. arXiv preprint arXiv:2602.01133 , 2026. Sam Ade Jacobs, Masahiro Tanaka, Chengming Zhang, Minjia Zhang, Shuaiwen Leon Song, Samyam Rajbhandari, and Yuxiong He. Deepspeed ulysses: System optimizations for enabling training of extreme long sequence transformer models. arXiv preprint arXiv:2309.14509 , 2023. Samy Jelassi, David Brandfonbrener, Sham M Kakade, and Eran Malach. Repeat after me: transformers are better than state space models at copying. In Proceedings of the 41st International Conference on Machine Learning , pp. 21502–21521, 2024. Albert Qiaochu Jiang, Alexandre Sablayrolles, Arthur Mensch, Chris Bamford, Devendra Singh Chaplot, Diego de Las Casas, Florian Bressand, Gianna Lengyel, Guillaume Lample, Lucile Saulnier, Lélio Renard Lavaud, Marie-Anne Lachaux, Pierre Stock, Teven Le Scao, Thibaut Lavril, Thomas Wang, Timothée Lacroix, and William El Sayed. Mistral 7b. ArXiv , abs/2310.06825, 2023. URL https://api.semanticscholar.org/ CorpusID:263830494 .Jungo Kasai, Hao Peng, Yizhe Zhang, Dani Yogatama, Gabriel Ilharco, Nikolaos Pappas, Yi Mao, Weizhu Chen, and Noah A Smith. Finetuning pretrained transformers into rnns. In 2021 Conference on Empirical Methods in Natural Language Processing, EMNLP 2021 , pp. 10630–10643. Association for Computational Linguistics (ACL), 2021. Angelos Katharopoulos, Apoorv Vyas, Nikolaos Pappas, and François Fleuret. Transformers are rnns: Fast autoregressive transformers with linear attention. In International conference on machine learning , pp. 5156–5165. PMLR, 2020. 25 Aniruddha Kembhavi, Mike Salvato, Eric Kolve, Minjoon Seo, Hannaneh Hajishirzi, and Ali Farhadi. A diagram is worth a dozen images. In European conference on computer vision , pp. 235–251. Springer, 2016. Disen Lan, Weigao Sun, Jiaxi Hu, Jusen Du, and Yu Cheng. Liger: Linearizing large language models to gated recurrent structures. In International Conference on Machine Learning , pp. 32452–32466. PMLR, 2025. Bo Li, Yuanhan Zhang, Dong Guo, Renrui Zhang, Feng Li, Hao Zhang, Kaichen Zhang, Peiyuan Zhang, Yanwei Li, Ziwei Liu, et al. Llava-onevision: Easy visual task transfer. Transactions on Machine Learning Research , 2024a. Bohao Li, Yuying Ge, Yixiao Ge, Guangzhi Wang, Rui Wang, Ruimao Zhang, and Ying Shan. Seed-bench: Benchmarking multimodal large language models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pp. 13299–13308, 2024b. Guoqi Li, Lei Deng, Huajin Tang, Gang Pan, Yonghong Tian, Kaushik Roy, and Wolfgang Maass. Brain-inspired computing: A systematic survey and future trends. Proceedings of the IEEE , 112(6):544–584, 2024c. doi: 10.1109/JPROC.2024.3429360. Yanhong Li, Songlin Yang, Shawn Tan, Mayank Mishra, Rameswar Panda, Jiawei Zhou, and Yoon Kim. Distilling to hybrid attention models via kl-guided layer selection. arXiv preprint arXiv:2512.20569 , 2025a. Yingyue Li, Bencheng Liao, Wenyu Liu, and Xinggang Wang. Matvlm: Hybrid mamba-transformer for efficient vision-language modeling. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pp. 20878–20888, 2025b. Yixing Li, Ruobing Xie, Zhen Yang, Xingwu Sun, Shuaipeng Li, Weidong Han, Zhanhui Kang, Yu Cheng, Chengzhong Xu, Di Wang, et al. Transmamba: Flexibly switching between transformer and mamba. arXiv preprint arXiv:2503.24067 , 2025c. Yuhong Li, Yingbing Huang, Bowen Yang, Bharat Venkitesh, Acyr Locatelli, Hanchen Ye, Tianle Cai, Patrick Lewis, and Deming Chen. Snapkv: Llm knows what you are looking for before generation. Advances in Neural Information Processing Systems , 37:22947–22970, 2024d. Opher Lieber, Barak Lenz, Hofit Bata, Gal Cohen, Jhonathan Osin, Itay Dalmedigos, Erez Safahi, Shaked Meirom, Yonatan Belinkov, Shai Shalev-Shwartz, et al. Jamba: A hybrid transformer-mamba language model. arXiv preprint arXiv:2403.19887 , 2024. Aixin Liu, Aoxue Mei, Bangcai Lin, Bing Xue, Bingxuan Wang, Bingzheng Xu, Bochao Wu, Bowei Zhang, Chaofan Lin, Chen Dong, et al. Deepseek-v3.2: Pushing the frontier of open large language models. arXiv preprint arXiv:2512.02556 , 2025a. Haotian Liu, Chunyuan Li, Qingyang Wu, and Yong Jae Lee. Visual instruction tuning. Advances in neural information processing systems , 36:34892–34916, 2023. Haotian Liu, Chunyuan Li, Yuheng Li, Bo Li, Yuanhan Zhang, Sheng Shen, and Yong Jae Lee. Llava-next: Improved reasoning, ocr, and world knowledge, January 2024a. URL https://llava-vl.github.io/ blog/2024-01-30-llava-next/ .Jiaheng Liu, Dawei Zhu, Zhiqi Bai, Yancheng He, Huanxuan Liao, Haoran Que, Zekun Wang, Chenchen Zhang, Ge Zhang, Jiebin Zhang, et al. A comprehensive survey on long context language modeling. arXiv preprint arXiv:2503.17407 , 2025b. Yuan Liu, Haodong Duan, Yuanhan Zhang, Bo Li, Songyang Zhang, Wangbo Zhao, Yike Yuan, Jiaqi Wang, Conghui He, Ziwei Liu, et al. Mmbench: Is your multi-modal model an all-around player? In European conference on computer vision , pp. 216–233. Springer, 2024b. Yuliang Liu, Zhang Li, Mingxin Huang, Biao Yang, Wenwen Yu, Chunyuan Li, Xu-Cheng Yin, Cheng-Lin Liu, Lianwen Jin, and Xiang Bai. Ocrbench: on the hidden mystery of ocr in large multimodal models. 
+
+Science China Information Sciences , 67(12):220102, 2024c. 26 Enzhe Lu, Zhejun Jiang, Jingyuan Liu, Yulun Du, Tao Jiang, Chao Hong, Shaowei Liu, Weiran He, Enming Yuan, Yuzhi Wang, et al. Moba: Mixture of block attention for long-context llms. arXiv preprint arXiv:2502.13189 , 2025. Kevin Lu and Thinking Machines Lab. On-policy distillation. Thinking Machines Lab: Connectionism , 2025. doi: 10.64434/tml.20251026. https://thinkingmachines.ai/blog/on-policy-distillation. Xinhao Luo, Man Yao, Yuhong Chou, Bo Xu, and Guoqi Li. Integer-valued training and spike-driven inference spiking neural network for high-performance and energy-efficient object detection. In European Conference on Computer Vision , pp. 253–272. Springer, 2025. Wolfgang Maass. Networks of spiking neurons: the third generation of neural network models. Neural networks , 10(9):1659–1671, 1997. Andrés Marafioti, Orr Zohar, Miquel Farré, Elie Bakouch, Pedro Manuel Cuenca Jiménez, Cyril Zakka, Anton Lozhkov, Nouamane Tazi, Vaibhav Srivastav, Joshua Lochner, et al. Smolvlm: Redefining small and efficient multimodal models. In Second Conference on Language Modeling , 2025. Ahmed Masry, Xuan Long Do, Jia Qing Tan, Shafiq Joty, and Enamul Hoque. Chartqa: A benchmark for question answering about charts with visual and logical reasoning. In Findings of the association for computational linguistics: ACL 2022 , pp. 2263–2279, 2022. Minesh Mathew, Dimosthenis Karatzas, and CV Jawahar. Docvqa: A dataset for vqa on document images. In Proceedings of the IEEE/CVF winter conference on applications of computer vision , pp. 2200–2209, 2021. Lingchen Meng, Jianwei Yang, Rui Tian, Xiyang Dai, Zuxuan Wu, Jianfeng Gao, and Yu-Gang Jiang. Deepstack: Deeply stacking visual tokens is surprisingly simple and effective for lmms. Advances in Neural Information Processing Systems , 37:23464–23487, 2024. Jean Mercat, Igor Vasiljevic, Sedrick Keh, Kushal Arora, Achal Dave, Adrien Gaidon, and Thomas Kollar. Linearizing large language models. arXiv preprint arXiv:2405.06640 , 2024. OpenCompass. Openvlm leaderboard. https://huggingface.co/spaces/opencompass/open_vlm_ leaderboard , 2025. Hugging Face Space, accessed 2026-03-26. Yuqi Pan, Yongqi An, Zheng Li, Yuhong Chou, Ruijie Zhu, Xiaohui Wang, Mingxuan Wang, Jinqiao Wang, and Guoqi Li. Scaling linear attention with sparse state expansion. arXiv preprint arXiv:2507.16577 ,2025a. Yuqi Pan, Yupeng Feng, Jinghao Zhuang, Siyu Ding, Han Xu, Zehao Liu, Bohan Sun, Yuhong Chou, Xuerui Qiu, Anlin Deng, et al. Spikingbrain: Spiking brain-inspired large models. arXiv preprint arXiv:2509.05276 ,2025b. Jing Pei, Lei Deng, Sen Song, Mingguo Zhao, Youhui Zhang, Shuang Wu, Guanrui Wang, Zhe Zou, Zhenzhi Wu, Wei He, et al. Towards artificial general intelligence with hybrid tianjic chip architecture. Nature , 572 (7767):106–111, 2019. Liliang Ren, Yang Liu, Yadong Lu, Chen Liang, Weizhu Chen, et al. Samba: Simple hybrid state space models for efficient unlimited context language modeling. In The Thirteenth International Conference on Learning Representations , 2024. Kaushik Roy, Akhilesh Jaiswal, and Priyadarshini Panda. Towards spike-based machine intelligence with neuromorphic computing. Nature , 575(7784):607–617, 2019. Tanik Saikh, Tirthankar Ghosal, Amish Mittal, Asif Ekbal, and Pushpak Bhattacharyya. Scienceqa: A novel resource for question answering on scholarly articles. International Journal on Digital Libraries , 23(3): 289–301, 2022. 27 Keisuke Sakaguchi, Ronan Le Bras, Chandra Bhagavatula, and Yejin Choi. Winogrande: An adversarial winograd schema challenge at scale. arXiv preprint arXiv:1907.10641 , 2019. Catherine D Schuman, Shruti R Kulkarni, Maryam Parsa, J Parker Mitchell, Prasanna Date, and Bill Kay. Opportunities for neuromorphic computing algorithms and applications. Nature Computational Science , 2 (1):10–19, 2022. Andrew Sellergren, Sahar Kazemzadeh, Tiam Jaroensri, Atilla Kiraly, Madeleine Traverse, Timo Kohlberger, Shawn Xu, Fayaz Jamil, Cían Hughes, Charles Lau, et al. Medgemma technical report. arXiv preprint arXiv:2507.05201 , 2025. Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, YK Li, Yang Wu, et al. Deepseekmath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 , 2024. Amanpreet Singh, Vivek Natarajan, Meet Shah, Yu Jiang, Xinlei Chen, Dhruv Batra, Devi Parikh, and Marcus Rohrbach. Towards vqa models that can read. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 8317–8326, 2019. Yutao Sun, Li Dong, Shaohan Huang, Shuming Ma, Yuqing Xia, Jilong Xue, Jianyong Wang, and Furu Wei. Retentive network: A successor to transformer for large language models. arXiv preprint arXiv:2307.08621 ,2023. Mirac Suzgun, Nathan Scales, Nathanael Schärli, Sebastian Gehrmann, Yi Tay, Hyung Won Chung, Aakanksha Chowdhery, Quoc V Le, Ed H Chi, Denny Zhou, , and Jason Wei. Challenging big-bench tasks and whether chain-of-thought can solve them. arXiv preprint arXiv:2210.09261 , 2022. Jiaming Tang, Yilong Zhao, Kan Zhu, Guangxuan Xiao, Baris Kasikci, and Song Han. Quest: query-aware sparsity for efficient long-context llm inference. In Proceedings of the 41st International Conference on Machine Learning , pp. 47901–47911, 2024. Hongyuan Tao, Bencheng Liao, Shaoyu Chen, Haoran Yin, Qian Zhang, Wenyu Liu, and Xinggang Wang. Infinitevl: Synergizing linear and sparse attention for highly-efficient, unlimited-input vision-language models. arXiv preprint arXiv:2512.08829 , 2025. Gemini Team, Petko Georgiev, Ving Ian Lei, Ryan Burnell, Libin Bai, Anmol Gulati, Garrett Tanzer, Damien Vincent, Zhufeng Pan, Shibo Wang, et al. Gemini 1.5: Unlocking multimodal understanding across millions of tokens of context. arXiv preprint arXiv:2403.05530 , 2024. Kimi Team, Yu Zhang, Zongyu Lin, Xingcheng Yao, Jiaxi Hu, Fanqing Meng, Chengyin Liu, Xin Men, Songlin Yang, Zhiyuan Li, et al. Kimi linear: An expressive, efficient attention architecture. arXiv preprint arXiv:2510.26692 , 2025a. Ling Team, Bin Han, Caizhi Tang, Chen Liang, Donghao Zhang, Fan Yuan, Feng Zhu, Jie Gao, Jingyu Hu, Longfei Li, et al. Every attention matters: An efficient hybrid architecture for long-context reasoning. 
+
+arXiv preprint arXiv:2510.19338 , 2025b. MiniCPM Team, Wenhao An, Yingfa Chen, Yewei Fang, Jiayi Li, Xin Li, Yaohui Li, Yishan Li, Yuxuan Li, Biyuan Lin, et al. Minicpm-sala: Hybridizing sparse and linear attention for efficient long-context modeling. arXiv preprint arXiv:2602.11761 , 2026. Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia Polosukhin. Attention is all you need. Advances in neural information processing systems , 30, 2017. Junxiong Wang, Daniele Paliotta, Avner May, Alexander Rush, and Tri Dao. The mamba in the llama: Distilling and accelerating hybrid models. Advances in Neural Information Processing Systems , 37: 62432–62457, 2024. 28 xAI. Realworldqa, 2024. Guangxuan Xiao, Yuandong Tian, Beidi Chen, Song Han, and Mike Lewis. Efficient streaming language models with attention sinks. In The Twelfth International Conference on Learning Representations , 2024. Xingrun Xing, Boyan Gao, Zheng Liu, David A Clifton, Shitao Xiao, Wanpeng Zhang, Li Du, Zheng Zhang, Guoqi Li, and Jiajun Zhang. Spikellm: Scaling up spiking neural network to large language models via saliency-based spiking. In The Thirteenth International Conference on Learning Representations , 2024. Han Xu, Zhiyong Qin, Di Shang, Jiahong Zhang, Xuerui Qiu, Bo Lei, Tiejun Huang, Bo Xu, and Guoqi Li. Spikemllm: Spike-based multimodal large language models via modality-specific temporal scales and temporal compression, 2026a. URL https://arxiv.org/abs/2604.18610 .Han Xu, Xuerui Qiu, Baiyu Chen, Xinhao Luo, Xingrun Xing, Jiahong Zhang, Bo Lei, Tiejun Huang, Bo Xu, and Guoqi Li. Spike-driven large language model, 2026b. URL https://arxiv.org/abs/2604.16475 .An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan Li, Dayiheng Liu, Fei Huang, Haoran Wei, et al. Qwen2.5 technical report. arXiv preprint arXiv:2412.15115 , 2024a. An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025a. Mingyu Yang, Mehdi Rezagholizadeh, Guihong Li, Vikram Appia, and Emad Barsoum. Zebra-llama: Towards extremely efficient hybrid models. arXiv preprint arXiv:2505.17272 , 2025b. Songlin Yang, Bailin Wang, Yikang Shen, Rameswar Panda, and Yoon Kim. Gated linear attention transformers with hardware-efficient training. In International Conference on Machine Learning , pp. 56501–56523. PMLR, 2024b. Songlin Yang, Bailin Wang, Yu Zhang, Yikang Shen, and Yoon Kim. Parallelizing linear transformers with the delta rule over sequence length. Advances in neural information processing systems , 37:115491–115522, 2024c. Man Yao, JiaKui Hu, Zhaokun Zhou, Li Yuan, Yonghong Tian, Bo Xu, and Guoqi Li. Spike-driven transformer. In Advances in Neural Information Processing Systems , volume 36, pp. 64043–64058, 2023. Man Yao, JiaKui Hu, Tianxiang Hu, Yifan Xu, Zhaokun Zhou, Yonghong Tian, Bo XU, and Guoqi Li. Spike-driven transformer v2: Meta spiking neural network architecture inspiring the design of next-generation neuromorphic chips. In The Twelfth International Conference on Learning Representations , 2024a. Man Yao, Ole Richter, Guangshe Zhao, Ning Qiao, Yannan Xing, Dingheng Wang, Tianxiang Hu, Wei Fang, Tugba Demirci, Michele De Marchi, Lei Deng, Tianyi Yan, Carsten Nielsen, Sadique Sheik, Chenxi Wu, Yonghong Tian, Bo Xu, and Guoqi Li. Spike-based dynamic computing with asynchronous sensing-computing neuromorphic chip. Nature Communications , 15(1):4464, 2024b. ISSN 2041-1723. Man Yao, Xuerui Qiu, Tianxiang Hu, Jiakui Hu, Yuhong Chou, Keyu Tian, Jianxing Liao, Luziwei Leng, Bo Xu, and Guoqi Li. Scaling spike-driven transformer with efficient spike firing approximation training. 
+
+IEEE Transactions on Pattern Analysis and Machine Intelligence , 47(4):2973–2990, 2025. doi: 10.1109/ TPAMI.2025.3530246. Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Weinan Dai, Tiantian Fan, Gaohong Liu, Lingjun Liu, et al. Dapo: An open-source llm reinforcement learning system at scale. arXiv preprint arXiv:2503.14476 , 2025. Jingyang Yuan, Huazuo Gao, Damai Dai, Junyu Luo, Liang Zhao, Zhengyan Zhang, Zhenda Xie, Yuxing Wei, Lean Wang, Zhiping Xiao, et al. Native sparse attention: Hardware-aligned and natively trainable sparse attention. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 23078–23097, 2025. 29 Xiang Yue, Yuansheng Ni, Kai Zhang, Tianyu Zheng, Ruoqi Liu, Ge Zhang, Samuel Stevens, Dongfu Jiang, Weiming Ren, Yuxuan Sun, et al. Mmmu: A massive multi-discipline multimodal understanding and reasoning benchmark for expert agi. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 9556–9567, 2024. Rowan Zellers, Ari Holtzman, Yonatan Bisk, Ali Farhadi, and Yejin Choi. Hellaswag: Can a machine really finish your sentence? In Proceedings of the 57th Annual Meeting of the Association for Computational Linguistics , 2019. Jintao Zhang, Haofeng Huang, Pengle Zhang, Jia Wei, Jun Zhu, and Jianfei Chen. Sageattention2: Efficient attention with thorough outlier smoothing and per-thread int4 quantization. In International Conference on Machine Learning , pp. 75097–75119. PMLR, 2025a. Jintao Zhang, Haoxu Wang, Kai Jiang, Shuo Yang, Kaiwen Zheng, Haocheng Xi, Ziteng Wang, Hongzhou Zhu, Min Zhao, Ion Stoica, et al. Sla: Beyond sparsity in diffusion transformers via fine-tunable sparse-linear attention. arXiv preprint arXiv:2509.24006 , 2025b. Michael Zhang, Simran Arora, Rahul Chalamala, Alan Wu, Benjamin Spector, Aaryan Singhal, Krithik Ramesh, and Christopher Ré. Lolcats: On low-rank linearizing of large language models. arXiv preprint arXiv:2410.10254 , 2024a. Michael Zhang, Kush Bhatia, Hermann Kumbong, and Christopher Re. The hedgehog & the porcupine: Expressive linear attentions with softmax mimicry. In The Twelfth International Conference on Learning Representations , 2024b. Yu Zhang, Songlin Yang, Rui-Jie Zhu, Yue Zhang, Leyang Cui, Yiqiao Wang, Bolun Wang, Freda Shi, Bailin Wang, Wei Bi, et al. Gated slot attention for efficient linear-time sequence modeling. Advances in Neural Information Processing Systems , 37:116870–116898, 2024c. Han Zhao, Min Zhang, Wei Zhao, Pengxiang Ding, Siteng Huang, and Donglin Wang. Cobra: Extending mamba to multi-modal large language model for efficient inference. In Proceedings of the AAAI Conference on Artificial Intelligence , pp. 10421–10429, 2025. Jeffrey Zhou, Tianjian Lu, Swaroop Mishra, Siddhartha Brahma, Sujoy Basu, Yi Luan, Denny Zhou, and Le Hou. Instruction-following evaluation for large language models. arXiv preprint arXiv:2311.07911 , 2023. Jingwei Zuo, Maksim Velikanov, Ilyas Chahed, Younes Belkada, Dhia Eddine Rhayem, Guillaume Kunsch, Hakim Hacid, Hamza Yous, Brahim Farhat, Ibrahim Khadraoui, et al. Falcon-h1: A family of hybrid-head language models redefining efficiency and performance. arXiv preprint arXiv:2507.22448 , 2025. 30 A Notations 
+
+Table 15: Notations used in this work. 
+
+Symbol Description 
+
+xt Row-vector representation at time step t.
+
+Xt Matrix representation at time step t, or the t-th block in MoBA. 
+
+M Causal mask, where Mij = 1 if i ≥ j and Mij = 0 otherwise. 
+
+eit The i-th element of vector et.
+
+Sit The i-th partition of state matrix St.
+
+n Sequence length. 
+
+t, s Time-step indices. 
+
+N Number of sparse state partitions in SSE. 
+
+k Top-k value used in MoBA and SSE. 
+
+b Block size in MoBA. 
+
+w Window size in SWA. 
+
+# B Definitions of Loss Terms Used in T2H Conversion 
+
+In addition to the standard cross-entropy (CE) objective, several auxiliary loss terms are used during T2H conversion. 
+
+Auxiliary Loss for SSE Layers. To improve training stability and mitigate partition-selection imbalance during sparse state updates, we apply an auxiliary loss to SSE layers: 
+
+Laux = Nk
+
+> n
+
+∑
+
+> t=1
+> N
+
+∑
+
+> i=1
+
+f it eit, (11) where eit denotes the gating value of the i-th partition at token t, and f it denotes its corresponding selection frequency. The auxiliary losses from all linear-attention layers are summed to obtain the final Laux .
+
+Layer-wise MSE Alignment Loss. To encourage representation alignment between the student and teacher models, we introduce a layer-wise mean squared error (MSE) loss. For each layer l, the student representation hstudent  
+
+> t,l
+
+is aligned with the corresponding teacher representation hteacher  
+
+> t,l
+
+:
+
+LMSE ,l = 1
+
+n
+
+> n
+
+∑
+
+> t=1
+
+|| hstudent  
+
+> t,l
+
+− hteacher  
+
+> t,l
+
+|| 2. (12) The losses across all layers are then averaged to produce the final alignment loss LMSE . For LLM distillation, we align the attention outputs of each layer. For VLM distillation, we instead align the final outputs at each layer. 
+
+End-to-End Knowledge Distillation Loss. We further apply logits-level knowledge distillation by minimizing the KL divergence between the teacher and student predictions. For each token, only the top-K
+
+teacher logits are considered: 
+
+LKD = 1
+
+n
+
+> n
+
+∑
+
+> i=1
+
+( K∑
+
+> k=1
+
+pteacher  
+
+> k
+
+log pteacher 
+
+> k
+
+pstudent 
+
+> k
+
+)
+
+. (13) This formulation concentrates the distillation signal on the most informative logits while reducing computa-tional overhead. 31 C Experiments 
+
+C.1 LLM Benchmarks 
+
+Tables 17 and 18 present the benchmark settings and evaluation frameworks used for pretrained and instruction-tuned LLMs, respectively. Table 17: Benchmark settings and evaluation frameworks for pretrained language models. Benchmark Settings Framework General 
+
+MMLU (Hendrycks et al., 2021a) logprobs, 5-shot opencompass 
+
+ARC-C (Clark et al., 2018) logprobs, 5-shot opencompass 
+
+HellaSwag (Zellers et al., 2019) logprobs, 0-shot opencompass 
+
+Winogrande (Sakaguchi et al., 2019) logprobs, 5-shot opencompass 
+
+PIQA (Bisk et al., 2020) logprobs, 0-shot lm-eval-harness 
+
+BBH (Suzgun et al., 2022) strict match, 3-shot CoT opencompass 
+
+Math 
+
+GSM8k (Cobbe et al., 2021) strict match, 4-shot CoT opencompass 
+
+Long Context 
+
+RULER-32k (Hsieh et al., 2024) strict match opencompass 
+
+Table 18: Benchmark settings and evaluation frameworks for instruction-tuned language models. Benchmark Settings Framework General 
+
+MMLU logprobs, 5-shot opencompass 
+
+Instruction Following 
+
+IFEVal (Zhou et al., 2023) strict prompt accuracy opencompass 
+
+Math 
+
+GSM8k strict match, 4-shot CoT opencompass 
+
+MATH (Hendrycks et al., 2021b) strict match, 4-shot CoT opencompass 
+
+Code 
+
+HumanEval (Chen et al., 2021b) pass@1 opencompass 
+
+Long Context 
+
+LongBench-32k (Bai et al., 2024) strict match opencompass 
+
+C.2 VLM Benchmarks 
+
+Table 19 summarizes the benchmark settings and evaluation frameworks used for VLMs. For all benchmarks, to ensure reliable evaluation, we first apply rule-based matching to extract the pre-dicted answer; if no valid answer is identified, we then use a judge model for verification. The judge model is a locally deployed Qwen3-VL-2B. To mitigate the tendency of Qwen3-VL to produce overly long outputs that complicate evaluation, we use the following system prompt during evalua-tion: system_prompt="When answering the questions, do NOT output any explanations, thinking process or intermediate steps, you should ONLY give the answer." For fairness, the same system prompt is also applied to SpB2.0-VL. 32 Table 19: Benchmark settings and evaluation frameworks for VLMs. Benchmark Settings Framework 
+
+AI2D (Kembhavi et al., 2016) MCQ VLMEvalKit 
+
+ChartQA (Masry et al., 2022) VQA VLMEvalKit 
+
+DocVQA (Mathew et al., 2021) VQA VLMEvalKit 
+
+MMBench (Liu et al., 2024b) MCQ VLMEvalKit 
+
+MME (Fu et al., 2025) Y/N VLMEvalKit 
+
+MMMU(val) (Yue et al., 2024) MCQ VLMEvalKit 
+
+MMStar (Chen et al., 2024a) MCQ VLMEvalKit 
+
+OCRBench (Liu et al., 2024c) VQA VLMEvalKit 
+
+RealWorldQA (xAI, 2024) MCQ VLMEvalKit 
+
+SEEDBench IMG (Li et al., 2024b) MCQ VLMEvalKit 
+
+ScienceQA (Saikh et al., 2022) MCQ VLMEvalKit 
+
+TextVQA (Singh et al., 2019) VQA VLMEvalKit 
+
+C.3 Additional Pretrained Model Comparisons 
+
+As shown in shown in Table 20, in addition to the strong transformer baselines, we further compare the pretrained SpB2.0-5B model with the base transformer model used for T2H conversion, Qwen3-4B-Instruct, as well as the previous SpB1.0-7B. Notably, despite using only 14B open-source tokens for continual training, SpB2.0 surpasses the base Transformer on several tasks, including HellaSwag, Winogrande, and PIQA. It also outperforms the larger SpB1.0-7B on several challenging benchmarks, such as MMLU, BBH, GSM8K, and RULER. Table 20: Additional comparison of the pretrained SpB2.0-5B model with Qwen3-4B-Instruct and SpB1.0-7B. Qwen3-4B-Instruct, as an instruction-tuned model, performs well on generative benchmarks such as BBH, GSM8K, and RULER-32k. SpB1.0-7B, as a pure linear-complexity model with a fixed state size, performs poorly on RULER-32k.                                                                      
+
+> Gemma3-4B Llama3.2-3B Qwen2.5-3B Qwen3-4B-Base SpB1.0-7B Qwen3-4B-Instruct-2507 SpB2.0-5B
+> MMLU 59.70 56.71 65.89 73.09 65.80 72.45 68.99 ARC-C 50.85 45.76 50.51 57.39 52.54 58.98 51.53 HellaSwag 70.26 69.32 67.71 67.92 72.97 64.20 66.41 Winogrande 72.77 72.38 69.46 70.48 73.48 67.80 68.35 PIQA 79.05 76.12 78.35 78.18 80.03 76.01 77.26 BBH 51.35 43.74 55.70 62.11 53.30 80.05 65.88 GSM8K 47.69 27.85 75.13 85.22 68.08 87.95 81.20 RULER-32k 43.44 51.38 58.95 62.28 17.21 85.62 50.87
+> Avg. 59.39 55.41 65.21 69.58 60.43 74.13 66.31
+
+C.4 Extended Results for Long-Context Extension 
+
+To better understand the effect of progressive long-context training, we evaluate intermediate checkpoints of SpB2.0-5B throughout the long-context continual-training pipeline. As shown in Table 21, performance on long-context benchmarks, measured by RULER-80k, improves steadily across the three LongCT stages, while the short-context benchmark MMLU decreases only slightly. 
+
+C.5 Ablation on the SSE-SWA Design 
+
+In the design of the SSE-SWA block, our goal is to reduce interference from the auxiliary SWA branch with the main LA pathway and to avoid computational shortcuts that may weaken LA learning. To verify this 33 Table 21: Performance across different stages of long-context extension on RULER-80k and MMLU. Long-context performance improves steadily from LongCT-stage1 to LongCT-stage3, while MMLU decreases only slightly. SN: single-needle; MK: multi-key; MQ: multi-query; MV: multi-value; SQD: SQuAD.                                
+
+> SN1 SN2 SN3 MK1 MQ MV SQD MMLU LongCT-stage1-64k 96.20 58.00 23.80 34.60 23.50 44.20 17.78 69.36 LongCT-stage2-256k 99.80 93.40 83.60 61.40 71.60 78.20 25.53 69.04
+> LongCT-stage3-512k 100.0 94.40 89.00 68.60 77.85 85.45 26.47 68.99
+
+design, we compare the trained SpB2.0 checkpoint with two ablated inference variants, in which only the SSE branch or only the SWA branch is enabled. As shown in Table 22, the combination of a small SWA window, branch dropout, and merge norm effectively preserves the LA branch. In particular, SSE-only inference retains most of the capability of the full model, whereas SWA-only inference leads to a substantial performance drop. Table 22: Ablation of SSE-only and SWA-only inference variants. All models are evaluated from the SpB2.0 checkpoint obtained after short-context distillation on 400k samples. For ablation, inference is performed with only the SSE branch or only the SWA branch enabled. 
+
+## SpB2.0 SpB2.0-SSE-only SpB2.0-SWA-only 
+
+## MMLU 69.38 62.15 23.69 ARC-C 52.88 52.54 25.76 HellaSwag 66.26 62.78 31.41 34
