@@ -1,0 +1,789 @@
+Title: ARCHES: Adaptive Real-Time Switching of AI Models for the RAN
+
+URL Source: https://arxiv.org/pdf/2604.23397v1
+
+Published Time: Tue, 28 Apr 2026 00:48:44 GMT
+
+Number of Pages: 10
+
+Markdown Content:
+> This work has been submitted to the ACM for possible publication. Copyright may be transferred without notice, after which this version may no longer be accessible.
+
+# ARCHES: Adaptive Real-Time Switching of AI Models for the RAN 
+
+# Neagin Neasamoni Santhi ★, Davide Villa ★‡, Michele Polese ★, Salvatore D’Oro ★,Yunseong Lee †, Koichiro Furueda †, Tommaso Melodia ★
+
+> ★
+
+Institute for Intelligent Network Systems, Northeastern University, Boston, MA, U.S.A. {neasamonisanthi.n, villa.d, m.polese, s.doro, t.melodia}@northeastern.edu 
+
+> †
+
+Technology Unit, SoftBank Corp., Tokyo, Japan yunseong.lee.1992@ieee.org, koichiro.furueda@g.softbank.co.jp 
+
+> ‡
+
+NVIDIA Corporation, Santa Clara, CA, U.S.A. dvilla@nvidia.com 
+
+## Abstract 
+
+Artificial Intelligence (AI) has become a powerful tool for model-free Radio Access Network (RAN) signal processing and optimiza-tion. However, it is challenging to design and train a single model that generalizes reliably across all radio environments. Specialized AI models often outperform conventional algorithms only under specific channel conditions, while their substantially higher com-pute and energy cost makes unconditional execution impractical at the base station. This creates a need for real-time expert switching: dynamically activating the most appropriate AI or conventional signal-processing expert based on current network conditions. To address this, we propose ARCHES ( Adaptive Real-time CUDA 
+
+Hot-swapping of Experts in the RAN Stack), a framework that hosts multiple AI-based and conventional signal processing ex-perts within a Graphics Processing Unit (GPU)-accelerated Physical (PHY) pipeline and dynamically selects the most appropriate expert at slot-boundary granularity, without dropping or corrupting in-flight data. ARCHES includes a lightweight Compute Unified Device Architecture (CUDA) switch kernel for zero-gap output selection, a dApp-based control plane that collects cross-layer telemetry and drives the switching policy, and a reusable process for telemetry selection and policy design based on controlled perturbation, mono-tonicity filtering, and hierarchical clustering. We validate ARCHES on uplink (UL) channel estimation, switch-ing between an AI-based and a Minimum Mean Square Error (MMSE) estimator in response to changing propagation and interference conditions. The prototype, implemented on the X5G platform with NVIDIA Aerial and OpenAirInterface (OAI), demonstrates median UL PHY throughput gains of 5.32% and 7.23% under good and poor conditions, respectively, with an end-to-end control-loop latency of ≈140 𝜇 s and sub-microsecond decision inference. Under good conditions, defaulting to MMSE saves 15.8 W of GPU power (9.6%) and 17 percentage points of GPU utilization versus unconditional AI execution, validating the performance-per-watt tradeoff that motivates adaptive expert selection.  
+
+> Permission to make digital or hard copies of all or part of this work for personal or classroom use is granted without fee provided that copies are not made or distributed for profit or commercial advantage and that copies bear this notice and the full citation on the first page. Copyrights for components of this work owned by others than the author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or republish, to post on servers or to redistribute to lists, requires prior specific permission and/or a fee. Request permissions from permissions@acm.org.
+> MobiHoc ’26, Tokyo, Japan
+> ©2026 Copyright held by the owner/author(s). Publication rights licensed to ACM. ACM ISBN 978-1-4503-XXXX-X/18/06 https://doi.org/XXXXXXX.XXXXXXX
+
+## CCS Concepts 
+
+• Networks → Network performance analysis .
+
+## Keywords 
+
+O-RAN, dApp, real-time expert switching, 5G NR, GPU-accelerated PHY, AI/ML, AI-RAN, channel estimation, mixture of experts 
+
+## 1 Introduction 
+
+Artificial Intelligence (AI)-based techniques have demonstrated sig-nificant potential across a range of Physical (PHY) and Radio Access Network (RAN) functions in 5G and beyond [ 1, 2]. In channel es-timation, neural-network-based approaches can capture complex propagation characteristics that traditional linear estimators strug-gle to model [ 3 , 4 ]. In beam management, AI enables faster and more accurate beam prediction, reducing overhead from exhaustive beam sweeps [ 5]. In positioning, learning-based methods improve localization accuracy by exploiting spatial features of the radio environment beyond conventional geometry-based approaches [ 6 ]. In resource allocation and scheduling, AI-driven strategies can adapt to dynamic traffic patterns and interference conditions more effectively than rule-based heuristics [7]. A common requirement across all of these functions is real-time processing under strict latency constraints, as they operate within the tight timing budgets of the PHY and Medium Access Control (MAC) layers. Such constraints demand lightweight models capable of fast inference, but their limited capacity often prevents them from generalizing across diverse channel conditions, spanning indoor and outdoor environments, pedestrian versus vehicular mobility, rural and urban deployments, and small and large cells. As a result, they tend to be specialized to a subset of conditions, where they can outperform traditional approaches, but may fail when operating outside their area of expertise [8, 9]. Crucially, even when an AI model outperforms its conventional counterpart across all observed conditions, operational considera-tions may still favor selective activation. Our measurements on a production Graphics Processing Unit (GPU)-accelerated Next Gen-eration Node Base (gNB) show that an AI-based channel estimator draws 15.8 W more GPU power and consumes 17 percentage points more GPU utilization than its conventional counterpart under fa-vorable conditions, for a throughput gain of only ∼5%. At scale, with dozens of cells and multiple User Equipments (UEs) per cell, unconditional AI execution becomes impractical: the compute and energy cost per marginal bit of throughput does not justify always-on inference. As AI components proliferate across the RAN, this  
+
+> arXiv:2604.23397v1 [cs.NI] 25 Apr 2026 MobiHoc ’26, Nov 23–26, 2026, Tokyo, Japan N. Neasamoni Santhi, D. Villa, M. Polese, S. D’Oro, Y. Lee, K. Furueda, T. Melodia
+
+performance-per-watt tradeoff will force operators to selectively activate AI experts only when the performance benefit warrants the additional resource expenditure. A common approach to address this lack of generalization is the Mixture-of-Experts (MoE) paradigm [ 10 , 11 ], in which multiple specialized models are maintained simultaneously and incoming inputs are routed to the most suitable expert based on current channel conditions. While classical MoE routes inputs among sub-networks within a single model, in this paper we extend the concept to switching between independent signal processing modules in a live pipeline. However, applying this idea to real-time signal processing func-tions in the RAN introduces additional challenges. The routing decision itself must be made under strict latency constraints, requir-ing the system to detect changing conditions and switch between experts at PHY-timescale using inputs from different parts of the protocol stack and processing pipeline. Beyond decision latency, switching must occur seamlessly within a live processing pipeline without dropping or corrupting in-flight data, since each uplink (UL) slot carries irreplaceable user traffic that cannot be buffered or replayed. Furthermore, the decision must be informed by cross-layer metrics spanning PHY, MAC, and higher layers, requiring tightly coordinated telemetry collection across disaggregated RAN components operating on different timescales. Motivated by this, we propose ARCHES (Adaptive Real-time 
+
+CUDA Hot-swapping of Experts in the RAN Stack), a general-purpose framework for real-time expert switching inside GPU-accelerated 5G PHY pipelines. ARCHES enables the simultaneous operation of multiple AI-based and conventional signal processing experts and dynamically selects the most appropriate one based on current network conditions, without disrupting data flow or intro-ducing processing gaps. The framework continuously monitors live RAN metrics through a dApp-based control plane, evaluates pre-vailing network conditions using a lightweight policy, and selects the most suitable expert at slot boundaries. Expert Selection 
+
+Eq 
+
+PUSCH 
+
+Pipeline 
+
+## gNB 
+
+## UE 
+
+Expert 1
+
+> Switchable Expert Bank
+
+PUSCH 
+
+I/Q Expert 2
+
+Expert N
+
+> …..
+> ...…
+
+H"!"#$%& !
+
+## Switching Logic 
+
+## dApp Cross -Layer 
+
+> KPMs
+
+Figure 1: High-level system architecture of ARCHES. Multiple signal processing experts execute within the PHY pipeline. A dApp collects cross-layer KPMs and drives the switching logic, which selects the appropriate expert output. Shown here for channel estimation; the same architecture applies to other PHY functions. 
+
+As a first instantiation, we validate ARCHES on UL channel estimation, where the framework switches between an AI-based and a Minimum Mean Square Error (MMSE) estimator in response to changing propagation and interference conditions. Channel es-timation serves only as the first validating case study; the core contribution is the switching mechanism itself. The expert bank, the Compute Unified Device Architecture (CUDA) switch kernel, the dApp-based control path, and the telemetry-driven policy de-sign are designed to generalize to any PHY/MAC function where multiple processing strategies coexist and the optimal choice de-pends on current network conditions. Our main contributions are as follows: 
+
+• We establish the design principles for real-time expert switch-ing in GPU-accelerated PHY pipelines, including dual ex-ecution modes balancing switching latency and resource efficiency, memory aliasing for a uniform downstream inter-face, slot-boundary timing semantics, and fail-safe defaults. 
+
+• We implement the ARCHES framework: a generic CUDA switch kernel and dApp-based control path with structured host-to-device propagation and E3-based telemetry collec-tion. 
+
+• We present a reusable process for selecting telemetry and switching policy design, based on controlled perturbation, monotonicity filtering, and redundancy reduction via hierar-chical clustering. 
+
+• We validate ARCHES through a case-study instantiation on UL channel estimation, demonstrating sub-microsecond deci-sion latency, an end-to-end control loop of ∼140 𝜇 s, through-put gains, and quantified GPU power and utilization savings via extensive Over-the-Air (OTA) experiments on the X5G platform. The remainder of the paper is organized as follows. Section 2 presents the design principles for real-time expert switching. Sec-tion 3 details the ARCHES framework. Section 4 describes the methodology for policy design. Section 5 presents the channel esti-mation case study. Section 6 describes the experimental evaluation. Section 7 discusses generalization to other RAN functions. Related work is reviewed in Section 8. Finally, Section 9 concludes the paper. 
+
+## 2 Design Principles for Real-Time Expert Switch-ing in the RAN 
+
+Before detailing the ARCHES framework, we state the design in-variants that any real-time expert-switching mechanism for GPU-accelerated PHY pipelines must satisfy. These principles are inde-pendent of the specific signal processing function being switched and emerge from the constraints of inline GPU processing at sub-millisecond timescales. 
+
+Dual execution modes balancing latency and efficiency. 
+
+ARCHES supports two execution modes. In concurrent mode, all candidate experts execute in parallel on every slot, ensuring the se-lected output is always readily available and eliminating cold-start penalties; this mode also enables online benchmarking by exposing all expert outputs simultaneously. In selected-only mode, only the active expert executes per slot, reducing compute and energy con-sumption at the cost of at least a one-slot activation delay when switching. The choice between modes reflects a deployment-specific trade-off: concurrent mode prioritizes switching responsiveness and observability, while selected-only mode prioritizes resource efficiency. ARCHES : Adaptive Real-Time Switching of AI Models for the RAN MobiHoc ’26, Nov 23–26, 2026, Tokyo, Japan dApp 
+
+# OAI 
+
+# L2 / L3 
+
+KPMs 
+
+2e 
+
+## PUSCH Pipeline 
+
+## MMSE 
+
+## AI 
+
+## Switch 
+
+## LS 
+
+## LS 
+
+# NVIDIA Aerial 
+
+mode(0=AI, 1=MMSE) 
+
+E3 Control Message 
+
+Fused equalizer and soft -demapper 
+
+MMSE Channel estimator 
+
+RSRP kernel 
+
+CB CRCs kernel 
+
+3
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+10 
+
+11 
+
+12 
+
+RSSI kernel 
+
+TB CRCs kernel 
+
+LDPC decoder 
+
+Rate de -matching kernel 
+
+CFO/TA estimator kernel 
+
+Noise/Interference estimator kernel 
+
+Equalizer coefficients kernel 
+
+AI -based Channel estimator 
+
+1 Root Switch kernel 2e 
+
+2a LS for MMSE 
+
+2b LS for AI -based 
+
+1
+
+2a 
+
+2b 
+
+2c 
+
+2d 3 9
+
+4
+
+865
+
+7 10 11 12 
+
+2c 
+
+2d 
+
+Switching Logic 
+
+KPMs 
+
+E3 
+
+E3 
+
+Figure 2: ARCHES prototype instantiated for channel estimation, illustrating NVIDIA Aerial, OAI, and the dApp. The switch kernel (node 2e) selects between Expert A (MMSE, node 2c) and Expert B (AI-based, node 2d). The dApp collects KPMs and communicates the mode variable via the E3 interface (Section 3.3). The same kernel and control path generalize to other PHY functions. Uniform downstream interface via memory aliasing. Down-stream processing stages (equalization, demapping, decoding) read from a single, fixed memory buffer. The switch kernel either per-forms a no-op or copies the alternative expert’s output into that buffer, depending on which expert is active. Downstream modules therefore require no modification regardless of how many experts are added. 
+
+Slot-boundary timing semantics. Switching decisions take ef-fect at slot boundaries. A decision generated during slot 𝑛 is applied at the setup phase of slot 𝑛 + 1. Because timing is deterministic, no in-flight data is corrupted mid-slot and the control loop has a well-defined, predictable latency. 
+
+Fail-safe defaults. The switch defaults to the conventional (non-AI) expert at initialization and on dApp failure. The system therefore never depends on the availability of either the AI model or the dApp control plane for baseline operation. 
+
+External control plane with independent policy evolution. 
+
+The switching policy resides in a dApp external to the real-time pipeline. Because the policy lives outside the pipeline, it can be updated, retrained, or replaced without modifying the PHY pipeline or its CUDA graphs. The dApp communicates only a single scalar (the mode variable) to the pipeline per slot. 
+
+Cross-layer telemetry as policy input. The switching decision is informed by Key Performance Measurements (KPMs) collected across multiple protocol layers, from PHY-layer channel quality metrics to MAC-layer scheduling and throughput indicators. No single metric suffices to capture the multi-dimensional trade-off between estimation quality, compute cost, and throughput gain. 
+
+## 3 The ARCHES Framework 
+
+This section describes the ARCHES framework, independent of the specific signal processing function being switched. ARCHES has three main components, illustrated in Figure 1: (i) a switchable expert bank integrated into the PHY pipeline, where 𝑁 experts can execute on the same input and a CUDA switch kernel selects the designated output; (ii) an external switching logic that determines which expert best suits the operating regime; and (iii) a dApp-based control path that collects cross-layer telemetry and propagates the switching decision to the pipeline. The system architecture builds on the O-RAN disaggregated gNB model, which separates base station functionality into modular, pro-grammable components connected via open interfaces: the Radio Unit (RU), Distributed Unit (DU), and Central Unit (CU). ARCHES is built on this architecture, where NVIDIA Aerial [ 12 ] implements high-PHY processing and OpenAirInterface (OAI) manages Layer 2 and higher layers. We use NVIDIA Aerial CUDA Baseband (cuBB), a Software Development Kit (SDK) that handles Low-DU/High-PHY signal processing for GPUs, implemented in CUDA and C++. cuBB operates with slot-level granularity, where each slot has a duration of 500 𝜇 s (30 kHz subcarrier spacing). Inline GPU acceleration is what makes ARCHES possible: multiple experts run within the same pipeline, and the switching decision is applied at the output selection stage without interrupting the processing flow. Figure 2 shows the detailed prototype instantiated for channel estimation: the Physical Uplink Shared Channel (PUSCH) CUDA graph executes both experts in parallel (nodes 2c and 2d), with the switch kernel (node 2e) selecting the output, while the dApp collects KPMs from both Aerial and OAI and communicates the 
+
+mode variable back to Aerial. 
+
+## 3.1 Switchable Expert Bank 
+
+The switchable expert bank resides within the Low-DU (High-PHY), where it replaces a single processing module with a bank of 𝑁 ex-perts ( Expert 1, Expert 2, . . . , Expert 𝑁 ) that execute on the same in-put data. ARCHES supports concurrent execution of all experts for two reasons: (i) it eliminates switching latency, since the selected output is always readily available regardless of when the switch logic updates its decision, and (ii) it enables the pipeline to expose MobiHoc ’26, Nov 23–26, 2026, Tokyo, Japan N. Neasamoni Santhi, D. Villa, M. Polese, S. D’Oro, Y. Lee, K. Furueda, T. Melodia 
+
+intermediate outputs from all experts, which helps monitor online performance and benchmark the switching policy offline. Each ex-pert produces its own output, and a CUDA switch kernel selects the designated result, forwarding it to downstream processing stages. Alternatively, ARCHES supports a selected-only execution mode in which only the active expert runs per slot, reducing compute and energy consumption at the cost of at least a one-slot activation delay when switching. In this work, we use concurrent execution to validate seamless switching and quantify expert-level tradeoffs. 
+
+## 3.2 CUDA Switch Kernel 
+
+The switch kernel implements the runtime selection logic on the GPU. Its behavior is controlled by a binary variable, mode , assigned during the slot setup phase. By default, mode is initialized to 1 (MMSE), ensuring fail-safe operation before the dApp issues its first decision or in case of dApp failure. To support efficient switching, separate memory locations are allocated for each expert’s output. Downstream modules consis-tently read from the AI-designated memory buffer. When mode =0 (AI), the kernel performs no operation, as the AI output is already in place. When mode =1, the kernel copies the MMSE output into the AI buffer using coalesced memory access. This memory layout choice means the MMSE path incurs a small copy overhead, while the AI path incurs none, a deliberate trade-off, since the AI-based estimator already dominates the latency budget and the additional copy overhead is better absorbed by the lighter MMSE path. We profile the execution times in Section 6.1. 
+
+## 3.3 dApp-Based Control Path 
+
+The switching logic resides in a dApp, a lightweight application deployed directly on the gNB that can access PHY/MAC teleme-try and execute control actions at sub-10 ms timescales [ 13 ]. The ARCHES dApp collects relevant KPMs from both NVIDIA Aerial and OAI via the E3 interface, processes them through a switching policy, and determines the optimal expert. The selected expert is encoded in the mode variable and conveyed to the PHY pipeline to trigger the corresponding switch. We leverage the dApp framework [ 14 ] implemented in the NVIDIA Aerial stack [ 15 ]. dApps are real-time, co-located applications in-terfacing directly with the gNB through a structured pre-standard E3-based control and data plane. This provides low-latency access to fine-grained PHY/MAC telemetry and optional control over RAN behavior. At the interface level, the E3 Agent within the RAN ex-poses telemetry (e.g., channel estimates, I/Q samples, and metadata) via shared memory and lightweight indication messages, while the E3 Manager within the dApp handles setup, subscription, and data delivery to the application logic. Internally, the dApp has three main components: (i) an orches-tration layer (E3 Manager), (ii) a processing layer implementing the dApp logic, and (iii) a client interface for lifecycle management. Multiple inference engines and AI backends can therefore be in-tegrated without structural changes. At runtime, data flows from the CUDA-based L1 pipeline to pinned host memory and shared-memory buffers, giving co-located dApps near zero-copy access while preserving isolation and real-time performance. 
+
+dApp–Switch Kernel Interaction. The control path from the dApp to the GPU follows a structured sequence: Decision and sig-naling: The dApp encodes its expert selection into the mode variable and transmits it to NVIDIA Aerial via the E3 interface. This value is made available on the host (CPU) side. Control integration: The mode 
+
+parameter is incorporated into the derived UE group parameters during the setup phase of each UL slot. Host-to-device propagation: 
+
+The mode parameter is copied from host memory to GPU memory together with the rest of the processing context. Kernel-level exe-cution: On the GPU, the switch kernel reads mode and selects the corresponding expert output. Timing semantics: Mode updates take effect at slot boundaries. A value generated during slot 𝑛 is applied at slot 𝑛 + 1; mid-slot updates are deferred. 
+
+## 4 Methodology for Policy Design 
+
+Given a bank of experts, the next question is how to select telemetry inputs and design the switching policy. We design the switching policy in three stages that are transferable across different PHY functions. We demonstrate this through the channel estimation case study, but the stages themselves — controlled perturbation, monotonicity filtering, and redundancy reduction — are generic. AWGN 
+
+> MMSE
+
++2c 2a      
+
+> 3
+> 4
+> 56
+> 7
+> 8
+> 9
+> 10 11 12
+> PUSCH Pipeline
+> 1𝑯 "𝑴𝑴𝑺𝑬
+> 𝒏𝒐𝒊𝒔𝒚
+> 𝐻 "𝑴𝑴𝑺𝑬
+> 𝑵
+
+Figure 3: Controlled perturbation for KPM sensitivity analysis: noise injection into the channel estimates within Expert A (node 2c), reusing the node descriptions from Figure 2. 
+
+## 4.1 Stage 1: Sensitivity Analysis via Controlled Perturbation 
+
+The first stage identifies candidate KPMs that are sensitive to the quality of the processing function under study. The approach is to inject controlled, calibrated degradation into one expert’s output and observe which downstream metrics respond. By isolating the effect of processing quality from the switching logic itself, we ensure that the selected KPMs genuinely reflect processing accuracy rather than artifacts of the switching process. Note that the ARCHES switching mechanism and the AI-based estimator are not included, as this setup is designed solely to serve as a baseline platform for KPM extraction. For the channel estimation case study, we inject Additive White Gaussian Noise (AWGN) into the MMSE channel estimates at node 2c, as illustrated in Figure 3. The wireless channel is characterized by the Channel State Information (CSI) H ∈ C𝑁 ant ×𝑁 l ×𝑁 sc ×𝑁 sym ,where 𝑁 ant = 4 is the number of antenna ports, 𝑁 l = 1 is the number of transmission layers, 𝑁 sc = 12 × 𝑁 PRB is the number of subcarriers with 𝑁 PRB denoting the number of Physical Re-source Blocks (PRBs) allocated for UL transmission, and 𝑁 sym = 14 
+
+is the number of Orthogonal Frequency Division Multiplexing (OFDM) symbols in a slot. At the receiver, H is estimated using DeModulation Reference Signal (DMRS)-based MMSE estimation with frequency-domain interpolation at DMRS positions, yielding 
+
+ˆHMMSE ∈ C𝑁 ant ×𝑁 l ×𝑁 sc ×𝑁 DMRS sym , where estimates are obtained from 
+
+𝑁 DMRS sym = 3 pilot symbols and later interpolated across all OFDM symbols by the equalizer. ARCHES : Adaptive Real-Time Switching of AI Models for the RAN MobiHoc ’26, Nov 23–26, 2026, Tokyo, Japan 
+
+0 50 100 150 200 
+
+20 
+
+40 
+
+60 
+
+𝜌 [%] 
+
+> TB Size [kB]
+
+(a) TB size vs. 𝜌 .
+
+0 50 100 150 200 
+
+0
+
+5
+
+10 
+
+15 
+
+20 
+
+𝜌 [%] 
+
+> SNR [dB]
+
+(b) SNR vs. 𝜌 .
+
+0 50 100 150 200 
+
+2
+
+4
+
+6
+
+8
+
+𝜌 [%] 
+
+> LCID4 Tput [Mbps]
+
+(c) LCID4 throughput vs. 𝜌 .
+
+Figure 4: KPM degradation trends showing incremental performance loss with increasing perturbation intensity 𝜌 for the channel estimation case study. 
+
+To induce degraded channel knowledge for OTA transmissions, controlled synthetic noise N of identical dimensions is injected into 
+
+ˆHMMSE , modeled as complex AWGN: 
+
+N ∼ CN ( 0, 𝜎 2), (1) where the standard deviation is proportional to the mean magnitude of ˆHMMSE :
+
+𝜎 = 𝜌 · E| ˆHMMSE | . (2) The parameter 𝜌 ∈ [ 0, 2] controls the noise intensity. We sweep 
+
+𝜌 from 0 to 2 in steps of 0.1 to evaluate performance degradation under gradually increasing noise levels. The resulting corrupted channel estimate ˆHnoisy MMSE is therefore given by 
+
+ˆHnoisy MMSE = ˆHMMSE + 𝜌 · E| ˆHMMSE | · CN ( 0, 1), (3) as illustrated in Figure 3. We then evaluate the degradation of candidate KPMs derived from NVIDIA Aerial Data Lake, described in Section 6 and OAI as a function of 𝜌 , identifying those that exhibit consistent sensitivity to channel estimation errors. For other functions, the perturbation would differ: for beam management, one might inject perturbations into channel estimates or angular offsets into beam predictions; for Low Density Parity-Check Code (LDPC) decoding variants, one might degrade decoder inputs by injecting noise into log-likelihood ratios at controlled rates. The idea is the same: perturb the expert output and observe how downstream performance changes. 
+
+## 4.2 Stage 2: Monotonicity Filtering 
+
+Having identified candidate KPMs via perturbation, the second stage retains only those that exhibit a consistent and monotonic degradation trend as perturbation intensity ( 𝜌 ) increases, indicating a direct sensitivity to processing quality. As shown in Figure 4, all three representative KPMs exhibit a clear monotonic decline as 𝜌 increases. Transport Block (TB) size (Figure 4a) and Signal-to-Noise-Ratio (SNR) (Figure 4b) follow a similar trajectory: both remain relatively stable at low noise levels before dropping sharply in the mid-range of 𝜌 , reflecting the point at which channel estimation errors begin to significantly impact link adaptation and demodulation. LCID4 throughput (Figure 4c) follows an analogous trend at the MAC layer, confirming that the PHY-layer degradation propagates upward through the protocol stack. The narrow 95% confidence intervals across all three plots indicate that these trends are consistent and repeatable across experimental runs. 
+
+## 4.3 Stage 3: Redundancy Reduction via Hierarchical Clustering                                                                         
+
+> 1.74 .75 .76 .79 .8 .8 -.32 -.58
+> .74 1.83 .81 .87 .91 .91 -.23 -.72
+> .75 .83 1.85 .93 .92 .93 -.19 -.64
+> .76 .81 .85 1.95 .97 .96 -.28 -.69
+> .79 .87 .93 .95 1.99 .99 -.25 -.69
+> .8 .91 .92 .97 .99 11-.26 -.71
+> .8 .91 .93 .96 .99 11-.26 -.71
+> -.32 -.23 -.19 -.28 -.25 -.26 -.26 1.16
+> -.58 -.72 -.64 -.69 -.69 -.71 -.71 .16 1
+> PDU Len
+> CodeRate
+> SINR
+> QAM Order
+> Num CB
+> MCS Index
+> TB Size
+> NDI
+> RSRP
+> PDU Len
+> CodeRate
+> SINR
+> QAM Order
+> Num CB
+> MCS Index
+> TB Size
+> NDI
+> RSRP
+
+(a) DataLake cluster.                     
+
+> 1.46 .44 .23 .27
+> .46 1.7 .67 .77
+> .44 .7 1.63 .69
+> .23 .67 .63 1.73
+> .27 .77 .69 .73 1
+> LCID4 RX
+> LCID4 Tput
+> MAC RX
+> SNR
+> MAC Tput
+> LCID4 RX
+> LCID4 Tput
+> MAC RX
+> SNR
+> MAC Tput
+
+(b) OAI cluster.     
+
+> −1−0.500.51
+> Correlation Coefficient
+
+Figure 5: Clustered correlation matrices for Data Lake and OAI KPMs, revealing redundancy structure used to select a compact input set for the switching policy. 
+
+While the preceding analysis identifies KPMs that are individu-ally sensitive to channel estimation quality, several of these metrics may carry redundant information. This redundancy arises because metrics are tightly coupled through link adaptation (e.g., MCS index and TB size move in lockstep as the scheduler adapts to channel quality). To distill the KPM set into a compact and non-redundant input for the ARCHES dApp, we compute pairwise Pearson correla-tion coefficients across all candidate KPMs and reorder the resulting matrices using hierarchical clustering, which groups highly cor-related KPMs into visually identifiable block-like structures. PHY throughput from Aerial is excluded from the correlation analysis due to its cumulative computation, unlike the other per-slot metrics from Aerial. Figure 5a shows the correlation matrix for the Aerial Data Lake KPMs. We apply a conservative correlation threshold of 0.8, cho-sen to retain KPMs that, despite moderate correlation, may carry complementary information under specific channel conditions. We observe only one redundant cluster, visible as the darker blue shaded block containing code rate, Signal to Interference plus Noise Ratio (SINR), Quadrature Amplitude Modulation (QAM) order, Modula-tion and Coding Scheme (MCS) index, TB size, and the number of Code Blocks (CBs), with pairwise correlation coefficients ranging MobiHoc ’26, Nov 23–26, 2026, Tokyo, Japan N. Neasamoni Santhi, D. Villa, M. Polese, S. D’Oro, Y. Lee, K. Furueda, T. Melodia 
+
+from 0.81 to 1. Link adaptation causes these parameters to change together as channel quality varies. From this cluster, we keep MCS index as the representative, as it directly reflects the scheduling decision and subsumes the effect of the remaining parameters. The remaining KPMs (Packet Data Unit (PDU) length, New Data In-dicator (NDI), and Reference Signal Received Power (RSRP)) fall below the threshold with respect to each other and are preserved as independent inputs to the switching logic. Notably, RSRP exhibits a consistent negative correlation with the main block (from −0.58 
+
+to −0.71 ). Since RSRP in Aerial is computed from the mean squared magnitude of the channel estimates, additive noise inflates the mea-sured power ( RSRP ≈ RSRP clean + 𝜎 2). As a result, RSRP increases as channel estimation quality degrades, while the remaining KPMs decline. Figure 5b shows the corresponding matrix for the OAI KPMs. No pairwise correlation exceeds the 0.8 threshold, with the strongest association being MAC throughput and LCID4 throughput (0.77). Consequently, all OAI-derived KPMs are retained. The generally moderate correlations suggest that these KPMs capture complemen-tary aspects of system performance, for instance, LCID4 RX exhibits the weakest correlations overall (0.23–0.46), reflecting user-plane delivery rather than PHY-layer link adaptation, and providing the ARCHES dApp with a cross-layer view of system health. Based on this analysis, the final set of KPMs selected for the ARCHES switching logic comprises: PHY throughput, MCS index, PDU length, NDI, and RSRP from Aerial Data Lake; and SNR, MAC-layer throughput, LCID4 throughput, MAC received bytes, and LCID4 received bytes from OAI. Together, these KPMs span mul-tiple protocol layers, from PHY-layer channel quality metrics to MAC-layer scheduling and throughput indicators, giving ARCHES a multi-layer perspective on channel conditions that no single met-ric could provide alone. 
+
+## 5 Case Study: UL Channel Estimation 
+
+This section instantiates the ARCHES framework for UL channel estimation, detailing the domain-specific aspects: the two experts (AI-based and MMSE), the background on channel estimation, and the specific switching policy. 
+
+## 5.1 Background: Channel Estimation 
+
+UL channel estimation at the gNB is performed using DMRS em-bedded within the PUSCH. The DMRS patterns and sequences are predefined by the standard and configured by the gNB, with the corresponding parameters conveyed to the UE through Downlink Control Information (DCI). Upon reception, the gNB correlates the known DMRS sequences with the received signal at the DMRS locations to estimate the channel response, thereby characterizing the effects of propagation, fading, and other impairments. These initial channel estimates are then interpolated in the fre-quency domain across all subcarriers to obtain channel estimates over the entire frequency band, as shown in Figure 6. The left image in Figure 6 shows a representative OFDM UL slot, where user data resource elements are shown in white and the channel estimates computed at the DMRS resource elements are shown in dark-green. We use DMRS with a Type 1 configuration with inter-leaved frequency-domain placement, occupying OFDM symbols 0, 5, and 10. The right-hand image in Figure 6 illustrates the frequency-domain interpolated channel estimates in light-green, where the Subcarriers  
+
+> Estimates
+> at DMRS
+> Freq. domain
+> interpolation Subcarriers
+> Channel Estimation
+> OFDM Symbols OFDM Symbols
+> Interpolated Estimates
+> User Data
+
+Figure 6: DMRS-Based Channel Estimation and Frequency-Domain Interpolation in a 5G NR UL Slot. 
+
+initial estimates at the DMRS resource elements are extended across all subcarriers within the corresponding OFDM symbols, thereby reconstructing the channel over the entire bandwidth. The interpolation and smoothing strategy depends on the spe-cific estimator used. Some estimators also perform time-domain in-terpolation. In the current implementation of ARCHES on NVIDIA Aerial, however, the channel estimator performs only frequency-domain interpolation, while time-domain interpolation across OFDM symbols is handled by the subsequent equalizer. The MMSE estimator leverages prior knowledge of channel and noise statistics but relies on assumptions (accurate covariance ma-trices, quasi-stationary statistics) that limit its robustness under time-selective channels, strong multipath, or statistical mismatch. Various neural-network estimators have shown promising perfor-mance under specific conditions, but no single estimator dominates across all scenarios [ 4]. This motivates the ARCHES approach: rather than committing to one estimator, the framework maintains both and selects per-slot. 
+
+## 5.2 Expert Bank: AI-Based and MMSE Estimators 
+
+The PUSCH CUDA graph (Figure 2) is extended to execute both the MMSE (node 2c) and AI-based (node 2d) estimators in parallel, with the switch kernel (node 2e) selecting the output. For this instantiation, mode =0 selects AI-based estimates and mode =1 selects MMSE. Separate memory is allocated for ˆHMMSE and ˆHAI , with downstream modules reading from the AI-designated buffer. The MMSE estimator (Expert A) is the conventional channel estimator native to the NVIDIA Aerial PUSCH pipeline, perform-ing frequency-domain interpolation based on power-delay profile approximation [16], as described in Section 5.1. The AI-based estimator (Expert B) employs a deep neural net-work with convolutional layers and residual connections, following architectures that have shown strong performance for OFDM chan-nel estimation [ 17 ], taking Least Squares (LS) channel estimates at DMRS locations as input and producing frequency-interpolated estimates across the full bandwidth. The model is integrated via the Channel-Estimate Factory on the Aerial platform using the TensorRT inference engine, and is tested in the open-source cuBB 25-3 [ 18 ]. The current NVIDIA Aerial integration supports AI-based estimation for a single UE; extending to multi-UE scheduling is left to future work. We will release the ARCHES extensions, including the switch kernel and dApp integration, as open source compo-nents. The AI-based estimator’s inference time and GPU utilization are reported in Section 6.2. ARCHES : Adaptive Real-Time Switching of AI Models for the RAN MobiHoc ’26, Nov 23–26, 2026, Tokyo, Japan 
+
+## 5.3 Switching Policy: Decision Tree 
+
+The switching policy is implemented as a lightweight decision tree classifier in the ARCHES dApp. It takes as input the KPMs selected via the methodology in Section 4 and outputs the binary 
+
+mode variable. 
+
+Training data and labeling. The decision tree is trained via supervised learning on OTA data, where each slot is labeled mode =0 under interference conditions and mode =1 otherwise. The goal is to identify when the additional performance from AI justifies its higher compute and energy cost (Section 6.2). We use interference presence as the supervisory signal because OTA profiling shows that AI provides its largest gains under interference, while MMSE remains near-optimal in clean conditions. 
+
+Model configuration. The tree has a maximum depth of 2 with Gini impurity splitting across 10 KPMs. The most informative features are MAC-layer throughput (94.27%), MAC received bytes (4.30%), and LCID4 throughput (1.42%). The shallow depth ensures sub-microsecond inference while avoiding overfitting. 
+
+Performance. As shown in Table 1, the decision tree achieves 99.66% accuracy, 97.56% precision, 99.60% specificity, and a 98.77% F1 score on a held-out test set (80/20 split). 
+
+Table 1: Decision tree classification performance. Accuracy Precision Specificity F1 Score 
+
+99.66% 97.56% 99.60% 98.77% 
+
+## 6 Experimental Evaluation 1m   
+
+> Cell 1
+> Cell 2
+> gNB2
+> gNB1
+> UE2
+> UE1
+> (a) Floor plan showing two cell sites. Insets: UE (top center), RF environment for gNB1–UE1 (top left), O-RU (top right), server (bottom right). gNB1 gNB2
+> UE1
+> UE2 (Interferer)
+> Desired Cell Interfering Cell
+> Cell Edge
+> (b) Introduction of interference via UL transmissions between UE2 and gNB2.
+
+Figure 7: Experimental setup. Aerial Data Lake. To collect the KPMs that drive the switching policy, we use NVIDIA Aerial Data Lake, a telemetry framework within the NVIDIA Aerial CUDA-accelerated RAN that captures UL I/Q samples from the O-RAN 7.2x fronthaul interface along with FAPI metadata exchanged between the L1 and L2 layers. 
+
+OTA data collection. All experiments are conducted on the X5G platform [ 19 ], an O-RAN–compliant, multi-vendor private 5G network built on NVIDIA Aerial [ 12 ], covering an entire floor of the EXP building at Northeastern University. Each node features OAI for upper layers and the NVIDIA Aerial SDK for the DU-Low, running on GH200 GPU systems. The OTA experiments are conducted in an indoor open space with a dynamic environment (Figure 7a). All measurements are performed under Line-of-Sight (LOS) conditions between the gNB1– UE1 pair, with UE1 placed on a stand and gNB1 mounted on a wall (Figure 7a). To evaluate performance under different conditions, we introduce frequency-selective in-band UL interference from a neighboring cell [ 20 ]: UE2 transmits to gNB2 in the same frequency band, with the interference level controlled by the MAC scheduler via PRB allocation (Figure 7b). We refer to conditions as good (no interference) and poor (interference present). 
+
+## 6.1 Mechanism-Level Results: Temporal Analysis 
+
+Switch Kernel. Figure 8 summarizes the runtime statistics for the AI expert (dark-green) and the MMSE estimator (light-green), pro-filed using NVIDIA Nsight Systems. The switch kernel executes in an average of 3.36 𝜇 s when selecting AI and 4.89 𝜇 s when selecting MMSE. The higher latency in MMSE mode reflects the coalesced memory copy discussed in Section 3.2, which is absent in AI mode. Similar trends are observed across the median, and standard devi-ations remain comparable for both modes, indicating consistent execution.            
+
+> Average Median Std Dev
+> 10 0
+> 10 2
+> 3.36 3.36
+> 0.41
+> 4.89 4.83
+> 0.47
+> 432 .33 432 .37
+> 0.84
+> 5.04 4.61
+> 0.83
+> 0.41 0.38
+> 0.12
+> Time [ 𝜇 s]
+> Switch (AI) Switch (MMSE) AI MMSE Decision Tree
+
+Figure 8: Runtime statistics for all components of the switching mechanism. Decision Tree. The inference time of the decision tree (purple bars in Figure 8), described in Section 5.3, running on the ARCHES dApp averages 0.41 𝜇 s on the GH200 (median 0.38 𝜇 s, std. dev. 0.12 𝜇 s), achieving an accuracy above 99%. The model is executed at a configurable periodicity, enabling timely adaptation to channel dynamics without introducing measurable processing overhead. 
+
+End-to-end Control Loop Latency. The end-to-end control loop latency accounts for the full data path from the GPU-accelerated PUSCH pipeline to the dApp, including the decision tree inference and the switch kernel execution. Prior to any model execution, the dApp incurs approximately 135 𝜇 s of framework overhead, com-prising several tightly optimized data-movement and messaging steps, such as copying data into shared memory buffers and send-ing pointers and metadata to the dApp via the ZeroMQ interface. MobiHoc ’26, Nov 23–26, 2026, Tokyo, Japan N. Neasamoni Santhi, D. Villa, M. Polese, S. D’Oro, Y. Lee, K. Furueda, T. Melodia 
+
+The decision tree classifier adds 0.41 𝜇 s on average, and the switch kernel itself executes in approximately 4.5 𝜇 s, yielding a total end-to-end control loop latency of approximately 140 𝜇 s. Note that this latency assumes the switching decision is applied at the beginning of the current slot; if the decision arrives after the slot boundary, it takes effect in the following slot. 
+
+Data Integrity. Since PHY throughput in Aerial is computed from successfully decoded transport blocks based on TB Cyclic Redundancy Check (CRC) checks, any corruption introduced by switching would therefore appear as reduced throughput. The stable throughput observed during switching confirms that slot-boundary switching does not corrupt in-flight data. 
+
+## 6.2 Case-Study Results: Performance Comparison 
+
+Expert Inference Times. We profile the execution time of the AI-based estimator (blue) and the MMSE filtering kernel (orange) in Figure 8. The AI-based estimator inference time is profiled us-ing TensorRT, while the MMSE latency is measured using Nsight Systems by profiling the dispatch kernel, which internally invokes the kernel that performs the actual MMSE estimation. The MMSE CUDA kernel executes in approximately 5.04 𝜇 s, while the AI-based estimator requires approximately 432 𝜇 s, making it roughly 85 times slower. This overhead, along with the GPU utilization discussed later in this subsection, is the primary motivation for the switching mechanism proposed in this work. Although the AI-based estimator delivers consistent throughput gains under the tested conditions, its substantially higher compute cost makes unconditional execu-tion impractical, particularly in multi-UE scenarios where per-slot latency budgets are shared across users. The dApp therefore dynam-ically activates the AI-based estimator only when the switching policy determines that conditions warrant it. 
+
+Time Series of PHY Throughput. Figure 9 shows the PHY throughput over time (indexed by slot) for an OTA experiment in which channel conditions transition from good to poor and back. Dashed lines show the throughput each estimator would achieve if run continuously; solid lines show the throughput under ARCHES. In good conditions, ARCHES selects MMSE: although AI con-sistently improves throughput, the gain is too small to justify its substantially higher compute and energy cost, as quantified un-der GPU and CPU Resources below. In poor conditions, ARCHES switches to the AI-based estimator, where the larger throughput advantage outweighs the additional resource consumption. 
+
+KPMs. Figure 10 presents CDFs of six KPMs used in the switch-ing logic. Under good conditions, the AI-based estimator achieves a median PHY throughput of 93.97 Mbps versus 89.23 Mbps for MMSE (5.32% gain) and a median MAC throughput of 93.67 Mbps versus 87.99 Mbps (6.45% gain). Under poor conditions, the AI advan-tage persists: median PHY throughput of 52.14 versus 48.64 Mbps (7.23%) and MAC throughput of 52.18 versus 47.77 Mbps (9.23%). For MCS index (Figure 10b), the AI-based estimator yields a median of 20 versus 19 under good conditions and 12 versus 11 under poor conditions. For PDU length (Figure 10e), both estimators produce larger PDUs under good conditions, with AI shifting the distribution to-ward higher values. LCID4 RX bytes (Figure 10c) follow a similar trend, confirming that PHY-layer gains propagate to user-plane 
+
+0 200 400 600 800 
+
+40 
+
+60 
+
+80 
+
+## Good Poor Good 
+
+Slot Index PHY Throughput [Mbps]  ARCHES (AI) AI ARCHES (MMSE) MMSE 
+
+Figure 9: PHY throughput over time as channel conditions transition from good to poor and back. Dashed lines: throughput under continuous execution of each estimator; solid lines: throughput under ARCHES.    
+
+> AI (Good) AI (Poor) MMSE (Good) MMSE (Poor)
+
+0 20 40 60 80 100 
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+PHY Throughput [Mbps] 
+
+> CDF
+
+AI(Good) 
+
+AI(Poor) 
+
+MMSE(Good) 
+
+MMSE(Poor) 
+
+> (a) PHY throughput
+
+0 10 20 
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+MCS Index 
+
+> CDF
+
+AI(Good) 
+
+AI(Poor) 
+
+MMSE(Good) 
+
+MMSE(Poor) 
+
+> (b) MCS index
+
+−1 0 1 2 3 4
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+LCID4 RX [ ×10 9 bytes] 
+
+> CDF
+
+AI(Good) 
+
+AI(Poor) 
+
+MMSE(Poor) 
+
+MMSE(Good) 
+
+> (c) LCID4 RX bytes
+
+0 20 40 60 80 100 
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+MAC Throughput [Mbps] 
+
+> CDF
+
+AI(Good) 
+
+AI(Poor) 
+
+MMSE(Good) 
+
+MMSE(Poor) 
+
+> (d) MAC throughput
+
+0 0.5 1 1.5 2 2.5
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+PDU Length [ ×10 4 bytes] 
+
+> CDF
+
+AI(Good) 
+
+AI(Poor) 
+
+MMSE(Good) 
+
+MMSE(Poor) 
+
+> (e) PDU length
+
+5 10 15 
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+RSRP [dBFS] 
+
+> CDF
+
+AI(Good) 
+
+AI(Poor) 
+
+MMSE(Good) 
+
+MMSE(Poor) 
+
+> (f) RSRP
+
+Figure 10: CDF comparison of AI (blue) and MMSE (orange) estimators under good (solid) and poor (dashed) channel conditions. ARCHES : Adaptive Real-Time Switching of AI Models for the RAN MobiHoc ’26, Nov 23–26, 2026, Tokyo, Japan 
+
+delivery. RSRP (Figure 10f) remains comparable across estimators, consistent with its dependence on received signal power rather than estimation quality.    
+
+> AI (Good) AI (Poor) MMSE (Good) MMSE (Poor)
+
+130 140 150 160 
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+GPU Power [W] CDF  AI (Good) AI (Poor) MMSE (Good) MMSE (Poor) 
+
+> (a) GPU power draw
+
+20 30 40 50 60 70 
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+GPU Utilization [%] 
+
+> CDF
+
+AI (Good) 
+
+AI (Poor) 
+
+MMSE (Good) 
+
+MMSE (Poor) 
+
+> (b) GPU utilization
+
+19 .5 20 20 .5 21 21 .5 22 22 .5 23 
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+CPU Memory Usage [%] 
+
+> CDF
+
+AI (Good) 
+
+AI (Poor) 
+
+MMSE (Good) 
+
+MMSE (Poor) 
+
+> (c) CPU memory usage
+
+Figure 11: CDF comparison of GPU power draw, GPU utilization, and CPU memory usage for AI (blue) and MMSE (orange) estimators under good (solid) and poor (dashed) channel conditions. GPU and CPU Resources. Figure 11 presents the CDFs of GPU power, utilization, and CPU memory. Measurements are collected with each estimator running independently, quantifying the per-expert resource profile that informs the switching decision. Under good conditions, MMSE shows a clear advantage: median GPU power decreases from 164.2 W (AI) to 148.4 W, saving 15.8 W (9.6%), while GPU utilization drops from 67% to 50% (17 percentage points). Under poor conditions, reduced scheduling grants lower overall GPU load for both estimators, shrinking the power gap to ∼1 W and converging utilization to 36% versus 35%. CPU memory remains comparable across all cases, confirming negligible host-side over-head. The resource gap is most pronounced under good conditions, thus reinforcing the case for defaulting to MMSE when conditions are favorable. Concurrent execution is used here to validate seamless slot-boundary switching, deterministic latency, and fail-safe operation. In practical deployment, the selected-only mode (Section 3.1) would directly realize these savings at the cost of at least a one-slot acti-vation delay. These resource profiles validate the ARCHES design rationale: activating AI only when conditions warrant it improves KPMs while avoiding unnecessary power expenditure. 
+
+## 7 Generalization to Other RAN Functions 
+
+The ARCHES mechanism is not specific to channel estimation. The design principles in Section 2 are function-agnostic; only the experts and telemetry inputs change per use case. For beam management, multiple prediction models (e.g., pedestrian vs. vehicular) [ 21 ] could execute, with the policy driven by beam failure rate and mobility indicators. For equalization or LDPC decoding, experts with dif-ferent configurations (e.g., iteration counts or neural-augmented variants [ 22 ]) could be switched based on Block Error Rate (BLER) and compute-budget metrics. For interference detection and Inte-grated Sensing and Communication (ISAC), prior work on the same platform [ 15 , 20 ] could be extended with multiple detection models selected based on observed interference patterns. In all cases, the validated mechanism-level properties—a 140 𝜇 s control loop, sub-microsecond policy inference, and a 3–5 𝜇 s switch kernel—transfer directly. The switching mechanism remains unchanged; only the experts and telemetry inputs are adapted to the target function. 
+
+## 8 Related Work 
+
+MoE and adaptive model selection. The MoE paradigm [ 10 ,11 , 23 , 24 ] has been widely studied in machine learning, where a gating network routes inputs to specialized sub-models. How-ever, conventional MoE systems operate in batch or near-real-time settings and do not address the challenges of seamless switching within a live, sub-millisecond signal processing pipeline without data loss. ARCHES adapts the MoE concept to the constraints of GPU-accelerated 5G PHY processing. 
+
+AI-based channel estimation. Deep learning has emerged as a promising alternative to conventional MMSE and LS estimation in OFDM systems. Several works have proposed Convolutional Neural Network (CNN) and residual architectures that consider the channel time-frequency responses as 2D images [ 3, 4, 17 ], while others have targeted high-mobility scenarios with Recurrent Neural Network (RNN)-based interpolators [ 25 ] or focused specifically on the 5G NR PUSCH with Artificial Neural Network (ANN) and online-trained estimators [ 26 , 27 ]. A common finding in these works, further high-lighted by the CeBed benchmark [ 4 ], is that no single estimator dominates across all propagation scenarios, directly motivating condition-aware selection. Notably, ChannelNet [ 3] itself proposes SNR-based switching between two specialized networks, but re-mains simulation-only. 
+
+Real-time AI in GPU-accelerated RAN. All of the above evalu-ations are conducted in simulation. Ford et al. [28 ] take a significant step toward real-world validation by demonstrating a ResNet-based AI channel estimator on the same NVIDIA testbed platform used in this work, achieving OTA throughput gains of up to 40% over MMSE. Boccuzzi et al. [ 29 ] present a GPU-accelerated AI-RAN ref-erence design and end-to-end verification methodology on NVIDIA Aerial, while other recent work has demonstrated real-time GPU-accelerated AI inference co-located with 5G NR PHY processing for interference detection and ISAC applications on the same plat-form [ 15 , 20 ]. However, none of these works incorporates dynamic selection between AI and conventional experts; instead, the AI model runs continuously, incurring inference overhead regardless of channel conditions. MobiHoc ’26, Nov 23–26, 2026, Tokyo, Japan N. Neasamoni Santhi, D. Villa, M. Polese, S. D’Oro, Y. Lee, K. Furueda, T. Melodia 
+
+To our knowledge, this work is the first to present a system for real-time expert switching inside a live GPU-accelerated 5G PHY pipeline, validated end-to-end through OTA experiments with switching decisions driven by a dApp using cross-layer KPMs col-lected from the live system. The contribution of this paper is there-fore not a better AI estimator, but the infrastructure required to safely switch between experts in real time. 
+
+## 9 Conclusions and Future Work 
+
+This paper presents ARCHES, a framework for real-time expert switching inside GPU-accelerated 5G PHY pipelines. ARCHES demonstrates that real-time expert switching is practical by en-abling multiple AI and conventional signal-processing experts to coexist within the pipeline, hot-swapping between them at slot-boundary granularity via a lightweight CUDA kernel, and driving the switching decision through cross-layer telemetry collected by a dApp—all without dropping or corrupting in-flight data. The framework is accompanied by a reusable three-stage process for telemetry selection and policy design. Validated through a case study on UL channel estimation on the X5G platform, ARCHES achieves an end-to-end control-loop latency of ∼140 𝜇 s with sub-microsecond decision inference. The case study demonstrates median UL PHY throughput improvements of 5.32% and 7.23% under good and poor conditions, respectively. Critically, under good conditions where the throughput gain from AI is marginal ( ∼5%), defaulting to MMSE saves 15.8 W of GPU power and 17 percentage points of utilization—quantifying the performance-per-watt tradeoff that motivates condition-aware ex-pert selection as AI components proliferate across the RAN. Future work includes extending ARCHES to support 𝑁 > 2 ex-perts for finer-grained adaptation, scaling the AI-based estimator to multi-UE scenarios, evaluating additional propagation condi-tions (Non-Line-of-Sight (NLOS), high mobility), characterizing the selected-only execution mode under realistic channel dynamics, reporting BLER and HARQ statistics to complement throughput-based evaluation, comparing alternative switching policies such as threshold-based gating, and applying the framework to other real-time RAN functions. 
+
+## References 
+
+[1] 3GPP, “Study on Artificial Intelligence (AI)/Machine Learning (ML) for NR Air Interface,” 3rd Generation Partnership Project, Technical Report TR 38.843, 2023, release 18. [2] W. Chen et al. , “AI assisted PHY in future wireless systems: Recent developments and challenges,” China Communications , vol. 18, no. 5, pp. 285–297, 2021. [3] M. Soltani, V. Pourahmadi, A. Mirzaei, and H. Sheikhzadeh, “Deep Learning-Based Channel Estimation,” IEEE Communications Letters , vol. 23, no. 4, pp. 652–655, 2019. [4] A. Feriani, D. Wu, X. Liu, and G. Dudek, “CeBed: A Benchmark for Deep Data-Driven OFDM Channel Estimation,” arXiv preprint arXiv:2306.13761 , 2023. [5] Y. Wang, A. Klautau, M. Ribero, A. C. K. Soong, and R. W. Heath, “MmWave vehicular beam selection with situational awareness using machine learning,” 
+
+IEEE Access , vol. 7, pp. 87 479–87 493, 2019. [6] X. Wang, L. Gao, S. Mao, and S. Pandey, “CSI-based fingerprinting for indoor localization: A deep learning approach,” IEEE Transactions on Vehicular Technology ,vol. 66, no. 1, pp. 763–776, 2017. [7] L. Bonati, S. D’Oro, M. Polese, S. Basagni, and T. Melodia, “Intelligence and learn-ing in O-RAN for data-driven NextG cellular networks,” IEEE Communications Magazine , vol. 59, no. 10, pp. 21–27, 2021. [8] J. Corgan et al. , “How critical is site-specific RAN optimization? 5G open-RAN uplink air interface performance test and optimization from macro-cell CIR data,” in Proc. IEEE Vehicular Technology Conference (VTC) , 2024. [9] R. Verdecia-Peña, R. Oliveira, and J. I. Alonso, “Enhancing mmWave channel estimation: A practical experimentation approach with modeled physical layer impairments incorporated in deep learning training,” IEEE Open Journal of the Communications Society , 2024. [10] R. A. Jacobs, M. I. Jordan, S. J. Nowlan, and G. E. Hinton, “Adaptive mixtures of local experts,” Neural Computation , vol. 3, no. 1, pp. 79–87, 1991. [11] N. Shazeer, A. Mirhoseini, K. Maziarz, A. Davis, Q. V. Le, G. E. Hinton, and J. Dean, “Outrageously large neural networks: The sparsely-gated mixture-of-experts layer,” in Proc. of International Conference on Learning Representations (ICLR) , 2017. [12] “Aerial RAN co-lab over-the-air (ARC-OTA),” 2025. [Online]. Available: https://docs.nvidia.com/aerial/aerial-ran-colab-ota/current/index.html [13] S. D’Oro, M. Polese, L. Bonati, H. Cheng, and T. Melodia, “dApps: Distributed Ap-plications for Real-Time Inference and Control in O-RAN,” IEEE Communications Magazine , vol. 60, no. 11, p. 52–58, Nov. 2022. [14] A. Lacava, L. Bonati, N. Mohamadi, R. Gangula, F. Kaltenberger, P. Johari, S. D’Oro, F. Cuomo, M. Polese, and T. Melodia, “dApps: Enabling Real-Time AI-Based Open RAN Control,” Computer Networks , vol. 269, p. 111342, September 2025. [15] D. Villa, M. Belgiovine, N. Hedberg, M. Polese, C. Dick, and T. Melodia, “Programmable and GPU-Accelerated Edge Inference for Real-Time ISAC on NVIDIA Aerial Testbed,” April 2026. [Online]. Available: https://arxiv.org/pdf/ 2512.06493 [16] K.-C. Hung and D. W. Lin, “Pilot-based LMMSE channel estimation for OFDM systems with power-delay profile approximation,” IEEE Transactions on Vehicular Technology , vol. 59, no. 1, 2010. [17] L. Li, H. Chen, H.-H. Chang, and L. Liu, “Deep Residual Learning Meets OFDM Channel Estimation,” IEEE Wireless Communications Letters , vol. 9, no. 5, pp. 615–618, 2020. [18] NVIDIA Aerial ™ CUDA-Accelerated RAN. [Online]. Available: https://github. com/NVIDIA/aerial-cuda-accelerated-ran/commits/main/ [19] D. Villa, I. Khan, F. Kaltenberger, N. Hedberg, R. S. da Silva, S. Maxenti, L. Bonati, A. Kelkar, C. Dick, E. Baena, J. M. Jornet, T. Melodia, M. Polese, and D. Kout-sonikolas, “X5G: An Open, Programmable, Multi-Vendor, End-to-End, Private 5G O-RAN Testbed With NVIDIA ARC and OpenAirInterface,” IEEE Transactions on Mobile Computing , vol. 24, no. 11, pp. 11 305–11 322, 2025. [20] N. Neasamoni Santhi, D. Villa, M. Polese, and T. Melodia, “InterfO-RAN: Real-Time In-band Cellular Uplink Interference Detection with GPU-Accelerated dApps,” in Proc. of ACM International Symposium on Theory, Algorithmic Founda-tions, and Protocol Design for Mobile Networks and Mobile Computing (MobiHoc) ,Houston, TX, USA, October 2025, p. 71–80. [21] Q. Xue et al. , “AI/ML for beam management in 5G-advanced: A standardization perspective,” IEEE Communications Surveys & Tutorials , vol. 26, no. 4, 2024. [22] E. Nachmani, E. Marciano, L. Lugosch, W. J. Gross, D. Burshtein, and Y. Be’ery, “Deep learning methods for improved decoding of linear codes,” IEEE Journal of Selected Topics in Signal Processing , vol. 12, no. 1, pp. 119–131, 2018. [23] M. I. Jordan and R. A. Jacobs, “Hierarchical mixtures of experts and the EM algorithm,” Neural Computation , vol. 6, no. 2, pp. 181–214, 1994. [24] W. Fedus, B. Zoph, and N. Shazeer, “Switch transformers: Scaling to trillion parameter models with simple and efficient sparsity,” in Journal of Machine Learning Research , vol. 23, no. 120, 2022, pp. 1–39. [25] A. K. Gizzini and M. Chafii, “RNN Based Channel Estimation in Doubly Selective Environments,” IEEE Transactions on Machine Learning in Communications and Networking , vol. 2, pp. 1–18, 2024. [26] A. B. Dayi, “Improving 5G NR Uplink Channel Estimation with Artificial Neural Networks: A Practical Study on NR PUSCH Receiver,” in Proceedings of the IEEE International Black Sea Conference on Communications and Networking (BlackSeaCom) , 2022, pp. 129–134. [27] K. Weththasinghe, B. Jayawickrama, and Y. He, “Machine Learning-Based Chan-nel Estimation for 5G New Radio,” IEEE Wireless Communications Letters , vol. 13, no. 4, pp. 1133–1137, 2024. [28] R. Ford, H. Chen, P. Madadi, M. Kulkarni, X. Ma, D. Burghal, G. Chen, Y. Hu, C. Tarver, P. Skrimponis, V. Loseu, Y. Zhang, Y. Xin, Y. Li, J. Zhang, S. Khunteta, Y. G. Reddy, A. K. R. Chavva, M. Kothiwale, and D. Villa, “Sim2Field: End-to-End Development of AI RANs for 6G,” in Proceedings of ACM Workshop on Open and AI RAN , Hong Kong, China, November 2025. [29] J. Boccuzzi, R. Chavan, R. Lekhwani, S. Lin, M. Hoang, N. Hedberg, Q. Wang, S. Samala, P. Marini, S. Sarpotdar, and M. Adamczyk, “GPU Accelerated High Capacity, AI-Ready 5G/6G Reference Design and Verification Methodology,” IEEE Wireless Communications , vol. 32, no. 6, pp. 216–223, 2025.
