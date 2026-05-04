@@ -6,73 +6,74 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-03
-- 运行时间：2026-05-03 19:49:22 UTC
+- 最新运行日期：2026-05-04
+- 运行时间：2026-05-04 20:22:25 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日精选 17 篇前沿论文，深度聚焦边缘智能落地与大模型长文本训练优化。
-重点推荐 AutoSP 编译器级序列并行技术及无人机边缘端杂草检测方案，攻克了长文本训练与资源受限部署难题。
-建议关注编译器优化与硬件感知量化，这是实现复杂算法在终端高效运行的核心路径。
-- 详情：[/202605/03/README](/202605/03/README)
+- 今日共生成 17 篇推荐（精读 6 篇，速读 11 篇）
+- 精读：《Extracting Exact Lie Derivatives Without Backpropagation: A Dual Compiler for Neural Control Barrier Functions》（9.0/10）, 《Vision SmolMamba: Spike-Guided Token Pruning for Energy-Efficient Spiking State-Space Vision Models》（9.0/10）
+- 速读：《Hyperloop Transformers》（8.0/10）, 《Hyperloop Transformers》（8.0/10）, 《Optimizing High-Throughput Distributed Data Pipelines for Reproducible Deep Learning at Scale》（8.0/10）
+- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
+- 详情：[/202605/04/README](/202605/04/README)
 
 ### 精读区论文标签
-1. [Resource-Constrained UAV-Based Weed Detection for Site-Specific Management on Edge Devices](/202605/03/2604.23442v1-resource-constrained-uav-based-weed-detection-for-site-specific-management-on-edge-devices)  
+1. [Extracting Exact Lie Derivatives Without Backpropagation: A Dual Compiler for Neural Control Barrier Functions](/202605/04/2604.23995v1-extracting-exact-lie-derivatives-without-backpropagation-a-dual-compiler-for-neural-control-barrier-functions)  
    标签：评分：9.0/10、query:hwnas
-   evidence：资源受限边缘平台上的无人机杂草检测
-2. [AutoSP: Unlocking Long-Context LLM Training Via Compiler-Based Sequence Parallelism](/202605/03/2604.27089v1-autosp-unlocking-long-context-llm-training-via-compiler-based-sequence-parallelism)  
+   evidence：用于在嵌入式硬件上部署神经网络的双代数编译器
+2. [Vision SmolMamba: Spike-Guided Token Pruning for Energy-Efficient Spiking State-Space Vision Models](/202605/04/2604.25570v1-vision-smolmamba-spike-guided-token-pruning-for-energy-efficient-spiking-state-space-vision-models)  
    标签：评分：9.0/10、query:hwnas
-   evidence：基于编译器的LLM训练序列并行自动化方案
-3. [RCW-CIM: A Digital CIM-based LLM Accelerator with Read-Compute/Write](/202605/03/2604.27384v1-rcw-cim-a-digital-cim-based-llm-accelerator-with-read-computewrite)  
+   evidence：具有令牌剪枝功能的节能脉冲状态空间架构
+3. [Multibit neural inference in a N-ary crossbar architecture](/202605/04/2604.26979v1-multibit-neural-inference-in-a-n-ary-crossbar-architecture)  
    标签：评分：9.0/10、query:hwnas
-   evidence：基于数字存算一体的LLM加速器及算子融合
-4. [EdgeFM: Efficient Edge Inference for Vision-Language Models](/202605/03/2604.27476v1-edgefm-efficient-edge-inference-for-vision-language-models)  
+   evidence：能效神经推理的存内计算
+4. [Real-Time Frame- and Event-based Object Detection with Spiking Neural Networks on Edge Neuromorphic Hardware: Design, Deployment and Benchmark](/202605/04/2605.00146v1-real-time-frame--and-event-based-object-detection-with-spiking-neural-networks-on-edge-neuromorphic-hardware-design-deployment-and-benchmark)  
    标签：评分：9.0/10、query:hwnas
-   evidence：面向跨平台边缘部署的智能体驱动VLM推理框架
-5. [NeuroRing: Scaling Spiking Neural Networks via Multi-FPGA Bidirectional Ring Topologies and Stream-Dataflow Architectures](/202605/03/2604.28059v1-neuroring-scaling-spiking-neural-networks-via-multi-fpga-bidirectional-ring-topologies-and-stream-dataflow-architectures)  
+   evidence：针对神经形态平台设计 SNN 架构
+5. [DPU or GPU for Accelerating Neural Networks Inference -- Why not both? Split CNN Inference](/202605/04/2605.00174v1-dpu-or-gpu-for-accelerating-neural-networks-inference----why-not-both-split-cnn-inference)  
    标签：评分：9.0/10、query:hwnas
-   evidence：基于FPGA流式数据流架构的高能效SNN加速器
-6. [On-Device Vision Training, Deployment, and Inference on a Thumb-Sized Microcontroller](/202605/03/2604.23012v1-on-device-vision-training-deployment-and-inference-on-a-thumb-sized-microcontroller)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：微控制器上的端侧视觉训练与推理
+   evidence：在DPU和GPU之间划分CNN推理
+6. [VitaLLM: A Versatile and Tiny Accelerator for Mixed-Precision LLM Inference on Edge Devices](/202605/04/2605.00320v1-vitallm-a-versatile-and-tiny-accelerator-for-mixed-precision-llm-inference-on-edge-devices)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：用于边缘设备LLM推理的混合精度加速器
 
 ### 速读区论文标签
-1. [Efficient INT8 Single-Image Super-Resolution via Deployment-Aware Quantization and Teacher-Guided Training](/202605/03/2604.20291v1-efficient-int8-single-image-super-resolution-via-deployment-aware-quantization-and-teacher-guided-training)  
+1. [Hyperloop Transformers](/202605/04/2604.21254v1-hyperloop-transformers)  
    标签：评分：8.0/10、query:hwnas
-   evidence：部署感知量化与紧凑推理图
-2. [Stream-CQSA: Avoiding Out-of-Memory in Attention Computation via Flexible Workload Scheduling](/202605/03/2604.20819v1-stream-cqsa-avoiding-out-of-memory-in-attention-computation-via-flexible-workload-scheduling)  
+   evidence：针对内存受限的边缘和设备端部署的参数高效架构设计
+2. [Hyperloop Transformers](/202605/04/2604.21254v2-hyperloop-transformers)  
    标签：评分：8.0/10、query:hwnas
-   evidence：内存自适应调度以避免注意力计算中的内存溢出
-3. [Ternary Memristive Logic: Hardware for Reasoning Realized via Domain Algebra](/202605/03/2604.20891v1-ternary-memristive-logic-hardware-for-reasoning-realized-via-domain-algebra)  
+   evidence：用于边缘和设备端部署的参数高效架构
+3. [Optimizing High-Throughput Distributed Data Pipelines for Reproducible Deep Learning at Scale](/202605/04/2604.21275v1-optimizing-high-throughput-distributed-data-pipelines-for-reproducible-deep-learning-at-scale)  
    标签：评分：8.0/10、query:hwnas
-   evidence：使用忆阻逻辑进行推理的软硬件协同设计
-4. [FairyFuse: Multiplication-Free LLM Inference on CPUs via Fused Ternary Kernels](/202605/03/2604.20913v1-fairyfuse-multiplication-free-llm-inference-on-cpus-via-fused-ternary-kernels)  
+   evidence：优化数据流水线以最大化GPU利用率
+4. [A four-player potential game for barren-plateau-aware quantum ansatz design](/202605/04/2604.21955v1-a-four-player-potential-game-for-barren-plateau-aware-quantum-ansatz-design)  
    标签：评分：8.0/10、query:hwnas
-   evidence：大语言模型推理的软硬件协同设计
-5. [Mixture of Heterogeneous Grouped Experts for Language Modeling](/202605/03/2604.23108v1-mixture-of-heterogeneous-grouped-experts-for-language-modeling)  
+   evidence：考虑硬件成本的量子电路设计
+5. [Hybrid JIT-CUDA Graph Optimization for Low-Latency Large Language Model Inference](/202605/04/2604.23467v1-hybrid-jit-cuda-graph-optimization-for-low-latency-large-language-model-inference)  
    标签：评分：7.0/10、query:hwnas
-   evidence：解决异构MoE架构中GPU利用率不均衡的问题
-6. [Hierarchical Spatio-Channel Clustering for Efficient Model Compression in Medical Image Analysis](/202605/03/2604.23375v1-hierarchical-spatio-channel-clustering-for-efficient-model-compression-in-medical-image-analysis)  
+   evidence：混合 JIT-CUDA 图优化用于低延迟推理
+6. [Adaptive Swin Transformer Partitioning over AI-RAN Networks](/202605/04/2604.23554v1-adaptive-swin-transformer-partitioning-over-ai-ran-networks)  
    标签：评分：7.0/10、query:hwnas
-   evidence：资源受限环境下的高效模型压缩
-7. [Evaluating CUDA Tile for AI Workloads on Hopper and Blackwell GPUs](/202605/03/2604.23466v1-evaluating-cuda-tile-for-ai-workloads-on-hopper-and-blackwell-gpus)  
+   evidence：针对边缘网络实时推理的自适应切分与激活压缩技术
+7. [ELSA: Exact Linear-Scan Attention for Fast and Memory-Light Vision Transformers](/202605/04/2604.23798v1-elsa-exact-linear-scan-attention-for-fast-and-memory-light-vision-transformers)  
    标签：评分：7.0/10、query:hwnas
-   evidence：AI工作负载的GPU内核效率评估
-8. [Hardware-Efficient FPGA Implementation of Sigmoid Function Using Mixed-Radix Hyperbolic Rotation CORDIC](/202605/03/2604.23547v1-hardware-efficient-fpga-implementation-of-sigmoid-function-using-mixed-radix-hyperbolic-rotation-cordic)  
+   evidence：针对视觉Transformer的轻量化内存算法重构
+8. [Architectural Isolation as a Timing Safety Primitive for Edge AI Medical Devices: Controlled Experimental Evidence on a Shared-Silicon Platform](/202605/04/2604.23831v1-architectural-isolation-as-a-timing-safety-primitive-for-edge-ai-medical-devices-controlled-experimental-evidence-on-a-shared-silicon-platform)  
    标签：评分：7.0/10、query:hwnas
-   evidence：激活函数的硬件高效FPGA实现
-9. [GreenDyGNN: Runtime-Adaptive Energy-Efficient Communication for Distributed GNN Training](/202605/03/2604.23139v1-greendygnn-runtime-adaptive-energy-efficient-communication-for-distributed-gnn-training)  
+   evidence：边缘加速器上的软硬件定时安全
+9. [Rethinking Collision Detection on GPU Ray Tracing Architecture](/202605/04/2604.23520v1-rethinking-collision-detection-on-gpu-ray-tracing-architecture)  
    标签：评分：6.0/10、query:hwnas
-   evidence：运行时自适应节能通信与缓存管理
-10. [LatentBurst: A Fast and Efficient Multi Frame Super-Resolution for Hexadeca-Bayer Pattern CIS images](/202605/03/2604.23268v1-latentburst-a-fast-and-efficient-multi-frame-super-resolution-for-hexadeca-bayer-pattern-cis-images)  
+   evidence：利用GPU光线追踪架构加速碰撞检测
+10. [FlowPlace: Flow Matching for Chip Placement](/202605/04/2604.23658v1-flowplace-flow-matching-for-chip-placement)  
    标签：评分：6.0/10、query:hwnas
-   evidence：专为在移动设备上实时运行而设计的快速高效网络
-11. [ARCHES: Adaptive Real-Time Switching of AI Models for the RAN](/202605/03/2604.23397v1-arches-adaptive-real-time-switching-of-ai-models-for-the-ran)  
+   evidence：物理设计中芯片布局的流匹配方法
+11. [Neural Enhancement of Analytical Appearance Models](/202605/04/2604.24081v1-neural-enhancement-of-analytical-appearance-models)  
    标签：评分：6.0/10、query:hwnas
-   evidence：基站的计算和能量成本
+   evidence：基于超立方体搜索，用小型MLP替换计算节点
 
 
 <div class="dpr-home-promo-card">

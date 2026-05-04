@@ -1,0 +1,472 @@
+Title: Rethinking Collision Detection on GPU Ray Tracing Architecture
+
+URL Source: https://arxiv.org/pdf/2604.23520v1
+
+Published Time: Tue, 28 Apr 2026 00:58:36 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# Rethinking Collision Detection on GPU Ray Tracing Architecture 
+
+# Durga Mandarapu ∗
+
+Purdue University, Lawrence Berkeley National Laboratory Berkeley, CA, USA dmandara@purdue.edu 
+
+# Isaac Fuksman 
+
+Purdue University West Lafayette, IN, USA ifuksman@purdue.edu 
+
+# Artem Pelenitsyn 
+
+Purdue University West Lafayette, IN, USA apelenit@purdue.edu 
+
+# Gilbert Bernstein 
+
+University of Washington Seattle, WA, USA gilbo@cs.washington.edu 
+
+# Milind Kulkarni 
+
+Purdue University West Lafayette, IN, USA milind@purdue.edu 
+
+## Abstract 
+
+Discrete Collision Detection (DCD) is a fundamental task in sev-eral domains including particle-based physics simulations. Efficient DCD uses indexing structures such as Bounding Volume Hierarchy (BVH), but accelerating irregular BVH traversals demands metic-ulous efforts to achieve performance. Modern GPUs feature Ray Tracing (RT) architecture that provides hardware acceleration for BVH traversal and optimized drivers for BVH construction. Recent work has attempted to exploit RT architecture to accelerate DCD on spherical particles by reducing DCD to fixed-radius neighbor search. However, this reduction breaks down for particles with different radii, necessitating the use of large bounding boxes that result in a higher number of duplicate collisions and poor performance. To address these limitations, we present Mochi, a new reduction that reformulates DCD on RT architecture by exploiting the symme-try of collision relations to support both uniform and non-uniform spherical particles efficiently. Mochi introduces per-object proxy spheres that decouple BVH bounding volumes from the collision search radius, enabling significantly tighter bounding boxes with-out sacrificing correctness. Mochi is provably sound and guarantees that all true collisions are detected. We integrate Mochi into an end-to-end particle simulation pipeline and evaluate it across large-scale particle workloads, showing consistent speedups over state-of-the-art BVH-based and RT-based DCD implementations. Mochi gener-alizes prior RT-based neighbor search formulations while avoiding their fundamental limitations for non-uniform spheres. 
+
+## CCS Concepts 
+
+• Computing methodologies → Collision detection ; Physical simulation ; Graphics processors ; Ray tracing .
+
+## Keywords 
+
+Discrete Collision Detection, GPU Ray Tracing architecture, GPU computing, Rigid spheres, Particle systems  
+
+> ∗This work was conducted during the author’s Ph.D. at Purdue University.
+> This work is licensed under a Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License.
+> ICS ’26, Belfast, United Kingdom
+> ©2026 Copyright held by the owner/author(s). ACM ISBN 979-8-4007-2522-7/2026/07 https://doi.org/10.1145/3797905.3807836
+
+ACM Reference Format: 
+
+Durga Mandarapu, Isaac Fuksman, Artem Pelenitsyn, Gilbert Bernstein, and Milind Kulkarni. 2026. Rethinking Collision Detection on GPU Ray Tracing Architecture. In 2026 International Conference on Supercomputing (ICS ’26), July 06–09, 2026, Belfast, United Kingdom. ACM, New York, NY, USA, 12 pages. https://doi.org/10.1145/3797905.3807836 
+
+## 1 Introduction 
+
+Discrete collision detection is a fundamental computational task in numerous domains, including physical simulations [ 2], computer graphics [ 38 ], and industrial manufacturing [ 30 ]. Given a set of objects, a DCD kernel finds all pairs of colliding (or intersecting) objects at a discrete time step and allows the next stages of the application pipeline to resolve collisions. To prune the quadratic search space, DCD algorithms commonly index objects using spa-tial acceleration structures, such as BVH trees. As such, efficient collision detection involves quickly building high-quality BVH and traversing it to identify colliding object pairs. However, despite decades of research, accelerating DCD using GPU shader cores remains a challenging task requiring meticulous attention to per-formance, due to the highly irregular control flow and memory access patterns inherent in parallel BVH traversal [4, 36]. Recent GPUs feature a dedicated ray tracing architecture that augments traditional shader cores with specialized RT cores for accelerating BVH traversals and geometric intersection tests—key components of DCD. Although originally introduced to accelerate real-time rendering, RT architecture has increasingly been repur-posed for non-rendering workloads involving irregular tree traver-sals. Prior work has demonstrated the effectiveness of RT architec-ture for accelerating a range of proximity and spatial workloads, including nearest neighbor search (NNS) [ 7, 23 , 27 , 45 ], outlier de-tection [ 26 , 37 ], database indexing [ 10 , 22 , 31 ], spatial queries [ 8, 9 ], and Barnes–Hut simulations [ 25 ]. Building on the reductions of these RT-accelerated spatial workloads, several recent works [ 32 , 33 ,43 , 44 ] attempt to accelerate DCD by mapping it to RT architecture. Prior works on accelerating DCD using RT architecture [ 32 , 33 ,43 , 44 ] implicitly reduce DCD to a neighbor search problem. In case of particle-based simulations, these approaches index objects as spheres of radius 𝑟 and model collision queries as point rays, directly reusing the neighbor search reduction. This formulation works well when all spheres have the same radius (uniform spheres), but it does not generalize to the more common case of spheres with different radii (non-uniform spheres). To preserve correctness,  
+
+> arXiv:2604.23520v1 [cs.GR] 26 Apr 2026 ICS ’26, July 06–09, 2026, Belfast, United Kingdom Mandarapu et al.
+
+they approximate non-uniform spheres to large “enough" uniform spheres, which requires constructing overly conservative bounding boxes when building BVHs. As a result, BVH quality degrades and a large number of unnecessary collision tests are performed on object pairs that do not actually collide, increasing the overall cost of DCD. More fundamentally, this reduction overlooks the opportunity to exploit RT architecture’s ability to handle irregular, object-centric queries and fails to optimally support non-uniform spheres typical of practical collision detection workloads. To address the limitations of existing RT-based DCD formula-tions, we present Mochi , a new reduction that reformulates DCD to efficiently leverage ray tracing architecture for all spherical ob-jects, including non-uniform spheres. Unlike prior reductions that require both objects in a colliding pair to independently detect the collision, Mochi exploits the symmetry of collision relations in DCD and requires detection by only one of the two objects. This observation enables the construction of per-object proxy spheres that yield significantly tighter bounding boxes without resorting to a large one-size-fits-all radius, thereby reducing unnecessary in-tersection tests. Despite relying on smaller bounding volumes, our reduction is provably sound and guarantees that no true collisions are missed. We further show that the NNS-based uniform-radius approach used in prior work emerges as a special case of our more general formulation. To demonstrate the applicability of our reduction in real-world use cases, we integrate Mochi into a Discrete Element Method (DEM) particle simulation pipeline. Custom collision responses can be seamlessly integrated into this pipeline. The contributions of this paper are as follows: (1) We identify a fundamental misconception in prior RT-based approaches to collision detection, showing that reducing DCD to fixed-radius neighbor search breaks down in case of non-uniform spheres. (2) We propose a sound reduction for DCD on RT hardware that exploits the symmetry of collision relations and enables tighter, per-object bounding boxes via proxy spheres. (3) We implement this reformulation as Mochi, an RT-based DCD reduction for large-scale particle simulations, and integrate it into a DEM solver 1.(4) We evaluate Mochi on multiple large-scale benchmarks, demon-strating significant performance improvements over state-of-the-art BVH- and RT-based DCD approaches. The remainder of the paper is organized as follows. Section 2 reviews background on DCD, GPU RT architecture, and prior RT-based DCD formulations. Section 3 presents the Mochi reduction, including the proxy-sphere construction and a formal correctness proof for non-uniform spheres. Section 4 describes the integration of Mochi into a GPU-based DEM simulation pipeline. Section 5 evaluates Mochi across a range of large-scale particle workloads and compares it against state-of-the-art BVH- and RT-based approaches. Section 6 discusses limitations and broader applicability, Section 7 surveys related work, and Section 8 concludes. 
+
+> 1https://github.com/MDurgaKeerthi/Mochi-DCD-on-RT
+
+## 2 Background 
+
+In this section, we provide background to DCD, RT architecture and its programming model, and reduction used in the prior DCD work. 
+
+## 2.1 Discrete Collision Detection 
+
+Discrete collision detection is widely used in fluid mechanics [ 2], computer graphics [ 4], and path planning [ 41 ], for simulating real-world object behaviors. A DCD kernel takes a scene with multiple objects as input and determines all the pairs of colliding objects. Exhaustively searching all pairs of objects for collisions takes O( 𝑛 2)
+
+time, where 𝑛 is the number of the objects in the scene. To employ optimizations and acceleration structures, the DCD pipeline is typi-cally divided into two phases : a broad phase and a narrow phase. In the broad phase of detecting collisions, the goal is to quickly prune the pairs of objects that may not cause a collision by em-ploying methods such as sweep-and-prune (SAP), spatial or object partitioning techniques, or spatial hashing. An example for object partitioning techniques is a BVH as it divides the set of objects pro-viding an O( 𝑛 𝑙𝑜𝑔𝑛 ) time complexity. The potential colliding pairs of objects from the broad phase are then tested using expensive object intersection tests to determine the actual colliding pairs of objects in the narrow phase. Section 7 describes the optimizations the prior works employ in both the phases. Objects in collision detection are commonly represented as ei-ther spheres or triangle meshes. In this work, we focus on objects with spherical geometry, where all spheres have either the same radius (uniform) or varying radii (non-uniform). In both cases, the spheres are assumed to have uniform density. We use the terms 
+
+spherical particles , spherical objects , and spheres interchangeably. Spherical objects are widely used in particle-based simulations and in applications where complex objects are approximated to collec-tions of simple primitives. For example, Liu et. al. [ 21 ] uses a group of six spheres to represent a torus (donut), while Sui et. al. [32 ]uses sphere-based approximation of robots. Prior work on DCD using RT architecture supports only spheres with uniform radius, even though non-uniform spheres are more common in practice. For example, in smoothed particle hydrodynamics and granular simulations, particles are often modeled as spheres of varying radii to account for differences in mass, density, and scale [5, 14]. 
+
+## 2.2 Ray Tracing Architecture 
+
+RT architecture is offered by multiple GPU vendors such as Nvidia, AMD, Apple, and Intel. In this paper, we focus on Nvidia RT ar-chitecture, which comprises of shader cores and third-generation RT cores. The main objective of RT architecture is to accelerate the RT algorithm for real-time rendering. RT algorithm begins by encapsulating objects in the scene with Axis-Aligned Bounding Boxes (AABBs), building a BVH on the AABBs and then launching rays per pixel in the image plane to determine the shading of the pixel based on the ray-object intersections. To achieve this, the architecture supports BVH construction through optimized drivers that run on shader cores and BVH traversal on RT cores along with ray-triangle or ray-AABB intersection tests. Rethinking Collision Detection on GPU Ray Tracing Architecture ICS ’26, July 06–09, 2026, Belfast, United Kingdom 
+
+2.2.1 Programming Model. OptiX [ 28 ] provides a CUDA-style pro-gramming interface to RT architecture by allowing the user to call inbuilt OptiX drivers and custom kernels at various stages in the RT programming pipeline. Using an inbuilt OptiX call, BVH can be constructed on triangles, spheres, curves, and AABBs. OptiX considers spheres hollow, so we used AABBs to contain our proxy spheres. The set of programs where the RT pipeline allows the user to write custom code are RayGen, Intersection, AnyHit, Closes-tHit, and Miss. We explain how we use RayGen and Intersection programs in Section 4. AnyHit and ClosestHit programs allow the user to choose whether to continue or terminate the BVH traversal after an intersection. These shaders are more useful when ranking intersections, so we do not use them. We do not build Miss shader either in our RT pipeline. 
+
+## 2.3 Neighbor search reduction in prior DCD work 
+
+Given a set of data points, query points, and a radius parameter 𝑟 ,fixed-radius nearest neighbor search finds all data points within distance 𝑟 of each query point. To map this problem onto RT ar-chitecture, prior work [ 7, 42 ] constructs spheres of radius 𝑟 each centered around a data point and checks if query points fall in-side the spheres. This formulation checks for query points falling within a distance of 𝑟 from data points instead of checking for data points falling within a distance of 𝑟 from query point. Ignoring this inverted formulation, the prior RT-based DCD work [ 43 ] and all open-source implementations [ 12 , 29 ] directly employ this NNS reduction to DCD. Given a set of sphere centers and their fixed radius 𝑟 , they use NNS reduction [ 7, 42 ] to find all centers that are within a distance of 2𝑟 of each center and interpret the resulting neighbors as colliding pairs. The challenge is that the NNS reduction cannot support multiple radius parameters simultaneously, which is required for DCD on non-uniform spheres. As shown in Figure 1 (right), for a sphere of radius 𝑟 1, the center of a colliding sphere may lie at a distance of up to 𝑟 1 + 𝑟 max , where 𝑟 max is the maximum radius in the dataset. But for a sphere of radius 𝑟 2, the center of a colliding sphere may lie at a distance of up to 𝑟 2 + 𝑟 max . Consequently, there is no single fixed search radius that can be used with NNS reduction. One naïve alternative is to run the NNS reduction multiple times, each with a different radius parameter. However, this would require construct-ing and traversing multiple BVHs, which is impractical given the high cost of BVH construction on RT architecture. Mochi instead detects all collisions in a single iteration by using non-uniform proxy spheres, making our approach a non-trivial generalization of the NNS-to-RT formulation rather than a direct application. Another alternative is to use a single radius which is equal to the largest of all radii and perform the NNS reduction once with it, followed by filtering neighbors to get actual radius neighbors for each query based on the individual particle’s radius. Prior work adopts this approach by selecting a predetermined search radius large enough to encompass any possible collision pair. While this avoids false negatives, it results in excessively large bounding vol-umes and a high number of false positives, necessitating substantial filtering and leading to sub-optimal performance. By constructing tighter, per-object bounding volumes, Mochi significantly reduces 
+
+Figure 1: Collisions occur within a distance of 2𝑟 and 𝑟 𝑖 +
+
+𝑟 𝑚𝑎𝑥 from sphere centers for uniform (left) and non-uniform (right) spheres, respectively. 
+
+false positives while preserving correctness, improving traversal efficiency without missing collisions. 
+
+## 3 Collision Detection using Proxy Spheres 
+
+This section describes how Mochi performs collision detection for spherical particles on RT architecture using an intermediate construction of proxy spheres . We focus on DCD for non-uniform spheres, a problem that was not known to be reducible to the RT problem prior to our work. First, we present the proxy-sphere for-mulation in the uniform-radius setting to establish intuition (Sec-tion 3.1), then show why this formulation alone is insufficient, and finally describe how exploiting the symmetry of collision relations enables correct detection for non-uniform spheres (Section 3.2). We conclude with a formal correctness proof of the resulting reduction (Section 3.3). Rather than treating DCD as a query-centric neighbor search problem, our formulation allows a collision to be detected by either object in a colliding pair. Our key observation is that the radii of the spheres in DCD need not have a single correspondence to the search radius used in the neighbor search. In particular, decou-pling the sphere’s bounding volume used in BVH traversal from the actual sphere–sphere collision test enables much tighter per-sphere AABBs than prior approaches. To capture this fundamental difference, we use proxy spheres to represent a sphere’s bound-ing volume based only on its geometric extent, while relying on ray–proxy-sphere intersections to trigger the collision tests cor-rectly. Essentially, when two spheres collide, their proxy spheres 
+
+together encompass the collision, ensuring that at least one of the two particles detects it. We formalize this reduction by first defining proxy spheres in Definition 2. 
+
+Definition 1 (Proxy Spheres). Given a sphere 𝑆 with center 𝑐 and radius 𝑟 , the proxy sphere corresponding to 𝑆 (denoted by proxy-sphere( 𝑆 )) is a sphere with the same center 𝑐 and radius 2𝑟 .
+
+To accelerate DCD on RT architecture, the Mochi reduction starts by constructing a proxy sphere for each input sphere and builds a BVH over the resulting set of proxy spheres. Mochi then launches a point ray from the center of every sphere, where a point ray is a ray with infinitesimal length and arbitrary direction. These rays traverse the BVH and report ray–proxy-sphere intersections. Each reported intersection identifies a candidate collision between the sphere corresponding to the ray origin and the sphere correspond-ing to the intersected proxy sphere. Mochi subsequently performs ICS ’26, July 06–09, 2026, Belfast, United Kingdom Mandarapu et al. 
+
+a sphere–sphere intersection test on each such candidate pair to determine whether a true collision has occurred. By combining the intersections reported across all rays, Mochi’s DCD kernel identifies all pairs of colliding spheres. 
+
+## 3.1 Uniform Spheres 
+
+We first consider the special case of uniform-radius spheres, where all spheres have the same radius 𝑟 . In this scenario, the Mochi reduction simplifies and coincides with the fixed-radius neighbor search formulation used in prior RT-based DCD work. For uniform spheres, two spheres 𝑆 𝑖 and 𝑆 𝑗 collide if and only if the distance between their centers ∥𝑐 𝑖 − 𝑐 𝑗 ∥ is less than or equal to 
+
+2𝑟 . This condition holds when a point ray launched from 𝑐 𝑖 inter-sects the proxy sphere of 𝑆 𝑗 , since each proxy sphere has radius 2𝑟 .Consequently, every ray-proxy-sphere intersection corresponds to a true collision, and every collision is detected by the rays launched from both sphere centers as shown in Figure 2a. As a result, in the uniform-radius case, Mochi’s reduction is equivalent to performing a fixed-radius neighbor search with search radius of 2𝑟 , and proxy spheres alone are sufficient to detect all collisions. 
+
+Figure 2: Construction of proxy spheres and point rays. Ac-tual spheres have solid boundary lines while proxy spheres have dotted ones. For uniform spheres, proxy spheres are enough. But in the case of non-uniform spheres, simply us-ing proxy spheres leads to missed collisions (false negatives). 
+
+## 3.2 Non-uniform spheres 
+
+However, this equivalence between DCD and neighbor search relies on all spheres sharing a common radius and no longer holds for non-uniform spheres. For uniform spheres, all collisions involving a sphere of radius 𝑟 occur within a distance of 2𝑟 between the centers, enabling a fixed-radius neighbor search formulation. But when the radii of spheres vary, this characterization breaks down: for a sphere 𝑆 𝑖 with radius 𝑟 𝑖 , the distance to the center of a colliding sphere also depends on the collision sphere’s radius 𝑟 𝑗 , and can exceed 2𝑟 𝑖 . As a result, there is no single search radius associated with 𝑟 𝑖 or 𝑟 𝑗 that captures all collisions. 
+
+Why proxy spheres alone are insufficient for non-uniform spheres. 
+
+The key challenge in generalizing the neighbor search reduction to non-uniform spheres is that the radius of the proxy sphere does not correspond to the search radius in NNS. This mismatch breaks the prior approaches that rely solely on proxy spheres or fixed-radius neighbor search. Consider two colliding spheres 𝑆 𝑖 and 𝑆 𝑗 
+
+with radii 𝑟 𝑖 and 𝑟 𝑗 . The distance between their centers is at most 
+
+𝑟 𝑖 + 𝑟 𝑗 , but it has no mathematical relation to 2𝑟 𝑖 or 2𝑟 𝑗 , the radii of their proxy spheres. A search radius of 2𝑟 𝑖 may miss collisions with larger spheres ( 𝑟 𝑗 > 𝑟 𝑖 ), while increasing the search radius to accommodate larger spheres introduces excessive false positives. Hence, using NNS with 2𝑟 𝑖 as the search radius or the proxy spheres alone will lead to false positives (if 𝑟 𝑖 > 𝑟 𝑗 ) or false negatives (if 
+
+𝑟 𝑖 < 𝑟 𝑗 ). As illustrated in Figure 2b, a point ray launched from the center of a larger sphere may fail to intersect the proxy sphere of a smaller colliding sphere, leading to a missed collision. Such false negatives are particularly problematic in DCD, as missed collisions compound over time and can result in qualitatively incorrect simulations. Fig-ure 3 demonstrates this effect after eight seconds of freefall when using proxy spheres alone. 2 
+
+> (a) Expected simulation (b) With just proxy spheres
+
+Figure 3: Particles under freefall after eight seconds: using proxy spheres alone results in an incorrect simulation (right) very different from the expected simulation (left). 
+
+Collision Symmetry. Our key observation is that collision detec-tion is symmetric with respect to the two colliding objects. That is, detecting a collision between spheres 𝑆 𝑖 and 𝑆 𝑗 does not require both particles to independently detect the collision. It is sufficient if the collision is detected by either of the two spheres. This symmetry allows Mochi to tolerate per-ray false negatives while still guaran-teeing correct per-pair collision detection. In particular, while the point ray launched from the center of a larger sphere may fail to in-tersect the proxy sphere of a smaller colliding sphere, the converse is guaranteed to occur. As illustrated in Figure 2b, the point ray launched from the center of the smaller sphere intersects the proxy sphere of the larger sphere, ensuring that the collision is detected. 
+
+Mochi Reduction for Non-uniform Spheres. Formally, Mochi ap-plies the same proxy-sphere construction as in the uniform-radius case: for each sphere 𝑆 𝑖 with center 𝑐 𝑖 and radius 𝑟 𝑖 , a proxy sphere of radius 2𝑟 𝑖 is constructed, and a point ray is launched from 𝑐 𝑖 . A pair of spheres (𝑆 𝑖 , 𝑆 𝑗 ) is reported as colliding if either the point ray launched from 𝑐 𝑖 intersects the proxy sphere of 𝑆 𝑗 or the point ray launched from 𝑐 𝑗 intersects the proxy sphere of 𝑆 𝑖 , and the subsequent sphere–sphere intersection test confirms a collision. We leverage the intersections found by both rays corresponding to the collision pair: false negative reported by one particle’s ray will be detected as true positive by the other. This asymmetric de-tection rule exploits the symmetry of collisions to ensure that all  
+
+> 2Refer to the first 8 seconds of the supplemental video for complete simulations. Rethinking Collision Detection on GPU Ray Tracing Architecture ICS ’26, July 06–09, 2026, Belfast, United Kingdom
+
+true collisions are detected, even though individual rays may miss collisions in isolation. 
+
+## 3.3 Correctness of Mochi reduction 
+
+We now prove that the Mochi reduction detects all pairs of colliding spheres. We begin by formally defining the reduction (Definition 2). We then establish a key lemma (Lemma 3.1) showing that, for any colliding pair of spheres, at least one of the two corresponding point rays intersects the other’s proxy sphere. While individual rays may miss collisions, DCD correctness depends on per-pair detection rather than per-ray. Finally, we use this lemma to prove the correctness of the Mochi reduction (Theorem 3.3). 
+
+Definition 2 (Mochi reduction). Given a set of spheres S, for every sphere 𝑆 𝑖 ∈ S with center 𝑐 𝑖 and radius 𝑟 𝑖 , Mochi reduction builds 
+
+proxy-sphere( 𝑆 𝑖 ), launches a point ray from 𝑐 𝑖 and detects all colliding pairs ( 𝑆 𝑖 , 𝑆 𝑗 ) by coordinating the ray-proxy-sphere intersections found by either of the rays launched from 𝑐 𝑖 and 𝑐 𝑗 .
+
+Lemma 3.1 (Collision Symmetry). If two spheres, 𝑆 𝑖 and 𝑆 𝑗 , with centers 𝑐 𝑖 and 𝑐 𝑗 and radii 𝑟 𝑖 and 𝑟 𝑗 , are colliding, then the point ray launched from 𝑐 𝑖 will intersect proxy-sphere( 𝑆 𝑗 ), or vice-versa. 
+
+Proof. We prove by contradiction. We assume that 𝑆 𝑖 and 𝑆 𝑗 
+
+are colliding and neither of their corresponding rays intersect the other’s proxy sphere. Since 𝑆 𝑖 and 𝑆 𝑗 are colliding, the distance between their centers is at most sum of their radii. 
+
+∥𝑐 𝑖 − 𝑐 𝑗 ∥ ≤ 𝑟 𝑖 + 𝑟 𝑗 (1) If the point ray launched from 𝑐 𝑖 does not intersect proxy-sphere( 𝑆 𝑗 ),then 𝑐 𝑖 is outside the proxy sphere and so the distance between 𝑐 𝑖 
+
+and 𝑐 𝑗 , the center of proxy-sphere( 𝑆 𝑗 ) is greater than the radius of proxy-sphere( 𝑆 𝑗 ). 
+
+∥𝑐 𝑖 − 𝑐 𝑗 ∥ > 2𝑟 𝑗 (2) Combining Equations 1 and 2 gives us the following. 
+
+𝑟 𝑖 + 𝑟 𝑗 ≥ ∥ 𝑐 𝑖 − 𝑐 𝑗 ∥ > 2𝑟 𝑗 =⇒ 𝑟 𝑖 > 𝑟 𝑗 (3) Similarly when the point ray launched from 𝑐 𝑗 does not intersect 
+
+proxy-sphere( 𝑆 𝑖 ), we have the following. 
+
+𝑟 𝑖 + 𝑟 𝑗 ≥ ∥ 𝑐 𝑖 − 𝑐 𝑗 ∥ > 2𝑟 𝑖 =⇒ 𝑟 𝑗 > 𝑟 𝑖 (4) Equations 3 and 4 contradict. Hence, our assumption is false, and at least one of the two rays must intersect other’s proxy sphere. □
+
+Theorem 3.2 (Correctness of Mochi reduction). The Mochi reduction detects all pairs of colliding spheres in S.
+
+Proof. Assume by contradiction that there exists a pair of col-liding spheres (𝑆 𝑖 , 𝑆 𝑗 ) that is not detected by the Mochi reduction. Then by the definition of Mochi reduction (Definition 2), the point ray launched from 𝑐 𝑖 does not intersect proxy-sphere( 𝑆 𝑗 ), and the point ray launched from 𝑐 𝑗 does not intersect proxy-sphere( 𝑆 𝑖 ). How-ever, this contradicts Lemma 3.1, which guarantees that at least one of these intersections must occur for any colliding pair. Therefore, all colliding sphere pairs are detected by the Mochi reduction. □
+
+## 4 DEM simulation using RT architecture 
+
+This section describes how Mochi implements DCD for particle simulations on GPU RT architecture. We integrate Mochi’s DCD kernel into a DEM solver and focus on execution structure rather than physics modeling details. Mochi executes particle simulation as a sequence of discrete timesteps. At each timestep, Mochi (1) builds or refits BVH over proxy spheres, (2) detects collisions by launching rays that traverse the BVH, and (3) resolves collisions and updates state of the particles. Algorithm 1 summarizes the resulting simulation loop. The input to this algorithm is the list of spheres, where each sphere is represented by its center, radius, and additional simula-tion parameters such as mass, velocity, and collision force. The output is an array of per-particle collision responses. The imple-mentation starts in Line 15 by initializing GPU buffers and reg-istering the OptiX programs used in the pipeline: OPTIX_BOUNDS ,
+
+OPTIX_INTERSECT , and OPTIX_RAYGEN . The simulation runs for a total number of timesteps equal to the number of frames multiplied by the number of iterations per frame, with frames rendered every few timesteps to seamlessly support visualization. 
+
+BVH maintenance. Before the simulation begins, a BVH is con-structed over the AABBs of proxy spheres by calling optixAccelBuild 
+
+(Line 16). At subsequent timesteps, the BVH is either refit or rebuilt to reflect updated particle positions. The same BVH and RT pipeline are reused to render particles for visualization (Line 22). 
+
+## 4.1 DCD Implementation 
+
+Given a set of spheres, Mochi’s DCD kernel identifies all colliding pairs of spheres and computes the corresponding collision forces. To initiate DCD, we call optixLaunch (Line 19), which invokes the 
+
+OPTIX_RAYGEN program (Line 12). This program launches rays in parallel with one point ray per sphere from the sphere center along the 𝑧 -axis. Each point ray has an infinitesimal length, and its direc-tion can be arbitrary. 
+
+Broad phase. The broad phase primarily consists of BVH traver-sal and ray–AABB intersection tests, both of which are executed on RT cores. As rays traverse the BVH, each ray–AABB intersection triggers the OPTIX_INTERSECT program (Line 3). Each such inter-section identifies a candidate collision between the sphere from which the ray is launched and the sphere corresponding to the proxy sphere contained in the intersected AABB. 
+
+Narrow phase. Unlike conventional DCD pipelines that strictly separate broad and narrow phases, Mochi interleaves these phases, thereby avoiding the materialization of large list of candidate colli-sion pairs. The narrow phase starts when OPTIX_INTERSECT pro-gram is invoked in the broad phase. For each ray–AABB intersec-tion, Mochi retrieves the sphere corresponding to the ray origin and the sphere corresponding to the intersected AABB (Lines 4–7). The distance between their centers is then computed (Lines 8–9) to determine whether a collision occurred between the spheres. 
+
+Duplicate detection. To avoid duplicate processing of the same collision pair, Mochi applies two checks in Line 10. First, the ray origin must lie within the proxy sphere of the intersected object, not ICS ’26, July 06–09, 2026, Belfast, United Kingdom Mandarapu et al. 
+
+Algorithm 1: Mochi’s Particle Simulation with DCD 
+
+Input: Spheres<center, radius, mass, velocity, force> 𝑆 
+
+Output: ∀𝑆 𝑖 ∈ 𝑆, 𝑆 𝑖 .force = Í collision forces on 𝑆 𝑖  
+
+> 1
+
+Function OPTIX_BOUNDS( S, threadID ): 
+
+> 2
+
+𝑡ℎ𝑟𝑒𝑎𝑑 _𝑖𝑑 ← 𝑜𝑝𝑡𝑖𝑥𝐺𝑒𝑡𝐿𝑎𝑢𝑛𝑐ℎ𝐼𝑛𝑑𝑒𝑥 () .𝑥 𝐴𝐴𝐵𝐵 [𝑡ℎ𝑟𝑒𝑎𝑑 _𝑖𝑑 ] ← 
+
+𝐵𝑜𝑥 () .𝑒𝑥𝑡𝑒𝑛𝑑 (𝑆 [𝑡ℎ𝑟𝑒𝑎𝑑 _𝑖𝑑 ].𝑐𝑒𝑛𝑡𝑒𝑟 + 2 ∗ 𝑟𝑎𝑑𝑖𝑢𝑠 )
+
+.𝑒𝑥𝑡𝑒𝑛𝑑 (𝑆 [𝑡ℎ𝑟𝑒𝑎𝑑 _𝑖𝑑 ].𝑐𝑒𝑛𝑡𝑒𝑟 − 2 ∗ 𝑟𝑎𝑑𝑖𝑢𝑠 ) 
+
+> 3
+
+Function OPTIX_INTERSECT( S):
+
+/* Narrow phase */  
+
+> 4
+
+𝑟𝑎𝑦 _𝑖𝑑 ← 𝑜𝑝𝑡𝑖𝑥𝐺𝑒𝑡𝐿𝑎𝑢𝑛𝑐ℎ𝐼𝑛𝑑𝑒𝑥 () .𝑥  
+
+> 5
+
+𝐴𝐴𝐵𝐵 _𝑖𝑑 ← 𝑜𝑝𝑡𝑖𝑥𝐺𝑒𝑡𝑃𝑟𝑖𝑚𝑖𝑡𝑖𝑣𝑒𝐼𝑛𝑑𝑒𝑥 ()  
+
+> 6
+
+𝑆 𝑖 ← 𝑆 [𝑟𝑎𝑦 _𝑖𝑑 ] 
+
+> 7
+
+𝑆 𝑗 ← 𝑆 [𝐴𝐴𝐵𝐵 _𝑖𝑑 ] 
+
+> 8
+
+𝑑𝑖𝑠𝑡 ← ∥ 𝑆 𝑖 .𝑐𝑒𝑛𝑡𝑒𝑟 − 𝑆 𝑗 .𝑐𝑒𝑛𝑡𝑒𝑟 ∥ 
+
+> 9
+
+if 𝑆 𝑖 .𝑟𝑎𝑑𝑖𝑢𝑠 + 𝑆 𝑗 .𝑟𝑎𝑑𝑖𝑢𝑠 − 𝑑𝑖𝑠𝑡 ≥ 0 then 
+
+/* collision is detected */  
+
+> 10
+
+if 2 ∗ 𝑆 𝑗 .𝑟𝑎𝑑𝑖𝑢𝑠 − 𝑑𝑖𝑠𝑡 ≥ 0 and ( 𝐴𝐴𝐵𝐵 _𝑖𝑑 > 𝑟𝑎𝑦 _𝑖𝑑 
+
+or 2 ∗ 𝑆 𝑖 .𝑟𝑎𝑑𝑖𝑢𝑠 − 𝑑𝑖𝑠𝑡 ≤ 0) then 
+
+/* Not a duplicate collision */  
+
+> 11
+
+Resolve_Collision( 𝑆 𝑖 , 𝑆 𝑗 ) 
+
+> 12
+
+Function OPTIX_RAYGEN( S): 
+
+> 13
+
+𝑟𝑎𝑦 _𝑖𝑑 ← 𝑜𝑝𝑡𝑖𝑥𝐺𝑒𝑡𝐿𝑎𝑢𝑛𝑐ℎ𝐼𝑛𝑑𝑒𝑥 () .𝑥  
+
+> 14
+
+optixTrace(ray( 𝑆 [𝑟𝑎𝑦 _𝑖𝑑 ], vec3f(0,0,1), 1.e-16f), params)  
+
+> 15
+
+Function Host_Main() : 
+
+> 16
+
+optixAccelBuild(S, params) // constructs BVH  
+
+> 17
+
+for 𝑖 ← 1 to 𝑁𝑢𝑚 _𝐹𝑟𝑎𝑚𝑒𝑠 do  
+
+> 18
+
+for 𝑗 ← 1 to 𝑁𝑢𝑚 _𝐼𝑡𝑒𝑟𝑎𝑡𝑖𝑜𝑛𝑠 _𝑃𝑒𝑟 _𝐹𝑟𝑎𝑚𝑒 do  
+
+> 19
+
+optixLaunch(S, params) // initiates DCD  
+
+> 20
+
+update(S)  
+
+> 21
+
+optixAccelBuild(S, Refit (or Rebuild), params)  
+
+> 22
+
+Render_Frame() // Optional 
+
+just the AABB. This check is essential because a ray-AABB intersec-tion does not guarantee a ray-proxy-sphere intersection. Assume ray 𝑟 𝑖 detects a collision by hitting AABB of proxy-sphere( 𝑆 𝑗 ) and ray 𝑟 𝑗 also detects collision. If the first half of if condition is absent, both the rays will process the collision because ray 𝑟 𝑗 only checks if ray 𝑟 𝑖 hit the proxy-sphere( 𝑆 𝑗 ) (last part of if condition). Second, when both rays associated with a colliding pair detect the collision, only the ray with smaller ID is allowed to resolve the collision. 
+
+Resolving collisions and update. When resolving a detected colli-sion (Line 11), Mochi computes the collision force using standard DEM model equations, also accounting for damping forces. Af-ter all rays complete detecting and resolving the collisions, Mochi launches a CUDA kernel to apply boundary conditions and up-date particle properties based on the accumulated forces (Line 20). Starting from the narrow phase, all steps are executed on shader cores. 
+
+## 5 Evaluation 
+
+In this section, we evaluate Mochi to assess when and why it im-proves DCD on GPU RT architecture. Our evaluation is designed to answer four key questions: (1) whether Mochi accelerates DCD kernel independent of simulation overhead when compared to state-of-the-art (SOTA) BVH- and RT-based DCD kernels; (2) how Mochi scales with increase in overall workload and irregularity; (3) where the observed speedups originate, including the relative con-tributions of BVH construction, traversal, and collision processing; and (4) how sensitive Mochi is to relative particle motion across timesteps and BVH update strategies such as refit versus rebuild. These experiments evaluate the impact of Mochi’s DCD reformula-tion, rather than the effects of tuning BVH maintenance parameters or other implementation specific optimizations. To this end, we first benchmark Mochi’s DCD kernel in isolation, then evaluate it within full DEM simulations across a range of workloads, and finally analyze its performance characteristics and limitations. 
+
+Baselines. We use three GPU-based implementations as baselines, two of which primarily use shader cores and one that leverages RT architecture. Zhao et al. [ 43 ] is a SOTA RT-based DCD implementa-tion that uses fixed-radius neighbor search with the search radius equal to four times the maximum particle radius. Oibvh [ 4 ] is a SOTA DCD implementation based on shader cores that uses a BVH as its indexing structure. Taichi [ 13 ] is a domain-specific language for high-performance graphics applications such as DCD; although it exposes a high-level programming interface, its underlying CUDA kernels are heavily optimized. We use uniform grid and hashmap-based particle simulation implementations provided on Taichi’s blog as simulation baselines. We compare Mochi’s DCD kernel against Zhao et. al. [43 ] and Oibvh [ 4]. For end-to-end simulations, we use Taichi as the baseline. 
+
+Experimental setup. We implemented Mochi using OptiX 8 and CUDA 12 .2 on NVIDIA GeForce RTX 4070Ti GPU. We evaluate Mochi and compare it with a range of baselines using four bench-marks to explore its performance in detail. We obtained Oibvh source code from authors, varying only the maximum number of the threads the code can issue. We could not obtain code from Zhao 
+
+et. al. , so we implemented their DCD approach in our simulation pipeline. Taichi uses a Python interface to call its optimized CUDA kernels underneath. To allow fair comparison, only the time taken by CUDA kernels is counted towards runtime so that Taichi is not penalized due to Python overheads. Both Taichi and Mochi were warmed up for 200 iterations before timing the simulation, since both use JIT compiler. Additionally, Taichi’s offline caching was enabled during the experiments, representing best-practice usage. 
+
+DEM simulations. In all simulations, the run time includes build, DCD, and, update times. The build time refers to the initial indexing of particles and refitting or rebuilding of the index structures after every iteration. The DCD time accounts for the collision detection time, including the computation time for normal forces once a collision is detected. The update time includes testing boundary conditions and updating the particle’s center and velocity due to collisions. In simulations, one iteration signifies a timestep, and it’s value is described in the benchmarks sections. Only gravity and Rethinking Collision Detection on GPU Ray Tracing Architecture ICS ’26, July 06–09, 2026, Belfast, United Kingdom 
+
+normal collision forces are considered, while friction and tangential forces are not computed. 
+
+Benchmarks. We considered three datasets: 1) 5 million (M) par-ticles in a unit cube with their radii uniformly distributed in the range 0.0005 -0.0006 and a density of 500 , 2) 1M particles in a 16-unit cube with three different radii ranges 0.0005 -0.0006 , 0.0005 -0.006 ,and, 0.0005 -0.06 , and 3) 14 bunnies totaling of 1.1M particles with radius 𝑟 (= 0.005 ) or 𝑟 /2. The time steps are 1𝑒 -4, 5𝑒 -5, and 2.5𝑒 -5
+
+seconds, respectively. The datasets are used to simulate two mo-tions: freefall under gravity and rotating gravity in 𝑋𝑍 −plane at an angular velocity of 0.25 𝜋 radians per second. 
+
+## 5.1 Benchmarking DCD kernel 
+
+In this section, we benchmark Mochi’s DCD kernel against the state-of-the-art BVH-based implementations using shader and RT cores, isolating collision detection performance from simulation overhead in order to directly compare different DCD formulations on the GPU. 
+
+5.1.1 Comparing with prior work on RT cores. In Figure 4, we com-pare the total simulation time of Mochi with Zhao et. al. [43 ] by varying the number of particles in the second dataset with radii in the range 0.0005 -0.06 under freefall. Mochi achieves an overall speedup of 1.04 x-1.56 x as the number of particles increases from 
+
+10 K to 1M. We observe that Mochi’s speedups increase with an increase in the number of particles, indicating better scalability of its DCD formulation. 
+
+Figure 4: Performance comparison of Mochi DCD kernel against SOTA shader and RT core-based implementations. Freefall on particles in radii range 0.0005 -0.06 . Then numbers on Mochi bars show Mochi speedups over baseline. 
+
+In Figure 5, we compare the DCD kernel times under rotating gravity for three different radii ranges in the second dataset. As the ratio of maximum to minimum particle radius increases, Mochi’s speedup over Zhao et. al. increases from 1.0x to 4.33 x. This trend is expected: as the fixed-radius RT baseline constructs AABBs of side length four times the maximum particle radius, whereas Mochi con-structs per-particle AABBs proportional to each sphere’s radius. As the ratio between the maximum and minimum radii increases, the inefficiency of using maximum radius as a parameter for AABB size becomes more pronounced. By using tighter, per-particle AABBs, Mochi significantly reduces unnecessary intersection tests, result-ing in increasing speedups with greater radius non-uniformity and higher number of particles. 
+
+Figure 5: Performance comparison of Mochi DCD kernel against SOTA RT core-based implementation for varying particles radii range. Rotating gravity in 𝑥𝑧 -plane with con-stant number of 1M particles. Then numbers on Mochi bars show Mochi speedups over baseline. 
+
+5.1.2 Comparing with SOTA BVH. In Figure 6, we compare Mochi with Oibvh [ 4], a state-of-the-art BVH implementation for DCD, using freefall and rotating gravity benchmarks on 1M particles. We modified Oibvh code so that collisions between spherical particles are detected instead of triangles, which it was originally built for. Since Oibvh does not perform simulation, we export particle po-sitions to text files per frame and input these files to Oibvh and Mochi to measure only the build and DCD times. 
+
+Figure 6: Performance comparison of Mochi DCD kernel against Oibvh across two benchmarks for 1M particles. Ro-tating G stands for rotating gravity. Then numbers on Mochi bars show Mochi speedups over baseline. 
+
+The overall speedups of Mochi over Oibvh are 23 .11 x and 5.16 x, of which build time speedups are 26 .3x and 5.25 x for freefall and rotating gravity benchmarks, respectively. The higher speedup for freefall benchmark compared to rotating gravity stems from the fact that Mochi refits the BVH, whereas Oibvh rebuilds it every frame. In DCD times, Mochi outperforms Oibvh by a factor of 
+
+2x for both benchmarks, indicating that the BVH constructed by RT architecture provides better traversal efficiency, despite Oibvh spending several times longer on BVH construction. 
+
+## 5.2 Benchmarking DEM simulations 
+
+In this section, we benchmark Mochi against Taichi in end-to-end DEM simulations to study the impact of collision detection, BVH maintenance, and particle motion on each other in realistic work-loads. ICS ’26, July 06–09, 2026, Belfast, United Kingdom Mandarapu et al. 
+
+5.2.1 Freely falling particles. Figure 7a shows a frame from the freefall simulation of particles in the first dataset 3. Figure 7b shows the total runtime of simulations produced by Taichi using uniform grid and hashmap implementations, and by Mochi, as the num-ber of particles varies from 1M to 5M. Each simulation runs for 
+
+80 ,000 iterations. In every iteration, Mochi refits the BVH, while Taichi rebuilds its grid and hashmap. For 1M particles, the mean and standard deviation of runtime over 5 runs are 31 .44 and 0.026 for Taichi’s hashmap, and 6.73 and 0.029 for Mochi. For 5M particles, Taichi’s uniform grid implementation times out. Across all config-urations, Mochi consistently outperforms Taichi’s fastest variant. We analyze the source of these speedups in Section 5.3.1.  
+
+> (a) Frame 6 in simulation (b) Runtime comparison
+
+Figure 7: Performance comparison of Mochi against Taichi for freefall DEM particle simulation of 8 seconds. 
+
+5.2.2 Rotating gravity. To induce increased particle motion and a sloshing effect, we rotate gravity (Figure 8a) and test the indexing structure’s ability to adapt to more dynamic workloads 4. Unlike the freefall benchmark in Section 5.2.1, we observe that rebuilding the BVH for Mochi instead of refitting it at every iteration would result in significantly faster overall simulation time. This indicates that the BVH refit operation offered by RT architecture is best suited for scenarios with limited relative particle displacement, similar to conventional BVH refit strategies. We could not report how fast the rebuild is, as the refit-based version times out.  
+
+> (a) Frame 70 in simulation (b) Runtime comparison
+
+Figure 8: Performance comparison of Mochi against Taichi for rotating gravity DEM particle simulation of 8 seconds. 
+
+Figure 8b compares the runtime of Taichi and Mochi when sim-ulating particles from the first dataset under rotating gravity for 
+
+> 3Refer to the 8:16 mark of the video for a complete simulation.
+> 4Refer to the 16:24 mark of the video for a complete simulation.
+
+160 ,000 iterations. In this experiment, the number of collision pairs increases at a higher scale than in the freefall benchmark due to in-creased particle motion. For Taichi, we report only for the hashmap implementation in the rest of the evaluation, as the uniform grid version is either slow or times out. From 1M to 3M particles, Mochi achieves speedups of 4.87 x to 8.75 x over Taichi. Beyond 3M par-ticles, Taichi’s hashmap runs out of memory, which is expected since it stores all potential collision pairs prior to resolving them. In contrast, Mochi resolves collisions immediately without storing potential pairs. Compared to the previous freefall experiment with less particle motion, Mochi achieves higher speedups, highlighting that RT architecture’s ability to efficiently refit BVHs allows Mochi to better handle highly dynamic particle motion. 
+
+5.2.3 Irregular workloads - changing radii. Figure 9b compares the runtimes of Taichi and Mochi when simulating particles with dif-ferent radii ranges ( 0.0005 –0.006 and 0.0005 –0.06 ) from the second dataset under rotating gravity for 160 ,000 iterations (Figure 9a) 5.The time spent in individual phases is shown using a gradient of colors, and the labels on Mochi’s bars indicate speedups over Taichi. For both Taichi and Mochi, the index times are almost the same across the two radii ranges, indicating that the indexing cost of Taichi’s hashmap and Mochi’s BVH depends primarily on the number of particles rather than their radii.    
+
+> (a) Frame 168 in 0.0005 -0.06 setting (b) Runtime comparison
+
+Figure 9: Performance comparison of Mochi against Taichi for rotating gravity DEM particle simulation of 8 seconds. 
+
+1M particles with maximum to minimum radius ratio of 12 
+
+and 120 with radius in the range of 0.0005 -0.006 and 0.0005 -
+
+0.06 , respectively. Then numbers on Mochi bars show Mochi speedups over baseline. 
+
+A key observation is that Mochi’s DCD time increases at a slower rate than Taichi’s as the particle size increases. In Taichi’s hashmap implementation, the size of each hash cell is set to four times the radius of the largest particle in the dataset — just large enough to contain any collision pair. As the radius of the largest particle increases, the number of hash cells decreases, which becomes prob-lematic in scenarios with a wide range of particle sizes, such as the 0.0005 –0.06 setting. In this case, several smaller particles are mapped to the same hash cells, increasing hashmap collisions and lookup cost. In contrast, Mochi tailors the AABBs for individual particles, making its BVH more robust to radius non-uniformity. Moreover, larger particles tend to collide with a greater number of neighbors. In both Mochi and Taichi’s hashmap implementations,  
+
+> 5Refer to the 24:32 mark of the video for a complete simulation. Rethinking Collision Detection on GPU Ray Tracing Architecture ICS ’26, July 06–09, 2026, Belfast, United Kingdom
+
+a single thread is assigned per particle; however, in the hashmap case, the thread corresponding to a large particle performs signif-icantly more work. This load imbalance does not arise in Mochi, since collision is detected by rays corresponding to the smaller particles, allowing work to be more evenly distributed. 
+
+5.2.4 Bunny. In this benchmark, we drop 14 bunny objects, where each bunny consists of 82 ,337 spherical particles (Figure 10a). We simulate dropping 1 and 14 bunnies into unit and 2-unit cubes, respectively, for 20 ,000 and 30 ,000 iterations 6. Figure 10b shows the runtime comparison between Taichi and Mochi. Mochi’s run-time is 11 .06 x and 9.26 x lower than Taichi’s for the two bunny configurations. Even in these highly clustered scenarios, Mochi’s RT-architecture-based BVH construction and collision detection outperform Taichi’s optimized shader kernel implementation.  
+
+> (a) Frame 110 in simulation (b) Runtime comparison
+
+Figure 10: Performance comparison of Mochi against Taichi for freefall DEM particle simulation of bunnies made of spherical particles. Then numbers on Mochi bars show Mochi speedups over baseline. 
+
+## 5.3 Performance Analysis 
+
+In this subsection, we analyze Mochi’s performance gains and limi-tations by comparing it with SOTA DCD implementations across several parameters such as the number of particles, rebuild fre-quency, and GPU architecture. 
+
+5.3.1 Where does the speedup come from? Table 1 shows the break-down of simulation times for Taichi and Mochi, along with the speedups achieved by Mochi over Taichi’s hashmap implemen-tation for the freefall benchmark with 1M particles described in Section 5.2.1. The time spent in all phases for both Taichi and Mochi (Columns 2–8) increases as the number of particles increases. Build time speedups (Column 9) decrease, while DCD speedups (Column 
+
+10 ) increase, and update-time speedups (Column 11 ) remain nearly constant. With the exception of the 1M particles case, the total time speedups (Column 12 ) decrease as the number of particles increases. This is because Mochi’s build and DCD times are in-creasing at a higher rate than Taichi’s. Specifically, Mochi’s total runtime increases by 2.96 x from 1M to 2M particles and by 1.96 xfrom 4M to 5M particles, whereas Taichi’s total runtime initially increases by 4.37 x and later by 1.36 x over the same ranges. We attribute this decrease in the rate of Taichi’s simulation time and the corresponding increase in Mochi’s speedup at 2M particles to 
+
+> 6Refer to the 32:56 mark of the video for a complete simulation.
+
+Taichi’s offline caching, which reuses previously compiled kernels to optimize subsequent executions. Although the decreasing speedup trend raises the question of whether Mochi would continue to outperform Taichi at much larger scales, Taichi is more likely to face out-of-memory errors before outperforming Mochi, due to the rapid increase in the number of collision pairs. However, it is challenging to empirically quantify beyond 5M particles in practice, as simulations at this scale run for several hours. 
+
+Build time speedups. Build times increase for both Mochi and Taichi as the number of particles increases. However, Mochi’s build-time speedups diminish and disappear beyond 3M particles, owing to poorly refit BVH. In this experiment, Mochi refits the BVH at every iteration. During freefall, particles repeatedly collide with the ground and bounce upon touching the ground. Higher the number of particles, more they bounce, larger the relative displacement and the number of collisions. These effects degrade the quality of the refitted BVH, reducing the benefit of refitting at larger scales. Refitting exposes the inherent trade-off between BVH maintenance cost and traversal quality, a limitation shared by all BVH-based prior work. 
+
+5.3.2 Performance across scale. Figure 11 plots the runtimes of Taichi and Mochi for the freefall simulation as the number of parti-cles increases from 1K to 1M in factors of 10 . Taichi’s runtime barely changes until it reaches 1M particles, indicating that its execution time is dominated by overhead costs for particle counts below 100 K. In contrast, Mochi’s runtime increases steadily with an increase in the number of particles. These differing trends result in a dip in speedup around 100 K particles. 
+
+Figure 11: Performance comparison of Mochi against Taichi for freefall DEM particle simulation as the number of parti-cles increases at a factor of 10. Then numbers on Mochi bars show Mochi speedups over baseline. 
+
+5.3.3 Exploring Mochi’s index times. Figure 12 shows how Mochi’s build and DCD times change as the number of iterations between BVH rebuilds varies during the rotating gravity simulation with 
+
+1M particles. After the initial build of BVH, it is rebuilt every 𝑛 -th iteration and refitted in the remaining iterations. As the rebuild frequency decreases, both the total build time and the overall run-time decrease, since BVH refitting is significantly cheaper than rebuilding. However, when rebuilds are too infrequent, repeated refitting degrades BVH quality, leading to increased DCD time and, consequently, higher total runtime. ICS ’26, July 06–09, 2026, Belfast, United Kingdom Mandarapu et al. 
+
+Table 1: Comparison of individual kernel and total times taken by Taichi and Mochi on millions of freely falling particles. All times in minutes. 
+
+Number of Time in minutes Speedups particles Taichi Mochi Build DCD Update Total Build DCD Update Total Build DCD Update Total 1000000 3.3 29.49 0.58 33.37 1.63 5.44 0.49 7.56 2.02 5.42 1.19 4.41 2000000 3.51 141.3 1.15 145.95 3.14 18.27 0.99 22.4 1.12 7.73 1.16 6.51 3000000 3.7 294.57 1.7 299.97 4.19 44.5 1.5 50.18 0.88 6.62 1.13 5.98 4000000 3.95 468.17 2.27 474.38 5.1 94.18 2.0 101.28 0.77 4.97 1.13 4.68 5000000 4.2 638.28 2.83 645.31 5.78 190.08 2.5 198.36 0.73 3.36 1.13 3.25 
+
+Figure 12: Build and DCD times of Mochi as the number of iterations between two rebuilds vary. Table 2: Hardware specifications of RTX 4070Ti and RTX 6000 GPUs 
+
+RTX 4070ti RTX 6000 Increase factor RT cores 80 142 1.78x Shader cores 7,680 18,176 2.37x Memory 12GB 48GB 4x 
+
+5.3.4 Performance on a different RT hardware. To demonstrate that Mochi’s implementation generalizes across different RTX GPUs, we conducted a freefall simulation with 1M particles on an RTX 6000. Table 2 summarizes the hardware differences between the GPUs. Mochi achieves speedups over Taichi of 1.51 x, 5.55 x, 1.44 x, and 3.96 x for build, DCD, update, and total runtimes, respectively. Compared to the RTX 4070Ti, the RTX 6000 provides a larger in-crease in shader cores ( 2.37 x) than in RT cores ( 1.78 x), yet Mochi achieves comparable DCD speedups. In contrast, build-time and overall speedups are slightly lower than those observed on the RTX 4070Ti (Table 1), indicating that BVH construction benefits less from the increased number of shader cores. 
+
+## 6 Discussion 
+
+Numerical robustness. To assess the robustness of Mochi under floating point inconsistencies, we performed a sensitivity analysis by perturbing particle positions with small random noise. Specifi-cally, we generated 30 perturbed variants of the 1M particles dataset (described in Section 5 by introducing noise sampled uniformly in the range [1𝑒 −6, 1𝑒 −5] to particle positions. After performing freefall simulation on the perturbed datasets, we compared the per-timestep distribution of detected collisions produced by Mochi and Taichi. While the exact number of collision pairs may differ due to floating-point operations, the collision count distributions were indistinguishable between the two implementations. This indi-cates that Mochi exhibits numerically stable behavior and performs the same logical collision detection task as existing GPU-based approaches, despite differences in execution model. 
+
+Geometries beyond spheres. In principle, the narrow phase of Mochi (implemented in the OPTIX_INTERSECT kernel) could be pro-grammed to handle other geometric primitives, provided that robust object–object intersection tests are available. However, extending the collision detection beyond spheres is primarily a mathematical challenge rather than a computational one. Even for simple general-izations such as ellipsoids, detecting collisions when ellipsoids are oriented along arbitrary axes requires solving complicated quartic equations, which is computationally expensive and numerically unstable [ 6]. As a result, approximating complex geometries using spheres remains a widely used optimization. By leveraging such approximations, Mochi can be utilized to support a broad range of non-spherical objects without modifying its core execution model. 
+
+Limitations. While Mochi’s design can be extended beyond spheres and to other hardware platforms, the strongest claim supported by our implementation and evaluation is that Mochi correctly performs DCD for rigid spheres on NVIDIA RT hardware. Mochi detects col-lisions at discrete time steps and may therefore miss collisions that would be detected by continuous collision detection algorithms. Mochi treats each particle as a rigid spherical object and does not account for deformations. Mochi operates using single-precision floating point arithmetic on GPU RT architecture; as with other large-scale GPU simulations, numerical discrepancies may arise, al-though the algorithm itself is deterministic and theoretically sound. 
+
+Limitations imposed by underlying RT architecture. The BVH con-structed by RT architecture is opaque to the programmer, making it difficult to directly assess BVH quality or determine when re-fitting is preferable to rebuilding. In Section 5.3.3, we analyzed the BVH maintenance cost by varying rebuild frequency; however, standard quality metrics such as surface area heuristic (SAH) are not accessible. Additionally, current RT hardware does not support double-precision (FP64) operations, so Mochi operates in single precision (FP32) and considers only FP32 input. If FP64 precision Rethinking Collision Detection on GPU Ray Tracing Architecture ICS ’26, July 06–09, 2026, Belfast, United Kingdom 
+
+is required, a possible approach is to slightly expand the AABBs of proxy spheres so that no valid collisions are missed. This may introduce a few additional false positives in the broad phase, but these will be filtered out in the narrow phase, which runs on shader cores that use FP64 arithmetic for collision checks. Although our implementation uses OptiX, Mochi’s reduction relies only on ef-ficiently reusing BVH traversal and ray–AABB intersection test functionalities provided by the underlying RT architecture, and is not tied to OptiX interface semantics. 
+
+## 7 Related Work 
+
+In this section, we give an overview of Collision Detection (CD) works using GPUs, BVH, and ray tracing. We refer to the sur-veys [24, 34] for an in-depth review. 
+
+Collision detection on GPUs. Due to the computational intensity of CD, numerous algorithms and optimization methods have been developed to harness the parallel computing capabilities of GPUs. Spatial subdivision data structures such as uniform and hierarchical grids are faster to build since they are regular, compared to BVH-based approaches. Wong et. al. [ 40 ] used an octree represented as a grid on GPU, while Weller et. al. [ 39 ] used hierarchical grids and hybrid spatial hashing. BVH-based approaches on GPU employ several optimizations to mitigate the performance loss due to the inherent irregular nature of BVH traversal. A common approach is to use a fast BVH construction algorithm and then use auxiliary data structures during the traversal to make up for the poor BVH quality. For example, Lauterbach et. al. [17 ] used tight-fitting BVHs and parallel tree-front-based BVH traversal, whereas Wang et. al. [ 36 ]used stackless depth-first search-based traversal, and tree front logs. Chitalu et. al. [ 4 ] optimized the accelerating structures by building a specialized BVH to speed up BVH node access during traversal. 
+
+Neighbor Search using RT architecture. Multiple researchers have attempted to accelerate proximity queries like k-nearest neighbor search and radius neighbor search using RT architectures. Zellman 
+
+et. al. [ 42 ] proposed a method where radius neighbor searches com-pute forces between point masses in graph drawing. Evangelou 
+
+et. al. [7] applied a similar method to perform photon mapping. Zhu et. al. [45 ] and Nagarajan et. al. [27 ] further optimized this method for nearest neighbor applications using query re-ordering and bundling, and iteratively increasing the search radius, respec-tively. However, neither of their optimizations are transferable to DCD as their optimizations focus on finding 𝑘 nearest neighbors rather than all radius neighbors needed in DCD. 
+
+Collision detection using RT hardware. With the recent introduc-tion of RT cores in GPUs, Vassilev et. al. [ 33 ] and Zhao et. al. [ 44 ]proposed using RT architecture to perform velocity-based cloth simulations and large-scale DEM simulations of arbitrarily shaped particles, respectively. Zhao et. al. [43 ], which is closest to our work, uses NNS reduction [ 7 ] to perform DCD during DEM particle sim-ulation. Sui et. al. [32 ] use sphere-based robot approximations and swept trajectories to perform discrete-pose and continuous collision detection. 
+
+Collision detection using RT algorithm. Most of the RT-based CD approaches that did not use RT hardware focus on accelerating the narrow phase. For a given pair of potentially colliding volumetric deformable bodies, Hermann et. al. [11 ] detect the collisions by shooting rays from surface vertices in the direction of their inward normals. Kim et. al. [ 15 ] support deep penetrations and non-convex objects. To reduce the number of rays cast for rigid convex and concave objects, Lehericey et. al. introduce iterations over Hermann 
+
+et. al. algorithm, launch predictive rays and introduce a pipeline that selects an algorithm based on the object characteristics [ 18 – 20 ]. Even though their algorithm improves CD speed, it is dependent on the collisions detected initially and the approximations it employs. 
+
+BVH construction. Our work relies on RT cores for both BVH construction and traversal, whereas much prior work focuses on optimizing these algorithms. Optimizing BVH construction is partic-ularly important in highly dynamic, real-time scenes, where simple refitting can degrade performance due to reduced BVH quality. For instance, Linear BVH (LBVH) aims to minimize the construction cost while maintaining good BVH quality [ 1 ], and its combination with SAH balances construction and traversal efficiency [ 16 ]. Im-plicit approaches further reduce memory usage (and, in turn, build time) at the expense of more complicated tree access [4]. 
+
+Continuous collision detection and others. Continuous Collision Detection (CCD) algorithms find collisions between discrete time steps that DCD algorithms may not be able to find. Brochu et. al. [ 3] proposed a geometrically exact detection for adaptive cloth simulation and used conservative culling and interval filters to improve performance. Wang et. al. [35 ] presented a CCD as well as a DCD algorithm for detecting self-collisions in deformable models using a normal cone test. We do not currently explore how Mochi can be paired with CCD or self-collision algorithms. 
+
+## 8 Conclusion 
+
+Mochi shows that rethinking how collision detection is reduced to RT primitives, rather than optimizing existing pipelines, is essential for effectively exploiting RT architecture for non-rendering work-loads. We introduce a new RT-based formulation for accelerating discrete collision detection, despite the lack of access to the data structures built by the architecture. Across all of our benchmarks, Mochi achieves consistent speedups, even for simulations involving up to 5 million particles. At this scale, simulations often run for hours to produce only a few seconds of output, making even mod-est performance improvements practically significant. Graphics libraries such as Taichi, which target high-performance simula-tion workloads, can benefit from incorporating Mochi’s RT-based DCD formulation into their GPU kernel implementations. As RT hardware continues to be adopted across GPU vendors, and our ap-proach relies only on core functionalities such as BVH construction and ray traversal, Mochi is portable across RT APIs and is likely to benefit from continued improvements in each new RT generation. 
+
+## Acknowledgments 
+
+We thank the anonymous reviewers for their valuable feedback. We are also grateful to Sunidhi Bachawala for valuable discussions on the dynamics of particle systems and motivating use cases, and to Raghav Malik for verifying the proofs. This work was funded by NSF grants CCF-1908504, CCF-1919197 and CCF-2216978. ICS ’26, July 06–09, 2026, Belfast, United Kingdom Mandarapu et al. 
+
+## References 
+
+[1] Ciprian Apetrei. 2014. Fast and Simple Agglomerative LBVH Construction. In 
+
+Computer Graphics and Visual Computing (CGVC) , Rita Borgo and Wen Tang (Eds.). The Eurographics Association. doi:10.2312/cgvc.20141206 [2] M Breuer and N Almohammed. 2015. Modeling and simulation of particle agglom-eration in turbulent flows using a hard-sphere model with deterministic collision detection and enhanced structure models. International Journal of Multiphase Flow 73 (2015), 171–206. [3] Tyson Brochu, Essex Edwards, and Robert Bridson. 2012. Efficient geometrically exact continuous collision detection. ACM Transactions on Graphics (TOG) 31, 4 (2012), 1–7. [4] Floyd M Chitalu, Christophe Dubach, and Taku Komura. 2020. Binary Ostensibly-Implicit Trees for Fast Collision Detection. In Computer Graphics Forum , Vol. 39. Wiley Online Library, 509–521. [5] Peter A Cundall and Otto DL Strack. 1979. A discrete numerical model for granular assemblies. geotechnique 29, 1 (1979), 47–65. [6] David Eberly. 2008. Intersection of Ellipsoids. https://www.geometrictools.com/ Documentation/IntersectionOfEllipsoids.pdf [7] I. Evangelou, G. Papaioannou, K. Vardis, and A. A. Vasilakis. 2021. Fast Radius Search Exploiting Ray Tracing Frameworks. Journal of Computer Graphics Tech-niques (JCGT) 10, 1 (5 February 2021), 25–48. http://jcgt.org/published/0010/01/ 02/ [8] Liang Geng, Rubao Lee, and Xiaodong Zhang. 2024. RayJoin: Fast and Precise Spatial Join. In Proceedings of the 38th ACM International Conference on Super-computing . 124–136. [9] Liang Geng, Rubao Lee, and Xiaodong Zhang. 2025. LibRTS: A Spatial Index-ing Library by Ray Tracing. In Proceedings of the 30th ACM SIGPLAN Annual Symposium on Principles and Practice of Parallel Programming . 396–411. [10] Justus Henneberg and Felix Schuhknecht. 2023. RTIndeX: Exploiting Hardware-Accelerated GPU Raytracing for Database Indexing. Proceedings of the VLDB Endowment 16, 13 (2023), 4268–4281. [11] Everton Hermann, François Faure, and Bruno Raffin. 2008. Ray-traced collision detection for deformable bodies. In GRAPP 2008-3rd International Conference on Computer Graphics Theory and Applications . INSTICC, 293–299. [12] HIP-RT. 2024. Tutorial 16, fluid simulation on HIP RT SDK. https://github.com/ GPUOpen-LibrariesAndSDKs/HIPRTSDK [13] Yuanming Hu, Tzu-Mao Li, Luke Anderson, Jonathan Ragan-Kelley, and Frédo Durand. 2019. Taichi: a language for high-performance computation on spatially sparse data structures. ACM Transactions on Graphics (TOG) 38, 6 (2019), 201. [14] Markus Ihmsen, Jens Orthmann, Barbara Solenthaler, Andreas Kolb, and Matthias Teschner. 2014. SPH fluids in computer graphics. (2014). [15] Youngjun Kim, Sang Ok Koo, Deukhee Lee, Laehyun Kim, and Sehyung Park. 2010. Mesh-to-mesh collision detection by ray tracing for medical simulation with deformable bodies. In 2010 International Conference on Cyberworlds . IEEE, 60–66. [16] C. Lauterbach, M. Garland, S. Sengupta, D. Luebke, and D. Manocha. 2009. Fast BVH Construction on GPUs. Computer Graphics Forum (2009). doi:10.1111/j.1467-8659.2009.01377.x [17] Christian Lauterbach, Qi Mo, and Dinesh Manocha. 2010. gProximity: hierarchical GPU-based operations for collision and distance queries. In Computer Graphics Forum , Vol. 29. Wiley Online Library, 419–428. [18] François Lehericey, Valérie Gouranton, and Bruno Arnaldi. 2013. New iterative ray-traced collision detection algorithm for gpu architectures. In Proceedings of the 19th ACM Symposium on Virtual Reality Software and Technology . 215–218. [19] François Lehericey, Valérie Gouranton, and Bruno Arnaldi. 2013. Ray-traced collision detection: Interpenetration control and multi-gpu performance. In 5th Joint Virtual Reality Conference of EuroVR-EGVE . 1–8. [20] François Lehericey, Valérie Gouranton, and Bruno Arnaldi. 2015. GPU Ray-Traced Collision Detection: Fine Pipeline Reorganization. In Proceedings of 10th Interna-tional Conference on Computer Graphics Theory and Applications (GRAPP’15) .[21] Fuchang Liu, Takahiro Harada, Youngeun Lee, and Young J Kim. 2010. Real-time collision culling of a million bodies on graphics processing units. ACM Transactions on Graphics (TOG) 29, 6 (2010), 1–8. [22] Yangming Lv, Kai Zhang, Ziming Wang, Xiaodong Zhang, Rubao Lee, Zhenying He, Yinan Jing, and X Sean Wang. 2024. RTScan: Efficient Scan with Ray Tracing Cores. Proceedings of the VLDB Endowment 17, 6 (2024), 1460–1472. [23] Durga Keerthi Mandarapu, Vani Nagarajan, Artem Pelenitsyn, and Milind Kulka-rni. 2024. Arkade: k-Nearest Neighbor Search With Non-Euclidean Distances using GPU Ray Tracing. In Proceedings of the 38th ACM International Conference on Supercomputing . 14–25. [24] Daniel Meister, Shinji Ogaki, Carsten Benthin, Michael J Doyle, Michael Guthe, and Jiří Bittner. 2021. A survey on bounding volume hierarchies for ray tracing. In Computer Graphics Forum , Vol. 40. Wiley Online Library, 683–712. [25] Vani Nagarajan, Rohan Gangaraju, Kirshanthan Sundararajah, Artem Pelenitsyn, and Milind Kulkarni. 2025. RT-BarnesHut: Accelerating Barnes-Hut Using Ray-Tracing Hardware. In Proceedings of the 30th ACM SIGPLAN Annual Symposium on Principles and Practice of Parallel Programming . 43–56. [26] Vani Nagarajan and Milind Kulkarni. 2023. RT-DBSCAN: Accelerating DBSCAN using Ray Tracing Hardware. CoRR abs/2303.09655 (2023). arXiv:2303.09655 doi:10.48550/arXiv.2303.09655 [27] Vani Nagarajan, Durga Mandarapu, and Milind Kulkarni. 2023. RT-kNNS Un-bound: Using RT Cores to Accelerate Unrestricted Neighbor Search. In Proceedings of the 37th International Conference on Supercomputing, ICS 2023, Orlando, FL, USA, June 21-23, 2023 , Kyle A. Gallivan, Efstratios Gallopoulos, Dimitrios S. Nikolopou-los, and Ramón Beivide (Eds.). ACM, 289–300. doi:10.1145/3577193.3593738 [28] Steven G. Parker, Heiko Friedrich, David Luebke, Keith Morley, James Bigler, Jared Hoberock, David McAllister, Austin Robison, Andreas Dietrich, Greg Humphreys, Morgan McGuire, and Martin Stich. 2013. GPU ray tracing. Commun. ACM 56, 5 (may 2013), 93–101. doi:10.1145/2447976.2447997 [29] RayTracedSPH. 2024. Real-time fluid simulation using smoothed particle hydro-dynamics. https://github.com/StarsX/RayTracedSPH [30] Xin Shi and Li Tian. 2022. Towards robotic assembly: collision detection between each part of the parallel groove clamp. The International Journal of Advanced Manufacturing Technology 119, 7 (2022), 4349–4358. [31] Xuri Shi, Kai Zhang, X Sean Wang, Xiaodong Zhang, and Rubao Lee. 2024. RTCUDB: Building Databases with RT Processors. arXiv preprint arXiv:2412.09337 
+
+(2024). [32] Sizhe Sui, Luis Sentis, and Andrew Bylard. 2025. Hardware-accelerated ray tracing for discrete and continuous collision detection on gpus. In 2025 IEEE International Conference on Robotics and Automation (ICRA) . IEEE, 16133–16139. [33] Tzvetomir Ivanov Vassilev. 2021. Real-time velocity based cloth simulation with ray-tracing collision detection on the graphics processor. In 2021 International Conference on Information Technologies (InfoTech) . IEEE, 1–5. [34] Monan Wang and Jiaqi Cao. 2021. A review of collision detection for deformable objects. Computer Animation and Virtual Worlds 32, 5 (2021), e1987. [35] Tongtong Wang, Zhihua Liu, Min Tang, Ruofeng Tong, and Dinesh Manocha. 2017. Efficient and Reliable Self-Collision Culling Using Unprojected Normal Cones. In Computer Graphics Forum , Vol. 36. Wiley Online Library, 487–498. [36] Xinlei Wang, Min Tang, Dinesh Manocha, and Ruofeng Tong. 2018. Efficient BVH-based collision detection scheme with ordering and restructuring. In Computer graphics forum , Vol. 37. Wiley Online Library, 227–237. [37] Ziming Wang, Kai Zhang, Yangming Lv, Yinglong Wang, Zhigang Zhao, Zhenying He, Yinan Jing, and X. Sean Wang. 2024. RTOD: Efficient Outlier Detection With Ray Tracing Cores. IEEE Transactions on Knowledge and Data Engineering 36, 12 (2024), 9192–9204. doi:10.1109/TKDE.2024.3453901 [38] René Weller. 2013. New geometric data structures for collision detection and haptics .Springer Science & Business Media. [39] René Weller, Nicole Debowski, and Gabriel Zachmann. 2017. kDet: Parallel constant time collision detection for polygonal objects. In Computer Graphics Forum , Vol. 36. Wiley Online Library, 131–141. [40] Tsz Ho Wong, Geoff Leach, and Fabio Zambetta. 2014. An adaptive octree grid for GPU-based collision detection of deformable objects. The Visual Computer 
+
+30, 6 (2014), 729–738. [41] Anna Yershova and Steven M LaValle. 2007. Improving motion-planning algo-rithms by efficient nearest-neighbor searching. IEEE Transactions on Robotics 23, 1 (2007), 151–157. [42] Stefan Zellmann, Martin Weier, and Ingo Wald. 2020. Accelerating Force-Directed Graph Drawing with RT Cores. In 2020 IEEE Visualization Conference (VIS) . 96– 100. doi:10.1109/VIS47514.2020.00026 [43] Shiwei Zhao, Zhengshou Lai, and Jidong Zhao. 2023. Leveraging ray tracing cores for particle-based simulations on GPUs. Internat. J. Numer. Methods Engrg. 
+
+124, 3 (2023), 696–713. [44] Shiwei Zhao and Jidong Zhao. 2023. Revolutionizing granular matter simulations by high-performance ray tracing discrete element method for arbitrarily-shaped particles. Computer Methods in Applied Mechanics and Engineering 416 (2023), 116370. [45] Yuhao Zhu. 2022. RTNN: Accelerating Neighbor Search Using Hardware Ray Trac-ing. In Proceedings of the 27th ACM SIGPLAN Symposium on Principles and Practice of Parallel Programming (Seoul, Republic of Korea) (PPoPP ’22) . Association for Computing Machinery, New York, NY, USA, 76–89. doi:10.1145/3503221.3508409
