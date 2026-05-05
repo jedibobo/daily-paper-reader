@@ -1,0 +1,955 @@
+Title: PipeRTL: Timing-Aware Pipeline Optimization at IR-Level for RTL Generation
+
+URL Source: https://arxiv.org/pdf/2605.01836v1
+
+Published Time: Tue, 05 May 2026 01:09:24 GMT
+
+Number of Pages: 21
+
+Markdown Content:
+# PipeRTL: Timing-Aware Pipeline Optimization at IR-Level for RTL Generation 
+
+SHUO YIN, The Chinese University of Hong Kong, Hong Kong SAR 
+
+FANGZHOU LIU, The Chinese University of Hong Kong, Hong Kong SAR 
+
+LANCHENG ZOU, The Chinese University of Hong Kong, Hong Kong SAR 
+
+RONGLIANG FU, The Chinese University of Hong Kong, Hong Kong SAR 
+
+WENQIAN ZHAO, The Chinese University of Hong Kong, Hong Kong SAR 
+
+CHEN BAI ∗, The Hong Kong University of Science and Technology, Hong Kong SAR 
+
+TSUNG-YI HO, The Chinese University of Hong Kong, Hong Kong SAR 
+
+YUAN XIE, The Hong Kong University of Science and Technology, Hong Kong SAR 
+
+BEI YU ∗, The Chinese University of Hong Kong, Hong Kong SAR Modern hardware compilers increasingly rely on rich intermediate representations (IRs) to preserve optimization-relevant semantics before generating RTL code. However, one important optimization is still largely deferred to backend tools: pipeline optimization. In common RTL flows, registers are inserted by frontend heuristics or hardware designers and later adjusted by backend retiming after the design has been lowered to a much lower-level netlist representation. At that point, much of the operator-level structure originally exposed by the compiler IR has already been weakened or lost, limiting opportunities for global, compiler-level pipeline optimization. This paper presents PipeRTL , an IR-level pipeline optimization framework for hardware compilers, instan-tiated in CIRCT. PipeRTL makes the legality of register relocation explicit in the IR, uses a learned timing predictor to approximate downstream delay behavior, and formulates timing-aware register relocation as a global min-cost flow problem under timing constraints. Evaluation on open-source designs under a commer-cial backend synthesis flow shows that PipeRTL improves downstream implementation quality on average, reducing critical-path delay, power, and area across the evaluated benchmarks, while also providing a stronger starting point for backend retiming. These results indicate that exposing pipeline optimization as an explicit compiler pass can deliver backend-meaningful gains by improving the sequential structure presented to later stages and the resulting downstream implementation quality. CCS Concepts: • Software and its engineering → Compilers ; • Hardware → Logic design .Additional Key Words and Phrases: hardware compiler, RTL generation, pipeline optimization, timing-aware optimization, CIRCT 
+
+> ∗
+
+Corresponding authors. Authors’ Contact Information: Shuo Yin, Department of Computer Science and Engineering, The Chinese University of Hong Kong, Hong Kong, Hong Kong SAR, yinshuo991229@link.cuhk.edu.hk; Fangzhou Liu, Department of Computer Science and Engineering, The Chinese University of Hong Kong, Hong Kong, Hong Kong SAR, fzliu23@cse.cuhk.edu.hk; Lancheng Zou, Department of Computer Science and Engineering, The Chinese University of Hong Kong, Hong Kong, Hong Kong SAR, lczou23@cse.cuhk.edu.hk; Rongliang Fu, Department of Computer Science and Engineering, The Chinese University of Hong Kong, Hong Kong, Hong Kong SAR, rlfu@cse.cuhk.edu.hk; Wenqian Zhao, Department of Computer Science and Engineering, The Chinese University of Hong Kong, Hong Kong, Hong Kong SAR, wqzhao@cse.cuhk.edu.hk; Chen Bai, Department of Electronic and Computer Engineering, The Hong Kong University of Science and Technology, Hong Kong, Hong Kong SAR, eecbai@ust.hk; Tsung-Yi Ho, Department of Computer Science and Engineering, The Chinese University of Hong Kong, Hong Kong, Hong Kong SAR, tyho@cse.cuhk.edu.hk; Yuan Xie, Department of Electronic and Computer Engineering, The Hong Kong University of Science and Technology, Hong Kong, Hong Kong SAR, yuanxie@ust.hk; Bei Yu, Department of Computer Science and Engineering, The Chinese University of Hong Kong, Hong Kong, Hong Kong SAR, byu@cse.cuhk.edu.hk. 
+
+> arXiv:2605.01836v1 [cs.AR] 3 May 2026
+
+1 Introduction 
+
+As modern hardware becomes increasingly complex, many hardware design languages (HDLs) [ 6 ,26 , 37 , 38 ] and hardware intermediate representations (IRs) [ 21 , 25 , 31 , 32 ] have been developed to provide higher-level abstractions and preserve semantic information for optimization and transformation before RTL generation. Yet one important optimization is still largely deferred to backend tools: pipeline optimization. Pipelining determines where registers are placed and therefore where the critical path can emerge. Beyond timing, pipeline structure also affects power and area through its impact on register usage and logic organization. Even when multiple RTL implementations are functionally equivalent, their register placements can expose very different optimization opportunities. Existing RTL generation approaches, including high-level synthesis (HLS) flows [ 5, 9, 14 , 19 ,31 , 41 ] and agile hardware development frameworks [ 2 , 3 , 28 , 34 ], usually determine pipeline structure without a downstream-aware optimization loop. HLS tools typically insert registers based on software-level control flow synthesis, while agile hardware frameworks often rely on human intuition and experience to place registers in the RTL. These frontend decisions are later revisited by backend pipeline optimization strategies such as retiming [ 23 , 33 ], which operate after logic synthesis and technology mapping in a netlist representation, when much of the operator-level structure originally exposed by the compiler IR has already been weakened or lost. As a result, backend retiming must search over a lower-level representation with less explicit semantic guidance, relying heavily on heuristics to navigate a difficult optimization space. We argue that the compiler IR level provides an effective point for pipeline optimization, bridging the gap between frontend and backend. High-level hardware IRs before lowering can still preserve optimization-relevant semantics that are difficult to recover later, including operation boundaries, stage relationships, and explicit fan-in and fan-out roles, providing richer guidance than a flattened netlist. At the same time, the IR is close enough to the implementation that bitwidth-dependent cost differences, register types, and stage potentials can be reasoned about explicitly, making pipeline optimization a structured compiler problem rather than either an uninformed frontend decision or a low-level backend recovery step. However, achieving effective IR-level pipeline optimization introduces several key challenges. First, the IR level lacks detailed physical information about operators, making it difficult to estimate the timing effect of register relocation. Such information depends on the process design kit and physical implementation of the circuit, which are usually available only in backend flows. Second, pipeline optimization must model how registers move across combinational logic, but current hardware IRs generally do not provide an explicit representation of the legality conditions for such transformations. Motivated by these challenges, we present PipeRTL , a compiler-guided pipeline optimization framework for hardware IRs, instantiated in Circuit IR Compilers and Tools (CIRCT) [ 10 ]. PipeRTL models register relocation as an IR-level transformation over a semantically enriched representation. This representation makes pipeline legality explicit through new semantics for stage potentials, delay boundaries, and source/sink constraints. On top of this representation, PipeRTL uses a learned timing cost model to approximate downstream timing behavior and formulates timing-aware register relocation as a min-cost flow problem under timing constraints. PipeRTL therefore treats pipeline optimization as a general compiler pass with explicit representation, legality, cost modeling, and global optimization, rather than leaving it entirely to backend heuristics. Our experiments on open-source processors and accelerators show that PipeRTL improves downstream implementation quality on average under a commercial backend synthesis flow. These gains are meaningful in a backend-facing setting, where even single-digit improvements in power                                                                       
+
+> 21module IIR (
+> 2input clock ,
+> 3input [7:0] io_x ,
+> 4output [7:0] io_y
+> 5);
+> 67reg [7:0] reg_0 , reg_1 , reg_2 ,
+> 8reg_3 , reg_4 ;
+> 910 wire [7:0] wire_0 =reg_3 +reg_4 ;
+> 11 wire [7:0] wire_1 =a*reg_0 ;
+> 12 wire [7:0] wire_2 =b*reg_2 ;
+> 13 14 assign io_y =io_x +wire_0 ;
+> 15 16 always @( posedge clock ) begin
+> 17 reg_0 <= io_x +wire_0 ;
+> 18 reg_1 <= io_x +wire_0 ;
+> 19 reg_2 <= reg_1 ;
+> 20 reg_3 <= wire_1 ;
+> 21 reg_4 <= wire_2 ;
+> 22 end
+> 23 endmodule
+
+Listing 1 Example I                                                                 
+
+> 1module IIR (
+> 2input clock ,
+> 3input [7:0] io_x ,
+> 4output [7:0] io_y
+> 5);
+> 67reg [7:0] reg_0 , reg_1 , reg_2 ,
+> 8reg_3 ;
+> 910 wire [7:0] wire_0 =reg_2 +reg_3 ;
+> 11 wire [7:0] wire_1 =a*reg_0 ;
+> 12 wire [7:0] wire_2 =b*reg_1 ;
+> 13 14 assign io_y =io_x +wire_0 ;
+> 15 16 always @( posedge clock ) begin
+> 17 reg_0 <= io_x +wire_0 ;
+> 18 reg_1 <= reg_0 ;
+> 19 reg_2 <= wire_1 ;
+> 20 reg_3 <= wire_2 ;
+> 21 end
+> 22 23 endmodule
+
+Listing 2 Example II                                                        
+
+> 1module IIR (
+> 2input clock ,
+> 3input [7:0] io_x ,
+> 4output [7:0] io_y
+> 5);
+> 67reg [7:0] reg_0 , reg_1 , reg_2 ;
+> 8910 wire [7:0] wire_0 =a*reg_0 ;
+> 11 wire [7:0] wire_1 =b*reg_1 ;
+> 12 13 14 assign io_y =io_x +reg_2 ;
+> 15 16 always @( posedge clock ) begin
+> 17 reg_0 <= io_x +reg_2 ;
+> 18 reg_1 <= reg_0 ;
+> 19 reg_2 <= wire_0 +wire_1 ;
+> 20 end
+> 21 22 23 endmodule
+
+Listing 3 Example III 
+
+Fig. 1 Three equivalent implementations of an IIR filter. 
+
+or area after timing-constrained synthesis are typically considered nontrivial. In addition, PipeRTL provides a stronger starting point for later retiming and physical optimization in our evaluated backend flow, further improving design quality. More broadly, this perspective matters for hardware compilation as a whole. Rather than viewing sequential optimization only as a backend recovery step, we show that it can also be exposed as a compiler optimization problem with explicit IR semantics, analyzable legality conditions, and a practical integration point with downstream implementation flows. At the same time, PipeRTL does not aim to replace backend optimization or exact physical timing analysis. Its role is to improve the quality of the sequential structure presented to later stages, especially in designs whose pipeline organization is still malleable at the IR level. The main contributions of this work are summarized as follows: 
+
+• We formulate pipeline optimization as a compiler middle-end problem over hardware IR, rather than treating it solely as a backend retiming task after lowering. 
+
+• We design an IR representation that makes the legality of register relocation explicit, including stage potentials, delay boundaries, and source/sink constraints needed to preserve sequential behavior. 
+
+• We develop a practical optimization flow that couples learned timing estimation with min-cost-flow-based register relocation, enabling global pipeline restructuring under timing constraints. 
+
+• We implement the approach in CIRCT and evaluate it on open-source processor and acceler-ator designs, showing average downstream PPA benefits under a commercial backend flow, including additional gains when combined with backend retiming in our evaluated setting. 
+
+2 Motivation & Background 2.1 Pipeline Synthesis Methodologies 
+
+Pipeline synthesis determines where registers are introduced or relocated so that a circuit can meet throughput and timing goals. Existing methodologies largely fall into three groups. First, in agile hardware design languages [ 2, 3, 28 , 37 ], pipeline structure is often chosen by designers and encoded directly in the generated RTL. Event-based HDLs [ 30 , 38 ] make this structure more explicit through specialized semantics, but placement decisions are still largely driven by designer intent rather than compiler optimization. Second, HLS frameworks [ 13 , 21 , 41 ] derive pipeline structure from 
+
+3Table 1 Differences among the three IIR implementations, where #Reg denotes register count.                   
+
+> Code #Reg Critical Path
+> Listing 1 5+(8b) → + (8b)
+> Listing 2 4+(8b) → + (8b)
+> Listing 3 3×(8b) → + (8b)
+> 1𝑏 bitwidth; +adder;
+> ×multiplier; →wire.
+
+scheduling and control-flow synthesis. Prior work has further explored basic-block pipelining and SDC-based formulations [ 20 , 43 ]. These approaches are effective at the scheduling level, but their optimization units are typically coarse and do not directly expose fine-grained, legality-preserving register relocation opportunities over an RTL-oriented IR. Third, synthesis-oriented approaches such as e-graph-based exploration [ 9 , 12 ] broaden the search space for structural rewrites and pipelining choices. However, they do not provide an explicit compiler representation of sequential legality together with a timing-aware objective for global register movement. The gap, therefore, is not simply a lack of pipelining support, but a lack of a compiler-stage methodology that treats pipeline optimization itself as an IR-level transformation problem. PipeRTL targets this gap by making sequential legality explicit in the IR, reasoning about downstream timing impact during optimization, and performing global register relocation before lowering to less structured representations. 
+
+Motivation Example . Using an example, we illustrate how register placement affects RTL performance. Equation (1) shows the formulation of a one-dimensional infinite impulse response (IIR) filter using 8-bit integer data. 
+
+𝑤 (𝑛 ) = 𝑎 · 𝑦 (𝑛 − 1) + 𝑏 · 𝑦 (𝑛 − 2),𝑦 (𝑛 ) = 𝑤 (𝑛 − 1) + 𝑥 (𝑛 ). (1) Accordingly, Listing 1, Listing 2, and Listing 3 show three Verilog implementations that differ only in register placement. Although the three implementations satisfy Equation (1), their register usage and critical paths differ, as detailed in TABLE 1. In Example I, the implementation follows Equation (1) directly and uses 5 registers (line 7). The critical path is defined by lines 10 and 17 , which contain two cascaded 8-bit adders; for this motivating example, we assume that two cascaded 8-bit adders have greater latency than one 8-bit multiplier. In Example II, combining one delay of 𝑦 (𝑛 − 1) and 
+
+𝑦 (𝑛 − 2) in the definition of 𝑤 (𝑛 ) reduces the register count to 4. The critical path remains the same as in Example I: two cascaded 8-bit adders. In contrast, Example III moves the register in Example II from the fan-in side of the 8-bit adder (line 10 ) to its fan-out side, further reducing the register count to 3. However, the critical path then contains an 8-bit multiplier and an 8-bit adder, which is worse than in Examples I and II. These three examples show that register relocation changes both resource usage and timing behavior even when the RTL remains functionally equivalent. Some relocations reduce the number of registers without affecting the critical path, while others improve one metric at the expense of another. This illustrates the compiler problem addressed by PipeRTL: how to search this space of legal sequential reorganizations systematically, while preserving functionality and avoiding downstream timing degradation. 
+
+Circuit IR Compilers and Tools . Circuit IR Compilers and Tools (CIRCT) [ 10 ] is a compre-hensive compiler stack for hardware design language implementation. Built on the MLIR/LLVM infrastructure, it supports applications such as high-level synthesis [ 31 ], Verilog/SystemVerilog generation [37, 38], and simulation [32, 46]. CIRCT supports core dialects for RTL representation, which include:     
+
+> 4HLS
+> High Level Language
+> CIRCT
+> Core Dialect
+> MLIR
+> Frontend Parsing
+> Pipe Dialect
+> Optimization Stage
+> Min. Cost Flow
+> wGraph wGraph’
+> CIRCT
+> Core Dialect
+> MLIR
+> SystemC
+> System Verilog
+> Simulation
+> Backend
+> Equivalence Check
+> 1235
+> 4
+> Timing Model
+
+Fig. 2 Overall framework of PipeRTL. 
+
+• hw dialect offers function-like semantics to represent module information. For instance, 
+
+hw.module captures module definitions, while hw.instance represents module instances. 
+
+• comb dialect represents combinational components in RTL. For example, the comb.add 
+
+operation can have a variadic number of operands and one result to represent an adder. 
+
+• seq dialect represents sequential logic. seq.firreg models a register lowered from FIRRTL [25], containing the piped value and reset as inputs. 
+
+• sv dialect represents SystemVerilog semantics for RTL generation. For example, sv.always 
+
+represents an always block, typically used to define sequential logic. The core dialects of CIRCT serve as a middleware layer for representing RTL with multiple levels of abstraction, supporting flexible transformations and conversions. This infrastructure offers a natural optimization point for PipeRTL before backend lowering. Leveraging CIRCT’s structural preservation, PipeRTL introduces pipeline-specific semantics and analyses for register relocation. 
+
+3 Overview of PipeRTL 
+
+Fig. 2 shows the overall framework of PipeRTL, with the transformation steps highlighted. PipeRTL transforms the circuit IR into a graph representation through a series of passes, performs pipeline optimization on the graph, and then lowers the optimized graph back into core dialects for down-stream processing. 1 PipeRTL reuses CIRCT frontend infrastructure to translate input designs into CIRCT core dialects, so pipeline optimization can operate on a common IR regardless of the source language. 2 PipeRTL converts the circuit IRs into the Pipe dialect, which models RTL as a weighted graph that captures stage boundaries. 3 The Pipe dialect provides explicit semantics for pipeline stage updates, with optimization guided by a learned timing predictor and formulated as a min-cost flow problem under timing constraints. 4 PipeRTL lowers the optimized Pipe IR back to standard CIRCT core dialects, yielding optimized pipeline structures. 5 The optimized IR can then be processed through standard CIRCT passes for multiple backend targets, including RTL generation, simulation, and formal verification. 
+
+4 PipeRTL Framework Design 
+
+This section presents the methodology of PipeRTL as an IR-level pipeline optimization framework for hardware compilers. 
+
+> 5
+
+hw.module @IIR( %clock : i1 , %reset : i1 , %io_x : i8 ) -> (io_y: i8 ) { 
+
+%c3_i8 = hw.constant 3 : i8 
+
+%reg_0 = seq.firreg %3 clock %clock : i8 
+
+%reg_1 = seq.firreg %3 clock %clock : i8 
+
+%reg_2 = seq.firreg %reg_1 clock %clock : i8 
+
+%reg_3 = seq.firreg %0 clock %clock : i8 
+
+%reg_4 = seq.firreg %1 clock %clock : i8 
+
+%0 = comb.mul %reg_0 , %c3_i8 : i8 
+
+%1 = comb.mul %reg_2 , %c3_i8 : i8 
+
+%2 = comb.add %reg_3 , %reg_4 : i8 
+
+%3 = comb.add %io_x , %2 : i8 
+
+hw.output %3 : i8 
+
+}
+
+hw.module @IIR( %clock : i1 , %reset : i1 , %io_x : i8 ) -> (io_y: i8 ) { 
+
+pipe.pin pin %io_x : i8 
+
+%c3_i8 = hw.constant 3 : i8 
+
+%0 = pipe.delay %8 clk %clock delay 1 : i8 , i8 
+
+%1 = pipe.delay %8 clk %clock delay 2 : i8 , i8 
+
+%2 = pipe.delay %4 clk %clock delay 1 : i8 , i8 
+
+%3 = pipe.delay %5 clk %clock delay 1 : i8 , i8 
+
+%4 = comb.mul %0 , %c3_i8 : i8 
+
+%5 = comb.mul %1 , %c3_i8 : i8 
+
+%6 = comb.add %2 , %3 : i8 
+
+%7 = comb.add %io_x , %6 : i8 
+
+%8 = pipe.bubble %7 : i8 
+
+pipe.sink sink %7 : i8 
+
+hw.output %7 : i8 
+
+}
+
+hw.module @IIR( %clock : i1 , %reset : i1 , %io_x : i8 ) -> (io_y: i8 ) { 
+
+pipe.pin pin %io_x : i8 
+
+%c3_i8 = hw.constant 3 : i8 
+
+%0 = pipe.delay %8 clk %clock delay 1 : i8 , i8 
+
+%1 = pipe.delay %8 clk %clock delay 2 : i8 , i8 
+
+%2 = pipe.delay %4 clk %clock delay 1 : i8 , i8 
+
+%3 = pipe.delay %5 clk %clock delay 1 : i8 , i8 
+
+%4 = comb.mul %0 , %c3_i8 {pipe.timing = 1.857500e+02 : f32 } : i8 
+
+%5 = comb.mul %1 , %c3_i8 {pipe.timing = 1.857500e+02 : f32 } : i8 
+
+%6 = comb.add %2 , %3 {pipe.timing = 7.286000e+01 : f32 } : i8 
+
+%7 = comb.add %io_x , %6 {pipe.timing = 7.286000e+01 : f32 } : i8 
+
+%8 = pipe.bubble %7 : i8 
+
+pipe.sink sink %7 : i8 
+
+hw.output %7 : i8 
+
+}
+
+hw.module @IIR( %clock : i1 , %reset : i1 , %io_x : i8 ) -> (io_y: i8 ) { 
+
+pipe.pin pin %io_x : i8 
+
+pipe.potential @pipe.pin node %io_x stage 0 : i8 
+
+%c3_i8 = hw.constant 3 : i8 
+
+%0 = pipe.delay %8 clk %clock delay 1 : i8 , i8 
+
+%1 = pipe.delay %8 clk %clock delay 2 : i8 , i8 
+
+%2 = pipe.delay %4 clk %clock delay 1 : i8 , i8 
+
+%3 = pipe.delay %5 clk %clock delay 1 : i8 , i8 
+
+%4 = comb.mul %0 , %c3_i8 {pipe.timing = 1.857500e+02 : f32 } : i8 
+
+pipe.potential @comb.mul node %4 stage 0 : i8 
+
+%5 = comb.mul %1 , %c3_i8 {pipe.timing = 1.857500e+02 : f32 } : i8 
+
+pipe.potential @comb.mul node %5 stage 0 : i8 
+
+%6 = comb.add %2 , %3 {pipe.timing = 7.286000e+01 : f32 } : i8 
+
+pipe.potential @comb.add node %6 stage 0 : i8 
+
+%7 = comb.add %io_x , %6 {pipe.timing = 7.286000e+01 : f32 } : i8 
+
+pipe.potential @comb.add node %7 stage 0 : i8 
+
+%8 = pipe.bubble %7 : i8 
+
+pipe.potential @pipe.bubble node %8 stage -1 : i8 
+
+pipe.sink sink %7 : i8 
+
+hw.output %7 : i8 
+
+}
+
+hw.module @IIR( %clock : i1 , %reset : i1 , %io_x : i8 ) -> (io_y: i8 ) { 
+
+%c3_i8 = hw.constant 3 : i8 
+
+pipe.pin pin %io_x : i8 
+
+%0 = pipe.bubble %9 : i8 
+
+%1 = pipe.delay %9 clk %clock delay 1 : i8 , i8 
+
+%2 = pipe.delay %4 clk %clock delay 1 : i8 , i8 
+
+%3 = pipe.delay %5 clk %clock delay 1 : i8 , i8 
+
+%4 = comb.mul %0 , %c3_i8 : i8 
+
+%5 = comb.mul %1 , %c3_i8 : i8 
+
+%6 = comb.add %2 , %3 : i8 
+
+%7 = pipe.delay %8 clk %clock delay 1 : i8 , i8 
+
+%8 = comb.add %io_x , %6 : i8 
+
+%9 = pipe.bubble %7 : i8 
+
+pipe.sink sink %8 : i8 
+
+hw.output %8 : i8 
+
+}
+
+hw.module @IIR( %clock : i1 , %reset : i1 , %io_x : i8 ) -> (io_y: i8 ) { 
+
+%c3_i8 = hw.constant 3 : i8 
+
+%_reg = seq.firreg %_reg_2 clock %clock : i8 
+
+%_reg_0 = seq.firreg %0 clock %clock : i8 
+
+%_reg_1 = seq.firreg %1 clock %clock : i8 
+
+%0 = comb.mul %_reg_2 , %c3_i8 : i8 
+
+%1 = comb.mul %_reg , %c3_i8 : i8 
+
+%2 = comb.add %_reg_0 , %_reg_1 : i8 
+
+%_reg_2 = seq.firreg %3 clock %clock : i8 
+
+%3 = comb.add %io_x , %2 : i8 
+
+hw.output %3 : i8 
+
+}
+
+1
+
+2 3
+
+5 64Fig. 3 IR transformation flow of PipeRTL. Blue circles highlight the steps introduced by PipeRTL. The initial and optimized designs correspond to Listing 1 and Listing 2, respectively. 
+
+4.1 IR Representation in the Pipe Dialect 
+
+PipeRTL introduces a dedicated MLIR dialect, Pipe , to represent sequential structure in a form explicit enough for legality checking and global relocation. The dialect is integrated into CIRCT and works alongside existing CIRCT core dialects. Fig. 3 shows the transformation flow on the IIR example, where Fig. 3( 1 ) is the initial CIRCT IR corresponding to Listing 1 (coefficients 𝑎 and 𝑏 
+
+are initialized to 3). This representation choice is important because the standard lowered forms used later in the flow no longer preserve enough structured information to express pipeline relocation directly as a compiler transformation. By introducing Pipe , PipeRTL keeps sequential structure explicit at the stage where operator boundaries, dataflow relationships, and boundary conditions are still naturally available to the compiler. The central abstraction is a weighted directed graph 𝐺 (𝑉 , 𝐸 ) over the IR, which we call wGraph .Nodes represent combinational operations or boundary nodes, and edges represent register-carrying or wire-like dependencies between them. TABLE 2 summarizes how RTL constructs are mapped to wGraph components and corresponding Pipe operations. In wGraph, each node 𝑣 represents either a combinational operation or a boundary node, and each edge 𝑒 𝑢,𝑣 captures the dependency between the fan-out of 𝑢 and the fan-in of 𝑣 . Every edge carries two weights. The first, 𝑤 (𝑒 𝑢,𝑣 ), is the number of registers on that dependency and is encoded in the Pipe dialect by the delay of pipe.delay . If 𝑤 (𝑒 𝑢,𝑣 ) = 0, the edge is a wire-like connection with no intervening register. The second, 𝛽 (𝑒 𝑢,𝑣 ), denotes data capacity and is aligned with the IR type system. Together, these two edge attributes let PipeRTL reason about both legality and cost in a single representation. The register-count weight captures where sequential boundaries can legally move, while the capacity weight links those moves to the register-resource objective used later in the optimization. To preserve end-to-end behavior during relocation, PipeRTL introduces pipe.pin and pipe.sink 
+
+to mark the boundaries of the circuit. These boundary operations make it explicit which paths must preserve their overall cycle latency and provide anchors for legality constraints in the optimization. 
+
+6Table 2 Mapping from RTL constructs to wGraph components and their corresponding Pipe operations.   
+
+> RTL Op wGraph Primitive
+
+a z8-b 
+
+> wire
+
+a z
+
+(0,8) 𝑤 (𝑒 𝑎,𝑧 )=0   
+
+> 𝛽 (𝑒 𝑎,𝑧 )=8 Use-define chain
+
+a z
+
+8-b 8-b 
+
+> register
+
+a z
+
+(2,8)             
+
+> 𝑤 (𝑒 𝑎,𝑧 )=2
+> 𝛽 (𝑒 𝑎,𝑧 )=8
+> %z =pipe.delay %a clk %clk delay 2:i8
+
+a
+
+b z××
+
+> 8-b
+> 8-b
+> 8-b
+> Comb logic
+
+a
+
+b
+
+z××      
+
+> (0,8)
+> (0,8)
+> (0,8) Comb Node
+> %z =comb.mul %a ,%b :i8 -b n1n1
+
+z1z1
+
+> -b nknk
+
+zkzk
+
+> …
+> Output Port …
+
+z1z1
+
+zkzk         
+
+> (0, n1)(0, n1)
+> (0, nk)(0, nk)Sink Node
+> pipe.sink sink %𝑧 1. . . %𝑧 𝑘 :i3 . . . i8 8-b
+
+a 8-b z1z1
+
+z2z2
+
+z3z3
+
+> Broadcasting (0,8)
+> (0,8)
+> (1,8)
+
+z1z1
+
+z2z2a
+
+z3z3     
+
+> (0,8) Bubble Node
+> %z =pipe.bubble %a :i8
+
+8-b z1z1
+
+z2z2
+
+z3z3
+
+> Input Port (0,8)
+> (0,8)
+
+z1z1
+
+z2z2
+
+z3z3       
+
+> (0,8) Pin Node
+> %z =pipe.pin pin %a :i8
+
+PipeRTL also introduces pipe.bubble to represent zero-delay broadcast structure. A bubble node has one fan-in and multiple fan-outs. Without it, a single register feeding multiple users would appear as several independent non-zero-weight edges and would therefore double count register capacity. The bubble abstraction preserves the sequential meaning of fan-out while keeping the optimization problem well formed. From Fig. 3( 1 ) to Fig. 3( 2 ), PipeRTL rewrites registers into pipe.delay , inserts pipe.bubble 
+
+where broadcast structure must be preserved, and marks io_x and io_y with pipe.pin and 
+
+pipe.sink . Fig. 4 shows the resulting wGraph for the IIR example and illustrates how the repre-sentation exposes the sequential structure needed for legality-aware pipeline optimization. External modules, such as IP blocks or SRAM macros, are treated as black boxes. Their outputs are modeled as pipe.pin operations and their inputs as pipe.sink operations, allowing PipeRTL to optimize surrounding logic without assuming visibility into the internal implementation of the black-box module. This treatment is deliberately conservative. It avoids attributing unsupported relocation freedom to module internals while still exposing enough structure to optimize the logic around those black-box boundaries. 
+
+4.2 IR-Level Pipeline Transformation 
+
+Following Fig. 3, PipeRTL performs pipeline optimization as an IR transformation pass over the Pipe 
+
+dialect. The method has four components: timing prediction, legality-preserving combinational propagation, timing-aware global optimization, and lowering of the optimized sequential structure back to standard CIRCT dialects. 
+
+4.2.1 Timing Prediction for Combinational Operations. IR-level pipeline optimization requires a timing proxy for each combinational operation. A fixed delay lookup is insufficient because detailed  
+
+> 78
+> (2,8)
+> io_x io_y
+> Wire
+> +
+
++ 8
+
++  
+
+> +
+> 8
+> 83
+> 3
+> 8
+> 8
+
++
+
++ 
+
+> +
+> (0,8)
+> (0,8)
+> (0,8)
+> +
+> (1,8)
+> (1,8)
+> (1,8)
+> io_x io_y
+> 8
+> (0,8)
+
+Fig. 4 Example IIR design and the corresponding wGraph representation. Operations (add, mix, e.g.)  
+
+> Bitwidths (8-bit, 4-bit e.g.)
+> Generate
+> Verilog
+> Design
+> Compiler
+> Timing
+> Performance
+> Input Data
+> Obtained Label
+> Sampling
+> Data
+> Customised Dataset
+> Timing Prediction
+> ML Model
+> Train
+> Comb
+> Dialect
+> Embed
+> Evaluate Backend-Informance Aware
+> Operand Num .
+> (2/3/4 inputs e.g.)
+
+Fig. 5 Training and inference flow of the XGBoost-based timing predictor. 
+
+gate-level information is unavailable at this stage and because the eventual implementation of an operation depends on factors such as operand count and bitwidth. For example, operations such as 
+
+comb.mul and comb.and admit multiple implementations with different delay characteristics. PipeRTL therefore uses a learned timing predictor to estimate a proxy delay 𝛿 (𝑣 ) for each combinational node. We adopt XGBoost, which is widely used in machine-learning compiler cost models [ 7 , 8 , 45 ] due to its efficiency and interpretability. As shown in Fig. 5, we generate a Verilog training set with diverse combinational configurations, extract feature vectors from CIRCT Comb 
+
+operations as [type , number of operands , bitwidth ], and use post-synthesis delay values from a commercial tool as labels. The predictor is trained as a regression model using mean squared error loss. The goal of this predictor is not to reproduce full backend timing analysis inside the compiler. Instead, it provides a stable ranking signal that lets PipeRTL distinguish timing-critical from timing-insensitive combinational regions early enough to influence register placement decisions. From Fig. 3( 2 ) to Fig. 3( 3 ), PipeRTL annotates each combinational operation with a pipe.timing 
+
+attribute derived from this predictor. It then approximates the delay of a combinational path by summing the predicted delays of the nodes along that path. At this stage, approximate path delays are sufficient to guide pipeline restructuring; exact wire delay and physical implementation effects are intentionally deferred to later backend stages. 
+
+4.2.2 Combinational Propagation. Given timing annotations, PipeRTL changes the sequential structure through combinational propagation . Each combinational node 𝑣 is assigned a stage-update variable Δ𝑠 (𝑣 ), which denotes how far the node is moved across surrounding registers. Moving a node forward by one stage is equivalent to pulling one register across the node from each fan-out edge to its fan-in edges; moving it backward performs the reverse transformation. TABLE 3 illustrates these two legal propagation directions. 
+
+> 8
+
+Table 3 Two legal forms of combinational propagation represented in RTL and wGraph.        
+
+> Before Propagation After Propagation Δ𝑠 (𝑣 )Primitive
+> RTL wGraph RTL wGraph
+
+a
+
+z××
+
+> 8-b
+> 8-b
+> 8-b
+
+b 8-b 8-b 
+
+c 8-b 8-b a
+
+c
+
+z××
+
+> (1,8)
+> (1,8)
+> (0,8)
+
+b(1,8) a
+
+z××b
+
+c 
+
+> 8-b
+> 8-b
+> 8-b
+> 8-b 8-b
+
+a
+
+c
+
+z××
+
+> (0,8)
+> (0,8)
+> (1,8)
+
+b(0,8)     
+
+> -1 pipe.potential @mul node %z stage -1 : i8 az1z1
+> ××z2z2
+> z3z3
+> 8-b
+> 8-b
+> 8-b
+> 8-b
+> 8-b
+> 8-b
+> const z1z1
+
+a ××(0,8) (1,8) 
+
+> (1,8)
+
+z1z1
+
+z2z2
+
+z3z3
+
+> (1,8)
+
+a z1z1
+
+×× z2z2
+
+z3z3 
+
+> 8-b 8-b
+> 8-b
+
+z1z1const 8-b a ××(1,8) (0,8) 
+
+> (0,8)
+
+z1z1
+
+z2z2
+
+z3z3 
+
+> (0,8)
+> +1 pipe.potential @mul node %z stage 1 : i8
+
+This operation preserves functional behavior because it only changes where registers are placed relative to a combinational node, not the combinational computation itself. Pin and sink nodes are treated as circuit boundaries and therefore satisfy Δ𝑠 (𝑣 ) = 0. For every path from a pin node to a sink node, the total cycle count remains unchanged after propagation. This gives PipeRTL a legality-preserving transformation primitive that can be reasoned about directly in the compiler middle-end. This property is what makes combinational propagation suitable as the basic compiler transfor-mation in PipeRTL. Rather than mutating the circuit through ad hoc rewrites, the pass manipulates a representation whose stage updates have an explicit interpretation and can therefore be checked systematically against boundary and timing constraints. In the Pipe dialect, PipeRTL records the stage update of each node using the pipe.potential 
+
+operation. This IR primitive serves as the carrier of pipeline relocation decisions during optimization and is later lowered into updated delay or bubble operations. 
+
+4.2.3 Pipeline Optimization Formulation. PipeRTL optimizes the pipeline by changing stage assign-ments of combinational operations while minimizing total register data capacity. Let 𝑢, 𝑣 ∈ 𝑉 be two connected nodes in wGraph. The updated number of registers on edge 𝑒 𝑢,𝑣 after combinational propagation is 
+
+𝑤 ′ (𝑒 𝑢,𝑣 ) = 𝑤 (𝑒 𝑢,𝑣 ) + Δ𝑠 (𝑣 ) − Δ𝑠 (𝑢 ). (2) For legality, 𝑤 ′ (𝑒 𝑢,𝑣 ) must remain non-negative on every edge. The optimizer therefore searches for stage updates Δ𝑠 (𝑣 ) that reduce weighted register capacity while preserving legal edge weights. 
+
+Target Delay Searching . Inspired by backend retiming [ 23 , 33 , 35 ] that lets timing serve as a constraint instead of an objective, PipeRTL does not optimize register count independently of timing. Instead, it searches for a feasible target delay 𝑇 and only accepts stage updates whose induced path delays remain within that target. PipeRTL performs this search as an outer feasibility loop over the wGraph. For a candidate target delay, it propagates delay estimates across zero-register paths, detects violations of the target, and incrementally adjusts stage updates to break overly long combinational regions. A candidate target is feasible only if the resulting stage updates satisfy both timing and legality, that is, all updated edge weights remain non-negative. PipeRTL then uses binary search over the target delay to identify the tightest feasible timing target below the original critical path estimate. This search is not intended to replace detailed backend timing analysis. Its role is to construct a timing-aware constraint set for IR-level pipeline relocation, so that the global optimizer operates over legal transformations that are also consistent with an estimated downstream timing objective. In this sense, the target-delay search serves as the interface between local timing estimation and global register relocation. It converts predicted path delays into a compact set of admissible timing constraints that can be enforced in the subsequent optimization problem. 
+
+> 9
+
+Table 4 Dual form of the min-cost-flow formulation derived from Equation (4).                                                             
+
+> Primal Program Dual Program
+> minimize total register cost min ∑︁
+> 𝑣 ∈𝑉
+> Δ𝑠 (𝑣 ) · 𝑤 [𝑣 ]
+> minimize flow cost min ∑︁
+> 𝑒 ∈𝐸
+> 𝑐 [𝑒 ] · 𝑓 (𝑒 )
+> node weight 𝑤 [𝑣 ]∑︁
+> 𝑠 ≺𝑣
+> 𝛽 (𝑒 𝑠,𝑣 ) − ∑︁
+> 𝑠 ≻𝑣
+> 𝛽 (𝑒 𝑣,𝑠 )
+> node supply supply[ 𝑣 ]∑︁
+> 𝑠 ≺𝑣
+> 𝛽 (𝑒 𝑠,𝑣 ) − ∑︁
+> 𝑠 ≻𝑣
+> 𝛽 (𝑒 𝑣,𝑠 )
+> edge weight constraint(Equation (2))
+> Δ𝑠 (𝑣 ) − Δ𝑠 (𝑢 ) ≥ − 𝑤 (𝑒 𝑢,𝑣 )
+> timing constraint(Equation (3))
+> Δ𝑠 (𝑣 ) − Δ𝑠 (𝑢 )>−𝑊 (𝑢 ⇝𝑣 )
+> cost 𝑐 for 𝐸 𝑐 [𝑒 𝑢,𝑣 ]=−𝑤 (𝑢, 𝑣 )
+> cost 𝑐 for C
+> 𝑐 [𝑒 C
+> 𝑢,𝑣 ]=−𝑊 (𝑢 ⇝𝑣 ) + 1
+> flow capacity
+> 0≤𝑓 (𝑒 ) ≤ ∞
+
+Objective Formulation . For any pair of nodes 𝑢 and 𝑣 in the wGraph, we define the minimal-weight path 𝑢 ⇝ 𝑣 as the path from 𝑢 to 𝑣 with the smallest number of registers, denoted by 
+
+𝑊 (𝑢 ⇝ 𝑣 ). We define the delay of this path as 𝐷 (𝑢 ⇝ 𝑣 ) = Í𝑘 ∈𝑢 ⇝𝑣 𝛿 (𝑘 ) (𝛿 is discussed in Section 4.2.1). Given the target delay 𝑇 , PipeRTL adds a timing constraint when a minimal-register path becomes longer than the target and therefore must retain at least one register after relocation. The resulting constraint is shown in Equation (3). 
+
+𝑊 (𝑢 ⇝ 𝑣 ) + Δ𝑠 (𝑣 ) − Δ𝑠 (𝑢 ) > 0. (3) We define the node pairs that require this condition as the timing constraint set C.The overall pipeline optimization problem is shown in Equation (4). The objective minimizes total register data capacity, while the constraints enforce legality and timing requirements. 
+
+min ∑︁  
+
+> 𝑣 ∈𝑉
+
+Δ𝑠 (𝑣 ) · ( ∑︁  
+
+> 𝑠 ≺𝑣
+
+𝛽 (𝑒 𝑠,𝑣 ) − ∑︁  
+
+> 𝑠 ≻𝑣
+
+𝛽 (𝑒 𝑣,𝑠 )) 
+
+s.t. 𝑤 (𝑒 𝑢,𝑣 ) + Δ𝑠 (𝑣 ) − Δ𝑠 (𝑢 ) ≥ 0, ∀𝑒 𝑢,𝑣 ∈ 𝐸. 𝑊 (𝑢 ⇝ 𝑣 ) + Δ𝑠 (𝑣 ) − Δ𝑠 (𝑢 ) > 0, ∀𝑢, 𝑣 ∈ C .
+
+(4) Equation (4) can be transformed into a min-cost flow problem and solved in polynomial time. The corresponding dual form is shown in TABLE 4. This formulation is important because it turns the relocation problem into a global optimization over the IR rather than a sequence of local greedy moves. As shown in Fig. 3( 4 ), the solution is materialized in the IR as a pipe.potential operation on each affected combinational node. 
+
+4.3 IR Lowering 
+
+The optimized stage updates are materialized by lowering pipe.potential back into standard sequential structure. According to Equation (2), PipeRTL recomputes the register count on each def-use edge after optimization, removes the original pipe.delay and pipe.bubble operations, and reconstructs the updated sequential structure from the optimized edge weights. As shown in Fig. 3( 5 ), if 𝑤 ′ (𝑒 𝑢,𝑣 ) ≠ 0, the corresponding pipe.potential is lowered to 
+
+pipe.delay ; otherwise it is lowered to pipe.bubble . From Fig. 3( 5 ) to Fig. 3( 6 ), pipe.delay 
+
+is further lowered to the standard seq dialect as shift-register structure, while pipe.bubble is eliminated from the def-use chain and becomes a wire connection in the generated RTL. The opti-mized design corresponds to Listing 2, which performs timing-constrained register relocation while 
+
+> 10
+
+Table 5 Benchmark description of PipeRTL.                                              
+
+> Source Benchmark Description Category Development
+> BOOM [1] BranchPredictor The branch predictor of BOOM Module Human-written Cache Non-blocking data cache with a three-stage pipeline Memory Human-written Xiangshan[39] StoreQueue Store queue between cache and main memory FIFO Human-written CSR Control and status register module of Xiangshan CPU Module Human-written ICache Instruction cache module of Xiangshan CPU Memory Human-written TLB The first-level TLB with a page table walker and LRU replacement Module Human-written TensorLib[18] GEMM The PE array for general matrix multiply Systolic Array Automated Generation Conv2D The PE array for 2D convolution Systolic Array Automated Generation Gemmini [15] Gemmini Matrix-multiply core of Gemmini for 𝐶 =𝐴 ∗𝐵 +𝐷 SoC Human-written WinoGen[24] WinoGen Winograd convolution IP generator for DNN acceleration IP Generator Human-written
+
+Table 6 Benchmark statistics.                                                        
+
+> Benchmark IR Nodes IR Edges #Reg #Capacity Clock ( 𝑝𝑠 )
+> BranchPredictor 3096 8022 407 3392 400 Cache 10426 27760 2980 15737 650 StoreQueue 13825 31850 2507 11022 650 CSR 4292 9328 415 8161 450 ICache 3322 6878 386 6662 650 TLB 1606 3718 256 1156 600 GEMM 5015 11704 1632 17262 650 Conv2D 7599 17820 1969 13567 750 Gemmini 35631 65905 4019 40330 800 WinoGen 2030 4635 271 2826 500
+
+reducing the total register data capacity from 24 bits to 16 bits. The optimization is expressed, solved, and materialized within the IR transformation flow, after which the design continues through standard CIRCT lowering for SystemVerilog generation and downstream backend implementation. As a result, PipeRTL fits naturally into existing compiler pipelines: it operates at the IR level where global transformations are tractable, uses a custom dialect to represent the sequential structure needed for legality and optimization, and lowers back into standard IR forms for compatibility with existing passes and backends. 
+
+5 Evaluation 5.1 Experimental Settings 
+
+We use firtool from CIRCT as the frontend baseline and evaluate the generated RTL using Synopsys Design Compiler (DC) [ 36 ]. The role of DC in this section is not to replace compiler optimization, but to provide a consistent downstream implementation environment for measuring the quality of compiler-generated pipeline structures. All timing, power, and area numbers therefore correspond to the same backend implementation flow, enabling a fair comparison between the original RTL and PipeRTL-transformed RTL. PipeRTL itself is implemented with approximately 
+
+4K lines of C++ code and all experiments are conducted on Ubuntu 20.04 using an Intel i7-10750H CPU at 2.60 GHz with 64 GB memory. 
+
+Benchmark Description . To demonstrate the scalability of PipeRTL, we select critical modules as benchmarks from open-source Chisel designs, including BOOM [ 1 ], Gemmini[ 15 ], Xiangshan [ 39 ], TensorLib [ 18 ], and WinoGen[ 24 ]. TABLE 5 shows the detailed benchmark description. These designs span domains such as out-of-order microprocessors, customized systems-on-a-chip (SoCs), and deep learning accelerators. The circuit implementations in our benchmarks are varied, including systolic arrays, circular FIFO queues with associative searches, and multi-ported registers. All external modules in the benchmark designs are SRAMs, whose internal timing is not optimized by PipeRTL. TABLE 6 presents the IR statistics, where “ IR Nodes ” denotes the total number of CIRCT core dialect operations and “ IR Edges ” denotes the use-define-chain relations. It also reports the total number of registers (“ #Reg ”) and the total register data capacity (“ #Capacity ”). The target 
+
+> 11
+
+Table 7 Performance analysis of timing prediction.                                                      
+
+> Model Operation Regression Path Regression RMSE MAE R2Kendall MAE R2
+> MLP 78.081 19.144 0.995 0.874 1027.483 0.761 Decision Tree 54.796 14.209 0.997 0.881 735.953 0.879 SVR 509.437 115.399 0.818 0.497 2212.613 0.429 KNN 571.181 128.099 0.604 0.829 961.076 0.811 Gradient Boost 173.871 43.048 0.969 0.865 1003.061 0.744
+> XGBoost 42.041 9.678 0.997 0.887 736.158 0.881 Branch-Predictor
+> Cache StoreQueue ICache TLB CSR GEMM Conv2D Gemmini WinoGen AVG.
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> Reduction Ratio ∆ / %
+> ∆ Reg (PipeRTL) ∆ Capacity (PipeRTL)
+
+Fig. 6 Register and register data capacity reduction of PipeRTL . The average reduction across all benchmarks is 19.8% for register count and 12.6% for register data capacity. 
+
+clock periods shown in the last column of TABLE 6 are obtained by frequency sweeping under the same DC flow and ASAP7 PDK used in the rest of the evaluation. For each benchmark, we scan the clock period and select a near-boundary feasible timing target for the backend flow. The same target clock is then used for both the original RTL and the PipeRTL-transformed RTL to ensure a fair downstream comparison; as a result, a small number of original no-retiming runs can slightly exceed the target and are reported as such. 
+
+Design Compiler Settings . PipeRTL is evaluated with DC through the dc-tcl interface. This evaluation employs the 7 nm process design kit ASAP7 [ 11 ], equipped with a composite current source (CCS) timing model to characterize transistor delays accurately. We use the command “compile_ultra ” to perform logic synthesis for each design. We report Design Compiler dynamic power estimates using its default constant activity factor of 0.1 for all nets. Moreover, to en-able retiming in DC, we use the “ -timing -retime ” option for timing-constrained retiming and “set_optimize_registers ” to allow register relocation. 
+
+PPA Analysis Metrics .We use the following four metrics in our experiments. 
+
+Critical Path Delay ( 𝑝𝑠 ) refers to the longest path delay reported by the backend implementation flow. 
+
+Total Dynamic Power ( 𝑚𝑊 ) represents the switching-power estimate reported by DC under the default activity model. 
+
+Cell Leakage Power ( 𝜇𝑊 ) measures static cell leakage reported by the backend library model. 
+
+Total Cell Area ( 𝜇𝑚 2) refers to the physical area occupied by the cells on the chip die. We use the geometric mean to aggregate results because it reduces skew from extreme values across different design sizes. 
+
+> 12
+
+Table 8 Visualization of the critical paths for the original and PipeRTL-optimized designs for GEMM , Conv2D ,and WinoGen .
+
+Benchmark Original Path PipeRTL PipeRTL (w.o C)
+
+GEMM ×( 16 𝑏 ) → +( 16 𝑏 ) → 𝑀 (16 𝑏 ) ×( 16 𝑏 ) → +( 16 𝑏 ) ×( 16 𝑏 ) → +( 16 𝑏 ) → 𝑀 (16 𝑏 )
+
+Conv2D ×( 7𝑏 ) → +( 7𝑏 ) 𝑀 (16 𝑏 ) e
+
+−→ +( 9𝑏 ) ×( 7𝑏 ) → 7 ⊙ +( 7𝑏 )
+
+WinoGen +( 4𝑏 ) → 2 ⊙ 𝑀 (4𝑏 ) +( 4𝑏 ) → 2 ⊙ 𝑀 (4𝑏 ) +( 2𝑏 ) c
+
+−→ 6 ⊙ 𝑀 (8𝑏 ) → 2 ⊙ −( 8𝑏 )
+
+𝑏 bitwidth; × multiplier; +/− adder/subtractor; 𝑀 multiplexer; 𝑛 ⊙ 𝑛 identical cascaded operations; → wire; 
+
+c/e 
+
+−−→ bit concatenation/extraction. 
+
+Table 9 Downstream implementation quality of the original RTL and PipeRTL-transformed RTL, with and without backend retiming.                                                                                                                                                                                                                            
+
+> Benchmark Critical Path Delay ( 𝑝𝑠 )Total Dynamic Power ( 𝑚𝑊 )Cell Leakage Power ( 𝜇𝑊 )Total Cell Area ( 𝜇𝑚 2)w.o Retiming w. Retiming w.o Retiming w. Retiming w.o Retiming w. Retiming w.o Retiming w. Retiming
+> Original PipeRTL Original PipeRTL Original PipeRTL Original PipeRTL Original PipeRTL Original PipeRTL Original PipeRTL Original PipeRTL BranchPredictor 428.34 381.50 381.24 366.93 9.371 8.634 9.523 9.323 1.665 1.233 1.538 1.419 2037.322 1706.924 2126.289 1957.219 Cache 630.78 630.85 630.65 628.94 267.751 267.623 267.828 267.661 51.448 45.023 45.764 45.850 68730.731 63644.556 63776.389 63721.203 StoreQueue 641.53 642.29 648.84 629.20 19.33 16.705 15.475 15.243 4.996 4.607 4.279 4.215 6896.471 6274.634 5897.362 5800.230 CSR 471.54 442.23 444.87 434.61 29.829 25.455 30.579 27.245 4.993 4.145 4.968 4.264 6779.423 5889.693 6903.295 5940.329 ICache 637.61 623.06 632.90 632.99 12.729 12.259 11.374 11.321 2.674 2.393 2.647 2.802 3587.832 3235.739 3295.576 3287.702 TLB 578.22 576.28 574.38 565.33 2.213 2.210 2.439 2.213 0.420 0.419 0.472 0.444 623.062 621.502 691.646 653.753 GEMM 641.14 632.52 628.36 629.16 31.039 26.526 33.010 28.276 7.324 6.793 7.700 6.930 9643.912 8933.807 10388.279 9177.570 Conv2D 731.96 731.37 741.93 715.49 57.936 55.631 58.181 55.873 12.052 11.799 12.726 12.238 17236.286 16774.304 17959.235 17378.879 Gemmini 784.89 779.29 779.18 779.10 62.613 62.815 67.499 54.403 33.666 34.099 29.207 26.023 47314.389 46978.932 40704.910 37125.885 WinoGen 479.14 476.69 480.88 449.16 5.923 5.572 5.950 5.822 1.058 1.008 1.104 1.084 1446.015 1405.045 1514.687 1513.491 GEOMEAN 592.35 578.78 581.32 569.00 22.05 20.60 21.94 20.48 4.87 4.43 4.75 4.51 6639.35 6169.28 6547.29 6191.40 Ratio Avg. 100.00% 97.71% 98.14% 96.06% 100.00% 93.41% 99.49% 92.88% 100.00% 90.97% 97.58% 92.56% 100.00% 92.92% 98.61% 93.25%
+
+5.2 Timing Model Analysis 
+
+We first evaluate whether the learned timing model is accurate enough to serve as the cost model for IR-level pipeline optimization. This experiment is important because PipeRTL relies on downstream timing estimation to guide register relocation before lowering. If the timing model is inaccurate, the global optimization may favor structurally legal but downstream-unprofitable solutions. To evaluate the XGBoost-based timing prediction model, we compare it with several machine-learning algorithms, as shown in TABLE 7. We sample the comb dialect training dataset (500 samples) using Latin hypercube sampling. First, we evaluate the regression performance of these algorithms on single combinational operations (1000 samples) of the comb dialect. Then, we randomly generate a combinational path dataset (500 samples) to evaluate the regression performance of these algorithms on path delay estimation. Notably, the labels for the training and test datasets in these evaluations are generated by DC with the same settings and PDK as described in Section 5.1. Because these benchmarks are modeled as pure combinational logic, we set signal delays from all inputs to outputs to their theoretical minimum of zero, with no clock cycles. The results are shown in TABLE 7. The evaluation metrics include Root Mean Square Error (RMSE), 
+
+Mean Absolute Error (MAE), 𝑅 2 score , and Kendall’s Tau . For operation regression, XGBoost performs best in terms of RMSE, MAE, and 𝑅 2, indicating that it captures operation timing effectively in our setting. For path regression, while the MAE of XGBoost is slightly higher than that of the best-performing Decision Tree, XGBoost achieves the best scores in Kendall’s Tau and 𝑅 2. This result further demonstrates the predictive accuracy of XGBoost and supports using summed operation delays as an approximation of path delay. Overall, XGBoost proves to be the most suitable model for timing prediction in PipeRTL. 
+
+5.3 Pipeline Optimization Quality 
+
+We next evaluate the transformed RTL produced by PipeRTL at the same target clock period as the original design. The goal of this experiment is to determine whether IR-level pipeline optimization 
+
+13 Table 10 Original and optimized critical-path delays predicted by the XGBoost model for each benchmark (all values are in 𝑝𝑠 ).                                   
+
+> Benchmark Original Delay Target Delay 𝑇 Optimized Delay
+> BranchPredictor 223.83 209.21 209.19 Cache 444.63 431.69 431.66 StoreQueue 371.36 369.73 369.69 ICache 184.68 171.74 171.71 CSR 549.43 536.49 536.46 TLB 158.43 140.56 136.89 GEMM 402.01 389.05 389.04 Conv2D 227.38 195.77 195.75 Gemmini 558.69 532.77 532.75 WinoGen 257.13 257.13 257.13
+
+The term “Delay” in this table refers to the predicted critical path delay. 
+
+improves both structural properties and downstream implementation quality. Unless otherwise stated, all results in this subsection compare the original RTL and PipeRTL under the target clocks listed in TABLE 6. 
+
+Structural Effects . Fig. 6 illustrates the reduction ratios of register count and register data capacity achieved by PipeRTL over the original design. PipeRTL achieves an average register-count reduction of 19 .84% and a data-capacity reduction of 12 .61% , demonstrating its effectiveness in reducing register usage at the RTL stage. For TLB , BranchPredictor , and StoreQueue , PipeRTL reduces register count and data capacity by roughly 10% to 20% , showing that the transformation is effective on general-purpose processor blocks. Furthermore, GEMM and Conv2D show even larger reductions in both metrics. This suggests that the optimization is especially effective on regular dataflow structures with replicated modules. 
+
+Critical Path Analysis . To understand how the compiler transformation changes timing behavior before backend optimization, we inspect the predicted critical-path delay of the original and optimized IR solutions. This analysis complements the downstream PPA numbers by showing that PipeRTL not only removes registers, but also reshapes the global timing structure seen by the backend. We present the XGBoost predictions of the original and optimized critical-path delay for each benchmark in TABLE 10. The third column shows the target delay 𝑇 obtained from the target-delay search described in Section 4.2.3. The last column displays the optimized critical path delay prediction for PipeRTL. As shown in TABLE 10, the predicted optimized critical path delay is always equal to or smaller than the predicted original critical path delay. This indicates that PipeRTL can either preserve the original critical path or further optimize it. TABLE 8 shows the detailed critical paths for GEMM , Conv2D , and WinoGen in the original and PipeRTL-optimized designs. For GEMM , PipeRTL effectively shortens the original critical path by realigning the pipeline of the cascaded multiplexer tree. For Conv2D , the critical path of the PipeRTL-optimized design shifts to a different path relative to the original design. This shows that PipeRTL does not merely preserve local path balance; it can change which path becomes critical and therefore acts as a global pipeline optimization rather than a local heuristic. For WinoGen ,PipeRTL preserves the original critical path during optimization. 
+
+PPA Evaluation w.o. Retiming . We first evaluate PipeRTL without enabling backend retiming in DC. This experiment isolates the quality of the compiler transformation itself: any improvement here comes from IR-level pipeline optimization rather than from backend sequential optimization. In other words, this setting answers whether the compiler pass alone can generate a better sequential structure for downstream synthesis. The results are presented in the columns under “ w.o Retiming ”in TABLE 9. 
+
+> 14
+
+Table 11 Ablation study of PipeRTL performance with and without timing constraints ( w. retiming).                                                                                                                                 
+
+> Benchmark Critical Path Delay ( 𝑝𝑠 )Total Dynamic Power ( 𝑚𝑊 )Cell Leakage Power ( 𝜇𝑊 )Total Cell Area ( 𝜇𝑚 2)
+> Origin PipeRTL (w.o C)PipeRTL Origin PipeRTL (w.o C)PipeRTL Origin PipeRTL (w.o C)PipeRTL Origin PipeRTL (w.o C)PipeRTL StoreQueue 648.84 628.03 629.20 15.475 16.041 15.243 4.279 4.359 4.215 5897.362 6027.882 5800.230 Conv2D 741.93 729.38 715.49 58.181 55.316 55.873 12.726 12.284 12.238 17959.235 17352.197 17378.879 GEMM 628.36 628.91 629.16 33.010 31.931 28.276 7.700 7.504 6.930 10388.279 10118.986 9177.570 Gemmini 779.18 1472.62 779.10 67.499 51.105 54.403 29.207 25.759 26.023 40704.910 35308.371 37125.885 WinoGen 480.88 479.28 449.16 5.950 6.724 5.822 1.104 1.240 1.084 1514.687 1742.981 1513.491 TLB 574.38 577.75 565.33 2.439 2.432 2.213 0.472 0.469 0.444 691.646 689.109 653.753 GEOMEAN 634.25 699.83 618.60 17.54 16.95 16.02 4.31 4.26 4.06 6005.61 5961.46 5691.29 Ratio Avg. 100.00% 110.34% 97.53% 100.00% 96.62% 91.32% 100.00% 99.03% 94.27% 100.00% 99.26% 94.77% 11.5
+> 1,000
+> 1,500
+> Clock Period (10 3ps )
+> Critical Path Delay ( ps )
+> 11.5
+> 20
+> 40
+> 60
+> Clock Period (10 3ps )
+> Total Dynamic Power ( mW  )
+> 11.5
+> 20
+> 25
+> 30
+> 35
+> Clock Period (10 3ps )
+> Cell Leakage Power ( μW  )
+> 11.5
+> 3.5
+> 4
+> ·10 4
+> Clock Period (10 3ps )
+> Total Cell Area ( μm 2)
+> Origin PipeRTL (w.o C)PipeRTL
+
+Fig. 7 PPA evaluation of Gemmini under a target-clock sweep. 
+
+Based on the above analysis of register and data capacity reduction, PipeRTL reduces both total cell area and total dynamic power on average. Although PipeRTL does not explicitly target cell leakage power, it also reduces leakage on average relative to the original RTL. This reduction is consistent with the decrease in register count and data capacity, which can expand the optimization space for combinational logic; such power and area gains are meaningful under the fixed backend flow, functionality, timing constraints, and technology mapping used in this study. Since timing serves as a constraint rather than the sole optimization objective in PipeRTL, PipeRTL still achieves an average timing improvement of about 2.3% even before backend retiming. This result is important in a compiler setting: rather than merely shifting cost across metrics, PipeRTL produces a better starting point for downstream implementation by reducing area and power without sacrificing timing robustness in the evaluated flow. In particular, the original BranchPredictor design violates the target clock of 400 𝑝𝑠 , while the PipeRTL-optimized design meets timing with lower power and area. As shown in Fig. 6, Cache and 
+
+ICache exhibit only modest reductions in register count and capacity, yet still obtain meaningful area and power improvements. This highlights the downstream impact of changing the sequential structure, not just the raw number of registers. 
+
+Co-optimization with Retiming . We next evaluate the generated RTL with retiming enabled in DC to determine whether IR-level optimization can provide additional benefits beyond backend sequential optimization in our evaluated flow. The results are presented in the columns under “w. Retiming ” in TABLE 9. Because logic synthesis has more accurate physical information, the PPA of both the original RTL and the PipeRTL-transformed RTL can be further improved after retiming. First, as shown in TABLE 9, PipeRTL without retiming already outperforms the original design with retiming on several benchmarks, indicating that the compiler pass can improve the starting sequential structure in some cases. Furthermore, compared with the original design with retiming, PipeRTL with retiming improves timing, area, and power on average across the evaluated benchmarks. This finding is central to our argument: IR-level pipeline optimization does not compete with backend retiming for the same optimization budget. Instead, it provides a better sequential starting point on top of which backend retiming can continue refining the design. Overall, compared with the original RTL with retiming, PipeRTL with retiming achieves about a 2.1% timing 
+
+15 Table 12 Predicted critical-path delay for PipeRTL (w.o C) and the reduction in register count ( ΔReg) and data capacity ( ΔCapacity) relative to PipeRTL.                      
+
+> Benchmark Optimized Delay ΔReg ΔCapacity
+> StoreQueue 448.79 +1.64% +0.42%
+> Conv2D 642.76 +8.58% +4.43%
+> GEMM 402.01 0.00% 0.00% Gemmini 5,874.58 +14 .26% +4.47%
+> WinoGen 264.31 0.00% 0.00% TLB 249.45 +1.56% +0.61%
+
+improvement together with reductions of 6.6% in total dynamic power, 5.1% in cell leakage power, and 5.4% in total cell area in the evaluated backend flow. This indicates that preserving pipeline semantics before lowering exposes optimization opportunities that remain valuable even when backend sequential optimization is enabled. 
+
+5.4 Necessity of Timing Constraints 
+
+We then study whether timing constraints are necessary in the IR optimization itself. This ablation is important because PipeRTL does not optimize purely for register reduction; it also needs to preserve a legal and profitable timing-aware search space. To evaluate this effect, we remove the timing constraint in Equation (3) on several benchmarks and compare the resulting RTL with the full system under the same downstream retiming configuration. We define PipeRTL with timing constraints as PipeRTL and without timing constraints as PipeRTL (w.o C). TABLE 11 shows the PPA results without timing constraints. PipeRTL (w.o C) can hurt timing, area, and power relative to both PipeRTL and the original design. As shown in TABLE 12, although PipeRTL (w.o C) can achieve larger reductions in register count and data capacity because it has fewer constraints, the critical path delay may degrade substantially. The last column of TABLE 8 visualizes the optimized critical paths without timing constraints. For Conv2D , PipeRTL (w.o 
+
+C) disrupts the pipeline structure of the adder tree, causing each level of the tree to cascade together, thereby extending the original critical path. Furthermore, for WinoGen , other paths in the circuit are disrupted and become a new critical path. This ablation demonstrates that legality-preserving structure alone is insufficient: the compiler also needs a timing-aware objective to avoid transformations that are structurally attractive but downstream harmful. Specifically, for StoreQueue and WinoGen , total cell area and power are even larger than in the original design, as shown in TABLE 11. One plausible reason is the use of heuristic algorithms in DC during logic synthesis. Notably, some combinational optimization techniques, such as logic restructuring [ 4 , 27 , 40 ] or sum-of-products balancing [ 29 ], can lead to better timing adjustments at the expense of increased area and power consumption. The timing results of these two designs show no violations, which is consistent with this interpretation. Although the critical path of GEMM can be preserved without timing constraints, as shown in TABLE 8, PipeRTL further improves PPA by shortening the critical path, as shown in TABLE 11. Furthermore, even with retiming applied, the Gemmini design fails to meet the timing requirement without timing constraints, because it significantly disrupts the critical path by removing the registers in the high-bitwidth multiplexer tree compared with the original design, as shown in TABLE 10 and TABLE 12. The overall average improvement in PPA shown in TABLE 11 therefore supports the role of timing constraints as a necessary component of the compiler optimization objective, not merely an optional heuristic hint. 
+
+> 16
+
+Table 13 Post Place-and-Route (PnR) results of Gemmini through Innovus with retiming enabled. 
+
+Condition Wire Length ( 𝜇𝑚 ) #Standard Cell Area ( 𝑚𝑚 2) Power ( 𝑚𝑊 )
+
+w.o. PipeRTL 5606517 492021 0.7479 1.2452 w. PipeRTL 5975710 474437 0.7319 1.0658 
+
+The target clock is the same as in TABLE 6. The generated layout has no timing violations (both WNS and TNS are 0). 0 20 40 60 80 100 Rate (%) Timing Prediction (8.27%) Target Searching (7.23%) Equation (4) Solving (47.31%) IR Transformations (37.19%) 
+
+Fig. 8 Average compilation runtime breakdown of PipeRTL. Table 14 Benchmark-wise runtime comparison of pipeline optimization in PipeRTL and retiming in DC.                                        
+
+> Benchmark |C| PipeRTL ( 𝑠 )Retiming ( 𝑠 )
+> BranchPredictor 143322 2.1 395 Cache 2846269 62.2 3742 StoreQueue 172674 11.7 888 ICache 566239 7.0 422 TLB 46932 3.3 167 CSR 7319 0.7 1243 GEMM 3751 0.7 875 Conv2D 21954 0.4 1363 Gemmini 1817383 16.1 3023 WinoGen 28792 0.6 236 GEOMEAN 94866.2 3.0 792.6 Ratio Avg. -1.0×262 .0×
+
+5.5 Case Study: Stability Across Target Clocks 
+
+Fig. 7 shows the PPA evaluation of Gemmini under a target-clock sweep from 800 𝑝𝑠 to 1800 𝑝𝑠 in 
+
+100 𝑝𝑠 steps with retiming enabled. When the target clock is below 1500 𝑝𝑠 , PipeRTL (w.o C) does not meet the timing requirement, consistent with the results in TABLE 11. In contrast, PipeRTL always meets the requirement and achieves slightly better timing than the original RTL. When the target clock is set to 900 𝑝𝑠 and 1500 𝑝𝑠 , the power and area curves of the original design exhibit a bump. This occurs because DC’s timing constraints approach the critical-path threshold, causing the adopted heuristics to encounter a corner case and produce slightly inferior results. In contrast, the PipeRTL-optimized design is more stable, indicating that the compiler-generated sequential structure is more robust across a wider range of backend timing targets. When the target clock sweeps from 1100 𝑝𝑠 to 1400 𝑝𝑠 , although the total dynamic power curve of PipeRTL is close to that of “Origin”, total cell area and cell leakage power improve. Overall, PipeRTL continues to improve several metrics across different target clock periods. TABLE 13 presents the post-place-and-route (PnR) results of Gemmini using the commercial tool Innovus. Compared with the original design, the PipeRTL-optimized design improves both chip area and power. This demonstrates that the optimizations introduced by PipeRTL are preserved through the post-layout stage. 
+
+> 17
+
+5.6 Runtime Overhead 
+
+Finally, we analyze the runtime cost of PipeRTL as a compiler optimization pass. Across the benchmarks in TABLE 14, PipeRTL runtime ranges from 0.4 𝑠 for Conv2D to 62 .2 𝑠 for Cache . Fig. 8 illustrates the geometric-mean runtime breakdown for benchmark compilation with PipeRTL. We analyze the runtime of the core optimization phases in PipeRTL, including XGBoost-based timing prediction, target-delay search, solving the pipeline optimization objective, and IR transformation and lowering. The breakdown shows that the most time-consuming phase is solving the pipeline optimization objective, since it requires solving min-cost flow problems that form the core of the global optimization process. As shown in TABLE 14, pipeline optimization in PipeRTL is considerably faster than retiming optimization in DC, with an average speedup of about 262 ×, because it operates on a smaller problem at the RTL stage while still achieving measurable downstream improvements. Notably, DC’s retiming phase uses 16 threads, whereas PipeRTL’s pipeline optimization runs single-threaded, further underscoring PipeRTL’s computational efficiency. The runtime of pipeline optimization in PipeRTL is dominated by min-cost flow solving, which is sensitive to the size of the constraint set 
+
+C. This runtime profile suggests that PipeRTL is practical as an IR-level compiler pass, while still delivering meaningful downstream implementation gains and complementing backend sequential optimization. 
+
+6 Related Work 
+
+CIRCT-based Hardware Compilers . CIRCT [ 10 ] is a hardware compiler infrastructure built on top of MLIR [ 22 ] and has been increasingly adopted for hardware generation and optimization. Calyx [ 31 ] is a hardware IR for accelerator generation, and LLHD [ 32 ] aims to unify the IR used in EDA. HLS tools such as ScaleHLS [ 41 ] and HIDA [ 42 ] use core MLIR dialects from software compilation to perform loop-level transformations and optimizations before lowering to CIRCT for hardware generation. Assassyn [ 37 ] uses CIRCT to bridge gaps between the RTL generation, verification, and simulation stages of the hardware design process. Cement [ 38 ] defines event-based semantics for pipelined hardware design based on CIRCT. PipeRTL is complementary to these efforts in that it adds an explicit IR-level pipeline optimization stage before lowering into less structured sequential forms. This broadens the optimization scope of CIRCT-based hardware compilers: instead of leaving pipeline organization entirely to frontend heuristics or backend retiming, these compilers can expose sequential structure in CIRCT and apply PipeRTL as a reusable middle-end pass. 
+
+Retiming . Retiming is a sequential optimization technique in logic synthesis, originally introduced in [ 23 ], with a formulation that parallels PipeRTL. Unlike PipeRTL, which performs optimization directly at the IR level without gate-level synthesis, traditional retiming algorithms are rooted in logic-based analysis of synthesized netlists. This analysis incorporates gate-level logic functions but often overlooks component bitwidth. Building on this foundational concept, subsequent retiming work has aimed to improve efficiency and scalability. [ 33 ] and [ 44 ] transformed the original problem into a flow-based problem, reducing its complexity. [ 16 ] further simplified the problem into a maximum-flow formulation, achieving a faster solution. [ 17 ] proposed a tree-based constraint graph heuristic, which performs well in large circuit designs. PipeRTL does not attempt to replace this line of work. Instead, it brings a related optimization objective into the compiler middle-end, where operation identities, stage boundaries, and structural legality are still explicit. This is why PipeRTL and backend retiming are complementary in our experiments rather than mutually exclusive alternatives. 
+
+> 18
+
+7 Conclusion 
+
+This paper presented PipeRTL, a compiler-guided IR-level pipeline optimization framework for RTL generation. Instead of leaving sequential optimization entirely to backend retiming after lowering, PipeRTL optimizes register placement while operation-level semantics and pipeline structure are still explicit. To support this, we introduce a CIRCT dialect with explicit pipeline-legality semantics, use a learned downstream-aware timing predictor, and solve global register relocation as a min-cost flow problem under timing constraints. Across the evaluated open-source processor and accelerator designs, PipeRTL improves downstream timing, power, and area on average, and provides additional gains when combined with backend retiming in our evaluated flow. Overall, our results show that preserving optimization-relevant pipeline semantics in compiler IR enables effective cost-aware sequential optimization before lowering and provides a useful direction for future hardware compilers. 
+
+References 
+
+[1] Krste Asanovic, David A Patterson, and Christopher Celio. 2015. The Berkeley Out-of-order Machine (BOOM): An Industry-competitive, Synthesizable, Parameterized RISC-V Processor. (2015). [2] Jonathan Bachrach, Huy Vo, Brian Richards, Yunsup Lee, Andrew Waterman, Rimas Avižienis, John Wawrzynek, and Krste Asanović. 2012. Chisel: Constructing Hardware in a Scala Embedded Language. In ACM/IEEE Design Automation Conference (DAC) .[3] Thomas Bourgeat, Clément Pit-Claudel, Adam Chlipala, and Arvind. 2020. The essence of Bluespec: a core language for rule-based hardware design. In ACM SIGPLAN Symposium on Programming Language Design & Implementation (PLDI) .[4] Ulrich Brenner and Anna Silvanus. 2022. Delay Optimization of Combinational Logic by AND-OR Path Restructuring. In IEEE/ACM Asia and South Pacific Design Automation Conference (ASPDAC) .[5] Andrew Canis, Jongsok Choi, Mark Aldham, Victor Zhang, Ahmed Kammoona, Jason H Anderson, Stephen Brown, and Tomasz Czajkowski. 2011. LegUp: High-Level Synthesis for FPGA-Based Processor/Accelerator Systems. In ACM International Symposium on Field-Programmable Gate Arrays (FPGA) .[6] Hongzheng Chen, Niansong Zhang, Shaojie Xiang, Zhichen Zeng, Mengjia Dai, and Zhiru Zhang. 2024. Allo: A Programming Model for Composable Accelerator Design. In ACM SIGPLAN Symposium on Programming Language Design & Implementation (PLDI) .[7] Tianqi Chen, Thierry Moreau, Ziheng Jiang, Lianmin Zheng, Eddie Yan, Haichen Shen, Meghan Cowan, Leyuan Wang, Yuwei Hu, Luis Ceze, et al . 2018. TVM: An Automated End-to-End Optimizing Compiler for Deep Learning. In USENIX Symposium on Operating Systems Design and Implementation (OSDI) .[8] Tianqi Chen, Lianmin Zheng, Eddie Yan, Ziheng Jiang, Thierry Moreau, Luis Ceze, Carlos Guestrin, and Arvind Krishnamurthy. 2018. Learning to Optimize Tensor Programs. In Annual Conference on Neural Information Processing Systems (NIPS) .[9] Jianyi Cheng, Samuel Coward, Lorenzo Chelini, Rafael Barbalho, and Theo Drane. 2024. SEER: Super-Optimization Explorer for High-Level Synthesis using E-graph Rewriting. In ACM International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS) .[10] CIRCT Project. 2024. CIRCT: Circuit IR Compilers and Tools. https://circt.llvm.org/. [11] Lawrence T Clark, Vinay Vashishtha, Lucian Shifren, Aditya Gujja, Saurabh Sinha, Brian Cline, Chandarasekaran Ramamurthy, and Greg Yeric. 2016. ASAP7: A 7-nm FinFET Predictive Process Design Kit. Microelectronics Journal 
+
+(2016). [12] Samuel Coward, Theo Drane, and George A Constantinides. 2024. ROVER: RTL optimization via verified e-graph rewriting. IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems (TCAD) (2024). [13] Ayatallah Elakhras, Jiahui Xu, Martin Erhart, Paolo Ienne, and Lana Josipović. 2025. ElasticMiter: Formally verified dataflow circuit rewrites. In ACM International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS) .[14] Fabrizio Ferrandi, Vito Giovanni Castellana, Serena Curzel, Pietro Fezzardi, Michele Fiorito, Marco Lattuada, Marco Minutoli, Christian Pilato, and Antonino Tumeo. 2021. Bambu: an open-source research framework for the high-level synthesis of complex applications. In ACM/IEEE Design Automation Conference (DAC) .[15] Hasan Genc, Seah Kim, Alon Amid, Ameer Haj-Ali, Vighnesh Iyer, Pranav Prakash, Jerry Zhao, Daniel Grubb, Harrison Liew, Howard Mao, et al . 2021. Gemmini: Enabling Systematic Deep-learning Architecture Evaluation via Full-stack Integration. In ACM/IEEE Design Automation Conference (DAC) .
+
+> 19
+
+[16] Aaron P Hurst, Alan Mishchenko, and Robert K Brayton. 2007. Fast Minimum-register Retiming Via Binary Maximum-flow. In Formal Methods in Computer Aided Design (FMCAD) .[17] Aaron P Hurst, Alan Mishchenko, and Robert K Brayton. 2008. Scalable Min-register Retiming Under Timing and Initializability Constraints. In ACM/IEEE Design Automation Conference (DAC) .[18] Liancheng Jia, Zizhang Luo, Liqiang Lu, and Yun Liang. 2021. Tensorlib: A Spatial Accelerator Generation Framework For Tensor Algebra. In ACM/IEEE Design Automation Conference (DAC) .[19] Gangwon Jo, Heehoon Kim, Jeesoo Lee, and Jaejin Lee. 2020. SOFF: An OpenCL high-level synthesis framework for FPGAs. In IEEE/ACM International Symposium on Computer Architecture (ISCA) .[20] Lana Josipović, Shabnam Sheikhha, Andrea Guerrieri, Paolo Ienne, and Jordi Cortadella. 2020. Buffer placement and sizing for high-performance dataflow circuits. In ACM International Symposium on Field-Programmable Gate Arrays (FPGA) .[21] Yi-Hsiang Lai, Yuze Chi, Yuwei Hu, Jie Wang, Cody Hao Yu, Yuan Zhou, Jason Cong, and Zhiru Zhang. 2019. HeteroCL: A Multi-paradigm Programming Infrastructure For Software-defined Reconfigurable Computing. In ACM International Symposium on Field-Programmable Gate Arrays (FPGA) .[22] Chris Lattner, Mehdi Amini, Uday Bondhugula, Albert Cohen, Andy Davis, Jacques Pienaar, River Riddle, Tatiana Shpeisman, Nicolas Vasilache, and Oleksandr Zinenko. 2021. MLIR: Scaling Compiler Infrastructure for Domain Specific Computation. In IEEE/ACM International Symposium on Code Generation and Optimization (CGO) .[23] Charles E Leiserson and James B Saxe. 1991. Retiming Synchronous Circuitry. Algorithmica (1991). [24] Mingjun Li, Pengjia Li, Shuo Yin, Shixin Chen, Beichen Li, Chong Tong, Jianlei Yang, Tinghuan Chen, and Bei Yu. 2024. WinoGen: A Highly Configurable Winograd Convolution IP Generator for Efficient CNN Acceleration on FPGA. In ACM/IEEE Design Automation Conference (DAC) .[25] Patrick S. Li, Adam M. Izraelevitz, and Jonathan Bachrach. 2016. Specification For The FIRRTL Language . Technical Report. EECS Department, University of California, Berkeley. [26] Derek Lockhart, Gary Zibrat, and Christopher Batten. 2014. PyMTL: A Unified Framework for Vertically Integrated Computer Architecture Research. In IEEE/ACM International Symposium on Microarchitecture (MICRO) .[27] Jinan Lou, Wei Chen, and M. Pedram. 1999. Concurrent logic restructuring and placement for timing closure. In 
+
+IEEE/ACM International Conference on Computer-Aided Design (ICCAD) .[28] Ali Mashtizadeh. 2007. PHDL: A Python hardware design framework . Ph. D. Dissertation. Massachusetts Institute of Technology. [29] Alan Mishchenko, Robert Brayton, Stephen Jang, and Victor Kravets. 2011. Delay optimization using SOP balancing. In IEEE/ACM International Conference on Computer-Aided Design (ICCAD) .[30] Rachit Nigam, Ethan Gabizon, Edmund Lam, Carolyn Zech, Jonathan Balkind, and Adrian Sampson. 2026. Parameterized Hardware Design with Latency-Abstract Interfaces. In ACM International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS) .[31] Rachit Nigam, Samuel Thomas, Zhijing Li, and Adrian Sampson. 2021. A Compiler Infrastructure For Accelerator Generators. In ACM International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS) .[32] Fabian Schuiki, Andreas Kurth, Tobias Grosser, and Luca Benini. 2020. LLHD: A Multi-level Intermediate Repre-sentation For Hardware Description Languages. In ACM SIGPLAN Symposium on Programming Language Design & Implementation (PLDI) .[33] Narendra Shenoy and Richard Rudell. 2003. Efficient Implementation of Retiming. The Best of ICCAD: 20 Years of Excellence in Computer-Aided Design (2003). [34] SpinalHDL Project. 2018. SpinalHDL: A Language to Describe Digital Hardware. https://spinalhdl.github.io/SpinalDoc-RTD/master/index.html. [35] Synopsys Inc. 2009. Design Compiler Register Retiming Reference Manual. https://picture.iczhiku.com/resource/ eetop/shkedggoGHzkAmNC.pdf. [36] Synopsys Inc. 2024. Synopsys Design Compiler: Concurrent Timing, Area, Power, and Test Optimization. https: //www.synopsys.com/implementation-and-signoff/rtl-synthesis-test/dc-ultra.html. [37] Jian Weng, Boyang Han, Derui Gao, Ruijie Gao, Wanning Zhang, An Zhong, Ceyu Xu, Jihao Xin, Yangzhixin Luo, Lisa Wu Wills, et al . 2025. Assassyn: A Unified Abstraction for Architectural Simulation and Implementation. In 
+
+IEEE/ACM International Symposium on Computer Architecture (ISCA) .[38] Youwei Xiao, Zizhang Luo, Kexing Zhou, and Yun Liang. 2024. Cement: Streamlining FPGA Hardware Design with Cycle-Deterministic EHDL and Synthesis. In ACM International Symposium on Field-Programmable Gate Arrays (FPGA) .[39] Yinan Xu, Zihao Yu, Dan Tang, Guokai Chen, Lu Chen, Lingrui Gou, Yue Jin, Qianruo Li, Xin Li, Zuojun Li, Jiawei Lin, Tong Liu, Zhigang Liu, Jiazhan Tan, Huaqiang Wang, Huizhe Wang, Kaifan Wang, Chuanqi Zhang, Fawang Zhang, Linjuan Zhang, Zifei Zhang, Yangyang Zhao, Yaoyang Zhou, Yike Zhou, Jiangrui Zou, Ye Cai, Dandan Huan, Zusong Li, Jiye Zhao, Zihao Chen, Wei He, Qiyuan Quan, Xingwu Liu, Sa Wang, Kan Shi, Ninghui Sun, and Yungang Bao. 
+
+> 20
+
+2022. Towards Developing High Performance RISC-V Processors Using Agile Methodology. In IEEE/ACM International Symposium on Microarchitecture (MICRO) .[40] Wenlong Yang, Lingli Wang, and Alan Mishchenko. 2012. Lazy man’s logic synthesis. In IEEE/ACM International Conference on Computer-Aided Design (ICCAD) .[41] Hanchen Ye, Cong Hao, Jianyi Cheng, Hyunmin Jeong, Jack Huang, Stephen Neuendorffer, and Deming Chen. 2022. ScaleHLS: A New Scalable High-level Synthesis Framework On Multi-level Intermediate Representation. In IEEE International Symposium on High Performance Computer Architecture (HPCA) . IEEE. [42] Hanchen Ye, Hyegang Jun, and Deming Chen. 2024. HIDA: A Hierarchical Dataflow Compiler for High-Level Synthesis. In ACM International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS) .[43] Hanchen Ye, David Z Pan, Chris Leary, Deming Chen, and Xiaoqing Xu. 2024. Subgraph extraction-based feedback-guided iterative scheduling for HLS. In IEEE/ACM Design, Automation and Test in Europe Conference (DATE) .[44] Bei Yu, Sheqin Dong, Yuchun Ma, Tao Lin, Yu Wang, Song Chen, and Satoshi Goto. 2011. Network Flow-based Simultaneous Retiming and Slack Budgeting for Low Power Design. In IEEE/ACM Asia and South Pacific Design Automation Conference (ASPDAC) .[45] Lianmin Zheng, Chengfan Jia, Minmin Sun, Zhao Wu, Cody Hao Yu, Ameer Haj-Ali, Yida Wang, Jun Yang, Danyang Zhuo, Koushik Sen, et al . 2020. Ansor: Generating High-Performance Tensor Programs for Deep Learning. In USENIX Symposium on Operating Systems Design and Implementation (OSDI) .[46] Kexing Zhou, Yun Liang, Yibo Lin, Runsheng Wang, and Ru Huang. 2023. Khronos: Fusing Memory Access for Improved Hardware RTL Simulation. In IEEE/ACM International Symposium on Microarchitecture (MICRO) .

@@ -6,74 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-04
-- 运行时间：2026-05-04 20:22:25 UTC
+- 最新运行日期：2026-05-05
+- 运行时间：2026-05-05 20:19:24 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-- 今日共生成 17 篇推荐（精读 6 篇，速读 11 篇）
-- 精读：《Extracting Exact Lie Derivatives Without Backpropagation: A Dual Compiler for Neural Control Barrier Functions》（9.0/10）, 《Vision SmolMamba: Spike-Guided Token Pruning for Energy-Efficient Spiking State-Space Vision Models》（9.0/10）
-- 速读：《Hyperloop Transformers》（8.0/10）, 《Hyperloop Transformers》（8.0/10）, 《Optimizing High-Throughput Distributed Data Pipelines for Reproducible Deep Learning at Scale》（8.0/10）
-- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202605/04/README](/202605/04/README)
+今日深度研读 17 篇前沿论文，重点攻克物理基础模型与半导体封装级的 AI 架构优化。
+核心结论指出，将大模型固化为硬件实现及 ViT 的多轴协同优化，是突破算力瓶颈的关键。
+建议关注硬件原生 AI 与异构专家模型，探索算法与底层芯片深度融合的高效能方案。
+- 详情：[/202605/05/README](/202605/05/README)
 
 ### 精读区论文标签
-1. [Extracting Exact Lie Derivatives Without Backpropagation: A Dual Compiler for Neural Control Barrier Functions](/202605/04/2604.23995v1-extracting-exact-lie-derivatives-without-backpropagation-a-dual-compiler-for-neural-control-barrier-functions)  
+1. [Physical Foundation Models: Fixed hardware implementations of large-scale neural networks](/202605/05/2604.27911v1-physical-foundation-models-fixed-hardware-implementations-of-large-scale-neural-networks)  
    标签：评分：9.0/10、query:hwnas
-   evidence：用于在嵌入式硬件上部署神经网络的双代数编译器
-2. [Vision SmolMamba: Spike-Guided Token Pruning for Energy-Efficient Spiking State-Space Vision Models](/202605/04/2604.25570v1-vision-smolmamba-spike-guided-token-pruning-for-energy-efficient-spiking-state-space-vision-models)  
+   evidence：大规模神经网络的固定硬件实现
+2. [Joint Architecture-Token-Bitwidth Multi-Axis Optimization of Vision Transformers for Semiconductor IC Packaging](/202605/05/2605.01742v1-joint-architecture-token-bitwidth-multi-axis-optimization-of-vision-transformers-for-semiconductor-ic-packaging)  
    标签：评分：9.0/10、query:hwnas
-   evidence：具有令牌剪枝功能的节能脉冲状态空间架构
-3. [Multibit neural inference in a N-ary crossbar architecture](/202605/04/2604.26979v1-multibit-neural-inference-in-a-n-ary-crossbar-architecture)  
+   evidence：针对资源受限环境的架构、Token和位宽联合优化
+3. [PipeRTL: Timing-Aware Pipeline Optimization at IR-Level for RTL Generation](/202605/05/2605.01836v1-pipertl-timing-aware-pipeline-optimization-at-ir-level-for-rtl-generation)  
    标签：评分：9.0/10、query:hwnas
-   evidence：能效神经推理的存内计算
-4. [Real-Time Frame- and Event-based Object Detection with Spiking Neural Networks on Edge Neuromorphic Hardware: Design, Deployment and Benchmark](/202605/04/2605.00146v1-real-time-frame--and-event-based-object-detection-with-spiking-neural-networks-on-edge-neuromorphic-hardware-design-deployment-and-benchmark)  
+   evidence：硬件编译器和RTL生成的IR级流水线优化
+4. [SwiftChannel: Algorithm-Hardware Co-Design for Deep Learning-Based 5G Channel Estimation](/202605/05/2605.01931v1-swiftchannel-algorithm-hardware-co-design-for-deep-learning-based-5g-channel-estimation)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对神经形态平台设计 SNN 架构
-5. [DPU or GPU for Accelerating Neural Networks Inference -- Why not both? Split CNN Inference](/202605/04/2605.00174v1-dpu-or-gpu-for-accelerating-neural-networks-inference----why-not-both-split-cnn-inference)  
+   evidence：深度学习估计器的算法-硬件协同设计
+5. [ViM-Q: Scalable Algorithm-Hardware Co-Design for Vision Mamba Model Inference on FPGA](/202605/05/2605.01935v1-vim-q-scalable-algorithm-hardware-co-design-for-vision-mamba-model-inference-on-fpga)  
    标签：评分：9.0/10、query:hwnas
-   evidence：在DPU和GPU之间划分CNN推理
-6. [VitaLLM: A Versatile and Tiny Accelerator for Mixed-Precision LLM Inference on Edge Devices](/202605/04/2605.00320v1-vitallm-a-versatile-and-tiny-accelerator-for-mixed-precision-llm-inference-on-edge-devices)  
+   evidence：FPGA上Vision Mamba的算法-硬件协同设计
+6. [Edge-Efficient Image Restoration: Transformer Distillation into State-Space Models](/202605/05/2605.02794v1-edge-efficient-image-restoration-transformer-distillation-into-state-space-models)  
    标签：评分：9.0/10、query:hwnas
-   evidence：用于边缘设备LLM推理的混合精度加速器
+   evidence：提高边缘硬件运行效率并自动发现有效的块组合
 
 ### 速读区论文标签
-1. [Hyperloop Transformers](/202605/04/2604.21254v1-hyperloop-transformers)  
+1. [MambaCSP: Hybrid-Attention State Space Models for Hardware-Efficient Channel State Prediction](/202605/05/2604.21957v1-mambacsp-hybrid-attention-state-space-models-for-hardware-efficient-channel-state-prediction)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对内存受限的边缘和设备端部署的参数高效架构设计
-2. [Hyperloop Transformers](/202605/04/2604.21254v2-hyperloop-transformers)  
+   evidence：针对资源受限无线部署的硬件高效SSM架构
+2. [Mixture of Heterogeneous Grouped Experts for Language Modeling](/202605/05/2604.23108v2-mixture-of-heterogeneous-grouped-experts-for-language-modeling)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于边缘和设备端部署的参数高效架构
-3. [Optimizing High-Throughput Distributed Data Pipelines for Reproducible Deep Learning at Scale](/202605/04/2604.21275v1-optimizing-high-throughput-distributed-data-pipelines-for-reproducible-deep-learning-at-scale)  
+   evidence：将计算成本与Token复杂度对齐以提高GPU利用率
+3. [Tessera: Secure, Near-Line-Rate Weight Streaming for UMA Edge Accelerators](/202605/05/2604.23205v1-tessera-secure-near-line-rate-weight-streaming-for-uma-edge-accelerators)  
    标签：评分：8.0/10、query:hwnas
-   evidence：优化数据流水线以最大化GPU利用率
-4. [A four-player potential game for barren-plateau-aware quantum ansatz design](/202605/04/2604.21955v1-a-four-player-potential-game-for-barren-plateau-aware-quantum-ansatz-design)  
+   evidence：边缘加速器的内存带宽优化
+4. [Breaking the Resource Wall: Geometry-Guided Sequence Modeling for Efficient Semantic Segmentation](/202605/05/2604.23399v1-breaking-the-resource-wall-geometry-guided-sequence-modeling-for-efficient-semantic-segmentation)  
    标签：评分：8.0/10、query:hwnas
-   evidence：考虑硬件成本的量子电路设计
-5. [Hybrid JIT-CUDA Graph Optimization for Low-Latency Large Language Model Inference](/202605/04/2604.23467v1-hybrid-jit-cuda-graph-optimization-for-low-latency-large-language-model-inference)  
+   evidence：针对受限硬件环境的高效架构设计
+5. [GoClick: Lightweight Element Grounding Model for Autonomous GUI Interaction](/202605/05/2604.23941v1-goclick-lightweight-element-grounding-model-for-autonomous-gui-interaction)  
    标签：评分：7.0/10、query:hwnas
-   evidence：混合 JIT-CUDA 图优化用于低延迟推理
-6. [Adaptive Swin Transformer Partitioning over AI-RAN Networks](/202605/04/2604.23554v1-adaptive-swin-transformer-partitioning-over-ai-ran-networks)  
+   evidence：针对资源受限移动设备的轻量级模型设计
+6. [FreeScale: Distributed Training for Sequence Recommendation Models with Minimal Scaling Cost](/202605/05/2604.24073v1-freescale-distributed-training-for-sequence-recommendation-models-with-minimal-scaling-cost)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对边缘网络实时推理的自适应切分与激活压缩技术
-7. [ELSA: Exact Linear-Scan Attention for Fast and Memory-Light Vision Transformers](/202605/04/2604.23798v1-elsa-exact-linear-scan-attention-for-fast-and-memory-light-vision-transformers)  
+   evidence：缓解分布式训练中计算资源利用不足的问题
+7. [TACO: Efficient Communication Compression of Intermediate Tensors for Scalable Tensor-Parallel LLM Training](/202605/05/2604.24088v1-taco-efficient-communication-compression-of-intermediate-tensors-for-scalable-tensor-parallel-llm-training)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对视觉Transformer的轻量化内存算法重构
-8. [Architectural Isolation as a Timing Safety Primitive for Edge AI Medical Devices: Controlled Experimental Evidence on a Shared-Silicon Platform](/202605/04/2604.23831v1-architectural-isolation-as-a-timing-safety-primitive-for-edge-ai-medical-devices-controlled-experimental-evidence-on-a-shared-silicon-platform)  
+   evidence：LLM训练中通信压缩的软硬件协同设计
+8. [PointTransformerX:Portable and Efficient 3D Point Cloud Processing without Sparse Algorithms](/202605/05/2604.24169v1-pointtransformerxportable-and-efficient-3d-point-cloud-processing-without-sparse-algorithms)  
    标签：评分：7.0/10、query:hwnas
-   evidence：边缘加速器上的软硬件定时安全
-9. [Rethinking Collision Detection on GPU Ray Tracing Architecture](/202605/04/2604.23520v1-rethinking-collision-detection-on-gpu-ray-tracing-architecture)  
+   evidence：硬件友好的3D点云骨干网络，移除自定义CUDA算子以提高移植性
+9. [Coordinated Multipoint Anti-jamming Beam Pattern Synthesis: From AI Accelerated Algorithm to Hardware Implementation](/202605/05/2604.23880v1-coordinated-multipoint-anti-jamming-beam-pattern-synthesis-from-ai-accelerated-algorithm-to-hardware-implementation)  
    标签：评分：6.0/10、query:hwnas
-   evidence：利用GPU光线追踪架构加速碰撞检测
-10. [FlowPlace: Flow Matching for Chip Placement](/202605/04/2604.23658v1-flowplace-flow-matching-for-chip-placement)  
+   evidence：AI加速算法到硬件实现
+10. [A2DEPT: Large Language Model-Driven Automated Algorithm Design via Evolutionary Program Trees](/202605/05/2604.24043v1-a2dept-large-language-model-driven-automated-algorithm-design-via-evolutionary-program-trees)  
    标签：评分：6.0/10、query:hwnas
-   evidence：物理设计中芯片布局的流匹配方法
-11. [Neural Enhancement of Analytical Appearance Models](/202605/04/2604.24081v1-neural-enhancement-of-analytical-appearance-models)  
+   evidence：通过进化程序树进行自动化算法设计
+11. [6thGrid-Net: Unified Remote Sensing Image Dehazing Based on Color Restoration and Edge-Preserving](/202605/05/2604.24149v1-6thgrid-net-unified-remote-sensing-image-dehazing-based-on-color-restoration-and-edge-preserving)  
    标签：评分：6.0/10、query:hwnas
-   evidence：基于超立方体搜索，用小型MLP替换计算节点
+   evidence：针对资源受限环境定制的高效遥感图像恢复框架
 
 
 <div class="dpr-home-promo-card">
