@@ -1,0 +1,172 @@
+Title: ClusterFusion++: Expanding Cluster-Level Fusion to Full Transformer-Block Decoding
+
+URL Source: https://arxiv.org/pdf/2604.23553v1
+
+Published Time: Tue, 28 Apr 2026 00:53:52 GMT
+
+Number of Pages: 7
+
+Markdown Content:
+# ClusterFusion++: Expanding Cluster-Level Fusion to Full Transformer-Block Decoding 
+
+Chiheng Jin Hongche Yu Xihui Chen 
+
+Shanghai Jiao Tong University 
+
+{wendy-hamlet, superk977, charly-a}@sjtu.edu.cn 
+
+## Abstract 
+
+Large language model (LLM) decoding is latency-sensitive and often bottle-necked by fragmented operator execution and repeated off-chip materialization of intermediate tensors. Prior work (Luo et al., 2025) expands fusion scope by leveraging thread-block clusters and on-chip inter-block collectives to fuse attention-side operators (QKV projection, attention, and output projection). We develop ClusterFusion++ , a CUDA-level extension that broadens fusion to the 
+
+full Transformer decoder block for GPT-NeoX/Pythia models: LayerNorm →
+
+QKV → RoPE → decode attention → output projection → Post-LN → MLP 
+
+→ residual . We additionally engineer a CUDA-Graph-compatible execution mode with persistent Tensor Memory Accelerator (TMA) descriptors to reduce per-step overhead. On an NVIDIA RTX 5090-class GPU, ClusterFusion++ im-proves throughput by 1.34 × for Pythia-2.8B and yields similar gains for Pythia-6.9B, while maintaining high output fidelity (near-token-identical generation, with minor non-determinism from FP16 atomics). Our code is open-sourced at https://github.com/superk668/ClusterFusionPlus .
+
+## 1 Introduction 
+
+Large language models (LLMs) have become the backbone of modern artificial intelligence, whose applications span across various domains (Liu et al., 2024) (Yang et al., 2024) (Su et al., 2022). Autoregressive decoding dominates end-to-end latency for many LLM workloads as context length and model size grow. Its acceleration has been a major focus of the research community, with many techniques being proposed to improve the efficiency of LLM inference (Dao et al., 2023) (Yang et al., 2024) (Ainslie et al., 2023) (Wu and Tu, 2024) (NVIDIA, 2024). In common inference stacks, a single decoding step of one Transformer block decomposes into many GPU kernels, each producing intermediate tensors that are written to and read from global memory. This fragmented execution incurs heavy off-chip traffic and kernel-launch overhead, both of which limit practical latency. While the optimization of this execution dataflow has been widely studied (Hong et al., 2024) (Liu and Li, 2025), the introduction of recent GPU architecture features has enabled new opportunities for optimization. ClusterFusion (Luo et al., 2025) observes that modern NVIDIA GPUs expose thread-block clusters with distributed shared memory (DSMEM), enabling low-latency communication between blocks within a cluster (NVIDIA, 2024). By providing cluster-level collective primitives, ClusterFusion fuses attention-side operators into a single cluster-coordinated kernel, reducing off-chip intermediate traffic. In this project we ask: can cluster-enabled fusion be extended from attention-side fusion to the full Transformer decoder block in a real GPT-style model? We answer yes, and in our project 
+
+ClusterFusion++ , we make the following contributions: 
+
+39th Conference on Neural Information Processing Systems (NeurIPS 2025). 
+
+> arXiv:2604.23553v1 [cs.DC] 26 Apr 2026
+
+• Full-block fusion for GPT-NeoX/Pythia : We port ClusterFusion-style cluster-centric decoding to the Pythia family (GPT-NeoX architecture) (Biderman et al., 2023) and expand fusion scope including LayerNorm, attention, partial RoPE, Post-LN and MLP, which yields a full decoder-block fused kernel for decoding. • Architecture-aware kernel mapping : We handle Pythia-2.8B’s non-power-of-two head dimension (dhead = 80 ) with warp/tiling choices that preserve correctness and performance. • CUDA Graph execution mode : We implement a reusable graph context that creates TensorMap (TMA) descriptors once per layer and reuses static buffers across decode steps, reducing per-step setup overhead. 
+
+## 2 Methods 
+
+2.1 Background: decoding operators and fusion 
+
+A Transformer decoder block for a single token typically performs: LayerNorm → QKV → RoPE 
+
+→ decode attention → output projection → MLP with residual . In standard execution, each step is scheduled as a separate kernel (or a few kernels), forcing intermediate tensors through global memory. 
+
+Fusion means executing multiple consecutive operators inside one kernel, keeping intermediate values in registers/shared memory instead of materializing them in global memory. However, fusion is traditionally limited by inter-block dependencies: when a result requires a reduction across blocks, frameworks typically end a kernel and use global memory as the rendezvous point. With recent GPU architecture features (NVIDIA, 2024), we can fuse more operators inside a single kernel. Thread-block clusters allow a set of blocks to be co-scheduled with fast inter-block communi-cation through DSMEM. ClusterFusion++ follows the cluster-centric philosophy of ClusterFusion (Luo et al., 2025): blocks within a cluster collaboratively compute and exchange partial results on-chip, enabling larger fused regions than block-isolated kernels. 
+
+2.2 ClusterFusion++: Full-block fusion for GPT-NeoX architecture 
+
+Building upon ClusterFusion’s attention-side fusion, ClusterFusion++ extends the fused region to cover the entire decoder block for GPT-NeoX/Pythia architectures. A single kernel invocation performs: Pre-attention LayerNorm → QKV projection and KV cache update → Rotary position embedding (RoPE) → Decode attention over KV cache → Output projection with residual connec-tion → Post-attention LayerNorm → MLP (up-projection, GELU, down-projection) with residual connection .
+
+Architecture-Specific Adaptations ClusterFusion++ introduces several architecture-specific adap-tations to support the GPT-NeoX/Pythia architecture. We add bias terms to the LayerNorm, QKV projection, and MLP layers, and the weights are stored interleaved per head rather than concatenated. ClusterFusion++ also supports the unique RoPE in Pythia-2.8B, where only the first 25% of each head dimension undergoes rotation, and the remaining dimensions are passed through unchanged. 
+
+Kernel Optimizations Beyond adaptation, we introduce the following kernel optimizations: • Single-pass LayerNorm : We compute mean and variance simultaneously using Var( x) = E[x2]−
+
+E[x]2, halving memory traffic compared to two-pass implementations. • Cluster-cooperative attention : Multiple thread blocks within a cluster cooperatively cover the KV cache sequence length, with efficient cross-block communication via distributed shared memory. • Tree reduction for output accumulation : We optimize cluster-level reduction from sequential ring reduction ( O(n) steps) to tree reduction ( O(log n) steps), reducing synchronization overhead by parallelizing the reduction through a binary tree structure. • PTX-accelerated GELU : We use inline PTX intrinsics to compute GELU activation with reduced instruction count. 22.3 CUDA Graph Mode with Persistent TensorMaps 
+
+To minimize per-token overhead during autoregressive decoding, we implement a CUDA Graph context for each layer. It creates TensorMap (TMA) descriptors once per layer and reuses static buffers across decode steps, reducing per-step setup overhead. Buffers, including output and intermediate tensors, are allocated once and reused across decode iterations. The decode step then becomes a single graph replay, eliminating CPU-side kernel-launch overhead. This complements operator fusion by reducing both GPU kernel overhead and CPU dispatch latency. 
+
+## 3 Experiments 
+
+Experimental Setup We evaluate ClusterFusion++ on an NVIDIA RTX 5090-class GPU ( sm_120 )using Pythia-2.8B and Pythia-6.9B models (GPT-NeoX). Sequence length ranges from 16 to 2048, and batch size is 1. All experiments use PyTorch 2.9.1 and CUDA 13.1. Our baseline is HuggingFace Transformers decoding with KV cache enabled. We evaluate ClusterFusion++ on two models: Pythia-2.8B and Pythia-6.9B, both based on the GPT-NeoX architecture. 
+
+Results We use time per output token (TPOT) and throughput as the metrics for end-to-end evaluation. Results appear in Figure 1 and Figure 2. For TPOT, ClusterFusion++ achieves 1.21 ×,1.25 ×, 1.26 ×, 1.30 ×, and 1.34 × speedup at different sequence lengths over the baseline for Pythia-2.8B, and 1.19 ×, 1.24 ×, 1.26 ×, 1.29 ×, and 1.34 × for Pythia-6.9B. See the Appendix for details. 
+
+Figure 1: Time per output token (TPOT) of Pythia-2.8B (left) and Pythia-6.9B (right) on RTX 5090. 
+
+Figure 2: Throughput of Pythia-2.8B on RTX 5090. 
+
+Output fidelity. As shown in Table 1 and 2, we observe near-token-identical generation for prompts, with occasional mismatches attributable to FP16 atomic accumulation in the output projec-tion. This behavior aligns with known non-determinism in parallel reductions with floating-point atomics. Table 1: PPL on WikiText-2 and PG-19 (un-change from baseline because our kernel changes only accelerate the decode phase). Dataset PPL Samples Tokens WikiText-2 24.00 100 16,807 PG-19 8.90 1 23,284 Table 2: Quality evaluation on WikiText-2. Metric Overall WikiText-2 Token Match Rate 99.4% 99.8% Logits MAE 0.0235 –Top-5 Agreement 92.3% 96.0% Top-10 Agreement 92.3% –
+
+## 4 Ablation Study and Discussion 
+
+4.1 Decode Phase 
+
+The decoding kernel is split into two components owned by two contributors: one handles the attention portion and the other the MLP. The components are later concatenated into a complete decoding kernel. We evaluate the performance improvement from each component separately, and Table 3 shows an interesting phenomenon: while the MLP down-projection kernel alone is 3slower than PyTorch’s cuBLAS implementation (0.75 × average speedup), combining it with the Attention+MLP-Up kernel yields better end-to-end performance than accelerating attention alone. Table 3: TPOT of different kernel configurations on Pythia-2.8B (with sequence length 2048). 
+
+Configuration Avg TPOT (ms) vs PyTorch 
+
+PyTorch Baseline 6.80 1.00 ×
+
+CUDA Attention + PyTorch MLP Down 5.32 1.28 ×
+
+PyTorch Attention + CUDA MLP Down 9.04 0.75 ×
+
+Full Fused Kernel 4.90 1.39 ×
+
+Why MLP down alone is slower but provides synergy when fused. The standalone MLP Down kernel underperforms because of cuBLAS efficiency in PyTorch’s F.linear , poorly amortized fixed overheads (TMA descriptor creation and cluster launch), and the memory-bound nature of loading 26.2M weight parameters. However, when the MLP Down kernel is fused with the preceding Attention+MLP-Up operations, the combined kernel achieves 1.39 × speedup—better than the 1.28 ×
+
+from attention-only acceleration. This synergy arises from amortized launch overhead, register/shared memory reuse of the 20KB MLP intermediate tensor, eliminated synchronization, and shared TMA infrastructure for weight loading. The memory-traffic reduction from fusion eliminates 2 × 10240 ×
+
+2 × 32 = 1 .31 MB per decode step. At 1.8 TB/s memory bandwidth (RTX 5090), this saves approximately 0.73 ms, closely matching the observed improvement from 5.32 ms to 4.90 ms. This demonstrates that kernel fusion benefits are non-additive : components individually slower than baseline can contribute positively when fused by eliminating intermediate memory traffic and amortizing fixed overheads. 
+
+4.2 Prefill Phase 
+
+For the prefill phase, we implement Flash Attention (Dao et al., 2022) and improve it on the GPT-NeoX architecture. However, while we do observe a speedup in Time To First Token (TTFT) of 1.56 × over the PyTorch baseline for applying Flash Attention, our architecture-specific adaptation only achieve a speedup of 0.33 ×. The latency is high due to pytorch-level limitations, but our variant still outperforms the baseline on memory efficiency and serves two important roles: (i) it isolates the memory benefit of the algorithm itself, proving that the idea works even in high-level frameworks, and (ii) it provides a transparent, hardware-agnostic reference that is easy to study, verify, and extend for future research. 
+
+## 5 Conclusion 
+
+ClusterFusion++ presents a CUDA-level cluster-centric fusion approach that expands ClusterFusion-style decoding fusion from attention-side operators to the full Transformer decoder block for GPT-NeoX/Pythia, enabling on-chip inter-block collectives via distributed shared memory to reduce intermediate global-memory traffic and launch overhead. Combined with a CUDA-Graph mode that reuses persistent TensorMap (TMA) descriptors and static buffers across decode steps, ClusterFu-sion++ outperforms the HuggingFace baseline on an RTX 5090 GPU across different configurations and models, while maintaining high output fidelity with only minor non-determinism attributable to FP16 atomic accumulation in cluster reductions. 
+
+## Acknowledgments 
+
+We thank the authors of ClusterFusion (Luo et al., 2025) for releasing their paper and codebase, which this project builds upon. 
+
+## References  
+
+> Xinhao Luo, Zihan Liu, Yangjie Zhou, Shihan Fang, Ziyu Huang, Yu Feng, Chen Zhang, Shixuan Sun, Zhenzhe Zheng, Jingwen Leng, and Minyi Guo. ClusterFusion: Expanding operator fusion scope for LLM inference via cluster-level collective primitive. arXiv preprint arXiv:2508.18850 , 2025.
+
+4Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Łukasz Kaiser, and Illia Polosukhin. Attention is all you need. In NeurIPS , 2017. Tri Dao, Daniel Y. Fu, Stefano Ermon, Atri Rudra, and Christopher Ré. FlashAttention: Fast and memory-efficient exact attention with IO-awareness. In NeurIPS , 2022. Mohammad Shoeybi, Mostofa Patwary, Raul Puri, Jared LeGresley, Patrick Casper, and Bryan Catanzaro. Megatron-LM: Training multi-billion parameter language models using model parallelism. arXiv preprint arXiv:1909.08053 , 2019. Yixuan Su, Tian Lan, Yan Wang, Dani Yogatama, Lingpeng Kong, and Nigel Collier. A contrastive framework for neural text generation. In Advances in Neural Information Processing Systems , volume 35, pages 21548–21561, 2022. Fang Liu, Yang Liu, Lin Shi, Houkun Huang, Ruifeng Wang, Zhen Yang, Li Zhang, Zhongqi Li, and Yuchi Ma. Exploring and evaluating hallucinations in LLM-powered code generation. arXiv preprint arXiv:2404.00971 ,2024. An Yang, Beichen Zhang, Binyuan Hui, Bofei Gao, Bowen Yu, Chengpeng Li, Dayiheng Liu, Jianhong Tu, Jingren Zhou, Junyang Lin, Keming Lu, Mingfeng Xue, Runji Lin, Tianyu Liu, Xingzhang Ren, and Zhenru Zhang. Qwen2.5-math technical report: Toward mathematical expert model via self-improvement. arXiv preprint arXiv:2409.12122 , 2024. Tri Dao, Daniel Haziza, Francisco Massa, and Grigory Sizov. Flash-decoding for long-context inference. 
+
+https://crfm.stanford.edu/2023/10/12/flashdecoding.html , 2023. Dongjie Yang, XiaoDong Han, Yan Gao, Yao Hu, Shilin Zhang, and Hai Zhao. Pyramidinfer: Pyramid KV cache compression for high-throughput LLM inference. arXiv preprint arXiv:2405.12532 , 2024. Joshua Ainslie, James Lee-Thorp, Michiel De Jong, Yury Zemlyanskiy, Federico Lebrón, and Sumit Sanghai. GQA: Training generalized multi-query transformer models from multi-head checkpoints. arXiv preprint arXiv:2305.13245 , 2023. Haoyi Wu and Kewei Tu. Layer-condensed KV cache for efficient inference of large language models. arXiv preprint arXiv:2405.10637 , 2024. NVIDIA. Tensorrt-LLM. https://github.com/NVIDIA/TensorRT-LLM , 2024. Ke Hong, Guohao Dai, Jiaming Xu, Qiuli Mao, Xiuhong Li, Jun Liu, Kangdi Chen, Yuhan Dong, and Yu Wang. Flashdecoding++: Faster large language model inference with asynchronization, flat GEMM optimization, and heuristics. In Proceedings of the Seventh Annual Conference on Machine Learning and Systems, MLSys 2024, Santa Clara, CA, USA, May 13-16, 2024 . mlsys.org, 2024. Shengyu Liu and Jiashi Li. Flashmla: Efficient MLA decoding kernels. https://github.com/deepseek-ai/ FlashMLA , 2025. NVIDIA. NVIDIA hopper architecture. https://www.nvidia.com/en-us/data-center/technologies/ hopper-architecture/ , 2024. Stella Biderman, Hailey Schoelkopf, Quentin Gregory Anthony, Herbie Bradley, Kyle O’Brien, Eric Hallahan, Mohammad Aflah Khan, Shivanshu Purohit, USVSN Sai Prashanth, Edward Raff, and others. Pythia: A suite for analyzing large language models across training and scaling. In International Conference on Machine Learning , pages 2397–2430, 2023. 
+
+## A Team Work as a class project 
+
+The ClusterFusion++ project https://github.com/superk668/ClusterFusionPlus is divided into three parts: prefill, decode-attention and decode-mlp. Xihui Chen is in charge of the prefill phase 
+
+https://github.com/Sougetsusou/CS3602_project_ClusterFusion , and Chiheng Jin is in charge of the decode-attention part https://github.com/Wendy-Hamlet/CS3602_project_ ClusterFusion and Hongche Yu is in charge of the decode-mlp part https://github.com/ superk668/ClusterFusionPlus-MLP . The integration of the three parts is done by Chiheng Jin, and this thesis is written by Hongche Yu. 
+
+## B Detailed Data 
+
+All benchmarks run on NVIDIA RTX 5090 (sm_120), batch=1. 5Table 4: TPOT (Time Per Output Token) - Decode Phase for Pythia-2.8B Decode Tokens HF (ms) CF (ms) CF+Graph (ms) CF Speedup Graph Speedup 16 5.69 5.11 4.70 1.11 × 1.21 ×
+
+32 5.70 5.11 4.69 1.12 × 1.22 ×
+
+64 5.84 5.16 4.69 1.13 × 1.25 ×
+
+128 5.76 5.11 4.69 1.13 × 1.23 ×
+
+256 5.82 5.15 4.74 1.13 × 1.23 ×
+
+512 5.98 5.17 4.76 1.16 × 1.26 ×
+
+1024 6.23 5.23 4.81 1.19 × 1.30 ×
+
+2048 6.60 5.31 4.91 1.24 × 1.34 ×
+
+Table 5: Throughput (tokens/second) for Pythia-2.8B Decode Tokens HF CF CF+Graph CF Speedup Graph Speedup 16 173.86 192.01 207.45 1.10 × 1.19 ×
+
+32 174.39 193.78 210.54 1.11 × 1.21 ×
+
+64 170.70 192.73 211.70 1.13 × 1.24 ×
+
+128 173.37 195.16 212.36 1.13 × 1.22 ×
+
+256 171.60 194.09 210.62 1.13 × 1.23 ×
+
+512 167.21 193.36 209.90 1.16 × 1.26 ×
+
+1024 160.51 191.29 207.85 1.19 × 1.29 ×
+
+2048 151.50 188.21 203.46 1.24 × 1.34 ×
+
+Table 6: FLOPs Estimation for Pythia-2.8B Decode Tokens Prefill (GFLOPs) Decode (GFLOPs) Total (GFLOPs) TFLOPS/s (CF+Graph) 16 26.48 84.78 111.26 1.44 32 26.48 169.65 196.12 1.29 64 26.48 339.63 366.11 1.21 128 26.48 680.63 707.10 1.17 256 26.48 1366.70 1393.18 1.15 512 26.48 2755.22 2781.69 1.14 1024 26.48 5597.68 5624.15 1.14 2048 26.48 11544.32 11570.79 1.15 Table 7: Pythia-6.9B Benchmark Results Decode Tokens CF (s) CF+Graph (s) HF (s) CF Speedup Graph Speedup 16 0.144 0.137 0.156 1.09 × 1.14 ×
+
+32 0.296 0.284 0.323 1.09 × 1.14 ×
+
+64 0.601 0.576 0.657 1.09 × 1.14 ×
+
+128 1.224 1.160 1.338 1.09 × 1.15 ×
+
+256 2.444 2.331 2.718 1.11 × 1.17 ×
+
+512 4.935 4.699 5.562 1.13 × 1.18 ×
+
+1024 9.910 9.464 11.453 1.16 × 1.21 ×
+
+2048 20.135 19.256 24.065 1.20 × 1.25 ×
+
+6Table 8: End-to-End Benchmark for Attention-only Kernel (vs PyTorch Baseline) Tokens CF(s) PyTorch(s) Speedup TPOT CF(ms) TPOT PT(ms) 16 0.078 0.100 1.27 × 5.23 6.64 32 0.163 0.209 1.28 × 5.25 6.74 64 0.333 0.420 1.26 × 5.29 6.66 128 0.668 0.845 1.26 × 5.26 6.65 256 1.349 1.701 1.26 × 5.29 6.67 512 2.724 3.463 1.27 × 5.33 6.78 1024 5.518 7.125 1.29 × 5.39 6.96 2048 11.249 14.950 1.33 × 5.50 7.30 Table 9: End-to-End Benchmark for MLP-only Kernel (vs PyTorch Baseline) Tokens CF(s) PyTorch(s) Speedup TPOT CF(ms) TPOT PT(ms) 16 0.134 0.098 0.73 × 8.96 6.54 32 0.279 0.202 0.72 × 9.01 6.52 64 0.575 0.413 0.72 × 9.12 6.56 128 1.145 0.835 0.73 × 9.02 6.57 256 2.303 1.700 0.74 × 9.03 6.67 512 4.621 3.449 0.75 × 9.04 6.75 1024 9.272 7.128 0.77 × 9.06 6.97 2048 18.507 14.980 0.81 × 9.04 7.32 7

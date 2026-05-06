@@ -6,73 +6,79 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-05
-- 运行时间：2026-05-05 20:19:24 UTC
+- 最新运行日期：2026-05-06
+- 运行时间：2026-05-06 20:31:18 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
+- 本次总论文数：19
+- 精读区：8
 - 速读区：11
 
 ### 今日简报（AI）
-今日深度研读 17 篇前沿论文，重点攻克物理基础模型与半导体封装级的 AI 架构优化。
-核心结论指出，将大模型固化为硬件实现及 ViT 的多轴协同优化，是突破算力瓶颈的关键。
-建议关注硬件原生 AI 与异构专家模型，探索算法与底层芯片深度融合的高效能方案。
-- 详情：[/202605/05/README](/202605/05/README)
+今日精选 19 篇前沿论文，深度解析低轨卫星瞬时环境监测系统与云端 CUDA 卷积性能优化。
+重点关注 LEO 卫星网络在环境感知中的满分应用，以及针对深度卷积的无计数器性能分析与算子加速方案。
+建议从空天互联网与底层硬件优化两个维度，探索高时效性、高可靠性的 AI 推理新路径。
+- 详情：[/202605/06/README](/202605/06/README)
 
 ### 精读区论文标签
-1. [Physical Foundation Models: Fixed hardware implementations of large-scale neural networks](/202605/05/2604.27911v1-physical-foundation-models-fixed-hardware-implementations-of-large-scale-neural-networks)  
+1. [Toward LEO Satellite Network Systems for Instantaneous Detection of Environmental Changes](/202605/06/2605.01243v1-toward-leo-satellite-network-systems-for-instantaneous-detection-of-environmental-changes)  
+   标签：评分：10.0/10、query:hwnas
+   evidence：低轨卫星的在轨边缘计算与星载计算能力
+2. [CUDA Kernel Optimization and Counter-Free Performance Analysis for Depthwise Convolution in Cloud Environments](/202605/06/2604.25422v2-cuda-kernel-optimization-and-counter-free-performance-analysis-for-depthwise-convolution-in-cloud-environments)  
    标签：评分：9.0/10、query:hwnas
-   evidence：大规模神经网络的固定硬件实现
-2. [Joint Architecture-Token-Bitwidth Multi-Axis Optimization of Vision Transformers for Semiconductor IC Packaging](/202605/05/2605.01742v1-joint-architecture-token-bitwidth-multi-axis-optimization-of-vision-transformers-for-semiconductor-ic-packaging)  
+   evidence：卷积的CUDA内核优化和执行映射
+3. [Random Cloud: Finding Minimal Neural Architectures Without Training](/202605/06/2604.26830v1-random-cloud-finding-minimal-neural-architectures-without-training)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对资源受限环境的架构、Token和位宽联合优化
-3. [PipeRTL: Timing-Aware Pipeline Optimization at IR-Level for RTL Generation](/202605/05/2605.01836v1-pipertl-timing-aware-pipeline-optimization-at-ir-level-for-rtl-generation)  
+   evidence：无需训练的神经架构搜索方法，寻找最小拓扑
+4. [AME-PIM: Can Memory be Your Next Tensor Accelerator?](/202605/06/2604.27808v1-ame-pim-can-memory-be-your-next-tensor-accelerator)  
    标签：评分：9.0/10、query:hwnas
-   evidence：硬件编译器和RTL生成的IR级流水线优化
-4. [SwiftChannel: Algorithm-Hardware Co-Design for Deep Learning-Based 5G Channel Estimation](/202605/05/2605.01931v1-swiftchannel-algorithm-hardware-co-design-for-deep-learning-based-5g-channel-estimation)  
+   evidence：基于存内计算矩阵加速的软硬件协同设计
+5. [A PVT-Resilient Subthreshold SRAM-Based In-Memory Computing Accelerator with In-Situ Regulation for Energy-Efficient Spiking Neural Networks](/202605/06/2605.00319v1-a-pvt-resilient-subthreshold-sram-based-in-memory-computing-accelerator-with-in-situ-regulation-for-energy-efficient-spiking-neural-networks)  
    标签：评分：9.0/10、query:hwnas
-   evidence：深度学习估计器的算法-硬件协同设计
-5. [ViM-Q: Scalable Algorithm-Hardware Co-Design for Vision Mamba Model Inference on FPGA](/202605/05/2605.01935v1-vim-q-scalable-algorithm-hardware-co-design-for-vision-mamba-model-inference-on-fpga)  
+   evidence：用于脉冲神经网络的存内计算加速器
+6. [Tempus: A Temporally Scalable Resource-Invariant GEMM Streaming Framework for Versal AI Edge](/202605/06/2605.00536v2-tempus-a-temporally-scalable-resource-invariant-gemm-streaming-framework-for-versal-ai-edge)  
    标签：评分：9.0/10、query:hwnas
-   evidence：FPGA上Vision Mamba的算法-硬件协同设计
-6. [Edge-Efficient Image Restoration: Transformer Distillation into State-Space Models](/202605/05/2605.02794v1-edge-efficient-image-restoration-transformer-distillation-into-state-space-models)  
+   evidence：在资源受限的边缘SoC上最大化性能的GEMM流框架
+7. [Design and Implementation of BNN-Based Object Detection on FPGA](/202605/06/2605.03396v1-design-and-implementation-of-bnn-based-object-detection-on-fpga)  
    标签：评分：9.0/10、query:hwnas
-   evidence：提高边缘硬件运行效率并自动发现有效的块组合
+   evidence：在FPGA上使用RTL和量化实现基于BNN的目标检测
+8. [Real Image Denoising with Knowledge Distillation for High-Performance Mobile NPUs](/202605/06/2605.03680v1-real-image-denoising-with-knowledge-distillation-for-high-performance-mobile-npus)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对移动NPU的硬件算法协同设计
 
 ### 速读区论文标签
-1. [MambaCSP: Hybrid-Attention State Space Models for Hardware-Efficient Channel State Prediction](/202605/05/2604.21957v1-mambacsp-hybrid-attention-state-space-models-for-hardware-efficient-channel-state-prediction)  
+1. [ClusterFusion++: Expanding Cluster-Level Fusion to Full Transformer-Block Decoding](/202605/06/2604.23553v1-clusterfusion-expanding-cluster-level-fusion-to-full-transformer-block-decoding)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限无线部署的硬件高效SSM架构
-2. [Mixture of Heterogeneous Grouped Experts for Language Modeling](/202605/05/2604.23108v2-mixture-of-heterogeneous-grouped-experts-for-language-modeling)  
+   evidence：针对Transformer解码的算子映射与融合感知
+2. [Sparsity-Aware Event-Driven Impulse Radio Transceivers for Reliable Neuromorphic Inference](/202605/06/2604.23559v1-sparsity-aware-event-driven-impulse-radio-transceivers-for-reliable-neuromorphic-inference)  
    标签：评分：8.0/10、query:hwnas
-   evidence：将计算成本与Token复杂度对齐以提高GPU利用率
-3. [Tessera: Secure, Near-Line-Rate Weight Streaming for UMA Edge Accelerators](/202605/05/2604.23205v1-tessera-secure-near-line-rate-weight-streaming-for-uma-edge-accelerators)  
+   evidence：边缘智能的能效神经形态推理
+3. [Opto-Atomic Spatio-Temporal Holographic Correlators for High-Speed 3D CNNs](/202605/06/2604.24800v1-opto-atomic-spatio-temporal-holographic-correlators-for-high-speed-3d-cnns)  
    标签：评分：8.0/10、query:hwnas
-   evidence：边缘加速器的内存带宽优化
-4. [Breaking the Resource Wall: Geometry-Guided Sequence Modeling for Efficient Semantic Segmentation](/202605/05/2604.23399v1-breaking-the-resource-wall-geometry-guided-sequence-modeling-for-efficient-semantic-segmentation)  
+   evidence：用于3D CNN效率的混合光电架构
+4. [A Comparative Analysis on the Performance of Upper Confidence Bound Algorithms in Adaptive Deep Neural Networks](/202605/06/2604.24810v1-a-comparative-analysis-on-the-performance-of-upper-confidence-bound-algorithms-in-adaptive-deep-neural-networks)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对受限硬件环境的高效架构设计
-5. [GoClick: Lightweight Element Grounding Model for Autonomous GUI Interaction](/202605/05/2604.23941v1-goclick-lightweight-element-grounding-model-for-autonomous-gui-interaction)  
+   evidence：在边缘计算中动态平衡计算成本、延迟与预测准确性
+5. [CacheFlow: Efficient LLM Serving with 3D-Parallel KV Cache Restoration](/202605/06/2604.25080v1-cacheflow-efficient-llm-serving-with-3d-parallel-kv-cache-restoration)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对资源受限移动设备的轻量级模型设计
-6. [FreeScale: Distributed Training for Sequence Recommendation Models with Minimal Scaling Cost](/202605/05/2604.24073v1-freescale-distributed-training-for-sequence-recommendation-models-with-minimal-scaling-cost)  
+   evidence：将KV缓存恢复视为多维并行执行问题
+6. [Target-depth sensing with metasurface-encoder integrated optoelectronic neural network](/202605/06/2604.25160v1-target-depth-sensing-with-metasurface-encoder-integrated-optoelectronic-neural-network)  
    标签：评分：7.0/10、query:hwnas
-   evidence：缓解分布式训练中计算资源利用不足的问题
-7. [TACO: Efficient Communication Compression of Intermediate Tensors for Scalable Tensor-Parallel LLM Training](/202605/05/2604.24088v1-taco-efficient-communication-compression-of-intermediate-tensors-for-scalable-tensor-parallel-llm-training)  
+   evidence：集成超表面编码器的光电神经网络架构，旨在降低功耗和延迟
+7. [FED-FSTQ: Fisher-Guided Token Quantization for Communication-Efficient Federated Fine-Tuning of LLMs on Edge Devices](/202605/06/2604.25421v1-fed-fstq-fisher-guided-token-quantization-for-communication-efficient-federated-fine-tuning-of-llms-on-edge-devices)  
    标签：评分：7.0/10、query:hwnas
-   evidence：LLM训练中通信压缩的软硬件协同设计
-8. [PointTransformerX:Portable and Efficient 3D Point Cloud Processing without Sparse Algorithms](/202605/05/2604.24169v1-pointtransformerxportable-and-efficient-3d-point-cloud-processing-without-sparse-algorithms)  
+   evidence：边缘设备上大语言模型的高效通信联邦微调
+8. [CUDA Kernel Optimization and Counter-Free Performance Analysis for Depthwise Convolution in Cloud Environments](/202605/06/2604.25422v1-cuda-kernel-optimization-and-counter-free-performance-analysis-for-depthwise-convolution-in-cloud-environments)  
    标签：评分：7.0/10、query:hwnas
-   evidence：硬件友好的3D点云骨干网络，移除自定义CUDA算子以提高移植性
-9. [Coordinated Multipoint Anti-jamming Beam Pattern Synthesis: From AI Accelerated Algorithm to Hardware Implementation](/202605/05/2604.23880v1-coordinated-multipoint-anti-jamming-beam-pattern-synthesis-from-ai-accelerated-algorithm-to-hardware-implementation)  
+   evidence：针对访存效率和数据复用的CUDA算子优化
+9. [Agentic Architect: An Agentic AI Framework for Architecture Design Exploration and Optimization](/202605/06/2604.25083v1-agentic-architect-an-agentic-ai-framework-for-architecture-design-exploration-and-optimization)  
    标签：评分：6.0/10、query:hwnas
-   evidence：AI加速算法到硬件实现
-10. [A2DEPT: Large Language Model-Driven Automated Algorithm Design via Evolutionary Program Trees](/202605/05/2604.24043v1-a2dept-large-language-model-driven-automated-algorithm-design-via-evolutionary-program-trees)  
+   evidence：用于计算机架构设计探索和优化的智能体AI框架
+10. [Lightweight Real-Time Rendering Parameter Optimization via XGBoost-Driven Lookup Tables](/202605/06/2604.25178v1-lightweight-real-time-rendering-parameter-optimization-via-xgboost-driven-lookup-tables)  
    标签：评分：6.0/10、query:hwnas
-   evidence：通过进化程序树进行自动化算法设计
-11. [6thGrid-Net: Unified Remote Sensing Image Dehazing Based on Color Restoration and Edge-Preserving](/202605/05/2604.24149v1-6thgrid-net-unified-remote-sensing-image-dehazing-based-on-color-restoration-and-edge-preserving)  
+   evidence：针对资源受限移动设备的实时渲染优化
+11. [PI-TTA: Physics-Informed Source-Free Test-Time Adaptation for Robust Human Activity Recognition on Mobile Devices](/202605/06/2604.25435v1-pi-tta-physics-informed-source-free-test-time-adaptation-for-robust-human-activity-recognition-on-mobile-devices)  
    标签：评分：6.0/10、query:hwnas
-   evidence：针对资源受限环境定制的高效遥感图像恢复框架
+   evidence：移动和可穿戴设备的高效端侧自适应
 
 
 <div class="dpr-home-promo-card">
