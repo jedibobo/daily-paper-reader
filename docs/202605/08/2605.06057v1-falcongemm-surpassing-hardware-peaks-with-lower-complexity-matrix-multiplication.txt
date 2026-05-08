@@ -1,0 +1,938 @@
+Title: FalconGEMM: Surpassing Hardware Peaks with Lower-Complexity Matrix Multiplication
+
+URL Source: https://arxiv.org/pdf/2605.06057v1
+
+Published Time: Fri, 08 May 2026 01:02:59 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# FalconGEMM: Surpassing Hardware Peaks with Lower-Complexity Matrix Multiplication 
+
+Honglin Zhu 1, Jiaping Cao 2, Jiang Shao 3, Siyuan Feng 4, Qian Qiu 5, Peng Chen 6,Xu Zhang 7, Yixian Zhou 8, Man Lung Yiu 9, Guang Ji 10 , Minwen Deng 11 , Wenxi Zhu 12 , Jintao Meng 13 1, 2, 5, 8, 11 , 12 Tencent, Shenzhen, China 2, 9The Hong Kong Polytechnic University, Hong Kong 
+
+3, 10 NVIDIA, Beijing, China 4Shanghai Innovation Institute, Shanghai, China 6RIKEN, Tokyo, Japan 
+
+7Southern University of Science and Technology, Shenzhen, China 
+
+7, 13 Shenzhen Institute of Advanced Technology, Chinese Academy of Sciences, Shenzhen, China 
+
+1honglinzhu@tencent.com, 2vincecao@tencent.com, 3jiangs@nvidia.com, 4syfeng@sii.edu.cn, 5qianqiu@tencent.com, 
+
+6peng.chen@a.riken.jp, 7xu.zhang3@siat.ac.cn, 8walnuts0715@gmail.com, 9csmlyiu@comp.polyu.edu.hk, 
+
+10 gji@nvidia.com, 11 danierdeng@tencent.com, 12 wenxizhu@tencent.com, 13 jt.meng@siat.ac.cn 
+
+Abstract —Peak breaking Matrix Multiplication is a promising technique to improve the performance of DL, especially in LLM training and inference. We present FalconGEMM, a cross-platform framework that automates the deployment, optimiza-tion, and selection of Lower-Complexity Matrix Multiplication Algorithms (LCMAs) across diverse hardware. There are three key innovations: (1) a Deployment Module that enables portable execution across various hardware and input configurations through code generation; (2) an Execution Module with Group-Parallel Optimizations that maximizes on-chip data reuse, utilizes parallel resources, and reduces bandwidth overhead; and (3) a Decision Module featuring a lightweight analytical performance model to select the optimal strategy based on matrix shapes and hardware profiles. Extensive evaluation is conducted on LLM workloads across GPU (H20, A100) and CPU (ARM, x86) architectures with multiple data types. FalconGEMM suc-ceeds in delivering peak breaking performance and outperforms GEMM libraries (e.g., cuBLAS, CUTLASS, Intel MKL, etc) by 7.59%–17.85% and LCMA competitors like AlphaTensor by 12.41%–55.61%. Our framework makes the theoretical promise of LCMAs practical for production deployment across the het-erogeneous landscape of modern hardware. 
+
+Index Terms —Deep Learning, GEMM, Code Generation 
+
+I. I NTRODUCTION 
+
+General Matrix Multiplication (GEMM) serves as the com-putational backbone for modern deep learning (DL) and high-performance computing (HPC) workloads, dominating the runtime of architectures ranging from Transformers to Convolutional Neural Networks (CNNs). As model sizes scale exponentially, the O(N 3) complexity of standard GEMM algorithms has become a critical bottleneck. To address this, a class of fast matrix multiplication algorithms has been developed. Collectively, we term them Lower-Complexity Ma-trix Multiplication Algorithms (LCMAs), such as Strassen’s algorithm [1], Laderman’s algorithm [2], and algorithms dis-covered by AlphaTensor [3]. By decomposing matrices into submatrices and performing linear combinations among them, LCMAs reduce the asymptotic complexity to O(N log 2 7) or 
+
+Honglin Zhu and Jiaping Cao contributed equally to this work. Jintao Meng is the corresponding author. 
+
+lower. Since vendor-optimized libraries like cuBLAS [4], Intel MKL [5], and localized optimizations [6], [7] have already pushed standard GEMM performance close to hardware peaks, further acceleration must rely on algorithmic innovations like LCMAs. Theoretically, this reduction offers the potential to accelerate large-scale model training and inference beyond the physical limits of current hardware. However, due to the extra memory overhead and lack of platform portability, few implementations can work efficiently as a backend to improve the performance of DL. Translating the theoretical arithmetic reduction of LCMAs into practical speedups presents three major challenges: 1
+
+Lack of Cross-Platform Portability : LCMAs introduce com-plex data dependencies and linear combination steps that differ significantly from standard GEMM. Implementing LCMAs requires writing highly specialized programs with complex data dependencies and also handling potential race conditions, which is likely to be inefficient. Besides, manually optimizing for every hardware backend (e.g., NVIDIA Tensor Cores, Arm NEON, x86 AVX) has a vast implementation space, leading to a lack of portable solutions. 2 Memory Overhead : The multi-phase nature of LCMAs necessitates the materializa-tion of large intermediate tensors. Writing these intermediate results to off-chip memory and reading them back for final accumulation consumes substantial memory bandwidth. This additional memory traffic often saturates the bus, negating the computational gains derived from the algorithm’s lower arithmetic complexity. 3 Difficulty in Decision : LCMAs are not universally faster; their benefit depends heavily on matrix shape, hardware bandwidth, and compute throughput. The performance cutoff point where the reduction in arithmetic operations outweighs the overhead is difficult to predict. It is important for users to have a lightweight mechanism to determine whether an LCMA will provide a speedup and which specific algorithm is optimal for their specific workload. FALCON GEMM is developed to effectively bridge the gap between the theoretical promise of LCMAs and the practical demands of production-level Deep Learning. By systematically 1
+
+> arXiv:2605.06057v1 [cs.DC] 7 May 2026
+
+addressing the complexities of portability, memory overhead, and algorithm selection, the framework transforms "peak-breaking" performance from a mathematical possibility into a cross-platform reality. The core contribution of F ALCON -GEMM lies in its three-pillar architecture:  
+
+> •
+
+Deployment: We abstract LCMAs and introduce a four-stage fast implementation; then, we apply code generation to automatically address the complexity of portability with millions of implementation variants.  
+
+> •
+
+Execution: We propose a Group-Parallel Optimization to eliminate memory overhead with a fused workflow, and address the induced parallel granularity and cache thrashing with Split-Group Parallelism and Cache-Aware Scheduling.  
+
+> •
+
+Decision: We conduct a theoretical arithmetic intensity analysis using a lightweight performance model, and apply it to guide optimal algorithm selection between multiple LCMAs and GEMM. Extensive evaluation is conducted on five computing devices, including both GPU (H20, A100) and CPU (ARM, x86) with multiple data types. F ALCON GEMM outperforms state-of-the-art GEMM libraries by 7.59%–17.85% (mostly beyond the peak) and LCMA implementations by 12.41%–55.61%. When using FALCON GEMM as PyTorch’s backend, we achieve 11.46%-18.12% average performance gains in the prefill stage when inferencing HunyuanVideo, Qwen3.5 and DeepSeek-R1. The step-wise evaluation confirms a stable optimization with at most 7.18% extra speedup by the Execution Module. The roofline analysis shows that F ALCON GEMM succeeds in de-livering optimal and stable peak breaking performance with the Decision Module, with about 19.31% and 11.37% performance gains compared to standard GEMM and Strassen’s algorithm, respectively. II. D EFINITION AND MOTIVATION 
+
+We first define Lower-Complexity Matrix Multiplication Al-gorithms (LCMAs), then discuss our motivation and intuition. 
+
+A. Definition of LCMA 
+
+Given two matrices A ∈ RM ×K and B ∈ RK×N (R can be represented with Int8 and floating point types such as FP8, FP16, BF16, or FP32), Lower-Complexity Matrix Multipli-cation Algorithms (LCMAs) are a class of algorithms that can 
+
+TABLE I: Notations of LCMA                                                              
+
+> Notation Meaning
+> A∈RM×K, B ∈RK×NInput matrices
+> C∈RM×NOutput matrix, C=AB
+> L=⟨m, k, n, R, U, V, W ⟩Definition of an LCMA
+> m, k, n Grid dimensions for partitioning M, K, N RRank (number of multiplications)
+> Ai,ℓ Submatrix of A, for i∈[1 , m ], ℓ ∈[1 , k ]
+> Bℓ,j Submatrix of B, for ℓ∈[1 , k ], j ∈[1 , n ]
+> Ci,j Submatrix of C, for i∈[1 , m ], j ∈[1 , n ]˜ArMatrix combined by A, for r∈[1 , R ]˜BrMatrix combined by B, for r∈[1 , R ]
+> HrIntermediate matrix, for r∈[1 , R ]
+> U, V, W Coefficient tensors in {− 1,0,1}
+
+be applied to compute matrix multiplication Equation (1) by performing fewer multiplications than the standard algorithm: 
+
+A × B = C, C ∈ RM ×N . (1) Specifically, an LCMA is defined by a tuple L =
+
+⟨m, k, n, R, U, V, W ⟩, where ⟨m, k, n ⟩ indicates the algorithm grid dimensions, R is the rank of the algorithm, and the algo-rithm coefficient tensors are U ∈ SR×m×k, V ∈ SR×k×n and 
+
+W ∈ SR×m×n, here S = R. In most cases S = {− 1, 0, 1} [8], [9]. LCMA first partitions A, B and C into grids of the following submatrices corresponding to the grid dimensions of m, k, n , then the Eq. 1 can be written as:                   
+
+> 
+> A1,1· · · A1,k
+> ...Ai,ℓ
+> ...
+> Am, 1· · · Am,k
+> ×
+> 
+> B1,1· · · B1,n
+> ...Bℓ,j
+> ...
+> Bk, 1· · · Bk,n
+> =
+> 
+> C1,1· · · C1,n
+> ...Ci,j
+> ...
+> Cm, 1· · · Cm,n
+> (2)
+
+here Ai,l ∈ R⌈ Mm ⌉×⌈ Kk ⌉, Bl,j ∈ R⌈ Kk ⌉×⌈ Nn ⌉, and Ci,j ∈
+
+R⌈ Mm ⌉×⌈ Nn ⌉.The standard multiplication algorithm performs m · k · n
+
+multiplications between submatrices, whereas LCMA uses only R matrix multiplications (where R < m ·k·n). The above computation for Eq. 2 will be partitioned into four stages. 1) Combine A: 
+
+˜Ar =
+
+> m
+
+X
+
+> i=1
+> k
+
+X
+
+> ℓ=1
+
+Ur,i,ℓ · Ai,ℓ , where 1 ≤ r ≤ R (3) 2) Combine B: 
+
+˜Br =
+
+> k
+
+X
+
+> ℓ=1
+> n
+
+X
+
+> j=1
+
+Vr,ℓ,j · Bℓ,j , where 1 ≤ r ≤ R (4) 3) GEMM: 
+
+Hr = ˜Ar · ˜Br , where 1 ≤ r ≤ R (5) 4) Combine H: 
+
+Ci,j =
+
+> R
+
+X
+
+> r=1
+
+Wr,i,j · Hr , where 1 ≤ i ≤ m, 1 ≤ j ≤ n (6) 
+
+Here in Combine A and Combine B stage, Eq. 3 and 4 utilizes the coefficient tensors U and V to linearly combine submatrices A and B into { ˜Ar }Rr=1 and { ˜Br }Rr=1 , respectively. Then in GEMM stage, there are R multiplications between 
+
+˜Ar and ˜Br to generate R intermediate matrices Hr with Eq. 5. Finally Combine H uses coefficient tensor W to linearly combine intermediate {Hr }Rr=1 to obtain the final result submatrices {Ci,j }m ni=1 j=1 according to Eq. 6. All the symbols used in this paper are summarized in Table I. As an example, Strassen’s algorithm [1] is one of the most well-known LCMA with grid dimensions m = n = k = 2 and rank R = 7 (denoted as ( ⟨2, 2, 2⟩, R = 7 )). Figure 1 illustrates its dataflow for multiplication of matrices A and B. For sim-plicity, we demonstrate a special case where each submatrix of A and B contains a single scalar. The coefficient tensors U
+
+and V define how the input submatrices are combined to form seven intermediate matrices ( H1, . . . , H 7). Subsequently, the 21 2                          
+
+> 34
+> 12
+> 34
+> 100
+> 4
+> 5
+> 1+4 00
+> 34
+> 7
+> 3+4
+> 1000
+> 1
+> 1000
+> 4
+> 4
+> 4
+> 1200
+> 3
+> 1+2
+> -1 0
+> 30
+> 2
+> -1+3 0
+> 20
+> -4
+> -2
+> 2-4
+> 100
+> 4
+> 1000020
+> -4
+> -1 0
+> 300004
+> 120000
+> 34
+> 51-2 2437
+> 1+4 12-4 -1+3 41+2 3+4
+> 710
+> 15 22
+> 25 00
+> 25 00
+> 7-7 0
+> -2 0
+> -2
+> 80
+> 80
+> -12 12 00000
+> 6
+> -14 000
+> 25
+> 7
+> -2
+> 8
+> 12
+> 6
+> -14
+> 25+8 -12-14 -2+12 7+8 25-7 -2+6
+
+Fig. 1: Dataflow of Strassen’s algorithm ( ⟨2, 2, 2⟩, R = 7). The figure visualizes its algorithm coefficient tensors U, V, W required to compute the linear combinations and the R = 7 multiplications. This specific example illustrates the case where M = N = K =2, m = n = k = 2 , but LCMA can generalize to arbitrary sizes. 
+
+tensor W defines how these seven intermediate matrices are linearly combined to produce the four output submatrices. We should also note that this definition can apply to all LCMA configurations discovered to date and is adopted throughout this paper. For example, other classical algorithms include Laderman’s algorithm [2] ( ⟨3, 3, 3⟩, R = 23 ) and the two-level recursive Strassen’s algorithm [1] ( ⟨4, 4, 4⟩, R = 49 ). More recently, AlphaTensor [3] has additionally discovered a large number of novel LCMAs, such as ( ⟨3, 4, 5⟩, R = 47 )and ( ⟨4, 4, 5⟩, R = 63 ). 
+
+B. Motivation 
+
+While these LCMAs theoretically reduce arithmetic com-plexity, achieving actual performance gains in practical de-ployment is nontrivial, and existing works still have limita-tions. 
+
+a) Platform Portability: It is challenging to efficiently deploy various LCMAs on diverse hardware. We model this complexity with a search space Nimpl as a combination of the following configurations: 
+
+Nimpl ≈ N algo × N hw × N dtype × N conf ig (7) here Nalgo is defined as the number of different LCMAs. The discoveries by AlphaTensor [3] have expanded the set of viable algorithms ( Nalgo ) to the order of 10 2. Nhw and 
+
+Ndtype are defined as the available varieties of hardware and data types used by modern deep learning frameworks. They span multiple generations of NVIDIA, AMD, Intel, and ARM architectures ( Nhw ≈ 10 ) and data types ( Ndtype ≈ 5)among FP32, FP16, BF16, INT8, etc. Nconf ig is termed the tuning configurations involving tile sizes, warp shapes, and pipeline stages. We anticipate the number of tuning combinations to be Nconf ig ≈ 10 3. The resulting product 
+
+Nimpl is in the millions of potential implementation variants. This implementation burden acts as a prohibitive barrier to widespread adoption. Previous LCMAs deployment [10], [11] still struggles to provide a highly optimized framework across both diverse hardware and LCMAs. 
+
+b) Parallel Partitioning: Existing implementations [11]– [13] typically decompose LCMA into R tasks, each computing one Hr from submatrices of A and B and then combining the product into several Ci,j . This Hr -parallel approach suffers from three inefficiencies. 1 Redundant memory access on repeatedly loading submatrices of A and B occurs during the computation of Ar and Br [11]–[13] . 2 Operator fragmentation happens when decomposing the GEMM stage into R smaller GEMMs, which degrades resource utilization, occupancy, and latency hiding [14] compared to a single batched GEMM [13]–[16]. 3 Write Conflicts is introduced because each Ci,j depends on multiple Hr (e.g., C1,1 in Strassen’s Algorithm depends on H1, H4, H5, and H7). Sep-arating conflicting writes with atomic operations via CUDA streams or sequential stages in prior work [13] introduces strict ordering dependencies, severely constraining parallelism. 
+
+c) Performance Modeling: To maximize performance, it is crucial to select the optimal LCMA based on specific input shapes and hardware characteristics. While some existing works attempt to model LCMA performance [12], [13], [17], [18], these analyzes typically evaluate the entire algorithm and are weak in addressing the characteristics of pipeline overlapping over computation and memory access, which are critically important in modern hardware. Although various works focus on specific aspects of LCMA deployment, to our knowledge, no existing work simulta-neously provides a unified LCMA framework with cross-platform support, optimized parallel execution, and fine-grained performance modeling. Thus, we propose F ALCON -GEMM to address all these issues. III. M ETHOD 
+
+A cross-platform framework named F ALCON GEMM is de-signed to generate high-performance LCMA implementations with cross-platform support. Its workflow is illustrated in Figure 2. F ALCON GEMM consists of three core components: 1 The Deployment Module introduces a workflow to deploy the LCMA algorithm across diverse backends (e.g., GPUs, CPUs) and configurations (e.g., data type, input shapes) using automated code generation. 2 The Execution Module pro-poses a Group-Parallel Optimization to reduce the bandwidth overhead of materializing intermediate results and to avoid write conflicts. 3 The Decision Module employs a light-weight cost model to automatically select the performance-optimal strategy for FALCON GEMM based on the given matrix shape and hardware profile. 
+
+A. Deployment Module 
+
+The LCMA workflow is introduced to implement the LCMA fast and efficiently. Then automated code generation is applied to serve as a unified execution template using various LCMAs across diverse hardware architectures. 
+
+1) LCMA Workflow: The LCMA workflow can be decom-posed into four stages, directly corresponding to the mathemat-ical formulation in Equations 3 to 6. A direct implementation of LCMA is demonstrated by Algorithm 1. Considering the 3Input 
+
+> A
+> B
+> CMKN
+
+Decision  Module    
+
+> Input Matrix Hardware Parameters
+> Bandwidth
+> For each LCMA
+> May LCMA have gain?
+> Vendor libs
+> No
+> Yes Loop Conduct bottleneck analysis for LCMA stages for 000000000000000000000000
+> 100
+> 1000000000000000000000000
+> 100
+> 1000000000000000000000000
+> 100
+> 1
+> GEMM Compute-bound Combine Memory-bound
+> Combine A Stage
+> Combine B Stage
+> GEMM Stage
+> Combine H Stage
+> Compile-time
+> Python Codegen DSL IR LCMA
+> embeded Target Binary
+> generate
+> TVM TileLang Triton
+> Hardware dtype specific
+> Cross-platform Implementation Generation
+> Does outperform standard GEMM?
+> Pipeline Interleaving
+> On-chip Resource Planning
+> Register Reuse
+
+Output 
+
+> Group-parallel
+> reduces off-chip memory traffic
+> Split-Group Parallelism
+> Cache-Aware Scheduling
+
+Deployment  Module   
+
+> Optimal LCMA
+> LD
+> LD
+> LD
+> LD
+> ST
+> ST
+> ST
+> ST
+> ST
+> ST
+> ST
+> Fused GEMM +
+> Group Combine H Group Combine A & B
+
+Execution Module  
+
+> falcongemm_N4096 K4096_bf16_arm.so falcongemm_N8192 K8192_bf16_sm86.cubin falcongemm_N8192 K8192_fp8groupwise _sm90a.cubin
+> Compiled Libs
+> Output Matrix
+> C
+> Runtime Compile-time
+
+Fig. 2: Overview of the workflow and internals of F ALCON GEMM. 
+
+memory hierarchy for modern computing chips on both CPU and GPU, the workflow in Algorithm 1 operates as follows: 
+
+Combine A: This stage prepares the inputs ˜Ar for the core GEMM stage. We apply the algorithm-specific coefficient tensors U to the input matrix A using equation 3. From line 2 to line 4, since Ur,i,ℓ is sparse and has its element value in {− 1, 0, 1}, only those matrices with non-zero coefficients are loaded into the CPU cache or the shared memory of the GPU. Finally, the accumulated results are stored back into main memory in line 5. This step encodes the input matrices into LCMA’s rank space. 
+
+Combine B: This stage works similarly to the above stage. 
+
+GEMM: This stage employs a batched GEMM with identical submatrix dimensions over R by multiplying intermediate matrix pairs ˜Ar and ˜Br to generate the result Hr with lines 12 and 13. Note that ˜Ar , ˜Br , and Hr may be large enough and need to be loaded from or written to the main memory. Highly optimized vendor libraries (e.g., cuBLAS [4] or Intel MKL [5]) can be applied here. 
+
+Combine H: Finally, the intermediate results Hr are aggre-gated using the algorithm coefficient W to transform from the algorithm’s rank space back to the final output matrix 
+
+C. To save memory bandwidth, for each Ci,j , only the 
+
+Hr with non-zero coefficients are needed to be loaded with lines from 16 to 17. There are three obstacles for the above algorithm to achieve both wide portability and high efficiency. The first obsta-cle is that the theoretical reduction in arithmetic operations (FLOPs) comes at a clear cost of additional memory overhead introduced by Stages 1, 2, and 4. To mask these overheads, optimized fused execution is presented in Section III-B. The second obstacle is how to select and determine parameters for LCMA workflow on diverse hardware configurations for an optimal implementation. This will be discussed in Sec-tion III-C. The last obstacle is to enable performance portabil-ity with various LCMAs and hardware diversity. We fix this issue with automated code generation as below. 
+
+2) Automated Code Generation: We introduce an Auto-mated Code Generation pipeline to decouple this engineering complexity and minimize the deployment costs with high-performance execution. 
+
+To decouple hardware, data types, and tuning configu-rations , we leverage deep learning compilers (e.g., TVM [19], TileLang [20], and Triton [21]) to decouple the implementation logic from hardware architectures ( Nhw ), data types ( Ndtype ), and tuning configurations ( Nconf ig ). These compilers provide a unified Intermediate Representation (IR) that transforms abstract computation logic and memory hierarchy optimiza-tions into highly efficient, cross-platform implementations with flexible data types and tiling configurations [19], [22], [23]. By specifying the target hardware architecture and shape-dependent tuning parameters during Just-In-Time (JIT) compi-lation, a single generic template can be automatically lowered to highly optimized machine code for arbitrary matrix dimen-sions and hardware platforms. This effectively neutralizes the complexity of hardware heterogeneity. 
+
+To decouple various LCMAs ,the challenge lies in generating efficient IR for the di-verse logic of different LCMAs (Nalgo ). We employ ameta-programming engine to synthesize kernel code based on the specific LCMA configuration. Given an algorithm 
+
+L = ⟨m, k, n, R, U, V, W ⟩, the engine encodes the coefficient tensors directly into the IR as compile-time constants. This eliminates runtime memory access for coefficients and enables the compiler to perform constant folding, effectively prun-ing operations where coefficients are zero. Moreover, three advanced micro-optimizations are applied in the IR gener-ation procedure: 1 On-chip Resource Planning is used to evaluate the consumption of on-chip resources (e.g., registers and GPU shared memory) based on the LCMA coefficients. We automatically adjust the tiling strategy or decompose the computation to fit within the available resources if the estimated usage exceeds hardware limits. 2 Register Reuse 
+
+is applied by reordering arithmetic operations. This is critical 4Algorithm 1 LCMA Workflow 
+
+Require: Inputs Matrices A, B ;
+
+Require: Static Algorithm Parameters L = ⟨m, k, n, R, U, V, W ⟩
+
+Ensure: Output Matrix C 
+
+> 1:
+
+//Stage 1: Combine A using Equation 3  
+
+> 2:
+
+For r ∈ [1 , R ]: //Prefetch to cache or share memory  
+
+> 3:
+
+For i ∈ [1 , m ], ℓ ∈ [1 , k ], and Ur,i,ℓ ̸ = 0 : 
+
+> 4:
+
+Load Ai,ℓ  
+
+> 5:
+
+˜Ar + = Ur,i,ℓ Ai,ℓ //Accumulate ˜Ar to main memory  
+
+> 6:
+
+//Stage 2: Combine B using Equation 4  
+
+> 7:
+
+For r ∈ [1 , R ]: //Prefetch to cache or share memory  
+
+> 8:
+
+For ℓ ∈ [1 , k ], j ∈ [1 , n ], and Vr,ℓ,j ̸ = 0 : 
+
+> 9:
+
+Load Bℓ,j  
+
+> 10:
+
+˜Br + = Vr,ℓ,j Bℓ,j //Accumulate ˜Br to main memory  
+
+> 11:
+
+//Stage 3: GEMM using Equation 5  
+
+> 12:
+
+For r ∈ [1 , R ]: 
+
+> 13:
+
+Hr = ˜Ar × ˜Br //Load AB and store H to main memory  
+
+> 14:
+
+//Stage 4: Combine H using Equation 6  
+
+> 15:
+
+For i ∈ [1 , m ], j ∈ [1 , n ]: 
+
+> 16:
+
+For r ∈ [1 , R ], and Wr,i,j ̸ = 0 : //Prefetch  
+
+> 17:
+
+Load Hr 
+
+> 18:
+
+Ci,j + = Wr,i,j Hr //Accumulate Ci,j to main memory 
+
+for high-rank algorithms where register pressure is high and expensive off-loading spills to last-level cache or memory should be avoided. 3 Instruction Interleaving is adopted to decompose asynchronous memory copy instructions and pipeline them with interleaved arithmetic logic. This exploits Instruction Level Parallelism (ILP) to effectively hide memory latency during the linear combination phases [24]. The automated code generation technique employs meta-programming/micro-optimization for specific LCMA and hardware/input aware JIT compilation in the implementation of Algorithm 1. This ensures an implementation with both wide portability and high efficiency. 
+
+B. Execution Module 
+
+Algorithm 1 relies on off-chip memory to transfer inter-mediate data between stages, resulting in memory overhead. It is necessary to apply fusion optimization across stages to eliminate this overhead. As discussed in Section II-B, existing fusion solutions [11]–[13] with R parallel tasks have drawbacks such as redundant memory accesses, operator fragmentation, and parallel write conflicts. In this section, we propose the Group-Parallel Optimization to avoid all these issues while achieving stage fusion. Based on this optimization, we also introduce Split-Group Parallelism and 
+
+Cache-Aware Scheduling to address the new challenges of coarsened parallel granularity and cache thrashing. 
+
+a) Group-Parallel Optimization: A Group is the collec-tion of elements across the R dimension at the same relative coordinate. Specifically, let (x, y ), (y, z ), and (x, z ) denote the coordinates of the elements (or blocks) Ai,ℓ [x, y ] in Ai,ℓ ,
+
+Bℓ,j [y, z ] in Bℓ,j and Ci,j [x, z ] in Ci,j . Here x ∈ [1 , ⌈ Mm ⌉],
+
+y ∈ [1 , ⌈ Kk ⌉] and z ∈ [1 , ⌈ Nn ⌉], the group in Combine A is defined as { ˜Ar [x, y ]}Rr=1 , similarly group in Combine B is 
+
+{ ˜Br [y, z ]}Rr=1 . The group used in GEMM and Combine H is defined as {Hr [x, z ]}Rr=1 .Group Combine A & B Fused GEMM + Group Combine H  
+
+> No input tile is read multiple times.
+> Launch 1 fused GEMM with better resource utilization.
+> Write-conflict-free.
+> Off-Chip Memory (e.g., DRAM, Global Memory)
+> On-Chip Memory (e.g., Registers, Shared Memory)
+> Off-chip Full
+
+Fig. 3: Our proposed Group-Parallel Optimization on Strassen (⟨2, 2, 2⟩, R = 7) as an example. In Group Combine A/B , asingle parallel unit processes an entire group { ˜Ar [x, y ]}Rr=1 or 
+
+{ ˜Br [y, z ]}Rr=1 by transforming 4 pairs of input elements into a group of 7 pairs of intermediate elements entirely on-chip. Fused GEMM + Group Combine H transforms the group {Hr [x, z ]}Rr=1 
+
+into {Ci,j [x, z ]}m ni=1 j=1 directly without write conflicts. 
+
+Algorithm 2 Fused LCMA Workflow 
+
+Require: Inputs Matrices A, B ;
+
+Ensure: Output Matrix C 
+
+> 1:
+
+//Stage 1: Group Combine A  
+
+> 2:
+
+Parallel For x ∈ [1 , ⌈ Mm ⌉], y ∈ [1 , ⌈ Kk ⌉]: 
+
+> 3:
+
+// Load inputs to on-chip memory and compute combinations  
+
+> 4:
+
+For i ∈ [1 , m ], ℓ ∈ [1 , k ]: 
+
+> 5:
+
+Load Ai,ℓ [x, y ] from off-chip memory  
+
+> 6:
+
+// Process all elements in group { ˜Ar [x, y ]}Rr=1  
+
+> 7:
+
+For r ∈ [1 , R ]: 
+
+> 8:
+
+For i ∈ [1 , m ], ℓ ∈ [1 , k ], and Ur,i,ℓ ̸ = 0 : 
+
+> 9:
+
+˜Ar [x, y ]+ = Ur,i,ℓ · Ai,ℓ [x, y ] 
+
+> 10:
+
+//Stage 2: Group Combine B  
+
+> 11:
+
+Parallel For y ∈ [1 , ⌈ Kk ⌉], z ∈ [1 , ⌈ Nn ⌉]: 
+
+> 12:
+
+// Load inputs to on-chip memory and compute combinations  
+
+> 13:
+
+For ℓ ∈ [1 , k ], j ∈ [1 , n ]: 
+
+> 14:
+
+Load Bℓ,j [y, z ] from off-chip memory  
+
+> 15:
+
+// Process all elements in group { ˜Br [y, z ]}Rr=1  
+
+> 16:
+
+For r ∈ [1 , R ]: 
+
+> 17:
+
+For ℓ ∈ [1 , k ], j ∈ [1 , n ], and Vr,ℓ,j ̸ = 0 : 
+
+> 18:
+
+˜Br [y, z ]+ = Vr,ℓ,j · Bℓ,j [y, z ] 
+
+> 19:
+
+//Stage 3/4: Fused GEMM and Group Combine H  
+
+> 20:
+
+Parallel For x ∈ [1 , ⌈ Mm ⌉], z ∈ [1 , ⌈ Nn ⌉]: 
+
+> 21:
+
+// Process all elements in group {Hr [x, z ]}Rr=1  
+
+> 22:
+
+For r ∈ [1 , R ]: 
+
+> 23:
+
+// Accumulate r from 1 to R on-chip (Register/Shared Mem)  
+
+> 24:
+
+For y ∈ [1 , ⌈ Kk ⌉]: 
+
+> 25:
+
+Hr [x, z ]+ = ˜Ar [x, y ] × ˜Br [y, z ] 
+
+> 26:
+
+// On-chip update output C, without any write conflicts  
+
+> 27:
+
+For i ∈ [1 , m ], j ∈ [1 , n ], and Wr,i,j ̸ = 0 : 
+
+> 28:
+
+Ci,j [x, z ]+ = Wr,i,j · Hr [x, z ] 
+
+> 29:
+
+Store {Ci,j [x, z ]} to off-chip memory 
+
+The Group-Parallel Optimization utilizes the inherent data locality in a group. That means all elements within a group can be computed by the same parallel execution unit. For example, in the Combine A stage, computing the elements at a specific relative coordinate (x, y ) consisting of all R
+
+˜Ar matrices (i.e., { ˜Ar [x, y ]}Rr=1 ) requires accessing only the source elements at the same (x, y ) position within the m × k
+
+5input submatrices Ai,ℓ (i.e., {Ai,ℓ [x, y ]}m ki=1 ℓ=1 ). Crucially, these source elements contribute exclusively to this specific group, i.e., no Ai,ℓ [x, y ] contributes to computing ˜Ar [x′, y ′]
+
+where x̸ = x′ or y̸ = y′. By loading Ai,ℓ [x, y ] exactly once, a parallel unit can exclusively compute all its contributing 
+
+˜Ar [x, y ] elements in the group. This special data locality is illustrated in Figure 3. This feature is not limited to Combine A but applies to all other combine stages in Algorithm 1. The linear combination to obtain a group of { ˜Br [y, z ]}Rr=1 from {Bℓ,j [y, z ]}k nℓ=1 j=1 
+
+shares the exact same memory footprint locality as in the Combine A stage. For the GEMM and Combine H stages illus-trated in Figure 3, once the elements in group {Hr [x, z ]}Rr=1 
+
+are computed locally, the output elements {Ci,j [x, z ]}m ni=1 j=1 
+
+can be intuitively derived from them without external depen-dencies. Note our design choice to materialize { ˜Ar }Rr=1 and 
+
+{ ˜Br }Rr=1 to off-chip memory, as fully fusing all stages without introducing extra recomputation and memory access would demand infeasibly large on-chip resources. To implement this optimization, loop reordering is applied to enable Group-Parallel Optimization in Algorithm 2. We adjust the loop order to keep (x, y ) and (y, z ) as the outermost loops, and (m, k ) and (k, n ) as the innermost loops for the first two combine stages using codes from line 2 to line 9, and codes from line 11 to line 18 respectively. After this optimization, one can see that Algorithm 1 accesses matrix A
+
+for || Ur,i,ℓ || 0 × Mm × Kk times, and matrices Ur,i,ℓ and ˜Ar once each, here || Ur,i,ℓ || 0 records the number of non-zero elements in Ur,i,ℓ . Whereas Algorithm 2 reads A and writes ˜Ar only once, at the cost of reading matrix Ur,i,ℓ for Mm × Kk times. We are actually making a tradeoff by saving memory accesses on 
+
+A at the cost of Ur,i,ℓ . Note that matrix Ur,i,ℓ is a sparse matrix with few non-zero elements. We can store it as an adjacency matrix in an array to reduce its size, and then store it directly in the last-level D-cache in CPU or shared memory in GPU to avoid main memory accesses. But in this work, we apply code generation techniques and compile the coefficients of U
+
+into code and store it in the I-Cache. Finally, we eliminate all the extra data accesses on Combine A and also B similarly. Applying group-parallel can also achieve an efficient fusion of GEMM and Combine H stages with data locality, as shown in Algorithm 2. We first compute the group elements 
+
+{Hr [x, z ]}Rr=1 by multiplying the matrices ˜Ar and ˜Br by looping over the y dimension in line 24. Then the set of output elements {Ci,j [x, z ]}m ni=1 j=1 is calculated exclusively on group 
+
+{Hr [x, z ]}Rr=1 , which is at the same coordinate in line 28. Thus a single computation unit can possess all elements in group {Hr [x, z ]}Rr=1 only once, and accumulate them into the on-chip element Ci,j . The final results are then written directly to the output matrix. This minimizes memory traffic without incurring extra computation or write conflicts. 
+
+b) Split-Group Parallelism: Group-Parallel Optimization using the group as a coarser parallel granularity may lead to a load imbalance problem. As a single compute unit must compute an entire group containing R elements for the Fused GEMM and Combine H stages, for GPU devices, this SM 0 SM 1 SM 2    
+
+> Unused
+> Resources SM 0SM 1SM 2
+> Read/Write C on global SM 0SM 1SM 2
+> Read/Write C in shared
+
+(a) Group-Parallel (b) Split-Group (c) Cache-Aware Fig. 4: Evolution of the F ALCON GEMM Group-Parallel Optimiza-tion on GPU, in total of 4 different coordinates (x, z ), denoted as 
+
+Hr [0] ∼ Hr [3] . (a) Group-Parallel assigns group to CTAs to SMs, leading to resource waste. (b) Split-Group uses persistent kernels to achieve fine-grained scheduling. (c) Cache-Aware scheduling reorders execution within each SMs to prevent cache thrashing. 
+
+coarse scheduling granularity can lead to resource waste. For example, scheduling 4 groups on 3 Streaming Multiprocessors (SMs) leaves one SM processing the last group alone while the others are idle (Figure 4(a)). In practice, when a matrix multiplication with (M, N, K ) = (4096 , 4096 , 4096) is com-puted with 128 × 128 GEMM tile block on M, N dimen-sion for the NVIDIA H20 GPU ( 78 SMs) using Strassen’s algorithm ( R = 7 ). The total number of Hr tile blocks is  
+
+> 4096 /2128
+
+× 4096 /2128 × 7 = 1792 , or equivalent to 256 groups. If processing one Hr tile takes one wave, scheduling at the tile block level yields ⌈1792 /78 ⌉ = 23 waves per SM. In contrast, scheduling at the group level yields ⌈256 /78 ⌉ = 4 
+
+groups ( 4 × 7 = 28 waves) per SM, which incurs about  
+
+> 28 −23 23
+
+× 100% = 21 .7% waves or running time waste. To resolve this issue, Split-Group Parallelism adopts persistent kernel techniques [25] to support tile block level scheduling and enable fine-grained granularity parallelism without breaking the data locality feature. In Figure 4(b), the persistent kernel techniques explicitly control tile scheduling over the lifecycle of each SM by keeping a single Cooperative Thread Array (CTA) alive throughout the entire GEMM execu-tion. Instead of treating groups as indivisible units, persistent kernel allows a single group to be split across at most two SMs, effectively restoring fine-grained execution efficiency. Specifically, we calculate a precise tile capacity per SM to distribute the total tiles evenly. When assigning a group to an SM exceeds the remaining capacity, we split the group: the current SM fills its capacity with the initial tiles of the group, and the overflow portion is processed by the next SM. Crucially, atomic operations are not required even when a group is split across two SMs. The deterministic execution order ensures that one SM processes its portion of the group in its earliest waves, while the other processes the remainder in its final waves, naturally avoiding write conflicts to the output. 
+
+c) Cache-Aware Scheduling: On some hardware, we observe that cache thrashing can become a new performance bottleneck. In the previous example of matrix multiplication with (M, N, K ) = (4096 , 4096 , 4096) on an H20 GPU, Split-6Group scheduling reduces the number of execution waves, but the heavy memory burden from a low L2 cache hit rate triggers the GPU power limit, dropping the SM frequency from 1.80 GHz to 1.61 GHz and increasing the overall time. This low L2 cache hit rate occurs because concurrent SMs access data stored far apart in memory. For example, concurrent SMs process H1[0] , H4[3] , and H7[1] during the initial wave in Figure 4(b), which requires accessing data in ˜A1, ˜A4, and ˜A7.However, ˜A1, ˜A4, and ˜A7 are stored far apart, as elements with the same r are stored contiguously. This scattered access pattern severely degrades the L2 cache hit rate. To mitigate this, we propose a Cache-Aware Scheduling 
+
+policy that reorders the computation sequence of Hr across groups within each SM. After reordering, different SMs access data corresponding to the same r during the majority of execution waves. As shown in Figure 4(c), concurrent SMs now process data with the same r like H1[0] , H1[1] , and H1[2] ,all of which require elements in ˜A1. Because this reordering interleaves the computation of different groups, their accu-mulators need to be buffered using extra on-chip resources. However, this trade-off yields significantly improved memory system efficiency and overall performance. 
+
+C. Decision Module 
+
+Given an input matrix shape (M, N, K ) and a specific hard-ware platform, the Decision Module iterates over a candidate set of LCMAs SLCM A to identify the optimal LCMA or defaults to standard GEMM if no LCMA is likely to yield a gain. In this section, we will first abstract hardware parameters and then summarize our LCMAs with a robust theoretical arithmetic intensity analysis. Selecting the optimal algorithms requires balancing the reduction in arithmetic complexity against the overhead of linear combination steps. This trade-off is strictly governed by the input matrix dimensions and the specific performance characteristics of the hardware platform. Thus a robust theoret-ical model is essential to determine whether an LCMA yields a performance gain and to identify which specific algorithm maximizes this benefit. We first abstract the hardware platform with the tuple of (FLOPS ×, FLOPS +, β ) and then conduct an arithmetic inten-sity analysis on standard GEMM for a better understanding. In our hardware-aware three tuple (FLOPS ×, FLOPS +, β ), FLOPS × is the floating-point operations per second for matrix multiplications in the GEMM stage. (e.g. Tensor Cores or SME instructions). FLOPS + is defined as the floating-point operations per second for addition or subtraction in Combine A/B/H stages (e.g., CUDA Cores or SVE instructions) β is defined as the bandwidth of off-chip memory for a target data type. When a standard GEMM is bounded by memory with 
+
+2M N K M K + N K + M N ≤ FLOPS ×
+
+β (8) 
+
+then all LCMAs are unlikely to yield a gain, as they reduce computation at the cost of increasing total memory traffic. In such cases, we immediately return the standard GEMM. Otherwise, it is compute-bound, and we take 2M N K  
+
+> FLOPS ×
+
+as its running time. Now we conduct an arithmetic intensity analysis on the LCMA described as L = ⟨m, k, n, R, U, V, W ⟩ and then summarize our robust theoretical model. Combine A stage in Algorithm 2 involves addition/subtraction on m × k submatri-ces, and each submatrix contributes Mm · Kk addition/subtraction operations. To obtain R matrices ˜Ar , a total of (∥U ∥0 − R)
+
+submatrix additions/subtractions are needed (for example, in Strassen’s algorithm, ∥U ∥0 = 12 and R = 7 , so beside R = 7 
+
+matrix assignment, only 5 submatrix additions/subtractions are performed). Hence, the total number of addition/subtraction operations in Combine A is (∥U ∥0 − R) · Mm · Kk . Regard-ing memory access, F ALCON GEMM requires loading the A
+
+matrix only once ( M K elements) and outputs R ˜Ar matrices (R · Mm · Kk elements), thus totally there are M K (1 + Rmk )
+
+elements. If the (∥U ∥0−R)· Mm · Kk   
+
+> M K (1+ Rmk )
+
+= ∥U ∥0−Rmk +R > FLOPS + 
+
+> β
+
+is satisfied, then the estimated running time is (∥U ∥0−R)· Mm · Kk 
+
+> FLOPS +
+
+; otherwise, it is memory-bound, and the time is M K (1+ Rmk ) 
+
+> β
+
+. Similarly, we derive and collect all computation operations, memory access, and arithmetic intensity equations in Table II for the other three stages in an LCMA L = ⟨m, k, n, R, U, V, W ⟩. Among all the four stages, the three combine stages are likely to be memory-bound for most LCMA. LCMA is used if and only if it can deliver a speedup over the standard GEMM. In the most common scenario, the Combine stages are memory-bound while the GEMM stage is compute-bound. Thus, according to the formulas in Table II, the time usage of LCMA needs to be less than the time usage of standard GEMM, that means M K (1+ Rmk ) 
+
+> β
+
++ N K (1+ Rnk ) 
+
+> β
+
++  
+
+> 2RM N K mnk
+> FLOPS ×
+
++ M N (1+ Rmn ) 
+
+> β
+
+< 2M N K  
+
+> FLOPS ×
+
+It can be simplified as: 
+
+2M N K  1 − Rmnk 
+
+
+
+M K  1 + Rmk 
+
+ + N K  1 + Rnk 
+
+ + M N  1 + Rmn 
+
+ > FLOPS ×
+
+β
+
+(9) 
+
+The inequality in Eq. 9 shares an interesting structural similarity with Eq. 8: it is a standard GEMM arithmetic intensity formula with extra LCMA-specific scaling factors. It intuitively quantifies how LCMA trades off lower bandwidth for reduced arithmetic complexity. Here, (1 − Rmnk ) represents 
+
+TABLE II: Theoretical arithmetic intensity analysis of LCMA Stages. 
+
+∥U ∥0, ∥V ∥0, ∥W ∥0 represent the number of non-zero elements in the coefficient tensors. The Arithmetic Intensity is the ratio of Computation to Memory Access.                                                           
+
+> Stage Computation (FLOPs) Memory Access (Number of elements) Arithmetic Intensity
+> Standard GEMM 2M N K M K +N K +M N 2M N K M K +N K +M N
+> Combine A Stage (Algo. 1 Stage 1) (∥U∥0−R)·Mm·KkM K (1 + Rmk )∥U∥0−Rmk +R
+> Combine B Stage (Algo. 1 Stage 2) (∥V∥0−R)·Nn·KkN K (1 + Rnk )∥V∥0−Rnk +R
+> GEMM Stage (Algo. 1 Stage 3) 2RM N K mnk R(M K mk +N K nk +M N mn )2M N K nM K +mN K +kM N
+> Combine H Stage (Algo. 1 Stage 4) (∥W∥0−mn )·Mm·NnM N (1 + Rmn )∥W∥0−mn R+mn
+
+7the scale of the computational savings of the GEMM, while the denominator represents the memory traffic overhead, i.e.,  
+
+> Rmk
+
+corresponds to the extra bandwidth for writing ˜A in the Combine A stage, Rnk for writing ˜B in the Combine B stage, and Rmn for writing H in the Combine H stage. Note that, the optimization with fused GEMM and Combine H stage in Algorithm 2 avoids off-chip writing and reading of the intermediate matrices Hr , thus the overhead Rmn associated with the M N term is eliminated. Finally, Eq. 9 can be simplified as:            
+
+> 2M N K  1−Rmnk
+> 
+> M K  1 + Rmk
+> +N K  1 + Rnk
+> +M N >FLOPS ×
+> β(10)
+
+In conclusion, Decision Module provides a theoretical pre-diction of the acceleration for each LCMA and standard GEMM algorithm. The LCMA with the highest acceleration ratio will be adopted as our final implementation, If no performance gains can be achieved with an LCMA, we fall back to the standard GEMM to keep its best performance. For limited space, extended analyses on tiling blocks and boundary scenarios are omitted for brevity. IV. E VALUATION 
+
+We implement F ALCON GEMM with all the above opti-mization to demonstrate its superior efficiency in accelerating Large Language Model (LLM) workloads across diverse hard-ware including both GPU and CPU devices supporting differ-ent data types (e.g., FP32, BF16, FP16 and FP8) supported by Deployment Module (Section III-A). We compare F ALCON -GEMM against multiple state-of-the-art matrix multiplication libraries and specialized LCMA implementations. We use step-wise evaluation to verify the performance gain of our proposed Execution Module (Section III-B), and the roofline results also confirm the selection of optimal LCMA and GEMM algorithms in our Decision Module (Section III-C). 
+
+A. Experiment Setup 
+
+Hardware Platforms. Our evaluation spans five represen-tative computing devices with varying compute and memory characteristics: 1 NVIDIA H20 (Hopper, 96GB), featuring 4.0 TB/s HBM3 bandwidth, with CUDA 12.9; 2 NVIDIA A100 (Ampere, 40GB), providing 1.6 TB/s HBM2 bandwidth, with CUDA 12.8; 3 Intel Xeon Platinum 8255C processor (2.50 GHz), with 240 GB/s memory bandwidth; 4 AMD EPYC 9K84 Processor (2.60 GHz), with 250 GB/s memory bandwidth; 5 Amazon EC2 M7g Instances using ARM Neoverse-V1 (2.1 GHz), with 20.8 GB/s memory bandwidth. 
+
+Workloads and Metrics. We extract linear layer shapes (N, K ) from three open-source LLMs ( DeepSeek-R1 [26], 
+
+Qwen3.5-397B [27], and HunyuanVideo [28]). Supported data types across all platforms include FP32, BF16, FP16, and FP8, depending on hardware capabilities. For FP8, we adopt the full BF16-to-quantized-FP8 workflow with 1 × 128 block-wise scaling for FP8E4M3 [29], consistent with widely used CUTLASS [7] and DeepGEMM [6]. 
+
+Baselines. We select the state-of-the-art competitors as baselines. For standard GEMM, we use cuBLAS [4] (em-bedded in CUDA Toolkit) on NVIDIA GPUs, Intel MKL [5] on Intel x86, OpenBLAS [30] on AMD x86, and ACL [31] (v52.8) on ARM. AlphaTensor [3] (relying on JAX) serves as the state-of-the-art cross-platform LCMA competitor. For FP8E4M3 with block-wise scaling on Hopper, we compare against CUTLASS (v4.4.2) [7], and we find no prior LCMA competitor that supports FP8 quantization. 
+
+LCMA Settings. The LCMA library of F ALCON GEMM employs various LCMAs with coefficient matrices provided by the AlphaTensor codebase [32], and we use m, n, k ∈ [2 , 5] .Our software stack includes TileLang v0.1.8 [20], Triton v3.6.0 [21], and TVM v0.23.0 [19]. The code of F ALCON -GEMM will be open-sourced upon publication. 
+
+Measurement. Performance is measured in Effective TFLOPS (or GFLOPS), defined as 2M N K  
+
+> time_seconds
+
+× 10 −12 (or 
+
+×10 −9 for GFLOPS), where 2M N K is the amount of floating-point operations of standard GEMM rather than LCMAs, thereby enabling a fair comparison between the LCMA and standard GEMM. Thus, the performance in the following experiments may exceed the hardware’s peak TFLOPS , which is due to the algorithmic advantage of LCMA rather than any hardware tricks like overclocking. 
+
+B. Operator-level Performance Evaluation 
+
+The evaluation on operator-level performance uses 960 linear layer shapes selected from 3 LLMs. We select 11 shapes on (N, K ) from DeepSeek-R1 [26], 7 shapes from Qwen3.5-397B [27], and 6 shapes from HunyuanVideo [28]. The dimension M increases from 512 to 20480 with a step of 512, and finally a total of 960 combinations of (M, N, K )
+
+are generated as the test shape cases. Figure 5 plots the per-formance results of F ALCON GEMM compared with 4 other vendor-provided libraries and Deepmind’s AlphaTensor [3] on these 960 test shapes. The results confirm that F ALCON -GEMM delivers a strong cross-hardware and data-type adapt-ability, and consistently outperforms standard GEMM libraries (CUTLASS, cuBLAS, MKL, OpenBLAS, ACL) and LCMA competitor AlphaTensor. FALCON GEMM achieves 7.59%, 7.50%, 11.82%, 12.17%, 17.85%, 12.94% higher performance than these best GEMM libraries on H20 using FP8, H20 using BF16, A100 using FP32, AMD CPU using FP32, ARM CPU using FP32, and Intel CPU using FP32, respectively. That is because LCMAs uses fewer computations, and F ALCON -GEMM frequently surpasses the theoretical hardware peak which is the strict upper bound for standard GEMMs. The above statistics include cases where F ALCON GEMM falls back to standard GEMM. If we count only cases where FALCON GEMM selects LCMA, the speedups over the best GEMM libraries become 11.20%, 11.06%, 17.03%, 12.55%, 17.85%, and 14.33%, respectively. For the AlphaTensor, the only competitor on LCMA, ours surpass it with 20.47%, 12.41%, 17.01%, 25.35%, 55.61% higher performance on all five devices besides H20 using FP8 which is not supported by AlphaTensor. The experiments also show that AlphaTen-80.2 0.5 0.8 1.0 1.2 1.5 1.8 2.0                  
+
+> FLOPs (2×M×N×K, ×10¹²)
+> 100
+> 150
+> 200
+> 250
+> 300
+> Effective TFLOPS
+> FalconGEMM
+> CUTLASS
+> H20 FP8 Peak 0.2 0.5 0.8 1.0 1.2 1.5 1.8 2.0
+> FLOPs (2×M×N×K, ×10¹²)
+> 100
+> 120
+> 140
+> 160
+> 180
+> Effective TFLOPS
+> FalconGEMM
+> cuBLAS
+> AlphaTensor
+> H20 BF16 Peak 0.2 0.5 0.8 1.0 1.2 1.5 1.8 2.0
+> FLOPs (2×M×N×K, ×10¹²)
+> 14
+> 16
+> 18
+> 20
+> 22
+> 24
+> Effective TFLOPS
+> FalconGEMM
+> cuBLAS
+> AlphaTensor
+> A100 FP32 Peak
+
+(a) NVIDIA H20 FP8 (b) NVIDIA H20 BF16 (c) NVIDIA A100 FP32 0.2 0.5 0.8 1.0 1.2 1.5 1.8 2.0                  
+
+> FLOPs (2×M×N×K, ×10¹²)
+> 80
+> 90
+> 100
+> 110
+> 120
+> 130
+> Effective GFLOPS
+> FalconGEMM
+> OpenBLAS
+> AlphaTensor
+> AMD FP32 Peak 0.2 0.5 0.8 1.0 1.2 1.5 1.8 2.0
+> FLOPs (2×M×N×K, ×10¹²)
+> 50
+> 60
+> 70
+> 80
+> Effective GFLOPS
+> FalconGEMM
+> ACL
+> AlphaTensor
+> ARM FP32 Peak 0.2 0.5 0.8 1.0 1.2 1.5 1.8 2.0
+> FLOPs (2×M×N×K, ×10¹²)
+> 60
+> 80
+> 100
+> 120
+> 140
+> 160
+> Effective GFLOPS
+> FalconGEMM
+> Intel MKL
+> AlphaTensor
+> x86 FP32 Peak
+
+(d) AMD EPYC 9K84 FP32 (e) ARM Neoverse-V1 FP32 (f) Intel Xeon 8255C FP32 
+
+Fig. 5: Operator-level performance is compared between F ALCON GEMM and six other libraries on three LLM workloads. The x-axis represents the amount of floating-point operations calculated as 2 × M × N × K using 960 test shapes. The y-axis is the performance measured in effective TFLOPS or GFLOPS. The peak-breaking performance is achieved by algorithmic operation reduction. 5000 10000 15000 20000                              
+
+> 1.00
+> 1.05
+> 1.10
+> 1.15
+> 1.20
+> 1.25
+> Speedup
+> (a)
+> NVIDIA A100 FP32  HunyuanVideo
+> 5000 10000 15000 20000 (b)
+> Qwen3.5-397B-A17B
+> 5000 10000 15000 20000 (c)
+> DeepSeek-R1
+> 5000 10000 15000 20000
+> 1.00
+> 1.05
+> 1.10
+> 1.15
+> Speedup
+> (d)
+> NVIDIA H20 BF16
+> 5000 10000 15000 20000 (e) 5000 10000 15000 20000 (f)
+> 5000 10000 15000 20000
+> Sequence Length
+> 1.00
+> 1.10
+> 1.20
+> 1.30
+> 1.40
+> Speedup
+> (g)
+> NVIDIA H20 FP8
+> 5000 10000 15000 20000
+> Sequence Length
+> (h) 5000 10000 15000 20000
+> Sequence Length
+> (i)
+> FalconGEMM AlphaTensor CUTLASS cuBLAS
+
+Fig. 6: End-to-end LLM speedup on PyTorch using different GEMM backends on H20 and A100 using FP32, BF16 and FP8. Here the x-axis is the sequence length (M) range from 128 to 20K, the y-axis is the relative speedup compared to PyTorch baselines using CUTLASS or cuBLAS. 
+
+sor can exceed the hardware peak on a few significantly large shapes, but for the small shapes, AlphaTensor often performs worse than standard GEMM. This limitation is due to the inherent overheads of traditional LCMA deployments, as we have discussed in Section II-B, which make previous LCMA impractical for real-world deployments. In contrast, FALCON GEMM achieves peak-breaking efficiency even on small matrices by eliminating these overheads, proving its robust practicality for real-world LLM inference. 
+
+C. End-to-End LLM Performance 
+
+The end-to-end (e2e) LLM performance evaluation on HunyuanVideo, Qwen3.5 and DeepSeek-R1 is conducted by replacing the GEMM operations of the linear layers in PyTorch with F ALCON GEMM and AlphaTensor. For F ALCON GEMM, we use offline Combine B stage for static weights B. The e2e performance results for the prefill stage on GPUs across varying sequence lengths are recorded and illustrated in Fig-ure 6. PyTorch using F ALCON GEMM delivers a highly stable and significant performance gain across all sequence lengths. For example, compared with PyTorch, 18 .12% , 12 .24% , and 
+
+11 .46% averaged e2e performance gains in prefill are achieved on the A100 using FP32, H20 using BF16 and H20 using FP8, respectively. This stability is attributed to our Deci-sion Module, which intelligently assigns the optimal LCMA configuration for specific weight shapes even when M is small. For example, PyTorch has recorded that 97 .9% , 85 .7% ,and 57 .7% linear layers use F ALCON GEMM’s LCMA on HunyuanVideo, Qwen3.5-397B, and DeepSeek-R1 models on H20 using FP8. This is the lowest ratio among six hardware and datatype cases. In contrast, prior LCMA frameworks like AlphaTensor fail to provide consistent benefits. They typically yield no speedup at small sequence lengths due to unoptimized overheads. More critically, at very large sequence lengths (e.g., on A100 using FP32), AlphaTensor’s performance degrades sharply. We observe that their large-R algorithms consume excessive shared memory, forcing the system to fall back to the basic Strassen’s algorithm. F ALCON GEMM’s execution entirely overcomes these limitations, ensuring robust acceler-ation across all deployment scenarios. For FP8 workloads with small M , where quantization overhead is typically substantial, FALCON GEMM fuses the quantization into the Combine A stage, yielding at most 46% greater performance. 
+
+D. Step-wise Evaluation for Execution Module 
+
+To evaluate the effectiveness of the optimizations proposed in Execution Module, we conduct a step-wise evaluation with square matrices on the NVIDIA H20 GPU with BF16 92048      
+
+> 2560
+> 3072
+> 3584
+> 4096
+> 4608
+> 5120
+> 5632
+> 6144
+> 6656
+> 7168
+> 7680
+> 8192
+> M(M = N = K)
+> -7%
+> 0%
+> +7%
+> +14%
+> Speedup vs. cuBLAS (%)  Algorithm 1 Group-Parallel Split-Group Cache-Aware cuBLAS (baseline)
+
+Fig. 7: Step-wise evaluation is conducted for the Execution Module on H20 using BF16 precision to run LCMA (⟨2, 2, 2⟩, R = 7) . The optimization path is: Algorithm 1 → Algorithm 2 Group-Parallel →
+
+Split-Group → Cache-Aware. 200 400 600 800 1000 1200 1400 1600           
+
+> Arithmetic Intensity (FLOP/Byte)
+> 50
+> 100
+> 150
+> 200
+> Effective TFLOPS
+> Roofline for Standard GEMM
+> Effective Roofline for 2, 2, 2 , R= 7
+> Effective Roofline for 4, 4, 4 , R= 49
+> Decision Module's Choice
+> Standard GEMM
+> ( 2, 2, 2 , R= 7)
+> ( 4, 4, 4 , R= 49)
+
+Fig. 8: Roofline Analysis on H20 BF16 with 4TB/s bandwidth and 148 TFLOPS. This roofline indicates that LCMA pursues higher effective peak TFLOPS at the cost of slightly larger bandwidth. Thus when Arithmetic Intensity is larger enough, LCMA with higher 
+
+R will be become the optimal solution; otherwise GEMM will be optimal. 
+
+precision. We fix the use of Strassen’s algorithm ( ⟨2, 2, 2⟩, R =7) within F ALCON GEMM to simplify the comparison. In Figure 7, F ALCON GEMM improves performance over the standard cuBLAS baseline by 3.07% ∼ 17 .13% improve-ment. Our implementation of Algorithm 1 yields an average speedup of 5.32% , and the fusion optimization (Algorithm 2 with Split-Group Parallelism and Cache-Aware Scheduling) achieves an average speedup of 7.83% . However, the Group-Parallel Optimization exhibits unstable performance due to the tail effect caused by its coarse granularity as discussed in Section III-B. Applying Split-Group Parallelism resolves this and performs better on smaller shapes. However, its per-formance drops sharply for M > 4096 , because the increased memory access intensifies L2 cache thrashing and triggers the GPU power limit that drops the SM frequency. Finally, the Cache-Aware Scheduling policy mitigates this by reordering computations to increase cache hit rates, delivering stable and high performance that consistently outperforms Algorithm 1 across all shapes. 
+
+E. Roofline Analysis 
+
+A roofline analysis measured in effective TFLOPS, shown in Figure 8, is used to visualize F ALCON GEMM’s LCMA selection strategy proposed by the Decision Module. We simu-late the workloads with varying arithmetic intensities. For high arithmetic intensity workloads, LCMA with a larger R (e.g., 
+
+⟨4, 4, 4⟩, R = 49 ) yields greater performance gains. But for the extremely low arithmetic intensity ( AI < 200 ) workloads, LCMA fails to provide benefits as it cannot trade memory bandwidth for computational savings. Standard GEMM be-comes optimal solution for these cases. Additionally, the peak TFLOPS of LCMA is slightly below the theoretical effective roofline. This minor gap is because extra stages, such as Combine A, cannot be fully overlapped. As a result, the computation units for matrix multiplication cannot operate at peak performance for the entire duration. 
+
+F. Numerical Precision Analysis 
+
+A known limitation of LCMA is the reduced numerical stability compared to standard GEMM [33], [34]. However, our fused pipeline inherently mitigates this issue. Based on our statistical analysis, we observe that F ALCON GEMM con-sistently achieves approximately 17.2% lower relative error than AlphaTensor across various matrix sizes. Traditional implementations like AlphaTensor typically downcast high-precision intermediate results Hr to lower precision to reduce bandwidth usage when materializing them to off-chip memory. In contrast, F ALCON GEMM’s Group-Parallel Optimization fuses the GEMM and Combine H stages. Thus, we calculate the output Ci,j directly by using high-precision on-chip Hr ,yielding better numerical accuracy. V. R ELATED WORKS 
+
+Research on lower-complexity matrix multiplication algo-rithms (LCMAs) began with Strassen’s rank-7 scheme [1]. Over the following decades, there are numerous theoretical discoveries on new LCMAs [2], [34]–[36], such as Laderman’s rank-23 algorithm [2]. While these schemes are typically called fast matrix multiplication algorithms , we refer to them as LCMAs to emphasize that lower complexity is not trivially fast and does not always acquire real performance gains on modern hardware. Recently, AI-driven approaches [3], [37], [38] such as AlphaTensor [3] have discovered new LCMA by novel low-rank decompositions. Deploying LCMAs to achieve speedups requires careful hardware-specific implementation. Benson et al. [11], [39] develop an LCMA framework that takes LCMA coefficients as input to generate sequential and distributed-memory parallel implementations. Dumas et al. [34] introduce a pipeline that searches for numerically stable LCMA schemes and generates implementations. AlphaTensor’s implementation [3] relies on JAX [40] for cross-platform LCMA deployment. Huang et al. integrate Strassen on CPUs via BLIS [12] and on NVIDIA GPUs via CUTLASS [13], and they also propose a framework to produce LCMA implementations [10]. Oo and Chaikan [41] present a power-efficient Strassen implementation on multi-core CPUs using AVX512 and OpenMP. Li et al. [17] im-plement Strassen and Winograd matrix multiplication on an NVIDIA GPU. Krishnan et al. [18] propose the multi-stage Strassen algorithm for GPUs with no extra GPU memory footprint. StraGCN [16] applies Strassen to sparse–dense 10 GNNs using a horizontally fused execution model. Several of these works [12], [17], [18] also build analytic or empirical performance models to predict when LCMA outperforms classical GEMM. VI. C ONCLUSION 
+
+FALCON GEMM bridges the long-standing gap between the theoretical potential speedup of LCMAs and their ab-sence in production-level Deep Learning due to a lack of efficient implementation. By addressing the inherent chal-lenges of hardware heterogeneity and deployment complexity, our framework transforms peak-breaking matrix multiplication from a mathematical concept into a viable performance driver for modern Large Language Models. Our extensive evalua-tions demonstrate that F ALCON GEMM consistently surpasses industry-standard libraries, achieving performance gains of up to 17.85% and outperforming existing LCMA implementations like AlphaTensor by as much as 55.61%. These results confirm that F ALCON GEMM is a robust, cross-platform solution ca-pable of meeting the rigorous computational demands of LLM training and inference. REFERENCES [1] V. Strassen, “Gaussian elimination is not optimal,” Numerische Mathematik, vol. 13, no. 4, pp. 354–356, 1969. [Online]. Available: https://doi.org/10.1007/BF02165411 [2] J. Laderman and V. Pan, “On practical algorithms for accelerated matrix multiplication,” Linear Algebra and its Applications, vol. 162–164, pp. 557–588, 1992. [Online]. Available: https://doi.org/10. 1016/0024-3795(92)90393-O [3] A. Fawzi, M. Balog, A. Huang, T. Hubert, B. Romera-Paredes, M. Barekatain, A. Novikov, F. J. R. Ruiz, J. Schrittwieser, G. Swirszcz et al., “Discovering faster matrix multiplication algorithms with reinforcement learning,” Nature, vol. 610, no. 7930, pp. 47–53, 2022. [Online]. Available: https://doi.org/10.1038/s41586-022-05172-4 [4] NVIDIA Corporation, “cuBLAS library,” https://developer.nvidia.com/ cublas, 2026. [5] Intel Corporation, “Intel oneapi math kernel library (oneMKL),” https:// www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl.html, 2025. [6] DeepSeek-AI, “DeepGEMM: Clean and efficient FP8 GEMM kernels with fine-grained scaling,” https://github.com/deepseek-ai/DeepGEMM, 2025. [7] NVIDIA Corporation, “CUTLASS: CUDA templates for linear algebra subroutines,” https://github.com/NVIDIA/cutlass, 2025. [8] O. Schwartz and N. Vaknin, “Pebbling game and alternative basis for high performance matrix multiplication,” SIAM Journal on Matrix Analysis and Applications, vol. 44, no. 4, pp. 1548–1575, 2023. [Online]. Available: https://doi.org/10.1137/22M1502719 [9] Y. Moran, O. Schwartz, and S. Yuan, “Complex to rational fast matrix multiplication,” arXiv preprint, 2026. [Online]. Available: https://doi.org/10.48550/arXiv.2602.13171 [10] J. Huang, L. Rice et al., “Generating families of practical fast matrix multiplication algorithms,” in IPDPS, 2017, pp. 656–667. [Online]. Available: https://doi.org/10.1109/ipdps.2017.56 [11] A. R. Benson, G. Ballard, J. Demmel, and O. Schwartz, “A framework for practical parallel fast matrix multiplication,” in PPoPP, 2015, pp. 42–53. [Online]. Available: https://doi.org/10.1145/2858788.2688513 [12] J. Huang, T. M. Smith, G. M. Henry, and R. A. van de Geijn, “Strassen’s algorithm reloaded,” in SC, 2016, pp. 690–701. [Online]. Available: https://doi.org/10.1109/sc.2016.58 [13] J. Huang, C. D. Yu, and R. A. van de Geijn, “Strassen’s algorithm reloaded on GPUs,” ACM Transactions on Mathematical Software, vol. 46, no. 1, pp. 1–22, 2020. [Online]. Available: https://doi.org/10.1145/3372419 [14] M. Dodovi´ c et al., “Analyzing the impact of kernel fusion on GPU tensor workloads,” Electronics, vol. 15, no. 5, p. 1034, 2026. [Online]. Available: https://doi.org/10.3390/electronics15051034 [15] H. Wang, J. Huang, X. Zhi, J. Huang et al., “KAMI: Communication-avoiding general matrix multiplication within a node,” in SC, 2025, pp. 1572–1589. [Online]. Available: https://doi.org/10.1145/3712285. 3759895 [16] W. He, Y. Guo, S. Bao et al., “StraGCN: GPU-accelerated strassen’s sparse-dense matrix multiplication for graph convolutional network training,” in SC, 2025, p. 631–644. [Online]. Available: https://doi.org/10.1145/3712285.3759826 [17] J. Li, S. Ranka, and S. Sahni, “Strassen’s matrix multiplication on gpus,” in ICPDS, 2011, pp. 157–164. [Online]. Available: https://doi.org/10.1109/ICPADS.2011.130 [18] A. G. Krishnan and D. Goswami, “Multi-stage memory efficient strassen’s matrix multiplication on GPU,” in HiPC, 2021, pp. 212–221. [Online]. Available: https://doi.org/10.1109/HiPC53243.2021.00035 [19] T. Chen, T. Moreau, Z. Jiang, L. Zheng, E. Yan, H. Shen, M. Cowan, L. Wang, Y. Hu, L. Ceze et al., “Tvm: An automated end-to-end optimizing compiler for deep learning,” in OSDI, 2018, p. 579–594. [Online]. Available: https://dl.acm.org/doi/10.5555/3291168.3291211 [20] L. Wang, Y. Cheng, Y. Shi, Z. Tang, Z. Mo, W. Xie, L. Ma, Y. Xia, J. Xue, F. Yang, and Z. Yang, “TileLang: A composable tiled programming model for AI systems,” arXiv preprint, 2025. [Online]. Available: https://doi.org/10.48550/arXiv.2504.17577 [21] P. Tillet, H. T. Kung, and D. Cox, “Triton: An intermediate language and compiler for tiled neural network computations,” in MAPL, 2019, pp. 10–19. [Online]. Available: https://doi.org/10.1145/3315508.3329973 [22] S. Feng, B. Hou, H. Jin, W. Lin, J. Shao, R. Lai, Z. Ye, L. Zheng, C. H. Yu, Y. Yu et al., “Tensorir: An abstraction for automatic tensorized program optimization,” in ASPLOS, 2023, pp. 804–817. [Online]. Available: https://doi.org/10.1145/3575693.3576933 [23] Y. Zhou, H. Zhu, Q. Qiu, W. Cui, Z. Liu, P. Chen, M. Wahib, C. Guo, S. Feng, J. Meng et al., “A sample-free compilation framework for efficient dynamic tensor computation,” in SC, 2025, pp. 167–184. [Online]. Available: https://doi.org/10.1145/3712285.3759779 [24] K. Goto and R. A. v. d. Geijn, “Anatomy of high-performance matrix multiplication,” ACM Transactions on Mathematical Software (TOMS), vol. 34, no. 3, pp. 1–25, 2008. [Online]. Available: https://doi.org/10.1145/1356052.1356053 [25] L. Zhang, M. Wahib, P. Chen, J. Meng, X. Wang, T. Endo, and S. Matsuoka, “Perks: a locality-optimized execution model for iterative memory-bound gpu applications,” in ICS, 2023, p. 167–179. [Online]. Available: https://doi.org/10.1145/3577193.3593705 [26] DeepSeek-AI, D. Guo, D. Yang, H. Zhang, J. Song, R. Zhang, R. Xu, Q. Zhu, S. Ma, P. Wang, X. Bi et al., “DeepSeek-R1: Incentivizing reasoning capability in LLMs via reinforcement learning,” Nature, vol. 645, pp. 633–638, 2025. [Online]. Available: https://doi.org/10.1038/s41586-025-09422-z [27] A. Yang, A. Li, B. Yang, B. Zhang, B. Hui, B. Zheng, B. Yu, C. Gao, C. Huang, D. Liu, J. Zhou, J. Lin et al., “Qwen3 technical report,” arXiv preprint, 2025. [Online]. Available: https://doi.org/10.48550/arXiv.2505.09388 [28] W. Kong, Q. Tian, Z. Zhang, R. Min, Z. Dai, J. Zhou, J. Xiong, X. Li, B. Wu, J. Zhang, K. Wu, Q. Lin, J. Yuan, Y. Long, A. Wang et al., “HunyuanVideo: A systematic framework for large video generative models,” arXiv preprint, 2024. [Online]. Available: https://doi.org/10.48550/arXiv.2412.03603 [29] P. Micikevicius, D. Stosic, N. Burgess, M. Cornea, P. Dubey, R. Grisenthwaite, S. Ha, A. Heinecke, P. Judd, J. Kamalu et al., “Fp8 formats for deep learning,” arXiv preprint, 2022. [Online]. Available: https://doi.org/10.48550/arXiv.2209.05433 [30] Q. Wang, X. Zhang, Y. Zhang, and Q. Yi, “Augem: automatically generate high performance dense linear algebra kernels on x86 cpus,” in SC, 2013, pp. 1–12. [Online]. Available: https://doi.org/10.1145/ 2503210.2503219 [31] Arm Limited, “Arm compute library,” https://github.com/ ARM-software/ComputeLibrary, 2025. [32] A. Fawzi, M. Balog, A. Huang, T. Hubert, B. Romera-Paredes, M. Barekatain, A. Novikov, F. J. R. Ruiz, J. Schrittwieser, G. Swirszcz, D. Silver, D. Hassabis, and P. Kohli, “Alphatensor code,” https://github. com/google-deepmind/alphatensor, 2022. 
+
+11 [33] O. Schwartz, S. Toledo, N. Vaknin, and G. Wiernik, “Alternative basis matrix multiplication is fast and stable,” in IPDPS, 2024, pp. 38–51. [Online]. Available: https://doi.org/10.1109/IPDPS57955.2024.00013 [34] J.-G. Dumas, C. Pernet, and A. Sedoglavic, “Towards automated generation of fast and accurate algorithms for recursive matrix multiplication,” Journal of Symbolic Computation, vol. 134, p. 102524, 2026. [Online]. Available: https://doi.org/10.1016/j.jsc.2025.102524 [35] J. Alman, R. Duan, V. V. Williams, Y. Xu, Z. Xu, and R. Zhou, “More asymmetry yields faster matrix multiplication,” in SODA, 2025, pp. 3681–3710. [Online]. Available: https://doi.org/10.1137/1. 9781611978322.118 [36] V. V. Williams, Y. Xu, Z. Xu, and R. Zhou, “New bounds for matrix multiplication: from alpha to omega,” in SODA, 2024, pp. 3792–3835. [Online]. Available: https://doi.org/10.1137/1.9781611977912.134 [37] Y. Sun and W. Li, “Opentensor: Reproducing faster matrix multiplication discovering algorithms,” arXiv preprint, 2024. [Online]. Available: https://doi.org/10.48550/arXiv.2405.20748 [38] A. I. Perminov, “Fast matrix multiplication in small formats: Discovering new schemes with an open-source flip graph framework,” arXiv preprint, 2026. [Online]. Available: https://doi.org/10.48550/arXiv.2603.02398 [39] G. Ballard, J. Demmel, O. Holtz, B. Lipshitz, and O. Schwartz, “Communication-optimal parallel algorithm for strassen’s matrix multiplication,” in SPAA, 2012, pp. 193–204. [Online]. Available: https://doi.org/10.1145/2312005.2312044 [40] J. Bradbury, R. Frostig, P. Hawkins, M. J. Johnson, Y. Katariya, C. Leary, D. Maclaurin, G. Necula, A. Paszke, J. VanderPlas, S. Wanderman-Milne, and Q. Zhang, “JAX: composable transformations of Python+NumPy programs,” 2018, version 0.3.13. [Online]. Available: http://github.com/jax-ml/jax [41] N. Oo and P. Chaikan, “Power efficient strassen’s algorithm using avx512 and openmp in a multi-core architecture,” ECTI Transactions on Computer and Information Technology (ECTI-CIT), vol. 17, pp. 46–59, 01 2023. [Online]. Available: https://doi.org/10.37936/ecti-cit. 2023171.248320 
+
+12

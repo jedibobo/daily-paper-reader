@@ -1,0 +1,1051 @@
+Title: Uncertainty-Guided Edge Learning for Deep Image Regression in Remote Sensing
+
+URL Source: https://arxiv.org/pdf/2605.05590v1
+
+Published Time: Fri, 08 May 2026 00:30:04 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# Uncertainty-Guided Edge Learning for Deep Image Regression in Remote Sensing 
+
+## Anh Vu Nguyen Dino Sejdinovic Tat-Jun Chin Australian Institute for Machine Learning (AIML), Adelaide University 
+
+{anhvu.nguyen, dino.sejdinovic, tat-jun.chin }@adelaide.edu.au 
+
+## Abstract 
+
+Edge learning refers to training machine learning mod-els deployed on edge platforms, typically using new data ac-cumulated onboard. The computational limitations on edge devices affect not only model optimisation, but also cal-culation of the predictive uncertainty of the current model on the unlabelled data, which is vital for informing model updating. In this paper, we investigate edge learning in the context of performing deep image regression on a re-mote sensing satellite, where a deep network is executed by an onboard computer to regress a scalar y from an input image, e.g. , y is the percentage of pixels indicating cloud coverage or land use. We propose an uncertainty-guided edge learning (UGEL) algorithm that can accurately pri-oritise the data to speed up training convergence of the on-board regression model. Underpinning UGEL is the cal-culation of predictive uncertainty based on deep beta re-gression, where a deep network is used to estimate the pa-rameters of a beta distribution for which the target y for an input image has a high likelihood. Compared to es-tablished methods for uncertainty estimation that are ei-ther too costly on edge devices (e.g., require many for-ward passes per sample) or make strict assumptions on the predictive distribution (e.g., Gaussian), deep beta re-gression is computable in a single forward pass and al-lows more general predictive distributions. Results show that UGEL delivers faster-converging edge learning than active or semi-supervised learning. Code and models are publicly available at https://github.com/anh-vunguyen/UGEL .
+
+## 1. Introduction 
+
+Deploying machine learning models on the edge promises the benefits of lower latency operation, reduced data trans-mission costs, and enhanced privacy [9, 11, 33, 52]. How-ever, a deployed model invariably needs to be updated to 
+
+Figure 1. (Top) Onboard inference for responsive RS missions. (Bottom) The proposed UGEL for RS missions. 
+
+maintain its accuracy. Edge learning (EL) aims to train a machine learning model on the edge [17, 27, 57]. A major theme is performing the update using data accumulated on the platform itself, since such data reflects the actual oper-ating environment. Progress in space-hardening neural network accelerators for use on orbit has opened up the potential of satellite-borne machine learning [19, 41]. In particular, in remote sensing (RS) missions, by performing inference on Earth imagery collected by onboard imagers and using the predic-tion for onboard decision making, the time and energy costs of downlinking the data are avoided, thus enabling more re-sponsive missions; see Fig. 1. To motivate using examples, let f ˆw be a deep network with weights ˆw, and ˆy = f ˆw(x)
+
+be the onboard evaluation of f ˆw on an Earth image x. If ˆy
+
+is the percentage of pixels that are cloud-occluded, x can be discarded if ˆy is high, thus saving onboard storage [23]. If ˆy
+
+is the percentage of pixels indicating land cover, timely sur-vey of environmental impact can be obtained without need-ing to downlink x for further processing [20]. The need for EL on RS missions arises from the do-
+
+> arXiv:2605.05590v1 [cs.CV] 7 May 2026
+
+main gap between the testing data I = {xi}Ni=1 collected onboard and the dataset used to train f ˆw due to inherent sensor discrepancies and drift [18]. Thus, f ˆw needs to be periodically updated to ensure accuracy in long-term oper-ation. Despite the increasing potential for satellite-borne neural network accelerators, the compute capability will likely be much lower than that of terrestrial versions. More-over, satellite platforms have stringent power constraints. This demands the update on f ˆw to be computational- and energy-efficient, which invariably translates into using only a small subset T ⊂ I of the unlabelled data to retrain f ˆw.Choosing the subset T for model retraining and extract-ing supervisory signals from the unlabelled data are core problems in EL [27]. These tasks are related to active learn-ing (AL) [40], which optimises data subset selection for human labelling, and semi-supervised learning (SSL) [54], which leverages pre-trained models to assign labels to new data. Underpinning the selection of T is the estimation of the predictive uncertainty of f ˆw on I [34]. However, if f ˆw
+
+has not adapted to the operating environment, balancing the contributions of AL and SSL to selecting T is difficult. Moreover, since |I| ≫ |T | , the cost of uncertainty es-timation can actually dominate that of retraining f ˆw on T ,and an expensive uncertainty estimation technique can ex-acerbate the computational challenges to EL. For example, the established Monte Carlo (MC) dropout method [21] re-quires multiple forward passes ( e.g. , 10 to 30) per sample to collect posterior statistics, which can quickly drain the energy of the edge platform. By adopting a non-Bayesian approach and placing ev-idential priors over the Gaussian likelihood function, the seminal deep evidential regression (DER) method [3] di-rectly predicts the hyperparameters of the evidential distri-bution and avoids multiple forward passes during inference. However, Gaussian predictive uncertainties are unsuitable for some applications, e.g. , in the RS tasks of cloud and forest coverage prediction, y is bounded in [0 , 1] whereas a Gaussian distribution is unbounded. Applying DER runs the risk of biased uncertainties, and since the accuracy of uncertainty estimation directly influences the usefulness of the selected T for updating f ˆw, the convergence of EL could be impacted. In short, existing uncertainty estimation methods are unsuitable for the task at hand. To summarise, our key contributions are: • We propose uncertainty-guided edge learning (UGEL) that unites AL and SSL in a principled manner through a common uncertainty estimation step. We will show clear evidence that combining human labels and pseudo-labels on small subsets of T chosen in UGEL allows the updat-ing of f ˆw to converge much more rapidly than AL, SSL, or a simple combination of AL and SSL [42]. • We propose the usage of deep beta regression (DBR), where a deep network predicts the beta distribution for which the target y for an input image x has a high likeli-hood, as the uncertainty estimator for UGEL. This per-mits more flexible predictive distributions and respects the target bound y ∈ [0 , 1] . Also crucially, the differential entropy of beta distribution is a theoretically justified un-certainty estimate which can be computed in one forward pass, which is attractive for edge application. • We demonstrate that the proposed framework consistently outperforms strong baselines across multiple image re-gression tasks with various modern lightweight back-bones through extensive and rigorous experiments. 
+
+## 2. Related works 
+
+The need to update machine learning models deployed on the edge motivates EL [17, 27, 57]. In addition to com-putational efficiency, major considerations in EL include model simplification, collaborative learning, and learning from partially labelled or unlabelled data—we focus on the latter in this paper. Techniques for EL from unlabelled data include unsupervised learning, self-supervised learn-ing, transfer learning, AL and SSL, the latter two being the most relevant for our work. In the following, we will sur-vey the relevant developments, including the core topic of uncertainty estimation. 
+
+2.1. Active learning 
+
+The general aim of AL [31, 40, 45, 49] is selecting a small subset of I for human (groundtruth) annotation, which is then used to retrain f ˆw. Finding the most appropriate sub-set under the manual labelling and data transfer budget (in settings where the subset needs to be transferred off board for human labelling) is a key AL problem. Broadly speaking, there are three strategies for AL: uncertainty-based [22, 43, 53], where samples with low prediction confidence by the current model are prioritised, diversity-based [44, 48], where samples that are representative of the underlying data distribution are selected, and hybrid tech-niques [4, 29], that combine the above approaches. While clear benefits to non-deep learning methods have been recorded [45], the utility of AL on deep learning is less obvious [37]. It has been conjectured that the small number of samples selected, which is generally of the same size as training batches, dilutes the effectiveness of AL for deep learning [50]. 
+
+2.2. Semi-supervised learning 
+
+SSL focusses on settings where we have a limited number of labelled (groundtruth) samples but a large number of po-tentially useful unlabelled data [54]. Broadly the SSL loss combines supervised loss, unsupervised loss and relevant regularisation terms. Major paradigms include generative methods [15, 16, 47], where the data distribution is approxi-mated before the joint data-label distribution is evaluated on the new samples, graph-based methods [2, 24, 56], where a neighbourhood structure is estimated for label propagation, consistency regularisation methods [6, 7, 46], which assume model predictions remain unchanged under realistic per-turbations to data or model weights, and pseudo-labelling methods [10, 30, 38], which generate labels for the new data based on one or more models trained on the labelled subset. In EL settings where there is domain gap or shift, SSL should not rely on groundtruth samples acquired prior to deployment, since this will lead to bias in the decisions on the new unlabelled samples. We argue that the groundtruth samples should be extracted from the unlabelled samples di-rectly, specifically using AL to request manual annotations on the appropriate subset of samples. 
+
+2.3. Active semi-supervised learning 
+
+Active semi-supervised learning (ASSL) combines AL and SSL to alleviate their respective shortcomings. However, previous works on ASSL [12, 32] assume all data to be lo-cated on a monolithic platform ( e.g. , a data centre) without restrictions on the computational and communication bud-get inherent to EL. More fundamentally, previous ASSL works combine AL and SSL simplistically, whereby AL is used to procure the small set of groundtruth samples for SSL. We argue that more principled ways to conduct ASSL could lead to further benefits, e.g. , cross leveraging the intermediate results of AL and SSL to improve accuracy and/or achieve computational savings. To this end, Sec. 3 will describe our proposed UGEL algorithm. 
+
+2.4. Uncertainty estimation 
+
+As mentioned above, uncertainty estimation is a key step in AL. The main approaches to uncertainty estimation are Bayesian inference, ensemble methods, and deterministic methods [51]. Due to the resource constraints of edge de-vices, ensemble methods—which require storing multiple models, performing several inferences per input, and up-dating all models in the ensemble when necessary—are not suitable and hence will not be considered. Given training data K = {(xk, y k)}Kk=1 , Bayesian infer-ence defines the predictive distribution on new sample x as 
+
+p(y | x, K) = 
+
+Z
+
+> w
+
+p(y | x, w)p(w | K )dw, (1) where p(w | K ) is the posterior of model weights w, and 
+
+p(y | x, w) is the likelihood. MC dropout [21] approxi-mates (1) efficiently by mimicking a sample from the pos-terior distribution: first, a deep network f ˆw is trained on 
+
+K using dropout, where ˆw are the learned weights. Then, 
+
+P forward passes of x through f ˆw are conducted, with stochastic dropouts on ˆw in each pass, yielding P estimates 
+
+{ˆy(p)}Pp=1 . The mean and variance of (1) are then obtained respectively as 
+
+ˆy = 1
+
+P
+
+> P
+
+X
+
+> p=1
+
+ˆy(p), ˆσ2 = 1
+
+P
+
+> P
+
+X
+
+> p=1
+
+(ˆ y(p) − ˆy)2, (2) with ˆy and ˆσ interpreted as the prediction at x and its uncer-tainty. Since P evaluations of f ˆw are required, MC dropout can be costly on edge devices if P is large, e.g. , P = 30 as suggested by Gal and Ghahramani [21]. DER [3], which is representative of deterministic meth-ods, jointly predicts the regression target and its correspond-ing evidence to estimate predictive uncertainty. Under the assumption that regression targets follows a Gaussian distri-bution of unknown mean μ ∼ N (γ, σ 2υ−1) and unknown variance σ ∼ Γ−1(α, β ), DER optimises the model to in-fer the parameters (γ, υ, α, β ) of the evidential distribution given input x, which are then used to estimate the aleatoric and epistemic uncertainties 
+
+ha = E[σ2] = βα − 1 , he = V ar [μ] = βυ(α − 1) . (3) The sum ha + he is used as the predictive uncertainty on 
+
+x [1]. As we will show later, using DER in selecting T in our UGEL method did not lead to consistently better per-formance than random sampling. 
+
+## 3. Uncertainty-guided edge learning 
+
+Let f ˆw be the deep regression model deployed onboard that was pre-trained with an initial labelled dataset D =
+
+{(xj , y j )}Mj=1 , where yj ∈ [0 , 1] . Details on training f ˆw
+
+will be given in Sec. 4. Our goal is updating f ˆw using the unlabelled data I = {xi}Ni=1 collected onboard, where 
+
+N ≫ M .The proposed UGEL algorithm for updating f ˆw using I
+
+iteratively selects a subset T ⊂ I , labels the subset, and updates f ˆw across a number of rounds—a single iteration of UGEL is defined in Alg. 1. To facilitate labelling, a twin model f˚w is also maintained on the edge. Both f ˆw and f˚w
+
+have the same architecture and were pre-trained on the same data D, but initialised differently, thus ˆw̸ = ˚ w. Details of the main steps in Alg. 1 are given in the following. 
+
+3.1. Subset selection 
+
+Let h ˆw(xi) be the estimated measure of predictive uncer-tainty of f ˆw on xi. Since UGEL is agnostic to the uncer-tainty estimation method, we will leave the description of the proposed DBR method to Sec. 4. In each round of UGEL, T = TU ∪T C is composed from • A subset TU ⊂ I of size BU on which f ˆw is the most uncertain , i.e. ,
+
+TU = arg max  
+
+> S⊂I ,|S| =BU
+
+X
+
+> xi∈S
+
+h ˆw(xi). (4) • A subset TC ⊂ I of size BC on which f ˆw is the most certain , i.e. ,
+
+TC = arg min  
+
+> S⊂I ,|S| =BC
+
+X
+
+> xi∈S
+
+h ˆw(xi). (5) By construction, TU ∩ T C = ∅, hence |T | = BU + BC .
+
+Algorithm 1 UGEL (single round)  
+
+> 1:
+
+Inputs: 
+
+f ˆw: regression model 
+
+h ˆw: uncertainty estimator 
+
+f˚w: twin model 
+
+D = {(xj , y j )}Mj=1 := ( X , Y): init. labelled dataset 
+
+I = {xi}Ni=1 : unlabelled data (typ. N ≫ M )
+
+BU : #samples for human annot. (req. BU ≤ N )
+
+BC : #samples for model annot. (req. BC ≤ N − BU )
+
+τ : loss coefficient 
+
+▷ Select data subset  
+
+> 2:
+
+TU ← arg max  
+
+> Z⊂I ,|Z| =BU
+
+P 
+
+> xi∈Z
+
+h ˆw(xi) 
+
+> 3:
+
+TC ← arg min  
+
+> Z⊂I ,|Z| =BC
+
+P 
+
+> xi∈Z
+
+h ˆw(xi)
+
+▷ Label data subset  
+
+> 4:
+
+YU ← manually annotate TU 
+
+> 5:
+
+ˆYC ← f ˆw(TC ) // Pseudo-labels  
+
+> 6:
+
+˚YC ← f˚w(TC ) // Pseudo-labels 
+
+▷ Retrain model(s)  
+
+> 7:
+
+(X , Y) ← (X , Y) ∪ (TU , YU ) 
+
+> 8:
+
+ˆY ← f ˆw(X ) // Prediction  
+
+> 9:
+
+˚Y ← f˚w(X ) // Prediction  
+
+> 10:
+
+L ← L s( ˆY, Y) + Ls(˚Y, Y) + τ LRM SE ( ˆY ∪ ˆYC , ˚Y ∪ 
+
+˚YC ) 
+
+> 11:
+
+f ˆw ← model update (f ˆw, L ) 
+
+> 12:
+
+f˚w ← model update (f˚w, L ) 
+
+> 13:
+
+Outputs: 
+
+f ˆw: updated regression model 
+
+f˚w: updated twin model 
+
+D ← (X , Y): expanded labelled dataset 
+
+I ← I \ T U : reduced unlabelled data 
+
+3.2. Label assignment 
+
+Labelling of T is achieved as follows: • TU is transferred off board for manual annotation, yield-ing the label set YU . Therefore, size BU should reflect the annotation budget, which depends on the available human effort and communication bandwidth. • TC is labelled by evaluating f ˆw and f˚w to yield the label sets ˆYC and ˚YC . Since TC has no groundtruth labels, ˆYC
+
+and ˚YC play the role of pseudo-labels .Note that in the context of satellite-borne machine learning, 
+
+TU needs to be downlinked with the labels YU subsequently uplinked. Hence BU should be small (more details below). 
+
+3.3. Model retraining 
+
+The loss function L is a weighted combination of super-vised loss Ls and semi-supervised loss LRM SE (precise definitions of the losses will be given in Sec. 4). Ls depends on the human-labelled samples only (including (TU , YU ))while LRM SE measures the inconsistency of the prediction of f ˆw and f˚w on the data considered thus far (including the pseudo-labelled samples). Intuitively, minimising LRM SE 
+
+induces cross supervision [13] between the primary and twin models. The overall loss L is then used to update both f ˆw and 
+
+f˚w. Then, (TU , YU ) is appended to D, TU is removed from 
+
+I, and UGEL can proceed to the next round if |I| ≥ BU .
+
+3.4. Intuition behind UGEL 
+
+UGEL allows to balance the contributions of human- and pseudo-labelled data, both chosen carefully using an uncer-tainty estimator, to speed up the training convergence. Exe-cuting UGEL sequentially will progressively expand D and reduce I. However, since D is initially small ( e.g. , M = 12 
+
+in typical online learning settings) and TU is kept small to minimise human labelling effort and data transfer load ( e.g. ,
+
+BU = 6 in our experiments), f ˆw, f˚w and h ˆw tend to be inaccurate and uninformative initially. Using all pseudo-labelled samples from I, which dwarfs D (e.g. , size N of 
+
+I can be 10 k), will lead to divergence in training. The size of TC should thus reflect the size of D. To this end, we use 
+
+BC = |D| , i.e. , TC is small initially and grows with D.Following from the above, we can also see that UGEL bridges AL, SSL and ASSL through the parameter settings: • If BU > 0 and BC = 0 , UGEL reduces to uncertainty-based AL [22, 43]. • If BU = 0 and BC = N , UGEL can be seen as SSL with cross pseudo supervision [13] (in this setting, UGEL will terminate after one round). • If BU > 0 and BC = N − BU , UGEL reduces to the ASSL algorithm of Yao et al. [55] that uses all human-and pseudo-labelled samples in the training. Sec. 6 will show that being able to balance the relative con-tributions of human- and pseudo-labelled samples allows UGEL to converge much faster than AL, SSL and ASSL. 
+
+3.5. Computational considerations 
+
+In each round of UGEL, the uncertainty estimator h ˆw needs to be applied on the unlabelled set I of size N . The samples involved in retraining f ˆw and f˚w are D, TU and TC , which are of sizes M , BU and BC respectively. Since N is much larger than M and BU , the total cost of uncertainty estima-tions in each round dominates that of retraining the models. This argues for a computationally efficient h ˆw.4. Deep beta regression 
+
+We focus on regressing a scalar y ∈ [0 , 1] from an input image x due its relevance to RS applications (see Sec. 1). Our method DBR trains a deep network fw that outputs the parameters of a beta distribution given x. The probabil-ity density function of a beta distribution has a support on 
+
+[0 , 1] and two shape parameters α > 0 and β > 0, i.e. ,
+
+p(y | α, β ) = 1
+
+Beta (α, β ) yα−1(1 − y)β−1, y ∈ [0 , 1] ,
+
+(6) where Beta (α, β ) is the beta function. We use an alterna-tive parameterisation via the mean μ = α/ (α + β) ∈ (0 , 1) 
+
+and the precision ν = α + β > 0, leading to 
+
+p(y|μ, ν ) = Γ( ν)Γ( μν )Γ  (1 − μ)ν yμν −1(1 − y)(1 −μ)ν−1,
+
+(7) where Γ( ·) is the gamma function. Hence the output range of fw is (0 , 1) × R+. Given the prediction (ˆ μ, ˆν) = fw(x),we take ˆμ directly as the scalar prediction ˆy.
+
+4.1. Predictive uncertainty 
+
+We can directly calculate the differential entropy [35], which measures the predictive uncertainty of the fitted beta distribution under mean-precision parameterisation as 
+
+hw(x) = log Γ(ˆ μˆν)Γ  (1 − ˆμ)ˆ ν
+
+Γ(ˆ ν)+(ˆ ν − 2) ψ(ˆ ν) − (ˆ μˆν − 1) ψ(ˆ μˆν)
+
+− (1 − ˆμ)ˆ ν − 1ψ (1 − ˆμ)ˆ ν,
+
+(8) where ψ(·) is the digamma function. Note that the range of (8) is [−∞ , 0] . A higher entropy indicates that the predicted beta distribution has a shape closer to the uni-form distribution, revealing the model is uncertain about the value of ˆy in [0 , 1] . Conversely, a lower entropy arises from a more concentrated density, indicating higher certainty. In contrast to MC dropout, computing hw(x) in DBR de-pends on values (ˆ μ, ˆν) obtained from a single forward pass of fw. In contrast to DER, the predictive density respects the range [0 , 1] . Fig. 2 provides qualitative comparisons be-tween the uncertainty estimation methods. As will be pre-sented in Sec. 6, the groundtruth targets frequently occupy the extremes ( 0 and 1) in real image regression datasets, thus, handling cases at the boundaries is vital. 
+
+4.2. Architecture and training 
+
+Let f be the deep neural network employed in this study. Given labelled dataset D = {(xj , y j )}Mj=1 := (X , Y),the training of fw is formulated as multitask optimisation, in which both the standard regression error (root mean-squared error) and the negative log-likelihood are min-imised simultaneously. Let ( ˆU, ˆV) = fw(X ), where ˆU =
+
+{ˆμj }Mj=1 and ˆV = {ˆνj }Mj=1 . The loss is 
+
+Ls = LRM SE ( ˆU, Y) + λLN LL ( ˆU, ˆV, Y), (9) where λ weighs the relative importance of the two tasks, 
+
+LRM SE ( ˆU, Y) = 
+
+vuut MX
+
+> j=1
+
+(ˆ μj − yj )2
+
+M (10) evaluates the regression error, while minimising 
+
+LN LL ( ˆU, ˆV, Y) = 1
+
+M
+
+> M
+
+X
+
+> j=1
+
+log Γ(ˆ μj ˆνj )Γ  (1 − ˆμj )ˆ νj
+
+
+
+Γ(ˆ νj )
+
+−(ˆ μj ˆνj − 1) log( yj ) −  (1 − ˆμj )ˆ νj − 1log(1 − yj )
+
+(11) fits the predictive beta density for uncertainty estimation. Refer to the supp material for details on the derivations. 
+
+## 5. Datasets 
+
+We first describe the RS datasets used in the experiments. 
+
+5.1. Real scenes with real clouds from Landsat-8 (RSRC-L8 )
+
+We used real RGB images from the 38-Cloud dataset [36] which contained groundtruth cloud masks. We selected 18 scenes for EL and the remaining 20 scenes were used as a testing data from unseen before scenes. We cropped all scenes and their ground-truth masks into 128 x128 non-overlapping patches, and the cloud coverage percentage of each patch was obtained by counting the foreground pixels in the masks. In total, we have 20 , 294 patches for EL, and 
+
+22 , 528 for testing; see Fig. 3. 
+
+5.2. Real scenes with real clouds from Sentinel-2 (RSRC-S2 )
+
+We sourced real base images from CloudSEN12 [5], a large-scale expert-labelled cloud segmentation dataset built upon ESA’s Sentinel-2 L1C imagery. Due to the large size of the corpus (nearly 1 TB), we selected 5, 000 based im-ages (about 10%) for EL and 2, 000 based images for test-ing. As above, we cropped each based image into 128 x128 
+
+patches and used bands 4-3-2, which can be processed to RGB images. The ground-truth masks of CloudSEN12 had 4 classes: 0-clear, 1-thick cloud, 2-thin cloud, 3-cloud shadow. We grouped classes 0 & 3 as non-cloud and classes 1 & 2 as cloud before calculating the groundtruth cloud percentage. In total, we have 80 , 000 patches for EL and 
+
+32 , 000 patches for testing. Figure 2. Qualitative comparison of MC Dropout, DER and DBR in uncertainty estimation for cloud coverage prediction. The first two panels show the input image x and the foreground mask corresponding to the groundtruth coverage value y. The remaining panels show the three uncertainty estimation methods. Note that the predictive distribution of DER (a Gaussian) extends beyond the target range [0 , 1] ,while that of DBR (a Beta) lies within [0 , 1] .  
+
+> Figure 3. Sample images from RSRC-L8 with reg. targets.
+
+5.3. Real scenes with land coverage ( RSLC )
+
+We sourced real RGB images for land cover segmentation from LandCover.ai [8]. The background class (uncovered) relates to open land ( e.g. , grass, fields) while the rest ( e.g. ,building, woodland, water and road) are subsumed under the foreground class (covered). Based on this assignment, the percentage of pixels corresponding to land cover were computed. As above, 128 x128 pixel patches were extracted, resulting in 154 , 056 patches for EL and 25 , 279 patches for testing; see Fig. 4 for sample images.   
+
+> Figure 4. Sample images from RSLC with regression targets.
+
+5.4. Dataset statistics 
+
+Fig. 5 plots the histograms of the groundtruth regression la-bels y in the three datasets above. The histograms are bi-modal, with the two extremes y = 0 and y = 1 being much more frequent, though non-trivial number of samples span the range [0 , 1] . Crucially, the fact that many groundtruth la-bels occupy the extremes argues for uncertainty estimation that handles boundaries correctly. 
+
+## 6. Experiments 
+
+6.1. Benchmarking on RS applications 
+
+We benchmarked UGEL against representative methods for model learning/updating in image-based RS applications. The specific pipelines compared were: 
+
+> Figure 5. Histogram of groundtruth regression labels.
+
+• Chen et al. [13]’s SSL algorithm based on cross pseudo supervision for image semantic segmentation that we modified for image regression (predicting scalar y). • Yao et al. [55]’s ASSL algorithm that combines AL and SSL for cloud segmentation, which we also modified for image regression. • The proposed UGEL with DBR uncertainty estimation. The hyperparameters used for each round of UGEL were 
+
+BU = 6 , BC = |D| and τ = 2 .For completeness, we also compared against • Using BALD [22] to train an image regressor. BALD is a seminal AL method that uses MC dropout for uncertainty estimation in the acquisition function that selects TU .• Baseline AL method with random sampling as the ac-quisition function. Munjal et al. [37] demonstrated that random sampling performs competitively with most AL methods in fair experimental settings, validating its role as a bona fide AL baseline. For the methods that require human labelling of TU , we take the groundtruth labels of TU as the human labels. We adopted the standard batch-mode active learning setup [4], initialising with M = 12 labelled samples and using a batch size of b = 6 to respect the communica-tion limit BU for annotation. BU is kept small to reflect the practical constraints of satellite communication. As dis-cussed in Sec. 1, satellites operate under stringent computa-tional and energy limitations, which necessitates the use of lightweight deep neural networks. Accordingly, this work focuses on compact yet effective architectures. All regres-sion models employed widely adopted lightweight back-bone architectures (ResNet18 [25], MobileNetV3 [26], or MobileNetV4 [39]) and were trained with the Adam op-timiser [28] (learning rate = 0.001). In each round, the models were randomly re-initialised and retrained for 12 epochs. Re-initialisation at the beginning of each round is required, since continuing training from the previous check-point degrades model performance due to catastrophic for-getting. Performance was evaluated using RMSE on the test set after each round. Each experiment consisted of as many rounds as feasible on our HPC, and the RMSE values were recorded. To ensure robustness and comparability, experi-ments were repeated 10 times to obtain mean, std dev and p-values. Results on RSRC-L8 and RSLC are presented in Fig. 6 for models using ResNet18 and MobileNetV3. Re-sults on RSRC-S2 and for the MobileNetV4 backbone are included in the supp material. The SSL and ASSL exper-iments were limited to fewer rounds due to computational constraints. Each ASSL round processes all remaining un-labeled samples, greatly increasing computational cost and runtime compared with UGEL with DBR or active learning methods (Rand and BALD). Extending ASSL further would require substantially more training time and resources with-out providing additional methodological insight. AL with random sampling and BALD reduced the test-ing RMSE over time, but with large fluctuations, particu-larly for random sampling. Moreover, BALD did not out-perform random sampling; in fact, in RSLC random sam-pling reduced the RMSE faster than BALD. This observa-tion is consistent with [37]. In contrast to the AL meth-ods, UGEL with DBR consistently yielded lower RMSE and standard deviations, indicating that incorporating su-pervisory signals from the most certain unlabelled instances enhances model convergence and learning stability. UGEL with DBR substantially outperformed Yao et al. [55]’s ASSL method. While ASSL initially provided no-ticeable improvement over using AL alone, its performance plateaued thereafter, likely due to a large number of noisy pseudo-labels diluting the human-labelled samples. In con-trast, UGEL sustained the benefit of SSL by leveraging only the most certain pseudo-labels, resulting in consistent per-formance gains. This highlights the importance of selec-tively integrating pseudo-labels guided by uncertainty. Note that the gap between all methods reduce with the number of rounds, since asymptotically all the new data are eventually selected for labelling. The key differentiat-ing factor for EL is reducing the testing error using the least number of samples to respect labelling and bandwidth lim-its. Tab. 1 shows p-values from comparing UGEL with the other methods, complementing the results shown in Fig. 6. The performance gaps are meaningful since most of the p-values are < 0.05 . Note that outcomes in different number of rounds are shown since the datasets are of distinct sizes, which yielded different convergence speeds. 
+
+6.2. UGEL ablation studies 
+
+Two ablation tests were conducted:                                                                       
+
+> Test Rd. 2 Rd. 4 Rd. 6 Rd. 8
+> RSRC-S2  UGEL vs Rand 0.019 0.001 0.005 0.002 UGEL vs BALD 0.042 0.002 0.053 0.002 UGEL vs SSL 0.014 0.001 0.005 0.001 UGEL vs ASSL 0.016 0.008 0.008 0.008
+> Test Rd. 5 Rd. 10 Rd. 15 Rd. 20
+> RSRC-L8  UGEL vs Rand 0.024 0.001 0.002 0.009 UGEL vs BALD 0.036 0.002 0.002 0.001 UGEL vs SSL 0.001 0.001 0.001 0.001 UGEL vs ASSL 0.001 0.001 0.001 0.001
+> Test Rd. 1 Rd. 2 Rd. 3 Rd. 4
+> RSLC  UGEL vs Rand 0.188 0.001 0.005 0.003 UGEL vs BALD 0.002 0.001 0.001 0.001 UGEL vs SSL 0.839 0.001 0.001 0.001 UGEL vs ASSL 0.577 0.042 0.024 0.019 Table 1. Wilcoxon signed-rank test p-values comparing UGEL with DBR against other methods on all datasets using the ResNet18 backbone.
+
+T1 Effects of diff. uncertainty estimation methods on UGEL. 
+
+T2 Effects of different groundtruth regression label distribu-tions on the performance of UGEL. For T1 , in place of DBR, we used the following uncer-tainty estimation algorithms in UGEL: MC dropout (MCD) with P = 10 , DER and a “dummy” method (RAN) that assigns constant uncertainty thus amounting to randomly sampling the data. The experimental setup, hyperparam-eter configurations, and evaluation metric were kept con-sistent with those described in the preceding benchmarking experiment. The utilised backbone is ResNet18. Results on RSRC-S2 are in Fig. 7, while those for RSRC-L8 and 
+
+RSLC are in the supp material. The results show that using DBR in UGEL outperformed the other uncertainty methods, with a noticeable gap in the earlier rounds. The statistical significance test results in Tab. 2 confirm that using DBR in UGEL achieved signif-icantly lower regression errors than other methods most of the time (p-values < 0.05 ). For T2 , we generated and added synthetic cloud masks on clearsky patches on RS images to produce deep regres-sion datasets with different groundtruth label distributions. UGEL with the different uncertainty estimation methods was then executed on the datasets, and the results show that DBR still provided the best regression accuracy with high statistical significance. Due to page limits, we refer the reader to the supp material for details of this experiment. 
+
+6.3. Runtime comparisons 
+
+To assess runtime in a satellite-borne EL context, we ex-ecuted UGEL with different uncertainty methods on an Nvidia Jetson Orin NX, which was identified as viable for satellite operation [19, 41]. The employed backbone is 1
+
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> 40
+> 45
+> 50
+> Round
+> 0.30
+> 0.35
+> 0.40
+> 0.45
+> 0.50
+> 0.55
+> 0.60
+> 0.65
+> Testing error (RMSE)
+> RSRC-L8
+> AL - Random Sampling
+> AL - BALD (Gal et al.)
+> UGEL w. DBR 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+> Round
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> RSRC-L8
+> SSL (Chen et al.)
+> ASSL (Yao, Guo, and Li)
+> UGEL w. DBR 1
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> 40
+> Round
+> 0.30
+> 0.35
+> 0.40
+> 0.45
+> 0.50
+> 0.55
+> 0.60
+> 0.65
+> Testing error (RMSE)
+> RSLC
+> AL - Random Sampling
+> AL - BALD (Gal et al.)
+> UGEL w. DBR 1
+> 2
+> 3
+> 4
+> Round
+> 0.30
+> 0.35
+> 0.40
+> 0.45
+> 0.50
+> 0.55
+> 0.60
+> 0.65
+> Testing error (RMSE)
+> RSLC
+> SSL (Chen et al.)
+> ASSL (Yao, Guo, and Li)
+> UGEL w. DBR 1
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> 40
+> 45
+> 50
+> Round
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> Testing error (RMSE)
+> RSRC-L8
+> AL - Random Sampling
+> AL - BALD (Gal et al.)
+> UGEL w. DBR 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+> Round
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> Testing error (RMSE)
+> RSRC-L8
+> SSL (Chen et al.)
+> ASSL (Yao, Guo, and Li)
+> UGEL w. DBR 1
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> 40
+> Round
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> Testing error (RMSE)
+> RSLC
+> AL - Random Sampling
+> AL - BALD (Gal et al.)
+> UGEL w. DBR 1
+> 2
+> 3
+> 4
+> Round
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> Testing error (RMSE)
+> RSLC
+> SSL (Chen et al.)
+> ASSL (Yao, Guo, and Li)
+> UGEL w. DBR
+
+Figure 6. Panels 1–4 (top row): Benchmarking UGEL with DBR against AL (BALD [22] and random sampling), SSL [13] and ASSL [55] on RSRC-L8 and RSLC using a ResNet18 backbone. Panels 5–8 (bottom row): Same comparisons but using MobileNetV3 as the back-bone. Bolded curves and shaded regions respectively indicate mean RMSE testing error and standard deviation over 10 runs. 3
+
+> 6
+> 9
+> 12
+> 15
+> 18
+> 21
+> 24
+> 27
+> 30
+> Round
+> 0.35
+> 0.40
+> 0.45
+> 0.50
+> 0.55
+> 0.60
+> 0.65
+> Testing error (RMSE)
+
+RSRC-S2 
+
+> UGEL w. RAN
+> UGEL w. MCD
+> UGEL w. DER
+> UGEL w. DBR
+
+Figure 7. Comparison of different uncertainty estimation methods in UGEL on RSRC-S2 using the ResNet18 backbone. Bolded curves and shaded regions respectively indicate mean RMSE test-ing error and std dev over 10 runs. 
+
+Test Rd. 5 Rd. 10 Rd. 15 Rd. 20 
+
+> RSRC-S2
+
+DBR vs RAN 0.005 0.002 0.116 0.019 DBR vs MCD 0.001 0.003 0.08 0.003 DBR vs DER 0.001 0.001 0.005 0.032 
+
+> RSRC-L8
+
+DBR vs RAN 0.094 0.003 0.003 0.068 DBR vs MCD 0.003 0.001 0.004 0.003 DBR vs DER 0.244 0.003 0.011 0.002 
+
+> RSLC
+
+DBR vs RAN 0.348 0.423 0.216 0.348 DBR vs MCD 0.042 0.005 0.116 0.042 DBR vs DER 0.138 0.042 0.065 0.042 Table 2. Wilcoxon signed-rank test p-values comparing using DBR and other methods using the ResNet18 backbone, sampled every 5 rounds. 
+
+ResNet18. Tab. 3 records the runtime on RSRC-S2 (see the supp material for the runtimes on RSRC-L8 and RSLC ), where it is clear that the computational cost of uncertainty estimation was much greater than that of model retraining, and that MC dropout was costlier than DER and DBR. 
+
+Method Uncertain. est. ↓ Model retrain. ↓
+
+UGEL w. RAN n/a 7.05-11.64 UGEL w. MCD 495.84-514.18 7.18-12.54 UGEL w. DER 82.01-85.47 7.23-13.29 UGEL w. DBR 68.04-74.53 7.43-12.02 Table 3. Runtime (minimum and maximum, in seconds) for dif-ferent uncertainty estimation methods during the first 10 rounds of UGEL on the RSRC-S2 dataset using the ResNet18 backbone. 
+
+## 7. Conclusions and limitations 
+
+We proposed an uncertainty-guided edge learning (UGEL) algorithm that was integrated with an efficient uncertainty estimation method based on deep beta regression (DBR). Benchmarking on real remote sensing (RS) datasets demon-strated the superiority of UGEL with DBR over active and semi-supervised learning methods. Ablation studies con-firmed that DBR effectively guided the selection of infor-mative unlabeled samples for model updates in remote sens-ing applications. Overall, the results indicate that the pro-posed framework is well-suited for accelerating on-board deep network training for RS applications. The improvement provided by the proposed framework declines with increased object diversity, as shown in the re-sults on RSLC . The use of the twin model in UGEL also increases computational costs, memory usage, and power consumption during training. In the future, we plan to de-velop a more adaptive uncertainty estimation method for such conditions and a more efficient semi-supervised learn-ing method without employing a twin model. 
+
+## Acknowledgments 
+
+We thank Andrew Du, Anh-Dzung Doan, and Punarjay Chakravarty for insightful discussions and feedback. References 
+
+[1] Moloud Abdar, Farhad Pourpanah, Sadiq Hussain, Dana Rezazadegan, Li Liu, Mohammad Ghavamzadeh, Paul Fieguth, Xiaochun Cao, Abbas Khosravi, U Rajendra Acharya, et al. A review of uncertainty quantification in deep learning: Techniques, applications and challenges. Informa-tion fusion , 76:243–297, 2021. 3 [2] Sami Abu-El-Haija, Bryan Perozzi, Amol Kapoor, Nazanin Alipourfard, Kristina Lerman, Hrayr Harutyunyan, Greg Ver Steeg, and Aram Galstyan. Mixhop: Higher-order graph convolutional architectures via sparsified neighborhood mix-ing. In international conference on machine learning , pages 21–29. PMLR, 2019. 3 [3] Alexander Amini, Wilko Schwarting, Ava Soleimany, and Daniela Rus. Deep evidential regression. Advances in neural information processing systems , 33:14927–14937, 2020. 2, 3[4] Jordan T Ash, Chicheng Zhang, Akshay Krishnamurthy, John Langford, and Alekh Agarwal. Deep batch active learning by diverse, uncertain gradient lower bounds. arXiv preprint arXiv:1906.03671 , 2019. 2, 6 [5] Cesar Aybar, Luis Ysuhuaylas, Jhomira Loja, Karen Gon-zales, Fernando Herrera, Lesly Bautista, Roy Yali, Angie Flores, Lissette Diaz, Nicole Cuenca, et al. Cloudsen12, a global dataset for semantic understanding of cloud and cloud shadow in sentinel-2. Scientific data , 9(1):782, 2022. 5 [6] David Berthelot, Nicholas Carlini, Ekin D Cubuk, Alex Kurakin, Kihyuk Sohn, Han Zhang, and Colin Raffel. Remixmatch: Semi-supervised learning with distribution alignment and augmentation anchoring. arXiv preprint arXiv:1911.09785 , 2019. 3 [7] David Berthelot, Nicholas Carlini, Ian Goodfellow, Nicolas Papernot, Avital Oliver, and Colin A Raffel. Mixmatch: A holistic approach to semi-supervised learning. Advances in neural information processing systems , 32, 2019. 3 [8] Adrian Boguszewski, Dominik Batorski, Natalia Ziemba-Jankowska, Tomasz Dziedzic, and Anna Zambrzycka. Land-cover. ai: Dataset for automatic mapping of buildings, wood-lands, water and roads from aerial imagery. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pat-tern Recognition , pages 1102–1110, 2021. 6 [9] Han Cai, Ji Lin, Yujun Lin, Zhijian Liu, Haotian Tang, Han-rui Wang, Ligeng Zhu, and Song Han. Enable deep learn-ing on mobile devices: Methods, systems, and applications. 
+
+ACM Transactions on Design Automation of Electronic Sys-tems (TODAES) , 27(3):1–50, 2022. 1 [10] Dong-Dong Chen, Wei Wang, and Wei Gao Zhihua Zhou. Tri-net for semi-supervised deep learning. In Proceedings of twenty-seventh international joint conference on artificial intelligence , pages 2014–2020, 2018. 3 [11] Jiasi Chen and Xukan Ran. Deep learning with edge comput-ing: A review. Proceedings of the IEEE , 107(8):1655–1674, 2019. 1 [12] Sijin Chen, Yingyun Yang, and Yan Hua. Semi-supervised active learning for object detection. Electronics , 12(2):375, 2023. 3 [13] Xiaokang Chen, Yuhui Yuan, Gang Zeng, and Jingdong Wang. Semi-supervised semantic segmentation with cross pseudo supervision. In Proceedings of the IEEE/CVF con-ference on computer vision and pattern recognition , pages 2613–2622, 2021. 4, 6, 8 [14] Mikolaj Czerkawski, Robert Atkinson, Craig Michie, and Christos Tachtatzis. Satellitecloudgenerator: Controllable cloud and shadow synthesis for multi-spectral optical satel-lite images. Remote Sensing , 15(17), 2023. 3 [15] Zihang Dai, Zhilin Yang, Fan Yang, William W Cohen, and Russ R Salakhutdinov. Good semi-supervised learning that requires a bad gan. Advances in neural information process-ing systems , 30, 2017. 2 [16] Remi Denton, Sam Gross, and Rob Fergus. Semi-supervised learning with context-conditional generative adversarial net-works. arXiv preprint arXiv:1611.06430 , 2016. 2 [17] Sauptik Dhar, Junyao Guo, Jiayi Liu, Samarth Tripathi, Un-mesh Kurup, and Mohak Shah. A survey of on-device ma-chine learning: An algorithms and learning theory perspec-tive. ACM Transactions on Internet of Things , 2(3):1–49, 2021. 1, 2 [18] Andrew Du, Anh-Dzung Doan, Yee Wei Law, and Tat-Jun Chin. Domain adaptation for satellite-borne hyperspectral cloud detection. arXiv preprint arXiv:2309.02150 , 2023. 2 [19] Michael A. Felix, Windy S. Slater, Derrek C. Landauer, Ryan E. Pinson, and Benjamin B.W. Rutherford. Total ioniz-ing dose radiation testing of nvidia jetson orin nx system on module. In 2024 IEEE Space Computing Conference (SCC) ,pages 116–121, 2024. 1, 7 [20] Matt Finer, Sidney Novoa, Mikaela J Weisse, Rachael Pe-tersen, Joseph Mascaro, Tamia Souto, Forest Stearns, and Ra´ ul Garc´ ıa Martinez. Combating deforestation: From satel-lite to intervention. Science , 360(6395):1303–1305, 2018. 1 [21] Yarin Gal and Zoubin Ghahramani. Dropout as a bayesian approximation: Representing model uncertainty in deep learning. In international conference on machine learning ,pages 1050–1059. PMLR, 2016. 2, 3 [22] Yarin Gal, Riashat Islam, and Zoubin Ghahramani. Deep bayesian active learning with image data. In International conference on machine learning , pages 1183–1192. PMLR, 2017. 2, 4, 6, 8 [23] Gianluca Giuffrida, Lorenzo Diana, Francesco De Gioia, Gionata Benelli, Gabriele Meoni, Massimiliano Donati, and Luca Fanucci. Cloudscout: a deep neural network for on-board cloud detection on hyperspectral images. Remote Sensing , 12(14):2205, 2020. 1 [24] Will Hamilton, Zhitao Ying, and Jure Leskovec. Inductive representation learning on large graphs. Advances in neural information processing systems , 30, 2017. 3 [25] Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun. Deep residual learning for image recognition. In Proceed-ings of the IEEE conference on computer vision and pattern recognition , pages 770–778, 2016. 6 [26] Andrew Howard, Mark Sandler, Grace Chu, Liang-Chieh Chen, Bo Chen, Mingxing Tan, Weijun Wang, Yukun Zhu, Ruoming Pang, Vijay Vasudevan, et al. Searching for mo-bilenetv3. In Proceedings of the IEEE/CVF international conference on computer vision , pages 1314–1324, 2019. 6 [27] Aymen Rayane Khouas, Mohamed Reda Bouadjenek, Hakim Hacid, and Sunil Aryal. Training machine learn-ing models at the edge: A survey. arXiv preprint arXiv:2403.02619 , 2024. 1, 2 [28] Diederik P Kingma and Jimmy Ba. Adam: A method for stochastic optimization. arXiv preprint arXiv:1412.6980 ,2014. 6 [29] Andreas Kirsch, Joost Van Amersfoort, and Yarin Gal. Batchbald: Efficient and diverse batch acquisition for deep bayesian active learning. Advances in neural information processing systems , 32, 2019. 2 [30] Dong-Hyun Lee et al. Pseudo-label: The simple and effi-cient semi-supervised learning method for deep neural net-works. In Workshop on challenges in representation learn-ing, ICML , page 896. Atlanta, 2013. 3 [31] Dongyuan Li, Zhen Wang, Yankai Chen, Renhe Jiang, Weip-ing Ding, and Manabu Okumura. A survey on deep active learning: Recent advances and new frontiers. IEEE Transac-tions on Neural Networks and Learning Systems , 2024. 2 [32] Wanli Ma, Oktay Karakus, and Paul L Rosin. Integrating semi-supervised and active learning for semantic segmenta-tion. arXiv preprint arXiv:2501.19227 , 2025. 3 [33] Miguel Angel Quiroz Martinez. Deep learning for edge com-puting: A survey. Artificial Intelligence, Computer and Soft-ware Engineering Advances: Proceedings of the CIT 2020 Volume 1 , 1326:79, 2021. 1 [34] Ryan G McClarren, Penrose McClarren, and R Penrose. Uncertainty quantification and predictive computational sci-ence. 2018. 2 [35] Joseph Victor Michalowicz, Jonathan M Nichols, and Frank Bucholtz. Handbook of differential entropy . Crc Press, 2013. 5[36] Sorour Mohajerani and Parvaneh Saeedi. Cloud-net: An end-to-end cloud detection algorithm for landsat 8 imagery. In 
+
+IGARSS 2019-2019 IEEE international geoscience and re-mote sensing symposium , pages 1029–1032. IEEE, 2019. 5 [37] Prateek Munjal, Nasir Hayat, Munawar Hayat, Jamshid Sourati, and Shadab Khan. Towards robust and reproducible active learning using neural networks. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 223–232, 2022. 2, 6, 7 [38] Siyuan Qiao, Wei Shen, Zhishuai Zhang, Bo Wang, and Alan Yuille. Deep co-training for semi-supervised image recogni-tion. In Proceedings of the european conference on computer vision (eccv) , pages 135–152, 2018. 3 [39] Danfeng Qin, Chas Leichner, Manolis Delakis, Marco Fornoni, Shixin Luo, Fan Yang, Weijun Wang, Colby Ban-bury, Chengxi Ye, Berkin Akin, et al. Mobilenetv4: Uni-versal models for the mobile ecosystem. In European Con-ference on Computer Vision , pages 78–96. Springer, 2024. 6[40] Pengzhen Ren, Yun Xiao, Xiaojun Chang, Po-Yao Huang, Zhihui Li, Brij B Gupta, Xiaojiang Chen, and Xin Wang. A survey of deep active learning. ACM computing surveys (CSUR) , 54(9):1–40, 2021. 2 [41] Ivan Rodriguez-Ferrandez, Leonidas Kosmidis, Maris Tali, David Steenari, Alex Hands, and Camille B´ elanger-Champagne. Proton evaluation of single event effects in the nvidia gpu orin som: Understanding radiation vulnerabilities beyond the soc. In 2024 IEEE 30th International Sympo-sium on On-Line Testing and Robust System Design (IOLTS) ,pages 1–7, 2024. 1, 7 [42] Matthias Rottmann, Karsten Kahl, and Hanno Gottschalk. Deep bayesian active semi-supervised learning. In 2018 17th IEEE International Conference on Machine Learning and Applications (ICMLA) , pages 158–164. IEEE, 2018. 2 [43] Tobias Scheffer, Christian Decomain, and Stefan Wrobel. Active hidden markov models for information extraction. In 
+
+International symposium on intelligent data analysis , pages 309–318. Springer, 2001. 2, 4 [44] Ozan Sener and Silvio Savarese. Active learning for convolu-tional neural networks: A core-set approach. arXiv preprint arXiv:1708.00489 , 2017. 2 [45] Burr Settles. Active learning literature survey. 2009. 2 [46] Kihyuk Sohn, David Berthelot, Nicholas Carlini, Zizhao Zhang, Han Zhang, Colin A Raffel, Ekin Dogus Cubuk, Alexey Kurakin, and Chun-Liang Li. Fixmatch: Simplifying semi-supervised learning with consistency and confidence. 
+
+Advances in neural information processing systems , 33:596– 608, 2020. 3 [47] Jost Tobias Springenberg. Unsupervised and semi-supervised learning with categorical generative adversarial networks. arXiv preprint arXiv:1511.06390 , 2015. 2 [48] Wei Tan, Lan Du, and Wray Buntine. Diversity enhanced active learning with strictly proper scoring rules. Advances in Neural Information Processing Systems , 34:10906–10918, 2021. 2 [49] Alaa Tharwat and Wolfram Schenck. A survey on active learning: State-of-the-art, practical challenges and research directions. Mathematics , 11(4):820, 2023. 2 [50] Devis Tuia, Konrad Schindler, Beg¨ um Demir, Xiao Xiang Zhu, Mrinalini Kochupillai, Saˇ so Dˇ zeroski, Jan N van Rijn, Holger H Hoos, Fabio Del Frate, Mihai Datcu, et al. Ar-tificial intelligence to advance earth observation: A review of models, recent trends, and pathways forward. IEEE Geo-science and Remote Sensing Magazine , 2024. 2 [51] Ke Wang, Chongqiang Shen, Xingcan Li, and Jianbo Lu. Un-certainty quantification for safe and reliable autonomous ve-hicles: A review of methods and applications. IEEE Trans-actions on Intelligent Transportation Systems , 2025. 3 [52] Xiaofei Wang, Yiwen Han, Victor CM Leung, Dusit Niyato, Xueqiang Yan, and Xu Chen. Convergence of edge com-puting and deep learning: A comprehensive survey. IEEE communications surveys & tutorials , 22(2):869–904, 2020. 1[53] Songbai Yan, Kamalika Chaudhuri, and Tara Javidi. The la-bel complexity of active learning from observational data. 
+
+Advances in Neural Information Processing Systems , 32, 2019. 2 [54] Xiangli Yang, Zixing Song, Irwin King, and Zenglin Xu. A survey on deep semi-supervised learning. IEEE transac-tions on knowledge and data engineering , 35(9):8934–8954, 2022. 2 [55] Xudong Yao, Qing Guo, and An Li. Cloud detection in op-tical remote sensing images with deep semi-supervised and active learning. IEEE Geoscience and Remote Sensing Let-ters , 20:1–5, 2023. 4, 6, 7, 8 [56] Kaixiong Zhou, Xiao Huang, Yuening Li, Daochen Zha, Rui Chen, and Xia Hu. Towards deeper graph neural networks with differentiable group normalization. Advances in neural information processing systems , 33:4917–4928, 2020. 3 [57] Shuai Zhu, Thiemo Voigt, Fatemeh Rahimian, and Jeonggil Ko. On-device training: A first overview on existing sys-tems. ACM transactions on sensor networks , 20(6):1–39, 2024. 1, 2 Uncertainty-Guided Edge Learning for Deep Image Regression in Remote Sensing 
+
+# Supplementary Material 
+
+## 8. Derivations 
+
+We have the likelihood of a beta distribution given the mean 
+
+μ and the precision ν:
+
+p(y|μ, ν ) = Γ( ν)Γ( μν )Γ((1 − μ)ν) yμν −1(1 − y)(1 −μ)ν−1,
+
+(12) where Γ( ·) is the gamma function. We can compute the negative log likelihood loss, LN LL , as: 
+
+LN LL (μ, ν, y ) = − log p(y|μ, ν )= −[log Γ( ν)Γ( μν )Γ((1 − μ)ν) + log yμν −1
+
++ log (1 − y)(1 −μ)ν−1]= log Γ( μν )Γ((1 − μ)ν)Γ( ν) − (μν − 1) log y
+
++ ((1 − μ)ν − 1) log (1 − y)
+
+(13) The differential entropy of the beta distribution, given shape parameters α, β > 0, is commly expressed as: 
+
+h = log Beta (α, β ) − (α − 1)[ ψ(α) − ψ(α + β)] 
+
+− (β − 1)[ ψ(β) − ψ(α + β)]  (14) where ψ(·) is the digamma function. In this work, we use an alternative parameterisation with the mean μ = α/ (α +
+
+β) ∈ (0 , 1) and the precision ν = α + β > 0. Therefore, the parameters α and β can be represented in terms of the mean μ and precision ν:
+
+α = μν, β = (1 − μ)ν (15) Thereby, the differential entropy of the beta distribution is calculated as: 
+
+h = log Beta (μν, (1 − μ)ν)
+
+− (μν − 1)[ ψ(μν ) − ψ(μν + (1 − μ)ν))] 
+
+− ((1 − μ)ν − 1)[ ψ((1 − μ)ν) − ψ(μν + (1 − μ)ν)] = log Γ( μν )Γ((1 − μ)ν)Γ( ν)+ ( ν − 2) ψ(ν) − (μν − 1) ψ(μν )
+
+− ((1 − μ)ν − 1) ψ((1 − μ)ν)= log Γ( μν ) + log(Γ((1 − μ)ν)) − log Γ( ν)
+
+− (μν − 1)[ ψ(μν ) − ψ(ν)] 
+
+− ((1 − μ)ν − 1)[ ψ((1 − μ)ν) − ψ(ν)] = log Γ( μν ) + log(Γ((1 − μ)ν)) − log Γ( ν)+ ( ν − 2) ψ(ν) − (μν − 1) ψ(μν )
+
+− ((1 − μ)ν − 1) ψ((1 − μ)ν)
+
+(16) 
+
+## 9. Benchmarking on RS applications 
+
+Fig. 8, Fig. 9, and Fig. 10 present the benchmarking results of UGEL against representative methods on RSRC-S2 us-ing the ResNet18, MobileNetV3, and MobileNetV4 back-bones, respectively. These results are consistent with those observed on RSRC-L8 and RSLC , as shown in Fig. 6 in the main paper. Additionally, Fig. 11 and Fig. 12 present the benchmarking results of UGEL against representative methods on RSRC-L8 and RSLC using the MobileNetV4 backbone. Tab. 4 and Tab. 7 provide the Wilcoxon signed-rank test p-values comparing UGEL with DBR to other methods us-ing the MobileNetV3 and MobileNetV4 backbones, respec-tively. 
+
+## 10. UGEL ablation studies 
+
+10.1. [ T1 ] Effects of different uncertainty estimation methods on UGEL. 
+
+The experimental setup, hyperparameter configurations, and evaluation metric were kept consistent with those de-scribed in the main paper. We evaluated the impact of different uncertainty estimation methods within the UGEL framework. In addition to Fig. 7 in the main paper, Fig. 13 provides an empirical comparison of their strengths and limitations in cloud and land coverage prediction tasks. 1
+
+> 5
+> 10
+> 15
+> 20
+> 25
+
+Round 
+
+> 0.35
+> 0.40
+> 0.45
+> 0.50
+> 0.55
+> 0.60
+> 0.65
+> 0.70
+> Testing error (RMSE)
+
+RSRC-S2 
+
+> AL - Random Sampling
+> AL - BALD (Gal et al.)
+> UGEL w. DBR 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+
+Round 
+
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> Testing error (RMSE)
+
+RSRC-S2 
+
+> SSL (Chen et al.)
+> ASSL (Yao, Guo, and Li)
+> UGEL w. DBR
+
+Figure 8. Benchmarking UGEL with DBR against AL (BALD and random sampling), SSL and ASSL on RSRC-S2 using the ResNet18 backbone. Bolded curves and shaded regions respec-tively indicate mean RMSE testing error and std dev over 10 runs. 1
+
+> 5
+> 10
+> 15
+> 20
+> 25
+
+Round 
+
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> Testing error (RMSE)
+
+RSRC-S2 
+
+> AL - Random Sampling
+> AL - BALD (Gal et al.)
+> UGEL w. DBR 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+
+Round 
+
+> 0.30
+> 0.35
+> 0.40
+> 0.45
+> 0.50
+> 0.55
+> 0.60
+> 0.65
+> 0.70
+> Testing error (RMSE)
+
+RSRC-S2 
+
+> SSL (Chen et al.)
+> ASSL (Yao, Guo, and Li)
+> UGEL w. DBR
+
+Figure 9. Benchmarking UGEL with DBR against AL (BALD and random sampling), SSL and ASSL on RSRC-S2 using the MobileNetV3 backbone. Bolded curves and shaded regions re-spectively indicate mean RMSE testing error and std dev over 10 runs. 1
+
+> 5
+> 10
+> 15
+> 20
+> 25
+
+Round 
+
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> Testing error (RMSE)
+
+RSRC-S2 
+
+> AL - Random Sampling
+> AL - BALD (Gal et al.)
+> UGEL w. DBR 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+
+Round 
+
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> Testing error (RMSE)
+
+RSRC-S2 
+
+> SSL (Chen et al.)
+> ASSL (Yao, Guo, and Li)
+> UGEL w. DBR
+
+Figure 10. Benchmarking UGEL with DBR against AL (BALD and random sampling), SSL and ASSL on RSRC-S2 using the MobileNetV4 backbone. Bolded curves and shaded regions re-spectively indicate mean RMSE testing error and std dev over 10 runs. 1
+
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> 40
+> 45
+> 50
+
+Round 
+
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> Testing error (RMSE)
+
+RSRC-L8 
+
+> AL - Random Sampling
+> AL - BALD (Gal et al.)
+> UGEL w. DBR 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+
+Round 
+
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> Testing error (RMSE)
+
+RSRC-L8 
+
+> SSL (Chen et al.)
+> ASSL (Yao, Guo, and Li)
+> UGEL w. DBR
+
+Figure 11. Benchmarking UGEL with DBR against AL (BALD and random sampling), SSL and ASSL on RSRC-L8 using the MobileNetV4 backbone. Bolded curves and shaded regions re-spectively indicate mean RMSE testing error and std dev over 10 runs. 1
+
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> Round
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> Testing error (RMSE)
+> RSLC
+> AL - Random Sampling
+> AL - BALD (Gal et al.)
+> UGEL w. DBR 1
+> 2
+> 3
+> 4
+> Round
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> Testing error (RMSE)
+> RSLC
+> SSL (Chen et al.)
+> ASSL (Yao, Guo, and Li)
+> UGEL w. DBR
+
+Figure 12. Benchmarking UGEL with DBR against AL (BALD and random sampling), SSL and ASSL on RSLC using the Mo-bileNetV4 backbone. Bolded curves and shaded regions respec-tively indicate mean RMSE testing error and std dev over 10 runs. 
+
+The results demonstrate that DBR is significantly more effective than other uncertainty methods in UGEL, partic-ularly in the early rounds where the performance gap was most evident. DBR’s uncertainty estimations facilitated the selection of informative unlabeled samples for model updat-ing. On RSRC-L8 and RSRC-S2 datasets, DBR achieved not only lowest RMSE but also the smallest standard devia-tion, indicating greater reliability for real-world cloud cov-erage prediction. For the land coverage prediction using 
+
+RSLC , while DBR still outperformed in early rounds, DER and RAN quickly reached comparable performance. This outcome may be attributed to the greater diversity of ob-jects considered as coverage in the land coverage prediction task. 
+
+10.2. [ T2 ] Effects of different groundtruth regres-sion label distributions on the performance of UGEL. 
+
+Real scenes with synthetic clouds ( RSSC ). We sourced images from NASA’s Landsat-9 Level-1 Collection. Ten scenes from different locations and diverse terrains ( e.g. ,sea, mountain, urban, rural, dessert) were selected. We en-sured that the collected scenes had no visible clouds. The 12-band raw data of each scene was converted to top-of-atmosphere spectral radiance, corrected for the sun angle using the metadata, and bands 4-3-2 were then selected to generate an RGB base image of dimension of 8000 x8000 3
+
+> 6
+> 9
+> 12
+> 15
+> 18
+> 21
+> 24
+> 27
+> 30
+> Round
+> 0.35
+> 0.40
+> 0.45
+> 0.50
+> 0.55
+> 0.60
+> 0.65
+> Testing error (RMSE)
+> RSRC-L8
+> UGEL w. RAN
+> UGEL w. MCD
+> UGEL w. DER
+> UGEL w. DBR 2
+> 4
+> 6
+> 8
+> 10
+> 12
+> 14
+> 16
+> 18
+> 20
+> Round
+> 0.35
+> 0.40
+> 0.45
+> 0.50
+> 0.55
+> 0.60
+> 0.65
+> 0.70
+> 0.75
+> Testing error (RMSE)
+> RSLC
+> UGEL w. RAN
+> UGEL w. MCD
+> UGEL w. DER
+> UGEL w. DBR
+
+Figure 13. (Top) Comparison of different uncertainty estimation methods in UGEL on RSRC-L8 using the ResNet18 backbone. (Bottom) Same comparison on RSLC using the ResNet18 back-bone. Bolded curves and shaded regions respectively indicate mean RMSE testing error and std dev over 10 runs. 
+
+Test Rd. 2 Rd. 4 Rd. 6 Rd. 8 
+
+> RSRC-S2
+
+UGEL vs Rand 0.080 0.348 0.014 0.688 UGEL vs BALD 0.688 0.722 0.032 0.312 UGEL vs SSL 0.461 0.065 0.042 0.348 UGEL vs ASSL 0.116 0.002 0.007 0.019 
+
+Test Rd. 2 Rd. 4 Rd. 6 Rd. 8 
+
+> RSRC-L8
+
+UGEL vs Rand 0.007 0.001 0.065 0.053 UGEL vs BALD 0.01 0.001 0.246 0.024 UGEL vs SSL 0.053 0.005 0.005 0.001 UGEL vs ASSL 0.01 0.002 0.001 0.001 
+
+Test Rd. 1 Rd. 2 Rd. 3 Rd. 4 
+
+> RSLC
+
+UGEL vs Rand 0.001 0.001 0.001 0.001 UGEL vs BALD 0.754 0.577 0.161 0.014 UGEL vs SSL 0.161 0.754 0.423 0.313 UGEL vs ASSL 0.406 0.156 0.062 0.031 Table 4. Wilcoxon signed-rank test p-values comparing UGEL with DBR against other methods on all datasets using the Mo-bileNetV3 backbone. 
+
+pixels. Synthetic clouds with groundtruth cloud masks were generated and added to the base images using Satellite-CloudGenerator [14]; see Fig. 14. Then, we cropped the base images and their ground-truth masks into 128 x128 
+
+non-overlapping patches ( x). In total, we extracted 9, 600 
+
+patches from 5 base images for EL and 8, 000 patches from the remaining 5 base images as testing data from unseen before scenes. Using synthetic clouds allowed us to con-trol the groundtruth cloud coverage percentage ( y) in each image and its distribution over the dataset. RSSC was mod-ified into four variations, each corresponding to a different ground truth label distribution. • RSSC-B : Bimodal distribution, • RSSC-N : Negatively skewed distribution, • RSSC-U : Uniform distribution, • RSSC-G : Gaussian distribution. 
+
+Figure 14. Sample images from RSSC with regression targets. 
+
+Fig. 15 shows the performance of different uncertainty estimation methods in UGEL under different ground truth label distributions. Tab. 8 provides Wilcoxon signed-rank test p-values comparing UGEL with DBR to other methods on RSSC using the ResNet18 backbone. 
+
+10.3. Runtime comparisons 
+
+Method Uncertain. est. Model retrain. 
+
+UGEL w. RAN n/a 8.26-12.54 UGEL w. MCD 122.19-127.94 5.93-12.35 UGEL w. DER 18.39-19.04 6.06-10.61 UGEL w. DBR 18.01-18.63 5.96-12.16 Table 5. Runtime (minimum and maximum, in seconds) for dif-ferent uncertainty estimation methods during the first 10 rounds of UGEL on the RSRC-L8 dataset using the ResNet18 backbone. 
+
+Method Uncertain. est. Model retrain. 
+
+UGEL w. RAN n/a 7.73-9.61 UGEL w. MCD 1021.00-1095.18 7.83-10.24 UGEL w. DER 176.55-507.84 7.84-9.65 UGEL w. DBR 171.94-507.43 7.93-9.32 Table 6. Runtime (minimum and maximum, in seconds) for dif-ferent uncertainty estimation methods during the first 5 rounds of UGEL on the RSLC dataset using the ResNet18 backbone. 
+
+Test Rd. 2 Rd. 4 Rd. 6 Rd. 8 
+
+> RSRC-S2
+
+UGEL vs Rand 0.031 0.031 0.422 0.156 UGEL vs BALD 0.016 0.016 0.016 0.016 UGEL vs SSL 0.891 0.500 0.578 0.422 UGEL vs ASSL 0.016 0.047 0.078 0.016 
+
+Test Rd. 2 Rd. 4 Rd. 6 Rd. 8 
+
+> RSRC-L8
+
+UGEL vs Rand 0.007 0.080 0.014 0.065 UGEL vs BALD 0.001 0.002 0.003 0.001 UGEL vs SSL 0.097 0.053 0.001 0.002 UGEL vs ASSL 0.001 0.001 0.001 0.001 
+
+Test Rd. 1 Rd. 2 Rd. 3 Rd. 4 
+
+> RSLC
+
+UGEL vs Rand 0.031 0.078 0.031 0.031 UGEL vs BALD 0.016 0.031 0.016 0.016 UGEL vs SSL 0.953 0.781 0.156 0.047 UGEL vs ASSL 0.219 0.219 0.047 0.047 Table 7. Wilcoxon signed-rank test p-values comparing UGEL with DBR against other methods on all datasets using the Mo-bileNetV4 backbone. 
+
+Test Rd. 5 Rd. 10 Rd. 15 Rd. 20 
+
+> RSSC-B
+
+DBR vs RAN 0.032 0.002 0.007 0.019 DBR vs MCD 0.002 0.001 0.001 0.001 DBR vs DER 0.032 0.014 0.116 0.002 
+
+Test Rd. 5 Rd. 10 Rd. 15 Rd. 20 
+
+> RSSC-N
+
+DBR vs RAN 0.01 0.188 0.461 0.539 DBR vs MCD 0.001 0.001 0.005 0.024 DBR vs DER 0.007 0.001 0.348 0.116 
+
+Test Rd. 5 Rd. 10 Rd. 15 Rd. 20 
+
+> RSSC-U
+
+DBR vs RAN 0.08 0.348 0.116 0.423 DBR vs MCD 0.001 0.001 0.001 0.003 DBR vs DER 0.005 0.019 0.014 0.024 
+
+Test Rd. 5 Rd. 10 Rd. 15 Rd. 20 
+
+> RSSC-G
+
+DBR vs RAN 0.539 0.348 0.278 0.935 DBR vs MCD 0.001 0.001 0.001 0.003 DBR vs DER 0.005 0.019 0.014 0.024 Table 8. Wilcoxon signed-rank test p-values comparing UGEL with DBR to other methods on RSSC using the ResNet18 back-bone. Figure 15. Comparison of different uncertainty estimation methods in UGEL on synthetic datasets: (Top Left) RSSC-B , (Top Right) 
+
+RSSC-N , (Bottom Left) RSSC-U , (Bottom Right) RSSC-G . Bolded curves and shaded regions respectively indicate mean RMSE testing error and std dev over 10 runs.

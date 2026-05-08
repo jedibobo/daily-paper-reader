@@ -1,0 +1,997 @@
+Title: CuLifter: Lifting GPU Binaries to Typed IR
+
+URL Source: https://arxiv.org/pdf/2604.27486v1
+
+Published Time: Fri, 01 May 2026 00:38:08 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# CuLifter: Lifting GPU Binaries to Typed IR 
+
+# Jisheng Zhao ∗ , Huanzhi Pu ∗, Shinnung Jeong, Chihyo Ahn, Hyesoon Kim Georgia Institute of Technology USA 
+
+## Abstract 
+
+GPU compilers merge all data types into a single unified register file, erasing the type information that binary-analysis tools rely on. We show that type recovery from this untyped register file is the central challenge of GPU binary lifting. We present CuLifter, a SASS-to-LLVM IR lifting framework that recovers register types via constraint propagation with conflict detection, reconstructs explicit control flow, and aggregates multi-instruction patterns. Across eight benchmark suites (24,437 GPU functions in 919 cubins) spanning open-source applications, vendor libraries, and optimized ML runtimes, CuLifter successfully lifts 99.98% of functions to valid LLVM IR. An ablation study confirms that type recovery is the only step required to produce semantically correct IR: disabling it drops the x86 pass rate from 73.8% to 0%, a 73.8 percentage-point drop. 
+
+## Keywords 
+
+GPU binary lifting, LLVM IR, SASS, type recovery, program analysis 
+
+## 1 Introduction 
+
+NVIDIA GPUs dominate high-performance and parallel computing, and CUDA [ 44 ] has become the de facto standard for GPU pro-gramming across ML frameworks (e.g., PyTorch [ 48 ], vLLM [ 35 ]) and HPC components [ 40 ]. Performance-critical CUDA kernels in-creasingly ship as pre-compiled SASS binaries without source code, including vendor libraries (cuDNN, TensorRT, cuBLAS, NCCL), optimized ML runtimes, and closed-source HPC components. Binary lifting translates machine code back into a higher-level IR amenable to compiler analysis. For CPU binaries, lifted IR enables a wide range of applications: security analysts use it to detect vulner-abilities in closed-source software [ 9 ], malware researchers apply taint analysis and symbolic execution on lifted code [ 7 ], and sys-tems researchers retarget legacy binaries to new architectures [ 13 ]or harden them with control-flow integrity [ 24 ]. These applications are supported by a mature tool ecosystem: static lifters such as McSema [ 19 ] and rev.ng [ 17 ] recover LLVM IR from x86, dynamic lifters such as BinRec [ 4] capture execution traces for recompilation, and a recent systematization of knowledge evaluates these tools across downstream applications [37]. No comparable infrastructure exists for GPU binaries. NVIDIA provides disassemblers ( nvdisasm , cuObjDump ), but these output only flat, untyped assembly without control-flow or type infor-mation. NVBit [ 57 ] and SASSI [ 53 ] instrument SASS dynamically and at compile time, respectively, but neither lifts the binary to an analyzable IR. CuAsmRL [ 26 ] optimizes SASS instruction sched-ules via reinforcement learning, and CASS [ 28 ] transpiles SASS to AMD RDNA3 assembly using LLMs, achieving 37.5% assembly-level translation accuracy. Both operate on SASS but neither produces a typed, retargetable IR suitable for compiler analysis. As a result, the analyses routinely applied to CPU binaries (vulnerability detection, 
+
+> 1These authors contributed equally.
+
+performance modeling, code portability) remain unavailable for the GPU binaries that dominate modern computing workloads. A key obstacle to GPU binary lifting is type recovery : determin-ing the data type (e.g., Float32 , Int32 , pointer) that each register holds at each program point. Type recovery is a well-known chal-lenge for CPU binaries as well, where integers and pointers share the same general-purpose registers and memory aliasing obscures data types. A long line of work addresses this problem, progressing from constraint-based inference [ 20 , 36 ] to lattice-based propa-gation [ 41 ], probabilistic prediction [ 61 ], and behavior-capturing types [ 6 ]. However, CPU ISAs still provide partial structural cues: separate register files for floating-point and vector values, explicit transfer instructions ( movd , cvtsi2sd ), and calling conventions that constrain parameter types. GPU ISAs provide far fewer cues. SASS stores all values in a single unified register file, and the same register can be consumed as Float32 by one instruction and as 
+
+Int32 by the next, with no intervening transfer. Without recov-ering these implicit type boundaries, a lifter cannot emit IR at all: every LLVM IR instruction requires explicit type annotations, so unresolved types block code generation entirely. Consider a compiled rsqrt() call:                    
+
+> 1FADD R25, R25, 1e-8 // Float32: R25 += eps
+> 2MUFU.RSQ R24, R25 // Float32: R24 = rsqrt(R25)
+> 3IADD3 R0, R25, -0xd000000, RZ // Int32: R0 = exponent bits
+> 4ISETP.GT P0, PT, R0, 0x727fffff // Int32: P0 = range check
+> 5@!P0 BRA 0x340 // branch if out of range
+> 6FMUL R0, R25, R24 // Float32: R0 = R25 * R24
+
+Listing 1: Compiled rsqrt() : register R25 changes type with no transfer instruction. 
+
+Register R25 is used as Float32 in lines 1–2 and 6, but reinterpreted as Int32 in line 3, with no transfer instruction between them. A lifter must detect this implicit type boundary and insert an explicit 
+
+bitcast ; otherwise, it cannot assign a single LLVM type to R25 .Our key insight is that GPU binary lifting is a structure-recovery 
+
+problem. GPU compilation erases three kinds of structure (control flow, instruction-level semantics, and data types), a framing consis-tent with recent formalizations of binary lifting [ 47 ]. Among these, type recovery is the most critical and the focus of this paper. We present CuLifter, a framework that recovers analyzable LLVM IR from NVIDIA SASS. We target LLVM IR because its mature ecosystem of analysis and optimization passes applies directly to the recovered code, and its backends enable retargeting to other ar-chitectures (e.g., x86 CPUs). To recover each lost structure, CuLifter applies a targeted technique: it infers register types by propa-gating type constraints from typed opcodes along def-use edges, reconstructs explicit control flow from SASS’s predicated execu-tion model, and reassembles multi-instruction patterns (e.g., carry chains, reciprocal approximations) into single high-level operations. We make the following contributions:  
+
+> arXiv:2604.27486v1 [cs.AR] 30 Apr 2026 Jisheng Zhao 1, Huanzhi Pu 1, Shinnung Jeong, Chihyo Ahn, Hyesoon Kim Georgia Institute of Technology USA
+
+(1) We identify type recovery as the central challenge of GPU binary lifting and solve it via constraint propagation with conflict detection. (2) We adapt 𝜓 -function-based SSA construction [ 54 ] to SASS, extending it for SIMT-specific predication and convergence barriers. (3) We build CuLifter, a complete SASS-to-LLVM IR lifter sup-porting SM75, SM90, SM100, and SM120, and evaluate it on 24,437 GPU functions across eight benchmark suites. CuLifter successfully lifts 99.98% of functions to valid LLVM IR. 
+
+## 2 Background 2.1 SASS as a Low-Level Representation 
+
+Table 1: Key structural differences between SASS and LLVM                     
+
+> SASS LLVM IR
+> operand physical register virtual SSA value type system untyped (unified strongly typed register file) (i32, i64, float, ptr, . . . ) control flow predicated execution explicit conditional + unconditional BRA branch on SSA value memory access arch-specific ops generic load/store (LDG, LDS, LDC, . . . ) with address space specified addressing reg + imm offset typed pointer tensor op HMMA, IMMA, target-specific HGMMA (SM90+) intrinsics tensor precision encoded in opcode abstracted in suffix (modifiers) intrinsic signature
+
+SASS [ 42 ] is the native machine code for NVIDIA GPUs. During compilation, CUDA source code is first compiled to PTX [ 45 ], a hardware-independent virtual assembly that preserves structured control flow and type information, and then lowered to SASS, a hardware-specific assembly where much of this structure is lost. SASS is optimized for specific GPU architectures (e.g., Turing SM75, Ampere SM80, Hopper SM90), with instruction encoding, register files, memory layout, and synchronization differing across genera-tions. Table 1 summarizes the key structural differences between SASS and LLVM IR. LLVM IR [ 38 ] is a strongly typed, platform-independent assembly in static single assignment (SSA) form [ 14 ]. It bridges high-level code and machine-specific assembly, with support for x86, ARM, RISC-V, NVPTX, and others. 
+
+## 2.2 SIMT Execution Model 
+
+The NVIDIA GPU architecture is built upon the Single Instruction, Multiple Threads (SIMT) execution model. Threads are grouped into warps of 32 threads that execute in lockstep. When threads within a warp encounter a data-dependent branch, divergence occurs: the warp executes each branch path sequentially, while predicate registers mask off inactive threads. As a result, SASS encodes most conditional behavior through predicated execution rather than explicit branch instructions. Starting with the Volta architecture, NVIDIA introduced Independent Thread Scheduling, which gives each thread its own program counter and call stack, allowing threads to make independent forward progress even after divergence. However, to regain lockstep efficiency once threads reconverge, NVIDIA employs explicit convergence instructions. On Volta and later architectures, BSSY and BSYNC are used; on pre-Volta architectures, SSY and SYNC serve this purpose. 
+
+## 2.3 Predicated SSA and 𝜓 -Functions 
+
+Standard SSA construction [ 14 ] assumes every instruction in a basic block executes unconditionally. Predicated code violates this: two instructions that write the same register under complementary predicates both “execute” in the same block, and standard SSA rename kills the first definition, producing wrong code. Stoutchinin and de Ferrière [ 54 ] introduced the 𝜓 -function ( psi-function ) for IA-64 predicated code: where a 𝜙 -node selects a value based on which control-flow edge was taken, a 𝜓 -function selects based on a predicate register’s value. A predicated write @P0 R0 = x followed by @!P0 R0 = y becomes R0 = 𝜓 (P0 : 𝑥, !P0 : 𝑦 ),semantically equivalent to a select instruction in LLVM IR. This technique is well-studied in the IA-64 compilation literature [ 8, 12 ,58]. Both IA-64 and NVIDIA SASS support predicated execution : al-most every instruction can be guarded by a predicate register (e.g., 
+
+p0 –p63 in IA-64, P0 –P7 in SASS). When the predicate is false, the instruction behaves as a no-op. Both architectures use a unified register file where integer, floating-point, and predicate values are stored; however, the 𝜓 -function concerns only dataflow, not types. To take advantage of the 𝜓 -function, we apply the same principle to the GPU predicated code in Section 5.2. 
+
+## 3 Challenges in GPU Binary Lifting 
+
+CPU binary lifters rely on separate register files, explicit branch in-structions, and publicly documented ISAs [ 7, 24 , 59 ]. SASS provides none of these: its unified register file carries no type information, predication replaces branches for short conditionals, and the ISA is proprietary and changes across GPU generations. Of these lost structures, type recovery is the most critical because it gates IR generation entirely (Section 6.4). We characterize each challenge below, starting with type recovery. 
+
+## 3.1 Type Evidence Is Sparse and Must Be Propagated 
+
+Type recovery is the key technical challenge of GPU binary lift-ing. On CPUs, separate integer and floating-point register files provide type information for free. On SASS, a unified register file holds Int32 , Float32 , Float64 (as register pairs), pointers, packed 
+
+Float16 ×2, and boolean predicates interchangeably. The register name carries no type information. Because LLVM IR requires ex-plicit types on every instruction, a lifter that cannot distinguish 
+
+Float32 from Int32 cannot emit valid IR at all. Most SASS instructions encode type constraints in their opcodes (e.g., FADD operates on floats, ISETP produces a boolean predicate), providing direct type evidence for ∼90% of all instructions (Sec-tion 6.3). However, two challenges remain. First, the remaining 
+
+type-transparent instructions (moves, bitwise logic, and memory operations) pass values without revealing their type, requiring propagation along def-use chains to resolve them. Second, GPU compilation introduces intentional type conflicts : deliberate reinter-pretation of float bits as integers for optimization [ 39 ]. We detect CuLifter: Lifting GPU Binaries to Typed IR 
+
+over 3.8 million such conflicts across our benchmarks (Section 6.3). Incorrect type assignment produces silent numerical corruption: a 32-bit float and an integer with the same bit pattern differ by orders of magnitude but cause no runtime fault. As shown in Listing 1, register R25 is defined by FADD (Float32), consumed by MUFU.RSQ (Float32), then read by IADD3 (Int32), and finally used again by FMUL (Float32). A forward-only approach forces Float32 onto IADD3 , producing wrong integer arithmetic. The correct solution detects the type conflict ( {FP32 } ∩ { Int32 } = ∅)and inserts a bitcast at the boundary. 
+
+Key intuition: GPU type recovery is a propagation problem with conflict detection. The density of type seeds and the length of transparent chains determine how far evidence must travel, and empty intersections reveal implicit type boundaries. We formalize this in Section 4.1 and characterize propagation reach empirically in Section 6.3. 
+
+## 3.2 Control Structure Is Not Explicit 
+
+Control recovery in SASS is fundamentally challenging due to a structural gap in the representation of control flow. LLVM IR ex-pects an explicit control structure in which conditional execution is implemented strictly via branch instructions. In contrast, SASS uses an implicit model in which almost any instruction can be pred-icated. Instead of a conditional branch instruction, SASS models conditional branching via predicate-guarded execution of an uncon-ditional BRA . The actual branch conditions are contained implicitly within the predicate register, whose set-predicate instruction could be many instructions away. In addition, this implicit nature of pred-ication further complicates SSA construction, because a predicated definition updates a value only for the threads whose predicate is true, while the remaining threads implicitly preserve the old value, breaking standard data-flow tracking assumptions. 
+
+Key intuition: control flow in SASS is heavily carried by predi-cate flow. To bridge this structural gap and produce a valid SSA form, the lifter must handle the predication semantics and reconstruct the missing explicit logic from predication correctly. 
+
+## 3.3 Semantic Operations Are Collapsed into Multi-Instruction Patterns 
+
+GPU compilers collapse high-level operations into multi-instruction patterns whose structure changes across GPU generations. A 64-bit subtraction threads a borrow predicate across two IADD3 /IADD3.X 
+
+instructions; if a lifter handles each instruction in isolation, the carry chain breaks and the wrong result is produced. On SM90, a single cp.async in CUDA becomes an orchestrated sequence: 
+
+FENCE.VIEW.ASYNC.S issues a memory fence, LDGSTS.E.128 per-forms a fused global-to-shared copy, and LDGDEPBAR /DEPBAR /BAR. SYNC form an async completion chain. A lifter that treats these inde-pendently would decompose LDGSTS into a synchronous load and store and discard the barrier chain as no-ops. SM90 also introduces packed-conversion instructions such as F2FP.PACK_AB_MERGE_C ,which converts two Float32 values to Float8, saturates, packs both into the upper 16 bits, and merges with a third operand’s lower 16 bits, all in a single opcode. No direct LLVM intrinsic exists; the lifter must synthesize the full decomposition. 
+
+Key intuition: Without pattern recognition, lifted IR is correct in behavior but opaque in intent. We present the full pattern catalog in Section 5.3. 
+
+## 3.4 Implicit Register Dependencies 
+
+SASS instructions may access registers that are not explicitly named in the disassembly. In many cases, an operand denotes only the first register of a contiguous register group, while the remaining regis-ters are determined implicitly by the opcode semantics. For example, 
+
+LDG.E.64 R4, [R2] appears with only two explicit registers, but it actually defines R5:R4 and reads R3:R2 . A conventional lifter that models only the explicitly named operands therefore misses half the data dependencies. This directly affects correctness. If another instruction writes R5 between the load and its consumer, the lifter must detect the conflict, but it cannot, because R5 never appears in the disassembly. Getting this wrong silently corrupts values rather than producing an error. Tensor-core instructions demonstrate an extreme case. On SM75, HMMA.16816.F32 names four registers but actually accesses fourteen. On SM90, HGMMA.64x128x16.F32 ac-cesses 164 registers through four named operands. 
+
+Key intuition: On CPU ISAs, every accessed register is named in the instruction encoding. On SASS, the lifter must reconstruct hidden registers from per-opcode tables before building data de-pendencies; otherwise SSA, def-use analysis, and type propagation all operate on incomplete information. 
+
+## 3.5 Device Functions Are Embedded 
+
+In CPU binaries, every callable function is a distinct ELF symbol with its own entry point, and lifters discover function boundaries directly from the symbol table. On SASS, the compiler embeds device functions inside the kernel function. They are not inlined (they retain their own control flow with CALL and RET instructions), but they share the same SASS section and have no separate symbol table entry.                  
+
+> 1// Kernel body
+> 20x210: CALL.ABS.NOINC 0x780 // call device function
+> 30x220: FADD R8, R8, R6 // return continues here
+> 4... // (kernel body continues)
+> 5// Device function (same SASS section, no ELF symbol)
+> 60x780: LDG.E R2, [R4] // entry point
+> 70x790: FFMA R2, R2, R5, R6
+> 80x7a0: RET // returns to 0x220
+
+Listing 2: Device function embedded inside the kernel function. The call target 0x780 is not a separate ELF symbol; it is a basic block inside the same function’s instruction stream. 
+
+After CFG construction, the kernel body and the device function appear as disconnected subgraphs within a single SASS function. 
+
+CALL does not create a normal CFG edge; it saves the return address to a register pair and branches, but does not duplicate the device function. 
+
+Key intuition: Embedded device functions must be recovered as call/return structure, not treated as unreachable CFG fragments; otherwise the lifter loses inter-block definitions that flow back through RET .Jisheng Zhao 1 , Huanzhi Pu 1, Shinnung Jeong, Chihyo Ahn, Hyesoon Kim Georgia Institute of Technology USA                  
+
+> Instruction Type set after seed Emitted IR
+> float add {Float32 }%v = fadd float %v, 1e-8
+> float rsqrt {Float32 }%u = call float @rsqrt(%v)
+> int subtract {Int32 }∩{ Float32 }=∅%vi = bitcast float %v to i32
+> conflict! %r = sub i32 %vi, 0xd000000
+> float multiply {Float32 }(no conflict) %w = fmul float %v, %u
+
+Figure 1: Type recovery walkthrough for Listing 1. The float-add definition establishes Float32 . The integer use triggers an empty intersection; a bitcast is inserted at the use site. The subsequent float use requires no bitcast. 
+
+## 4 Solution Approach 
+
+This section presents our solutions to the two key technical prob-lems at an algorithmic level, independent of SASS-specific details. Section 5 describes the GPU-specific implementation. 
+
+## 4.1 Type Recovery via Constraint Propagation 
+
+We formulate type recovery as a constraint-propagation problem over type sets. Each value 𝑣 carries a set of candidate types T ( 𝑣 ) ⊆ 
+
+𝐿 , where 𝐿 contains Bool; the integer family {Int8 , Int16 , Int32 , Int64 , Int128 }
+
+plus its unsigned counterparts {UInt8 , UInt16 , UInt32 , UInt64 }; and the floating-point family {Float16 , BF16 , TF32 , Float32 , Float64 }. Sec-tion 5.4 formalizes the lattice and width-based partitioning. All values start unconstrained: T ( 𝑣 ) = 𝐿 .
+
+Phase 1: Detect type seed. Instructions with known type se-mantics (e.g., floating-point add ⇒ Float32 , integer compare ⇒
+
+Bool ) narrow their operands’ sets. Most SASS instructions are type-seeding (Section 3.1), but the remaining type-transparent instruc-tions create gaps that propagation must bridge. 
+
+Phase 2: Propagate type information. Type-transparent in-structions (Section 3.1) propagate constraints by intersecting the candidate sets of related operands along def-use edges. A worklist-based fixpoint iterates until no set changes. 
+
+Phase 3: Detect conflicts and insert bitcasts. When inter-section produces ∅, the algorithm has discovered an implicit type boundary , a point where the compiler reinterprets bits across types with no explicit instruction. The conflict resolution rule is: (1) The value retains its definition-site type . (2) The conflicting use site 
+
+receives an explicit bitcast . (3) Once marked conflicted, subse-quent type assignments overwrite rather than intersect, preventing cascading false conflicts. For example, Figure 1 traces the recovery phase through Listing 1. A register holding a float value is read as an integer by a subsequent instruction. Seeding establishes the definition-site type as Float32 .When the integer use requests Int32 , the intersection {Float32 } ∩ {Int32 } = ∅ triggers a conflict: the value keeps Float32 , and the integer use receives a bitcast fp32 to i32 . A later float use of the same register requires no bitcast because the definition-site type is already correct. After convergence, values with multiple remaining candidates are resolved by priority ( Int32 preferred), a conservative choice that preserves bit patterns for a subsequent bitcast . The key quantity is propagation reach : how many transparent hops evidence must travel. We measure this across real GPU kernels in Section 6.3. 
+
+## 4.2 Predicated SSA via Select Insertion 
+
+We apply the 𝜓 -function technique (Section 2.3) to GPU predicated code: each predicated write is isolated into a synthetic basic block and merged via a select :                  
+
+> 1// Before (flat predicated code): // After (select insertion):
+> 2p= (x > 0) p= (x > 0)
+> 3r= x << 1 // unconditional r1 = x << 1
+> 4@!p r = x + 100 // conditional r2 = x + 100
+> 5use(r) // which r? r= select(p, r1, r2)
+> 6use(r)
+
+Listing 3: Predicated if-else: two writes to the same register under complementary predicates, and the corrected SSA with select insertion. 
+
+This is semantically equivalent to a 𝜓 -function: 𝑟 = 𝜓 (𝑝 : 𝑟 1, ¬𝑝 :
+
+𝑟 2). On GPUs, three additional SIMT-specific constructs require handling beyond IA-64: (1) predicated thread termination must become a conditional return rather than function exit, (2) dual-predicate branches must separate the branch condition from the convergence annotation, and (3) hardware convergence barriers must be treated as metadata. We detail these in Section 5.2. 
+
+## 5 Recovering Analyzable Structure in CuLifter 
+
+This section describes three structure recovery techniques identified in Section 3. 
+
+## 5.1 Recovery Ordering 
+
+The two techniques from Section 4, together with pattern nor-malization, must execute in a specific order as shown in Figure 2: control-flow reconstruction first (to build the CFG with SSA form), semantic operation recovery second (to normalize and to aggregate multi-instruction patterns), and type recovery last (to propagate over the normalized graph). Control-flow reconstruction must come first because both pattern matching and type propagation traverse def-use edges, which require a complete CFG in SSA form. Semantic operation recovery must precede type analysis because the type lattice operates over aggregated values; typing a carry-chain pair before aggregation would mistype the borrow predicate as an in-dependent integer rather than as internal to a 64-bit operation. Stages 1 and 2 are architecture-dependent because instruction en-codings, control codes, and predicate semantics differ across GPU generations. 
+
+## 5.2 Control Structure Recovery 
+
+5.2.1 SSIR Construction. SSIR (SASS Static IR) is the IR that bridges the architecture-specific and architecture-independent stages. SSIR represents six levels: function metadata, basic blocks, instructions with opcodes and operands, operand type information, CUDA-specific objects (cooperative groups, warps), and synchronization operations. During parsing, SSIR preserves architecture-specific in-formation including nested opcodes (e.g., XMAD.MRG ), operand prop-erties (e.g., R0.reuse ), and control codes. Instruction normalization expands nested opcodes to 3-address form; one SASS instruction may produce several SSIR instructions. Several architecture-specific issues are resolved at this stage. Branch targets are realigned from control-code lines to valid instruc-tion addresses. Predicate registers are treated as normal operands, CuLifter: Lifting GPU Binaries to Typed IR SASS       
+
+> Binary
+> LLVM
+> IR
+> Special Code Pattern
+> Recognition ( §5.3.1)
+> Stage 2: Semantic Operations
+> Recovery ( §5.3)
+> CUDA Object and
+> Operation Recognition ( §5.3.2)
+> SSIR Construction ( §5.2.1)
+> Stage 1: Control Flow Recovery ( §5.2)
+> Implicit Register
+> Expansion ( §5.2. 2)
+> Predicate -Aware CFG
+> Construction ( §4.2, §5.2.3)
+> Dataflow Graph
+> Construction ( §5.2.4)
+> Device Function
+> Recovery ( §5.2.5)
+> Def -Use Analysis Type Seed Analysis
+> Stage 3: Type Recovery ( §4.1 )
+> Seeding and Propagation
+> Rules ( §5.4.2)
+> Conflict Detection and
+> Bitcast Insertion ( §5.4.3)
+> SSIR (CFG + Def -Use) Normalized SSIR Internal CuLifter IR
+
+Figure 2: The CuLifter lifting pipeline. SASS is transformed into LLVM IR through three stages: (1) Control flow recovery with SSA conversion and dataflow analysis; (2) Semantic operation recovery with architecture-specific normalization (multiply idioms, reciprocal chains, copy propagation, dead code); (3) Type recovery, and LLVM IR emission. 
+
+and predicated instructions are isolated into single-instruction basic blocks for downstream SSA construction. Compiler-inserted infinite loops after EXIT are removed; NVCC places these as safety padding to prevent threads from falling through to invalid instructions, but they are not reachable control flow. On Volta and later architec-tures, instructions with multiple definitions (carry-out predicates) are split into separate instructions. 
+
+5.2.2 Implicit Register Expansion. CuLifter expands every instruc-tion to its full set of accessed registers using per-opcode tables. Each register group is treated as a single SSIR operand with sub - register access. This representation preserves the original type constraints. This expansion is applied in the parsing phase. For 64-bit operations, the named register is replaced with an explicit register pair: R4 becomes R5:R4 . For 128-bit operations (LDG.128 , STS.128 ), a register quad R7:R6:R5:R4 is created. For tensor-core instructions, the expansion is shape-dependent: 
+
+• HMMA.16816.F32 (SM75): the shape m16n8k16 determines D=4, A=4, B=2, C=4 registers. 
+
+• HGMMA.64x128x16.F32 (SM90): the warp-group shape m64 
+
+with N=128 determines D=64, A=4, B=32, C=64 registers. A register group is treated as a single SSIR operand with sub-register access, so that type analysis can preserve the type constraint (R3:R2 as an int64 address operand in LDG ) while assigning types to individual registers (e.g., R3 is later used as int32 by IADD3 ). 
+
+5.2.3 Predicate-Aware CFG Construction. We identify basic-block leaders using standard rules (function entry, branch targets, fall-through successors) plus one GPU-specific rule: whenever the pred-icate guard changes, a new block starts. This isolates predicated regions for later analysis. On SASS, conditional control flow is encoded as predicate-guarded execution of unconditional instructions, so the lifter must recover the implicit condition. Unconditional branches become Br termi-nators. For predicated BRA /EXIT patterns, CuLifter extracts the predicate guard and constructs a CondBr with both taken and fall-through successors. For example, a predicated @P0 EXIT terminates only threads satisfying the condition; the remaining threads fall through to the next instruction. A non-SIMT-aware lifter treats this as unconditional termination, making the fall-through unreach-able. SIMT-specific instructions ( BSSY , BSYNC , WARPSYNC ) are kept as ordinary instructions with metadata for later stages. A more complex case arises with dual-predicate branches, where two independent predicates control the same instruction:              
+
+> 1ISETP.EQ.AND P1, PT, R24, 0x1, PT // P1 = (R24 == 1)
+> 2ISETP.NE.AND P0, PT, R2, RZ, PT // P0 = (R2 != 0)
+> 3@!P0 BRA P1, 0x2810 // if (!P0) branch-on-P1
+> 4STL [R1+0x4], RZ // fall-through
+
+Listing 4: Dual-predicate branch: execution guard and branch condition are separate predicates. 
+
+@!P0 BRA P1 has two predicate roles: @!P0 is the SIMT execution guard, and P1 is the branch condition. We represent this as a nested predicated branch; treating either field as primary produces an incorrect CFG. 
+
+5.2.4 Dataflow Graph Construction. On top of the CFG, we build an intra-procedural def-use graph. Nodes are SSIR instructions; edges represent register value flow from definitions to uses. The analysis includes predicate registers and special registers (e.g., SR_TID ) so that later passes can reason about SIMT-specific data flow. Because SSA guarantees each register has exactly one definition, the analysis is a simple two-pass scan: the first pass maps each register to its defining instruction; the second links each use to its definition in constant time. 
+
+5.2.5 𝜓 -Functions Construction. The predicated code may intro-duce multiple definitions of the same register appearing in the same block under mutually exclusive predicates. A naive renaming would keep only the last definition, discarding the others. CuLifter solves this by constructing 𝜓 -functions, adapting the IA-64-predicted SSA technique to GPU SIMT execution. Let 𝐵 be a basic block. For each architectural register 𝑟 , let 𝑊 𝑟 =
+
+{( 𝑖 1, 𝑝𝑟𝑒𝑑 1), (𝑖 2, 𝑝𝑟𝑒𝑑 2), . . . } be the set of predicated writes to 𝑟 in 
+
+𝐵 , where each 𝑝𝑟𝑒𝑑 𝑗 is a predicate register (or its negation). The combined effect is: 
+
+𝑟 = 𝜓 (𝑝𝑟𝑒𝑑 1 : 𝑣𝑎𝑙 1, 𝑝𝑟𝑒𝑑 2 : 𝑣𝑎𝑙 2, . . . , 𝑑𝑒 𝑓 𝑎𝑢𝑙𝑡 : 𝑣𝑎𝑙 𝑝𝑟𝑒𝑣 )
+
+where 𝑣𝑎𝑙 𝑝𝑟𝑒𝑣 is the value of 𝑟 coming from preceding blocks (i.e., the 𝜙 -node or live-in value). The semantics: for each thread, the 
+
+𝜓 -function selects the 𝑣𝑎𝑙 𝑗 whose predicate 𝑝𝑟𝑒𝑑 𝑗 evaluates to true; if none, it selects 𝑣𝑎𝑙 𝑝𝑟𝑒𝑣 .In practice, CuLifter simplifies the 𝜓 to a binary select chain: 
+
+𝑟 = 𝑠𝑒𝑙𝑒𝑐𝑡 (𝑝𝑟𝑒𝑑 1, 𝑣𝑎𝑙 1, 𝑠𝑒𝑙𝑒𝑐𝑡 (𝑝𝑟𝑒𝑑 2, 𝑣𝑎𝑙 2, . . . , 𝑣𝑎𝑙 𝑝𝑟𝑒𝑣 )) 
+
+Algorithm 1 shows the 𝜓 -function construction for each basic block after control-flow recovery and before SSA renaming. There are two complications introduced for handling SIMT divergence and convergence: Jisheng Zhao 1 , Huanzhi Pu 1, Shinnung Jeong, Chihyo Ahn, Hyesoon Kim Georgia Institute of Technology USA 
+
+Algorithm 1: 𝜓 -Function Construction for a Basic Block 
+
+Require: A basic block 𝐵 with a sequence of predicated instructions, and the live-in set 𝐿𝑖𝑣𝑒𝐼𝑛 (𝐵 ) of register values. 
+
+Ensure: 𝐵 transformed with 𝜓 -functions and predicated writes replaced by unconditional writes.  
+
+> 1:
+
+Let 𝐷𝑒 𝑓 𝑠 be a map from register 𝑟 to a list of (𝑝𝑟𝑒𝑑, 𝑣𝑎𝑙𝑢𝑒 )
+
+pairs.  
+
+> 2:
+
+for each instruction 𝑖 in 𝐵 in order do  
+
+> 3:
+
+if 𝑖 writes register 𝑟 under predicate 𝑝 then  
+
+> 4:
+
+Append (𝑝, 𝑣𝑎𝑙𝑢𝑒 (𝑖 )) to 𝐷𝑒 𝑓 𝑠 [𝑟 ]. 
+
+> 5:
+
+Mark 𝑖 for removal (its effect will be represented by the 
+
+𝜓 -function).  
+
+> 6:
+
+end if  
+
+> 7:
+
+end for  
+
+> 8:
+
+for each register 𝑟 with 𝐷𝑒 𝑓 𝑠 [𝑟 ] non-empty do  
+
+> 9:
+
+Let 𝑑𝑒 𝑓 𝑎𝑢𝑙𝑡 ← 𝐿𝑖𝑣𝑒𝐼𝑛 (𝑟 ) (or ⊥ if none).  
+
+> 10:
+
+Let 𝑒𝑥𝑝𝑟 ← 𝑑𝑒 𝑓 𝑎𝑢𝑙𝑡 . 
+
+> 11:
+
+for each (𝑝, 𝑣𝑎𝑙 ) in 𝐷𝑒 𝑓 𝑠 [𝑟 ] in reverse order do  
+
+> 12:
+
+𝑒𝑥𝑝𝑟 ← select (𝑝, 𝑣𝑎𝑙, 𝑒𝑥𝑝𝑟 ). 
+
+> 13:
+
+end for  
+
+> 14:
+
+Insert an unconditional assignment 𝑟 ← 𝑒𝑥𝑝𝑟 at the end of 
+
+𝐵 (after all original instructions).  
+
+> 15:
+
+Update 𝐿𝑖𝑣𝑒𝑂𝑢𝑡 (𝐵 ) accordingly.  
+
+> 16:
+
+end for  
+
+> 17:
+
+Remove all original predicated writes. (1) Per-thread predicates : The 𝜓 -function’s select instruc-tion in LLVM IR naturally models per-lane choice. No addi-tional masking is needed because LLVM’s vector types or scalar-on-SIMT semantics (depending on backend) preserve thread-level distinction. (2) Convergence barriers : Instructions like BSSY /BSYNC (Volta+) or SSY /SYNC (pre-Volta) mark reconvergence points. CuLifter does not construct 𝜓 -functions that cross these barriers. In-stead, it treats each barrier-separated region independently, inserting 𝜙 -nodes at convergence points as needed. This prevents incorrect merging of values from threads that have not yet reconverged. 
+
+5.2.6 Device Function Recovery. After CFG construction and be-fore SSA, we recover embedded device functions by identifying disconnected subgraphs unreachable from the entry block. Call targets are resolved through the ELF relocation table. Recovered device functions are either extracted into separate SSIR functions or inlined into the caller. Inlining is the common case: the CUDA compiler inlines most device functions at the PTX level, so the few that survive to SASS are typically small helpers. Extraction is reserved for functions with many call sites (e.g., math library routines compiled as device functions) to avoid code bloat. 
+
+## 5.3 Semantic Operations Recovery 
+
+Stage 2 takes the SSIR from Stage 1 and (1) aggregates instruction sequences implementing a logical operation, and (2) recovers CUDA-level objects from synchronization and communication patterns. 
+
+5.3.1 Special Code Pattern Recognition. NVIDIA’s compiler decom-poses logical operations into multi-instruction patterns, either for performance or because 64-bit values require 32-bit register pairs. Lifting instruction-by-instruction produces verbose IR that loses the original intent. CuLifter uses a pattern matcher based on variable unification (shown in Algorithm 2). Each pattern template specifies expected op-codes and symbolic operand names. The matcher scans basic blocks, attempts to map template variables to actual registers (unify), and rewrites matched sequences into aggregated pseudo-instructions. Table 2 lists the code patterns in the matcher. 
+
+Algorithm 2: Variable-unification-based pattern identifi-cation      
+
+> Input: BB : basic block; PatternTable : instruction-sequence templates
+> Output: matches : matched instruction groups
+> 1matches
+
+← ∅    
+
+> 2for pattern
+
+∈ PatternTable do   
+
+> 3candidates
+
+← FindCandidates( BB, pattern.opcodes )   
+
+> 4for candidate
+
+∈ candidates do   
+
+> 5vars
+
+← ∅ ; // variable bindings   
+
+> 6ok
+
+← true    
+
+> 7for (inst, tmpl)
+
+∈ zip(candidate, pattern.templates) do   
+
+> 8if
+
+¬MatchOpcodes( inst, tmpl ) then   
+
+> 9ok
+
+← false ; break   
+
+> 10 if
+
+¬Unify( inst.operands, tmpl.vars, vars ) then   
+
+> 11 ok
+
+← false ; break      
+
+> 12 if ok then
+> 13 matches
+
+← matches ∪ {( pattern.name , candidate )}   
+
+> 14 return matches
+
+Table 2: Normalizations implemented in CuLifter.                        
+
+> Pass / Pattern Description
+> Code Pattern Normalization
+> XmadToImad Rewrites the 3-instruction SM52 XMAD /XMAD.MRG /
+> XMAD.PSL.CBCC idiom into a single IMAD
+> OpModTransform Expands the .X4 address-scale modifier by inserting an explicit SHL 2 instruction SRSubstitute Scans constant-memory operands ( c[0][offset] )for known SR_* offsets (e.g. SR_TID.X at 0x2C ); in-serts explicit S2R instructions at first use and rewrites the operand to the fresh temp register ReciprocalNorm Detects the I2F
+
+→MUFU →IADD /IADD3 →F2I magic-constant reciprocal chain emitted by NVCC; inserts             
+
+> BITCAST nodes around the integer-add step to pre-serve correct float/int reinterpretation semantics
+> Cooperative Group Object and Operations Recognition
+> Group creation Identified through thread mask manipulation instruc-tions (e.g., WARPSYNC ,BAR.SYNC ) and predicate con-figurations that define participation masks.
+> Sync operation BAR.SYNC with specific barrier IDs indicates thread-block synchronization; WARPSYNC with mask patterns identifies warp-level synchronization.
+> Collective operations Cooperative reductions manifest as specific shuffle instruction sequences.
+> Type differentiation Thread-block groups exhibit block-wide BAR.SYNC
+> patterns; warp groups show WARPSYNC 0xFFFFFFFF
+> and shuffle-based communication. CuLifter: Lifting GPU Binaries to Typed IR
+
+Table 3: Classification of SASS and their type signatures                         
+
+> Category Example Signature (Defs ←Uses) Floating-point ALU FADD {Float32 } ← { Float32 },{Float32 }
+> Integer ALU IADD {Int32 } ← { Int32 },{Int32 }
+> Compare ISETP {Bool ,Bool } ← { Int32 },{Int32 },{Bool }
+> Memory (Global) LDG {Num32 } ← { Int64 }
+> Memory (Shared) LDS {Num32 } ← { Int32 }
+> Tensor core HMMA.BF16 {Float32 }4← { BF16 }3,{Float32 }4
+> Type-transparent MOV, PACK64, SHR (Propagate types only )
+
+5.3.2 CUDA Object and Operation Recognition. CUDA-specific ob-jects such as cooperative groups are not represented by explicit SASS opcodes; they emerge through specific synchronization and communication patterns. CuLifter identifies them by scanning for characteristic opcode sequences (shown in Table 2). 
+
+## 5.4 Type Recovery 
+
+Stage 3 of CuLifter assigns architecture-independent types to all SSIR values using a constraint-propagation mechanism.           
+
+> ⊤
+> ⊥
+> Num32 Num64 Num128 Num1 Num16
+> Int32 Float32 Int64 Float64 Int128 Bool Float16 BF16
+
+Figure 3: Type lattice used by CuLifter. 
+
+5.4.1 Type Domain and Lattice. As shown in figure 3, we parti-tion the lattice into width-based subsets to enable propagation through type-agnostic instructions. The seeding stage differenti-ates instructions by both the opcode and the modifier. For example, the 16-bit family contains half and bfloat datatypes, which occupies the same register width but encode different exponent/mantissa lay-outs. While the opcode of HFMA2 and HFMA2.BF16 all suggests 𝑁 16 ,the modifier disambiguates the operand in HFMA2.BF16 to BF16. Note that some types such as TF32 have no designated type in LLVM IR. In this case, we assign them to the actual type modelled in LLVM IR (e.g., TF32 → Int32). This preserves type semantics since any tf32-related instructions accepts Int32 as equivalent data type for TF32. For each value 𝑣 , we maintain a candidate type set T ( 𝑣 ). Initially, 
+
+T0 (𝑣 ) is set to a top element representing all types. The lattice is extended with ⊥ = ∅ to denote a type conflict. 
+
+5.4.2 Seeding and Propagation Rules. Type evidence originates from two sources. 
+
+Seeding instructions. Opcodes with fixed type semantics (e.g., 
+
+FADD seeds {Float32 }, ISETP seeds {Bool }) narrow the candidate set of their defined value: 
+
+T ( 𝑣 ) ← T ( 𝑣 ) ∩ 𝐶 (𝐼 ),Initial Type Set L            
+
+> 𝒯 (𝑣 )=L(unconstrained)
+> 1-bit Bool
+> 16 -bit Float16 BF16
+> 32 -bit Int32 Float32
+> 64 -bit Int64 Float64
+> 128 -bit Int128
+
+Constraint narrowing for value 𝒗 (R25)                        
+
+> 𝒯 (𝑣 )= {Bool , Int32, Float32, Int64, Float64}
+> Insert bitcast I32* Float*
+> 𝒯 𝑣 ∩𝐶 (𝐹𝐴𝐷𝐷 )= {Float32} ∩{Float32}
+> 𝒯 𝑣 ∩𝐶 (𝑀𝑈𝐹𝑈 )= {Float32} ∩{Float32}
+> 𝒯 𝑣 ∩𝐶 (𝐼𝐴𝐷𝐷3 )= {Float32} ∩{Int32}
+
+Type Conflict 
+
+Figure 4: Iterative Propagation and Conflict Detection walk-through for Listing 1 
+
+where 𝐶 (𝐼 ) ⊆ 𝐿 is the type constraint of instruction 𝐼 .
+
+Type-transparent instructions. Moves, bitwise logic, and memory operations propagate types without revealing them. For a transpar-ent instruction with inputs 𝑥 1, . . . , 𝑥 𝑘 and output 𝑦 :
+
+T ( 𝑦 ) ← 
+
+> 𝑘
+
+Ù
+
+> 𝑖 =1
+
+T ( 𝑥 𝑖 ), ∀𝑖, T ( 𝑥 𝑖 ) ← T ( 𝑥 𝑖 ) ∩ T ( 𝑦 ).
+
+Type conversion instructions. (e.g., F2I , I2F ) relate source and destination types via a known conversion function 𝑓 :
+
+T ( 𝑦 ) = 𝑓 (T ( 𝑥 )) .
+
+Table 3 categorizes SASS instructions according to their role. 
+
+5.4.3 Data-Flow Propagation. Constraints are propagated along the def-use graph of the SSA-form intermediate representation. For each register 𝑟 , we define a set of possible types T ( 𝑟 ) ⊆ L initially seeded by its defining instruction. The propagation is a fixed-point iteration: 
+
+T 𝑘 +1 (𝑟 ) = T 𝑘 (𝑟 ) ⊓ 
+
+/  
+
+> 𝑐 ∈constraints (𝑟 )
+
+solve (𝑐, T 𝑘 ),
+
+where solve (𝑐, T 𝑘 ) returns the required type for 𝑟 given the current types of other registers in constraint 𝑐 . For an equality constraint 
+
+𝜏 (𝑟 ) = 𝜏 (𝑠 ), we have: solve (𝑐, T 𝑘 ) = T 𝑘 (𝑠 ).
+
+The iteration proceeds in reverse topological order of the def-use graph (from uses to definitions) to accelerate convergence. The process terminates when ∀𝑟, T 𝑘 +1 (𝑟 ) = T 𝑘 (𝑟 ).
+
+5.4.4 Conflict Detection and Bitcast Insertion. A type conflict occurs when the meet of all propagated constraints for a register becomes 
+
+⊥: /  
+
+> 𝑐 ∈constraints (𝑟 )
+
+solve (𝑐, T ∗) = ⊥.
+
+In this case, no single type satisfies all uses of 𝑟 . The solution is to split the register into two value instances connected by an explicit bitcast. Formally, we replace 𝑟 with two fresh registers 𝑟 𝑎 and 𝑟 𝑏 
+
+such that: 
+
+𝜏 (𝑟 𝑎 ) =
+
+/   
+
+> 𝑐 ∈𝐶 def (𝑟 )
+
+solve (𝑐, T ∗), 𝜏 (𝑟 𝑏 ) =
+
+/   
+
+> 𝑐 ∈𝐶 use (𝑟 )
+
+solve (𝑐, T ∗),Jisheng Zhao 1 , Huanzhi Pu 1, Shinnung Jeong, Chihyo Ahn, Hyesoon Kim Georgia Institute of Technology USA 
+
+Algorithm 3: Type Propagation with Conflict Resolution 
+
+Require: SSA-form IR with def-use chains 
+
+Ensure: Typed IR with explicit bitcasts  
+
+> 1:
+
+Initialize T ( 𝑟 ) ← { seed (𝑟 )} if 𝑟 defined by a seeding instruction, else T ( 𝑟 ) ← {⊤}  
+
+> 2:
+
+repeat  
+
+> 3:
+
+changed ← false  
+
+> 4:
+
+for each register 𝑟 in reverse topological order do  
+
+> 5:
+
+Tnew (𝑟 ) ← T ( 𝑟 ) 
+
+> 6:
+
+for each constraint 𝑐 involving 𝑟 do  
+
+> 7:
+
+Tnew (𝑟 ) ← T new (𝑟 ) ⊓ solve (𝑐, T )  
+
+> 8:
+
+end for  
+
+> 9:
+
+if Tnew (𝑟 ) ≠ T ( 𝑟 ) then  
+
+> 10:
+
+T ( 𝑟 ) ← T new (𝑟 ), changed ← true  
+
+> 11:
+
+end if  
+
+> 12:
+
+end for  
+
+> 13:
+
+until not changed  
+
+> 14:
+
+for each register 𝑟 where T ( 𝑟 ) = ⊥ do  
+
+> 15:
+
+Split 𝑟 into 𝑟 def and 𝑟 use as per conflict resolution  
+
+> 16:
+
+end for  
+
+> 17:
+
+for each register 𝑟 where T ( 𝑟 ) = ⊤ or T ( 𝑟 ) = ∅ do  
+
+> 18:
+
+T ( 𝑟 ) ← { Int32 } 
+
+> 19:
+
+end for  
+
+> 20:
+
+return typed IR and insert a conversion bitcast 𝑟 𝑎 →𝑟 𝑏 between them. The new types are guaranteed non-⊥ by construction. In the rare case that a regis-ter receives no constraint at all (unreachable code or missing seed), we apply a safe fallback: 𝜏 (𝑟 ) = Int32 .
+
+5.4.5 Fixed-Point Algorithm. Algorithm 3 presents the complete fixed-point type propagation. The complexity is 𝑂 (𝑁 · 𝐿 · 𝐻 ) where 
+
+𝑁 is the number of registers, 𝐿 the number of lattice elements (con-stant), and 𝐻 the maximum number of propagation hops (bounded by the def-use chain length). In practice convergence requires at most 6 iterations (Section 6.3). Figure 4 gives an example that presents the type states for analyzing the code in listing 1. 
+
+5.4.6 Resolving Ambiguous Types. After fixpoint convergence, some values may still have |T ( 𝑣 )| > 1 (multiple candidate types). CuLifter applies a fallback prioritizing integer types: resolve (𝑣 ) =
+
+
+
+Int32 , if Int32 ∈ T ( 𝑣 ),
+
+Int64 , if Int64 ∈ T ( 𝑣 ),
+
+Int128 , if Int128 ∈ T ( 𝑣 ),𝑡 ∈ T ( 𝑣 ), otherwise. In the rare case, if the constraint set is empty because no type is propagated to it, the system defaults to Int32 to ensure compilable IR generation. 
+
+## 5.5 Lowering to LLVM IR 
+
+After type annotation and pattern normalization, we emit LLVM IR through per-opcode handlers. Table 4 shows the mapping: phys-ical registers become typed SSA values, special registers become 
+
+Table 4: SSIR to LLVM IR mapping.        
+
+> SSIR LLVM IR
+> Registers (R0, R1, ...) Logical operand with type Special registers (%tid, %ctaid) NV-specific intrinsics Memory spaces (global, shared, local) Explicit address spaces Arithmetic/logic operators LLVM IR equivalents Control flow (CondBra/Bra) CondBr/Br instructions Barriers (BAR.SYNC) Sync intrinsics
+
+Table 5: Formal mapping of tensor operations to LLVM       
+
+> SASS operation LLVM representation
+> MMA multiply-accumulate @llvm.nvvm.mma.*
+> Tensor load load <type>, addrspace(N)
+> Tensor store store <type>, addrspace(N)
+> Tensor reduction (sum) scalar FMA decomposition Tensor reduction (max) scalar compare/select
+
+NVIDIA intrinsics, and memory-space qualifiers become LLVM address-space annotations. CuLifter maps SASS tensor operations to LLVM representations (Table 5). MMA instructions use NVIDIA’s standard llvm.nvvm.mma.* 
+
+intrinsics; tensor memory operations lower to typed loads/stores with address-space annotations; tensor reductions decompose into scalar equivalents. We support SASS tensor types .F16 , .F16x2 ,
+
+.BF16 , .BF16x2 , .TF32 , .I8 , and .I32 , mapped to LLVM vector types ⟨𝑁 × half ⟩, ⟨𝑁 × float ⟩, ⟨𝑁 × bfloat ⟩, ⟨𝑁 × i8 ⟩, and ⟨𝑁 × i32 ⟩
+
+respectively. 
+
+## 5.6 Architecture Support 
+
+We support SM75 (Turing), SM90 (Hopper), and SM100/SM120 (Blackwell), with legacy support for SM35 (Kepler) and SM52 (Maxwell). Architecture support is localized to Stages 1 and 2: the parser han-dles different instruction encoding and predicate semantics, and the pattern library adds generation-specific idioms. Type analysis and LLVM generation are architecture independent. Adding a new generation requires extending the parser and pattern library only. The main evolution across generations is the convergence mech-anism. Pre-Volta architectures use reconvergence stacks ( SSY /SYNC ); Turing and later use convergence barriers ( BSSY /BSYNC ). We han-dle both by abstracting convergence as opaque synchronization intrinsics. 
+
+## 6 Evaluation 6.1 Methodology 
+
+We evaluate CuLifter on eight benchmark suites totaling 24,437 GPU functions (a function is either a __global__ or __device__ 
+
+function) across 919 cubins (often a whole library archive, which may contains multiple kernels whose entry point is denoted as 
+
+__global__ ). CuLifter operates at the per function level, Table 6 reports the per-suite function counts and lifting results. Table 7 reports the kernel counts inherited from the original benchmark description, and the corresponding breakdown by application domain, span-ning Linear Algebra, ML/DNN, Simulation, Science, Image/Vision, CuLifter: Lifting GPU Binaries to Typed IR 
+
+Graph, Crypto, and Infrastructure workloads. All results in this section are based on SM90 (Hopper). 1
+
+Execution correctness. We evaluate type recovery against ground truth from debug information (DWARF) and source-level kernel signatures. A kernel passes execution correctness if its lifted IR and run on the same inputs, matches the original binary output (integer: bitwise; float: relative tolerance 10 −5 for Float32, 10 −2 for Float16). 
+
+Type accuracy. CuLifter achieves 100% kind accuracy (inte-ger/float/bool classification) across all 24,437 functions. Exact ac-curacy (fully matching source type, including width) ranges from 77% to 87% depending on benchmark suite. The gap stems from register-level width mismatches introduced by the compiler—e.g., a 64-bit pointer loaded as two 32-bit halves—not from type con-fusion between different type families. Per-type-class accuracy is 100% for Bool, Float32, and Int32; lower values for Int64/Float64 are again due to splitting/merging artifacts. Coverage (fraction of ground-truth variables with an inferred type) exceeds 98% in all suites. 
+
+## 6.2 Lift Results 
+
+CuLifter successfully lifts 24,431 of 24,437 GPU functions (99.98%) across eight benchmark suites. Table 6 shows per - suite success rates ranging from 99.1% (CUTLASS) to 100% (all others). Function-level failures: Only six functions fail to lift, all in CUT-LASS. The root cause is the QGMMA instruction (SM90 tensor-core variant), which our parser currently emits as an opaque intrinsic. Cubin-level results: At the granularity of compiled binary archives (cubins), CuLifter processes 872 of 919 cubins (94.9%). The remain-ing 47 cubins time out after 900 seconds due to the size of code. Importantly, every individual function inside those cubins still lifts successfully—the timeout only prevents the batch processing of the entire archive. No parser error or type - recovery breakdown occurs. 
+
+## 6.3 Type Propagation Characterization 
+
+We validate the type-recovery claims of Section 3.1 by measuring six metrics across all benchmark suites. 
+
+Instruction classification. Figure 5 shows the fraction of in-structions in each recovery role per domain. Type-seeding instruc-tions dominate across all suites (93.0% combined, ranging from 77% in CUDA SDK to 96% in cuDNN Adv). Most values receive their type directly from a seed instruction without requiring propagation. The CUDA SDK shows a higher transparent fraction (22.8%), reflect-ing simpler hand-written kernels. Although seeding covers most instructions, the type-transparent gap is sufficient to break correct-ness without propagation, as the ablation confirms (Section 6.4). 
+
+Type composition. Figure 6 shows that Int32 is the domi-nant type across all domains, driven by addressing and fixed-point computation. Float32 contributes a substantial share in compute-intensive domains (linear algebra, ML, science) but is much smaller in integer-heavy domains such as sort/search and crypto. Int64 accounts for only a small fraction because global-memory address-ing operations that require 64-bit pointers are far less frequent      
+
+> 1Due to limited GPU resources, we focused evaluation on SM90. SM75 results are qualitatively similar. We verified correctness on SM100/SM120 (Blackwell) but omit those results for space. 75 80 85 90 95 100
+> Instruction percentage (%)
+> Linear Algebra
+> ML/DNN
+> Simulation
+> Graph
+> Image/Vision
+> Crypto
+> Science
+> Sort/Search
+> Stencil/PDE
+> Infrastructure
+> Other
+> Type-seeding
+> Type-transparent
+> Unclassified
+
+Figure 5: Instruction classification by recovery role per appli-cation domain (stacked percentage). All domains show >84% seeding. 0 20 40 60 80 100 
+
+> Type distribution (%)
+> Linear Algebra
+> ML/DNN
+> Simulation
+> Graph
+> Image/Vision
+> Crypto
+> Science
+> Sort/Search
+> Stencil/PDE
+> Infrastructure
+> Other
+> Int32
+> Float32
+> Bool
+> Int64
+> Float64
+> Float16
+
+Figure 6: Proportion of type by type recovery across domains. 85 88 91 94 97 100 
+
+> Value resolution (%)
+> Linear Algebra
+> ML/DNN
+> Simulation
+> Graph
+> Image/Vision
+> Crypto
+> Science
+> Sort/Search
+> Stencil/PDE
+> Infrastructure
+> Other
+> Seeded (local)
+> Propagated (multi-hop)
+> Unresolved
+
+Figure 7: Value resolution by domain (stacked percentage). 
+
+than arithmetic and control instructions. The 16-bit float family ( Float16 + BF16 , ∼0.2% overall) and TF32 appear only where tensor-core operations are present (ML, linear algebra); within that family, 
+
+HMMA.*.F32.BF16 opcodes select BF16 inputs while HMMA.*.F32 
+
+selects half, and HMMA.*.F32.TF32 selects TF32, all on the same 32-bit register width. Int128 does not appear in the final IR despite being part of the type lattice (Section 4.1). SASS has no native 128-bit ALU; LDG.128 /STG.128 are wide memory transactions that move four 32-bit values simultaneously. The lifter decomposes all 128-bit operations into four scalar operations, so Int128 serves as a memory-width constraint during propagation but is never emitted. 
+
+Type resolution. Figure 7 breaks down value-resolution out-comes.Across all suites, 90.5% of values are resolved directly by seed instructions, while propagation resolves another 4.9%, filling the gap left by type-transparent instructions. Type conflicts constitute Jisheng Zhao 1 , Huanzhi Pu 1, Shinnung Jeong, Chihyo Ahn, Hyesoon Kim Georgia Institute of Technology USA 
+
+Table 6: Lifting success rates per benchmark suite. “Functions” counts every SASS function the lifter sees ( __global__ entry-points and __device__ callees); “Lifted” is the subset for which CuLifter emits a valid LLVM IR function.                                              
+
+> Suite Desc Domain(s) #Functions #Lifted Rate
+> HeCBench [32] open-source benchmark suite spanning 10 application domains (ML/DNN, Science, Simulation, etc.) All 10 Domains 773 773 100% cuBLAS closed-source BLAS library kernels from NVIDIA’s cuBLAS SDK Linear Algebra 7,260 7,260 100% CUTLASS [56] NVIDIA’s open-source CUDA Templates for Linear Algebra Subroutines, including GEMM and convolution kernel Linear Algebra, ML/DNN, Science, Infra., Other 641 635 99.1% FlashAttention [15] optimized attention kernels from the FlashAttention library representing state-of-the-art ML inference workloads ML/DNN 4,952 4,952 100% cuDNN CNN [11] closed-source deep learning library. This sub-library contains kernels re-lated to convolutional neural network ML/DNN 46 46 100% cuDNN Ops general tensor-operation kernels from cuDNN’s Ops sub-library ML/DNN 2,410 2,410 100% cuDNN Adv machine learning kernels from cuDNN’s Adv sub-library ML/DNN 4,336 4,336 100% CUDA SDK [1] CUDA kernels from CUDA SDK examples extracted via cuObjDump [ 43 ]ML/DNN, Sort/Search, Infra., Other 19 19 100%
+> Total 24,437 24,431 99.98%
+
+Table 7: Distribution of benchmark kernels across applica-tion domains (at the entry-point granularity used by the original benchmark authors; Table 6 reports lift success at the finer function granularity that CuLifter operates on).              
+
+> Application Domain Count
+> Linear Algebra 1,089 ML/DNN 390 Infrastructure 54 Science 52 Simulation 29 Other 20 Image/Vision 18 Sort/Search 12 Crypto 6Graph 6Stencil/PDE 5
+> Total 1,681
+
+3.2% of total values, and 1.4% remain unresolved after propaga-tion, typically because no type evidence reaches them through the def-use chain. These unresolved values receive the Int32 fallback (Section 4.1). 
+
+Propagation behavior. Figure 8a shows that type evidence usually travels only 1–2 hops from the nearest seed instruction, with a small tail extending to 4 hops. Local evidence is typically sufficient, while a smaller set of cases requires multi-hop propagation through longer transparent chains. 
+
+Convergence Each fixpoint iteration propagates type constraints along def-use edges and checks for new conflicts; the analysis termi-nates when no type set changes. Figure 8b shows that convergence is fast in practice: the mean iteration count ranges from 2.2 (CUDA SDK) to 4.6 (cuDNN Ops), with a maximum of 6 and a combined mean of 3.5. Long propagation chains are uncommon, and the anal-ysis converges reliably across all benchmark suites. 
+
+## 6.4 Ablation Study 
+
+We isolate the contribution of each recovery step by selectively disabling it and measuring the effect on lifting success. We restrict this experiment to HeCBench (229 cubins, one CUDA kernel and its host_cpu.cpp driver per cubin) due to the cost of lifting and executing larger suites; the 229 unit count in this table is the number of host drivers exercised, not the function granularity of Table 6. 1 2 3 4 5 
+
+> Propagation reach (hops)
+> 0
+> 500
+> 1000
+> 1500
+> 2000
+> Number of values  55%
+> 27%
+> 15%
+> 3% 0%
+
+(a) Propagation reach. 0 1 2 3 4 5 6 
+
+> Fixpoint iterations
+> 0
+> 25
+> 50
+> 75
+> 100
+> Number of kernels
+
+(b) Fixpoint iteration counts. 
+
+Figure 8: Analysis of benchmark propagation chains and analysis convergence. (a) Distribution of propagation reach (hop count from nearest type-seeding instruction to resolved value) across all benchmarks; hop=0 (seeded locally) ex-cluded. (b) Distribution of fixpoint iteration counts across all benchmarks. Table 8: Type recovery steps ablation         
+
+> What is disabled IR Gen x86 Pass Effect
+> B0 Nothing (full pipeline) 229 169 (73.8%) baseline B1a Predicate
+
+→SEL 228 167 (72.9%) −0.9 pp B1b Pattern normalization 229 169 (73.8%) no change B2 Seed only (no propagation) 8 0 (0.0%) −73.8 pp B3 No type recovery (all int32) 8 0 (0.0%) −73.8 pp 
+
+Execution correctness is evaluated via the x86 backend, which emulates GPU execution for validation (Section 7.2). Due to the backend’s own semantic limitations (MUFU approximation fidelity, missing texture operations, SIMT emulation), the baseline achieves 73.8% pass rate. However, all ablations face the same x86 limitations, so any drop from the baseline isolates the effect of the disabled step. Table 8 and Figure 9 show the results. 
+
+Type propagation gates correct execution. Disabling propa-gation (B2) or removing type recovery entirely (B3) drops the x86 pass rate from 73.8% to 0%. Every kernel still produce LLVM IR, the IR is functionally broken: registers whose types require prop-agation receive incorrect assignments, and the resulting IR fails downstream (compile error in 162 kernels, runtime crash in 45). Dis-abling predicate-to-select lowering (B1a) or pattern normalization (B1b) has negligible effect on the pass rate, confirming that type propagation is the single recovery step that determines whether the lifted IR is semantically faithful. CuLifter: Lifting GPU Binaries to Typed IR 0% 20% 40% 60% 80% 100%  
+
+> Percentage of kernels (HecBench, x86 backend)
+> B0
+> full
+> B1a
+> no Predicate SEL
+> B1b
+> no pattern norm
+> B2
+> seed only
+> B3
+> no type recovery
+> Pass
+> Wrong result
+> Crash
+> Lift fail
+> Compile fail
+> Link fail
+> Timeout
+
+Figure 9: Ablation on HeCBench (229 kernels, x86 backend). Removing type recovery (B2, B3) drops the pass rate from 73.8% to 0% — most lifted kernels fail downstream (compile errors and runtime crashes). Other ablations preserve the baseline. Lift success is 100% on HeCBench (Table 6). 0 10 20 30 40 50 60 70 80 90 100 
+
+> Seed instructions removed(%, least important first)
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Lift success Rate(%)
+> Lift success Rate(%)
+> Type resolution rate(%)
+> 50.0
+> 52.5
+> 55.0
+> 57.5
+> 60.0
+> 62.5
+> 65.0
+> 67.5
+> 70.0
+> Type resolution rate(%)
+
+Figure 10: Type degradation on HeCBench. Lift success and type resolution remain stable under modest seed removal, then drop sharply once too much seed is removed. Resilience to reduced seed coverage. Figure 10 progressively removes seed instructions in descending order of frequency. The more seed instructions are removed, the more obvious the decline in the ration will be. This shows that propagation compensates for a moderate amount of missing seed information but still depends on a core set of high-frequency seed instructions. 
+
+## 6.5 Type Boundary Analysis 
+
+Type boundaries are program points where constraint propaga-tion detects an empty intersection, indicating that the compiler has reinterpreted a register’s rely almost every domain. The Crypto domain is the sole outlier which contains no floating point patterns, as a different type without an explicit conversion. By analyzing the instructions at these boundaries, we find that most are not due to incorrect type recovery but rather intentional compiler opti-mizations. Table 9 summarizes the main categories: bit-level ma-nipulation of floating-point values (IEEE 754 field extraction, float reconstruction), fast-math approximation chains (integer reciprocal via I2F →MUFU.RCP →IADD3 →F2I ), and branch merges that join semantically distinct type paths. Figure 11 categorizes the boundary patterns across all domains. The data shows that classifiable patterns account for more than half of the boundaries in almost every domain. The Crypto domain 
+
+Table 9: Type boundary instruction patterns categorization. 
+
+Category Example pattern 
+
+Branch merge a PHI node joins a float path with an integer path (LOP3 bit-manipulation). Fast math chains I2F → MUFU.RCP → IADD3 → F2I . Fast integer division. IEEE 754 field ops 
+
+mantissa_extraction : LOP3.LUT Rd, Rsrc, 0x7fffff, RZ . Isolate mantissa field. Float reconstruc-tion 
+
+LOP3.LUT R53, R43, 0x7f800000, RZ, 0xfc . Forces Inf/NaN via exponent saturation Analysis arti-facts 
+
+IMAD.WIDE produces a 64-bit result, but downstream only uses the 32-bit low as float. Unclassified Uncategorized type conflicts. 0% 20% 40% 60% 80% 100% 
+
+> Type-boundary pattern distribution (%)
+> Linear Algebra
+> ML/DNN
+> Simulation
+> Graph
+> Image/Vision
+> Crypto
+> Science
+> Sort/Search
+> Stencil/PDE
+> Infrastructure
+> Other
+> IEEE 754 ops
+> Float reconstruct
+> Analysis artifact
+> Unclassified
+
+Figure 11: Distribution of instruction patterns at type bound-aries per application domain (stacked percentage). Crypto contains no pattern since it has no type boundary. 
+
+is the sole outlier which contains no floating point patterns, as its kernels rely almost entirely on integer arithmetic. 
+
+## 6.6 Discussion 
+
+Parser completeness. The six function-level lift failures (in CUT-LASS) are caused by unimplemented SM90 instruction variants, pri-marily QGMMA. Adding support requires extending the parser and lowering rules but does not require changes to the type-propagation or control-flow algorithms. Each new GPU generation introduces new instructions, so parser maintenance is an ongoing cost. 
+
+Type recovery is sound but incomplete. Our constraint prop-agation detects conflicts and inserts bitcasts, but it cannot recover types for values that are never consumed by a type-seeding instruc-tion. These values receive the Int32 fallback, which preserves bit patterns but may misrepresent intent. In practice, 1.4% of values remain unresolved (Section 6.3). 
+
+Intra-procedural analysis. Type propagation and control-flow recovery operate within a single kernel function. Device-side func-tion calls (rare in SASS, where the compiler aggressively inlines) are lifted as opaque calls without cross-function type propagation. 
+
+Semantic fidelity. The CPU backend achieves a 73.8% end-to-end pass rate on HeCBench (compile, execute, and bitwise/tolerance-checked output match against the original binary). The remaining 26.2% are kernels that lift cleanly but fail downstream because Jisheng Zhao 1 , Huanzhi Pu 1, Shinnung Jeong, Chihyo Ahn, Hyesoon Kim Georgia Institute of Technology USA 
+
+hardware-specific operations (MUFU approximations, texture sam-pling, SM90 cluster features) have no exact CPU equivalent. The CPU backend is intended for analysis and testing, not performance. 
+
+## 7 Use Cases 7.1 Memory Access Pattern Analysis 
+
+We demonstrate analysis of closed-source kernels on a kernel with stride-based thread-variant memory accesses, a common pattern in ML and HPC code that causes poor coalescing. The SASS below, recovered from a compiled binary, shows the first violation: non-contiguous accesses where Thread 0 reads input[0] , Thread 1 reads input[5] , Thread 2 reads input[10] , and so on, forcing 32 memory transactions per warp instead of 1–2:            
+
+> 1CGPart_Rank R3, R0
+> 200b0: ISETP.GE.AND P1, PT, R6, c[0x0][0x170], PT
+> 300c0: IADD3 R3, R0, R3, RZ
+> 400f0: MOV R4, 0x4
+> 50100: IMAD.WIDE.U32 R2, R3, R4, c[0x0][0x160]
+> 60110: LDG.E.SYS R2, [R2]
+
+The second case accesses every other element (Thread 0: input[0] ,Thread 1: input[4] , ...), requiring 16 transactions for 16 threads:          
+
+> 1CGBlock_Rank R2, R6
+> 20180: MOV R5, 0x4
+> 30190: IMAD.WIDE R2, R6, R5, c[0x0][0x160]
+> 401a0: LDG.E.SYS R2, [R2]
+> 501b0: IMAD.WIDE R4, R6, R5, c[0x0][0x168]
+> 601c0: FADD R7, R2, 1
+> 701d0: STG.E.SYS [R4], R7
+
+Both cases can be identified from lifted IR by tracing def-use chains from thread indices through address computations. This analysis requires typed IR: without type recovery, the lifter cannot emit valid LLVM IR at all (Section 6.4), and even partially incorrect types would misclassify integer index arithmetic as floating-point operations, breaking the address pattern. 
+
+## 7.2 Cross-Platform Execution on x86 and ARM 
+
+Because the lifted output is standard LLVM IR, we can retarget it to non-GPU backends including x86-64 and aarch64 (ARM). We compile lifted IR with clang and execute on commodity hardware, enabling functional testing without a GPU. 
+
+Execution model. The CPU runtime emulates GPU execution for correctness validation, not performance: one OS thread per GPU logical thread, with CTAs executed sequentially. Kernel pa-rameters are passed through constant memory matching SASS’s 
+
+c[0][ARG_BASE + offset] layout, so the lifted function has a 
+
+void() signature with no ABI dependency. The base offset varies across GPU generations (e.g., 0x160 on SM75, 0x210 on SM90, 
+
+0x360 on SM100/SM120) because NVIDIA expands the constant-memory prefix with each generation to accommodate additional system state. CuLifter reads the correct offset from ELF metadata (EIATTR_PARAM_CBANK ) rather than hardcoding it, so the same run-time supports all architectures. 
+
+GPU semantic decomposition. GPU-specific operations have no direct CPU equivalent; we decompose them to portable scalar operations as summarized in Table 11. All decompositions use stan-dard LLVM instructions and C++17 synchronization primitives, with no platform-specific intrinsics or inline assembly. 
+
+Table 10: GPU-to-CPU execution model mapping.            
+
+> GPU Concept CPU Mapping
+> Grid (gridDim CTAs) Sequential CTA loop CTA (blockDim threads) std::thread pool (1 per GPU thread) Warp (32 lanes) 32 OS threads + mutex-based shuffle/vote Shared memory (per-CTA) Global array (zeroed per CTA) Local memory (per-thread) Thread-local storage (TLS) array Constant memory (5 banks) TLS array (copied per thread) Registers (R0–R255) SSA values (register-allocated by LLVM) Predicates (P0–P7) i1 values in LLVM IR
+
+Table 11: GPU semantic decomposition to portable CPU op-erations.                           
+
+> GPU Operation CPU Decomposition Notes
+> HMMA/WGMMA
+> (tensor core) Scalar FMA loops Correct for lane 0 SHFL (warp shuffle) Mutex-based exchange Per-warp shared buffer VOTE/BALLOT (warp vote) Mutex-based ballot Per-warp ballot buffer BAR (barrier) Condition-variable wait Counting barrier ATOM (atomics) Scalar load+op+store Sequential CTA model MUFU (special math) libm functions +3 ULP bias for RCP MEMBAR/DEPBAR (fences) NOP Ordering via mutex LDG/STG (global mem) inttoptr + load/store LDS/STS (shared mem) GEP into shared array
+
+Numerical fidelity. The hardest semantic gap is NVIDIA’s hard-ware reciprocal ( MUFU.RCP ), which returns an approximation bi-ased by approximately +3 ULPs relative to IEEE 754. The compiler-emitted integer-division sequence depends on this bias: our runtime must bias the IEEE reciprocal result by +3 ULPs to match, or exact IEEE division produces wrong quotients. 
+
+ARM (aarch64) support. Supporting ARM required chang-ing only the TLS model annotation and the LLVM target triple. The entire lifting pipeline (parser, transform passes, type analysis, and IR generation) is target-independent and produces identical LLVM IR regardless of the host CPU. We validated on an ARM Grace Hopper (GH200) system; all failures matched x86 failures with no ARM-specific issue. ARM’s relaxed memory model does not affect correctness because inter-thread communication in the runtime uses std::mutex , which provides full acquire/release semantics on both architectures. The goal of cross-platform execution is analysis and valida-tion, not performance parity. Texture/surface operations and SM90 cluster-level features are not yet supported. 
+
+## 8 Related Work 8.1 CPU Binary Lifters and Their Assumptions 
+
+CPU binary lifters, including McSema [ 19 ], BAP [ 7 ], RetDec [ 34 ], and others [ 9, 13 , 16 , 21 , 33 , 37 ], are mature tools for x86, ARM, and RISC-V. As discussed in Section 3, the assumptions these tools rely on (branch-based control flow, separate register files, documented ISAs) do not hold for SASS. CuLifter: Lifting GPU Binaries to Typed IR 
+
+## 8.2 Type Recovery: CPU vs. GPU 
+
+CPU binary type recovery is well-studied, with two main lines of work. The first is constraint-based inference: TIE [ 36 ] introduced type inference with intersection and union types, Retypd [ 41 ] ad-vanced this direction with recursive types, polymorphism, and sub-typing, and BinSub [ 52 ] reformulates subtyping-based inference us-ing algebraic subtyping, achieving a 63 × runtime improvement over Retypd. The second line applies probabilistic and learning-based techniques: OSPREY [ 61 ] recovers variables and data structures probabilistically, DEBIN [ 27 ] and DIRTY [ 10 ] predict types and variable names from stripped binaries using learning-based models, Manta [ 60 ] combines hybrid-sensitive static analysis with type in-ference for bug detection, and TYGR [ 62 ] infers types for stripped binaries via graph neural networks. All of these systems operate in settings where ISA and ABI structure provide strong type evidence through separate register files, explicit branch instructions, and documented calling conventions. On SASS, that evidence is much weaker because integer, floating-point, pointer, and packed values all share a single architectural register file. GPU type recovery therefore becomes a propagation problem with conflict detection rather than a classification problem. We must also handle intentional type punning, routinely emitted by the GPU compiler for fast reciprocal and exponent manipulation, through explicit bitcast insertion at conflict boundaries. 
+
+## 8.3 Tools for SASS or GPU Binary Analysis 
+
+NVIDIA’s cuObjDump and nvdisasm [ 43 ] provide disassembly and CFG extraction. NVBit [ 57 ] is a dynamic binary instrumentation framework; SASSI [ 53 ] is a compile-time instrumentation frame-work. Ari et al. [ 25 ] demonstrate assembler generation with a Hard-ware Abstraction Layer. Unlike CuLifter, none of these recover analyzable LLVM IR from SASS. Jeanmougin et al. [ 30 ] build CFGs for SASS using abstract in-terpretation to detect divergence. Shoushtary et al. [ 51 ] reverse-engineer 20 SASS control-flow instructions for CFG construction. Sen et al. [ 50 ] apply pattern matching to SASS for memory-access analysis. In contrast, CuLifter translates SASS to typed LLVM IR, enabling compiler-level analysis and retargeting to other architec-tures. 
+
+## 8.4 Running CUDA on Non-NVIDIA Hardware 
+
+Prior work translates CUDA at various abstraction levels [ 3 , 5 , 18 , 22 ,23 , 29 , 31 , 46 , 49 , 55 ]. Source-level tools (MCUDA [ 55 ], Hipify [ 2 ]) convert CUDA source to CPU loops or HIP. COX [ 23 ] and CuP-BoP/SoftCUDA/Volt [ 3 , 22 , 31 ] operate on NVVM IR. Ocelot [ 18 ]lifts PTX to LLVM IR. ZLUDA [ 29 ] translates PTX at runtime. Flex-Grip [ 5 ] reverse-engineers SASS for integer-only FPGA execution. CASS [ 28 ] ports CUDA to AMD at source and assembly level. Unlike all of these, CuLifter targets SASS (the final binary) and recovers typed LLVM IR. 
+
+## 9 Conclusion 
+
+We presented CuLifter, a framework that recovers analyzable LLVM IR from NVIDIA SASS binaries. Our key findings are: (1) Type recovery is the key challenge of GPU binary lifting. SASS’s unified register file erases all type informa-tion. We show that type recovery on GPUs is a constraint-propagation problem with conflict detection. Our ablation confirms this: disabling type recovery drops the x86 pass rate from 73.8% to 0%, a 73.8 percentage-point drop, while disabling other recovery steps has negligible effect. (2) Predicated-to-SSA conversion adapts known techniques. 
+
+We apply 𝜓 -function-based select insertion from the IA-64 literature, extended for SIMT-specific constructs (predicated 
+
+EXIT , dual-predicate branches, convergence barriers). (3) Practical lifting across GPU generations is feasible. 
+
+CuLifter supports SM75 through SM120 and successfully lifts 24,431 of 24,437 GPU functions (99.98%) across eight benchmark suites spanning open-source applications, ven-dor libraries, and optimized ML runtimes, demonstrating that opaque GPU binaries can be brought back into the compiler-analysis stack. The lifted LLVM IR enables downstream analysis (memory access pattern detection) and cross-platform execution on x86 and ARM CPUs. Jisheng Zhao 1 , Huanzhi Pu 1, Shinnung Jeong, Chihyo Ahn, Hyesoon Kim Georgia Institute of Technology USA 
+
+## References 
+
+[1] 2026. NVIDIA/Cuda-Samples. NVIDIA Corporation. [2] Advanced Micro Devices, Inc. (AMD). 2025. HIP Documentation — HIP 7.2.53211 Documentation .[3] Chihyo Ahn, Ruobing Han, Udit Subramanya, Jisheng Zhao, Blaise Tine, and Hyesoon Kim. 2025. SoftCUDA: Running CUDA on Softcore GPU. In 2025 IEEE 33rd Annual International Symposium on Field-Programmable Custom Computing Machines (FCCM) . 138–142. https://doi.org/10.1109/FCCM62733.2025.00049 [4] Anil Altinay, Joseph Nash, Taddeus Kroes, Prabhu Rajasekaran, Dixin Zhou, Adrian Dabrowski, David Gens, Yeoul Na, Stijn Volckaert, Cristiano Giuffrida, Herbert Bos, and Michael Franz. 2020. BinRec: Dynamic Binary Lifting and Recompilation. In Proceedings of the 15th European Conference on Computer Systems (EuroSys) . https://doi.org/10.1145/3342195.3387550 [5] Kevin Andryc, Murtaza Merchant, and Russell Tessier. 2013. FlexGrip: A Soft GPGPU for FPGAs. In 2013 International Conference on Field-Programmable Tech-nology (FPT) . 230–237. https://doi.org/10.1109/FPT.2013.6718358 [6] Jay Bosamiya, Maverick Woo, and Bryan Parno. 2025. TRex: Practical Type Reconstruction for Binary Code. In Proceedings of the 34th USENIX Security Symposium .[7] David Brumley, Ivan Jager, Thanassis Avgerinos, and Edward J. Schwartz. 2011. BAP: A Binary Analysis Platform. In Computer Aided Verification , Ganesh Gopalakrishnan and Shaz Qadeer (Eds.). Vol. 6806. Springer Berlin Heidelberg, Berlin, Heidelberg, 463–469. https://doi.org/10.1007/978-3-642-22110-1_37 [8] L. Carter, B. Simon, B. Calder, L. Carter, and J. Ferrante. 1999. Predicated Static Single Assignment. In 1999 International Conference on Parallel Architectures and Compilation Techniques (Cat. No.PR00425) . 245–255. https://doi.org/10.1109/ PACT.1999.807561 [9] Sang Kil Cha, Thanassis Avgerinos, Alexandre Rebert, and David Brumley. 2012. Unleashing Mayhem on Binary Code. In 2012 IEEE Symposium on Security and Privacy . 380–394. https://doi.org/10.1109/SP.2012.31 [10] Qibin Chen, Jeremy Lacomis, Edward J. Schwartz, Claire Le Goues, Graham Neubig, and Bogdan Vasilescu. 2022. Augmenting Decompiler Output with Learned Variable Names and Types. In 31st USENIX Security Symposium (USENIX Security 22) . USENIX Association, Boston, MA, 4327–4343. [11] Sharan Chetlur, Cliff Woolley, Philippe Vandermersch, Jonathan Cohen, John Tran, Bryan Catanzaro, and Evan Shelhamer. 2014. cuDNN: Efficient Primitives for Deep Learning. https://doi.org/10.48550/arXiv.1410.0759 arXiv:1410.0759 [cs] [12] Weihaw Chuang, B. Calder, and J. Ferrante. 2003. Phi-Predication for Light-Weight If-Conversion. In International Symposium on Code Generation and Opti-mization, 2003. CGO 2003. 179–190. https://doi.org/10.1109/CGO.2003.1191544 [13] C. Cifuentes and M. Van Emmerik. 2000. UQBT: Adaptable Binary Translation at Low Cost. Computer 33, 3 (March 2000), 60–66. https://doi.org/10.1109/2.825697 [14] Ron Cytron, Jeanne Ferrante, Barry K. Rosen, Mark N. Wegman, and F. Kenneth Zadeck. 1991. Efficiently Computing Static Single Assignment Form and the Control Dependence Graph. ACM Trans. Program. Lang. Syst. 13, 4 (Oct. 1991), 451–490. https://doi.org/10.1145/115372.115320 [15] Tri Dao, Daniel Y. Fu, Stefano Ermon, Atri Rudra, and Christopher Ré. 2022. FLASHATTENTION: Fast and Memory-Efficient Exact Attention with IO-awareness. In Proceedings of the 36th International Conference on Neural In-formation Processing Systems (NIPS ’22) . Curran Associates Inc., Red Hook, NY, USA, 16344–16359. [16] Sandeep Dasgupta, Sushant Dinesh, Deepan Venkatesh, Vikram S. Adve, and Christopher W. Fletcher. 2020. Scalable Validation of Binary Lifters. In Proceedings of the 41st ACM SIGPLAN Conference on Programming Language Design and Implementation (PLDI 2020) . Association for Computing Machinery, New York, NY, USA, 655–671. https://doi.org/10.1145/3385412.3385964 [17] Alessandro Di Federico, Mathias Payer, and Giovanni Agosta. 2017. Rev.Ng: A Unified Binary Analysis Framework to Recover CFGs and Function Boundaries. In Proceedings of the 26th International Conference on Compiler Construction (Cc 2017) . Association for Computing Machinery, New York, NY, USA, 131–141. https://doi.org/10.1145/3033019.3033028 [18] Gregory Frederick Diamos, Andrew Robert Kerr, Sudhakar Yalamanchili, and Nathan Clark. 2010. Ocelot: A Dynamic Optimization Framework for Bulk-Synchronous Applications in Heterogeneous Systems. In Proceedings of the 19th International Conference on Parallel Architectures and Compilation Techniques (Pact ’10) . Association for Computing Machinery, New York, NY, USA, 353–364. https://doi.org/10.1145/1854273.1854318 [19] Artem Dinaburg and Andrew Ruef. 2014. McSema: Static Translation of X86 Instructions to LLVM. REcon. [20] Khaled ElWazeer, Kapil Anand, Aparna Kotha, Matthew Smithson, and Rajeev Barua. 2013. Scalable Variable and Data Type Detection in a Binary Rewriter. In 
+
+Proceedings of the 34th ACM SIGPLAN Conference on Programming Language De-sign and Implementation (PLDI) . 51–60. https://doi.org/10.1145/2491956.2462165 [21] Bryan Ford and Russ Cox. 2008. Vx32: Lightweight User-Level Sandboxing on the X86. In USENIX 2008 Annual Technical Conference (ATC’08) . USENIX Association, USA, 293–306. [22] Ruobing Han, Jun Chen, Bhanu Garg, Xule Zhou, John Lu, Jeffrey Young, Jae-woong Sim, and Hyesoon Kim. 2024. CuPBoP: Making CUDA a Portable Lan-guage. ACM Trans. Des. Autom. Electron. Syst. 29, 4 (June 2024), 60:1–60:25. https://doi.org/10.1145/3659949 [23] Ruobing Han, Jaewon Lee, Jaewoong Sim, and Hyesoon Kim. 2022. COX : Exposing CUDA Warp-level Functions to CPUs. ACM Trans. Archit. Code Optim. 
+
+19, 4 (Sept. 2022), 59:1–59:25. https://doi.org/10.1145/3554736 [24] Niranjan Hasabnis and R. Sekar. 2016. Lifting Assembly to Intermediate Rep-resentation: A Novel Approach Leveraging Compilers. In Proceedings of the Twenty-First International Conference on Architectural Support for Programming Languages and Operating Systems (Asplos ’16) . Association for Computing Ma-chinery, New York, NY, USA, 311–324. https://doi.org/10.1145/2872362.2872380 [25] Ari B. Hayes, Fei Hua, Jin Huang, Yanhao Chen, and Eddy Z. Zhang. 2019. Decod-ing CUDA Binary. In Proceedings of the 2019 IEEE/ACM International Symposium on Code Generation and Optimization (CGO 2019) . IEEE Press, Washington, DC, USA, 229–241. [26] Guoliang He and Eiko Yoneki. 2025. CuAsmRL: Optimizing GPU SASS Sched-ules via Deep Reinforcement Learning. In Proceedings of the 23rd ACM/IEEE International Symposium on Code Generation and Optimization (CGO) . https: //doi.org/10.1145/3696443.3708943 [27] Jingxuan He, Pesho Ivanov, Petar Tsankov, Veselin Raychev, and Martin Vechev. 2018. Debin: Predicting Debug Information in Stripped Binaries. In Proceedings of the 2018 ACM SIGSAC Conference on Computer and Communications Security (CCS ’18) . Association for Computing Machinery, New York, NY, USA, 1667–1680. https://doi.org/10.1145/3243734.3243866 [28] Ahmed Heakl, Gustavo Bertolo Stahl, Sarim Hashmi, Seung Hun Eddie Han, Salman Khan, and Abdulrahman Mahmoud. 2025. CASS: Nvidia to AMD Tran-spilation with Data, Models, and Benchmark. (Oct. 2025). [29] Andrzej Janik. 2026. Vosen/ZLUDA. [30] Louison Jeanmougin, Pascal Sotin, Christine Rochange, and Thomas Carle. 2023. Warp-Level CFG Construction for GPU Kernel WCET Analysis. OASIcs, Volume 114, WCET 2023 114 (2023), 1:1–1:13. https://doi.org/10.4230/OASICS.WCET. 2023.1 [31] Shinnung Jeong, Chihyo Ahn, Huanzhi Pu, Jisheng Zhao, Hyesoon Kim, and Blaise Tine. 2026. Inside VOLT: Designing an Open-Source GPU Compiler (Tool). In Proceedings of the 35th ACM SIGPLAN International Conference on Compiler Construction (Cc ’26) . Association for Computing Machinery, New York, NY, USA, 155–167. https://doi.org/10.1145/3771775.3786275 [32] Zheming Jin and Jeffrey S. Vetter. 2023. A Benchmark Suite for Improving Perfor-mance Portability of the SYCL Programming Model. In 2023 IEEE International Symposium on Performance Analysis of Systems and Software (ISPASS) . 325–327. https://doi.org/10.1109/ISPASS57527.2023.00041 [33] Soomin Kim, Markus Faerevaag, Minkyu Jung, SeungIl Jung, DongYeop Oh, JongHyup Lee, and Sang Kil Cha. 2017. Testing Intermediate Representations for Binary Analysis. In Proceedings of the 32nd IEEE/ACM International Conference on Automated Software Engineering (Ase ’17) . IEEE Press, Urbana-Champaign, IL, USA, 353–364. [34] Jakub Kroužek and Peter Matula. 2017. RetDec: A Retargetable Machine-Code Decompiler. Botconf. [35] Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph Gonzalez, Hao Zhang, and Ion Stoica. 2023. Efficient Memory Management for Large Language Model Serving with PagedAtten-tion. In Proceedings of the 29th Symposium on Operating Systems Principles (Sosp ’23) . Association for Computing Machinery, New York, NY, USA, 611–626. https://doi.org/10.1145/3600006.3613165 [36] JongHyup Lee, Thanassis Avgerinos, and David Brumley. 2011. TIE: Principled Reverse Engineering of Types in Binary Programs. In Proceedings of the 18th Annual Network and Distributed System Security Symposium (NDSS) .[37] Zhibo Liu, Yuanyuan Yuan, Shuai Wang, and Yuyan Bao. 2022. SoK: Demystifying Binary Lifters Through the Lens of Downstream Applications. In 2022 IEEE Symposium on Security and Privacy (SP) . 1100–1119. https://doi.org/10.1109/ SP46214.2022.9833799 [38] LLVM Developer Group. 2025. The LLVM Compiler Infrastructure. [39] Chris Lomont. 2003. Fast Inverse Square Root. [40] Cristóbal A. Navarro, Nancy Hitschfeld-Kahler, and Luis Mateu. 2014. A Survey on Parallel Computing and Its Applications in Data-Parallel Problems Using GPU Architectures. Communications in Computational Physics 15, 2 (Feb. 2014), 285–329. https://doi.org/10.4208/cicp.110113.010813a [41] Matt Noonan, Alexey Loginov, and David Cok. 2016. Polymorphic Type Infer-ence for Machine Code. In Proceedings of the 37th ACM SIGPLAN Conference on Programming Language Design and Implementation (PLDI ’16) . Association for Computing Machinery, New York, NY, USA, 27–41. https://doi.org/10.1145/ 2908080.2908119 [42] NVIDIA Corporation. 2020. NVIDIA Ampere Architecture SASS Instruction Set .Technical Report. NVIDIA Corporation. [43] NVIDIA Corporation. 2024. CUDA Binary Utilities Documentation .[44] NVIDIA Corporation. 2025. CUDA Toolkit - Free Tools and Training .[45] NVIDIA Corporation. 2025. NVIDIA Parallel Thread Execution (PTX) ISA .CuLifter: Lifting GPU Binaries to Typed IR 
+
+[46] Alexandros Papakonstantinou, Karthik Gururaj, John A. Stratton, Deming Chen, Jason Cong, and Wen-Mei W. Hwu. 2009. FCUDA: Enabling Efficient Compilation of CUDA Kernels onto FPGAs. In 2009 IEEE 7th Symposium on Application Specific Processors . 35–42. https://doi.org/10.1109/SASP.2009.5226333 [47] Jihee Park, Insu Yun, and Sukyoung Ryu. 2025. Bridging the Gap between Real-World and Formal Binary Lifting through Filtered-Simulation. In Proceedings of the ACM on Programming Languages , Vol. 9. Article 112. https://doi.org/10.1145/ 3720524 [48] Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory Chanan, Trevor Killeen, Zeming Lin, Natalia Gimelshein, Luca Antiga, Alban Desmaison, Andreas Köpf, Edward Yang, Zach DeVito, Martin Raison, Alykhan Tejani, Sasank Chilamkurthy, Benoit Steiner, Lu Fang, Junjie Bai, and Soumith Chintala. 2019. PyTorch: An Imperative Style, High-Performance Deep Learning Library. In Proceedings of the 33rd International Conference on Neural Information Processing Systems . Number 721. Curran Associates Inc., Red Hook, NY, USA, 8026–8037. [49] Huanzhi Pu, Rishabh Ravi, Shinnung Jeong, Udit Subramanya, Euijun Chung, Jisheng Zhao, Chihyo Ahn, and Hyesoon Kim. 2025. Hardware vs. Software Implementation of Warp-Level Features in Vortex RISC-v GPU. arXiv:2505.03102 [cs.AR] [50] Soumya Sen, Stepan Vanecek, and Martin Schulz. 2023. GPUscout: Locating Data Movement-related Bottlenecks on GPUs. In Proceedings of the SC ’23 Workshops of the International Conference on High Performance Computing, Network, Storage, and Analysis (SC-W ’23) . Association for Computing Machinery, New York, NY, USA, 1392–1402. https://doi.org/10.1145/3624062.3624208 [51] Mojtaba Abaie Shoushtary, Jordi Tubella Murgadas, and Antonio Gonzalez. 2024. Control Flow Management in Modern GPUs. https://doi.org/10.48550/arXiv. 2407.02944 arXiv:2407.02944 [cs] [52] Ian Smith. 2025. BinSub: The Simple Essence of Polymorphic Type Inference for Machine Code. In Static Analysis , Roberto Giacobazzi and Alessandra Gorla (Eds.). Springer Nature Switzerland, Cham, 425–450. https://doi.org/10.1007/978-3-031-74776-2_17 [53] Mark Stephenson, Siva Kumar Sastry Hari, Yunsup Lee, Eiman Ebrahimi, Daniel R. Johnson, David Nellans, Mike O’Connor, and Stephen W. Keckler. 2015. Flexible Software Profiling of GPU Architectures. In Proceedings of the 42nd Annual International Symposium on Computer Architecture (ISCA ’15) . Association for Computing Machinery, New York, NY, USA, 185–197. https://doi.org/10.1145/ 2749469.2750375 [54] A. Stoutchinin and F. de Ferriere. 2001. Efficient Static Single Assignment Form for Predication. In Proceedings. 34th ACM/IEEE International Symposium on Mi-croarchitecture. MICRO-34 . 172–181. https://doi.org/10.1109/MICRO.2001.991116 [55] John A. Stratton, Sam S. Stone, and Wen-mei W. Hwu. 2008. MCUDA: An Effi-cient Implementation of CUDA Kernels for Multi-core CPUs. In Languages and Compilers for Parallel Computing , José Nelson Amaral (Ed.). Vol. 5335. Springer Berlin Heidelberg, Berlin, Heidelberg, 16–30. https://doi.org/10.1007/978-3-540-89740-8_2 [56] Vijay Thakkar, Pradeep Ramani, Cris Cecka, Aniket Shivam, Honghao Lu, Ethan Yan, Jack Kosaian, Mark Hoemmen, Haicheng Wu, Andrew Kerr, Matt Nicely, Duane Merrill, Dustyn Blasig, Aditya Atluri, Fengqi Qiao, Piotr Majcher, Paul Springer, Markus Hohnerbach, Jin Wang, and Manish Gupta. 2023. CUTLASS. [57] Oreste Villa, Mark Stephenson, David Nellans, and Stephen W. Keckler. 2019. NVBit: A Dynamic Binary Instrumentation Framework for NVIDIA GPUs. In 
+
+Proceedings of the 52nd Annual IEEE/ACM International Symposium on Microar-chitecture (MICRO-52) . Association for Computing Machinery, New York, NY, USA, 372–383. https://doi.org/10.1145/3352460.3358307 [58] Nancy J. Warter, Scott A. Mahlke, Wen-Mei W. Hwu, and B. Ramakrishna Rau. 1993. Reverse If-Conversion. In Proceedings of the ACM SIGPLAN 1993 Conference on Programming Language Design and Implementation (PLDI ’93) . Association for Computing Machinery, New York, NY, USA, 290–299. https://doi.org/10.1145/ 155090.155118 [59] Matthias Wenzl, Georg Merzdovnik, Johanna Ullrich, and Edgar Weippl. 2019. From Hack to Elaborate Technique—A Survey on Binary Rewriting. Acm Com-puting Surveys 52, 3 (June 2019), 49:1–49:37. https://doi.org/10.1145/3316415 [60] Chengfeng Ye, Yuandao Cai, Anshunkang Zhou, Heqing Huang, Hao Ling, and Charles Zhang. 2025. Manta: Hybrid-sensitive Type Inference toward Type-Assisted Bug Detection for Stripped Binaries. In Proceedings of the 29th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 4 (Asplos ’24) . Association for Computing Machinery, New York, NY, USA, 170–187. https://doi.org/10.1145/3622781.3674177 [61] Zhuo Zhang, Yapeng Ye, Wei You, Guanhong Tao, Wen-chuan Lee, Yonghwi Kwon, Yousra Aafer, and Xiangyu Zhang. 2021. OSPREY: Recovery of Vari-able and Data Structure via Probabilistic Analysis for Stripped Binary. In 2021 IEEE Symposium on Security and Privacy (SP) . 813–832. https://doi.org/10.1109/ SP40001.2021.00051 [62] Chang Zhu, Ziyang Li, Anton Xue, Ati Priya Bajaj, Wil Gibbs, Yibo Liu, Rajeev Alur, Tiffany Bao, Hanjun Dai, Adam Doupé, Mayur Naik, Yan Shoshitaishvili, Ruoyu Wang, and Aravind Machiry. 2024. TYGR: Type Inference on Stripped Binaries Using Graph Neural Networks. In 33rd USENIX Security Symposium (USENIX Security 24) . 4283–4300.

@@ -1,0 +1,674 @@
+Title: Affinity Tailor: Dynamic Locality-Aware Scheduling at Scale
+
+URL Source: https://arxiv.org/pdf/2604.27915v1
+
+Published Time: Fri, 01 May 2026 01:16:45 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# Affinity Tailor: Dynamic Locality-Aware Scheduling at Scale 
+
+## Jin Xin Ng 
+
+njx@google.com 
+
+Google, USA 
+
+## Ori Livneh 
+
+atdt@google.com 
+
+Google, USA 
+
+## Richard O’Grady 
+
+rjogrady@google.com 
+
+Google, USA 
+
+## Josh Don 
+
+joshdon@google.com 
+
+Google, USA 
+
+## Peng Ding 
+
+dingp@google.com 
+
+Google, USA 
+
+## Samuel Grossman 
+
+samuelgr@google.com 
+
+Google, USA 
+
+## Luis Otero 
+
+lotero@google.com 
+
+Google, USA 
+
+## Chris Kennelly 
+
+ckennelly@google.com 
+
+Google, USA 
+
+## David Lo 
+
+davidlo@google.com 
+
+Google, USA 
+
+## Carlos Villavieja 
+
+villavieja@google.com 
+
+Google, USA 
+
+## Abstract 
+
+Modern large multicore systems often run multiple work-loads that share CPUs under schedulers such as Linux CFS. To keep CPUs busy, these schedulers load-balance runnable work, causing each workload to execute on many cores. This weakens locality at the microarchitectural level: workloads lose reuse in caches, branch predictors, and prefetchers, and interfere more with one another—especially on chiplet-based systems, where spreading execution across cores also spreads it across LLC boundaries. A natural alternative is strict CPU partitioning, but hard partitions leave capacity idle when workloads do not fully use their reserved CPUs. We present Affinity Tailor , a userspace-guided kernel sched-uling system built on a key insight: the kernel can preserve locality for workloads that share CPUs by treating demand-sized, topologically compact CPU sets as affinity hints rather than hard partitions. A userspace controller estimates each workload’s CPU demand online and assigns a preferred CPU set sized to that demand, chosen to be as disjoint as possible from other workloads while spanning as few LLC domains as possible. The kernel then uses this set as an affinity hint, steering threads toward those CPUs while still allowing exe-cution elsewhere when needed to preserve utilization. De-ployed at Google, Affinity Tailor delivers geometric-mean per-CPU throughput gains of 12% on chiplet-based systems and 3% on non-chiplet systems over Linux CFS. Further-more, faster execution reduces memory residency, yielding per-GB throughput gains of 3-7%. Our findings suggest that future schedulers should treat spatial locality as a first-class objective, even at the expense of work-conservation. 
+
+## 1 Introduction 
+
+As modern datacenter processors aggressively scale core counts, individual applications increasingly struggle to sat-urate massive hardware topologies. To maximize hardware utilization, hyperscalers aggressively co-locate hundreds of workloads per machine [ 2, 3 ], resulting in operating system schedulers continuously interleaving threads from distinct applications on the same physical cores. This interleaving is inefficient due to the continuous loss of microarchitectural state. Every time the kernel schedules a new thread onto a core, it effectively begins diluting the previous thread’s instruction execution and data access history, thus degrad-ing the hit rates across the memory hierarchy (L1, L2, and last-level caches) and reducing the accuracy of core-level predictive hardware structures, such as the branch predictor and hardware prefetchers. Concurrently, memory bandwidth per core has stagnated in recent server architectures, while workloads have become memory-intensive [ 13 ]. This dispar-ity leaves shared memory interconnects highly vulnerable to saturation caused by traffic from antagonistic workloads. Thread scheduling is a primary determinant of application performance [ 21 ]. Modern OS schedulers—such as Linux’s 
+
+Completely Fair Scheduler (CFS) [ 25 ] and Earliest Eligible Virtual Deadline First (EEVDF) scheduler [ 7 , 29 ]—prioritize 
+
+work-conservation . A strictly work-conserving scheduler op-erates on the axiom that no CPU core should sit idle if a runnable thread exists. Consequently, the OS constantly mul-tiplexes threads across cores to minimize immediate queue-ing. While recent advances have made scheduling policies more extensible [ 10 , 11 ], work-conservation remains a dom-inant paradigm. Work-conserving approaches maximize theoretical CPU cycle utilization but are increasingly at odds with modern hardware. Over the last several generations of server CPUs, the cadence of Moore’s law has driven core counts exponen-tially higher while memory bandwidth per core has stag-nated. On modern processor architectures composed of nu-merous chiplet-based core complexes, non-uniform cache hierarchies pose significant inefficiencies for application per-formance as memory traffic must traverse shared memory interconnects [ 33 ], often with fixed bandwidth ceilings. Even when the bandwidth ceilings are not reached, elevated mem-ory bandwidth results in higher memory latency [ 13 ]. Simul-taneously, software applications spend a significant portion 
+
+> 1
+> arXiv:2604.27915v1 [cs.OS] 30 Apr 2026 Affinity Tailor: Dynamic Locality-Aware Scheduling at Scale
+
+of cycles backend-bound [16 , 28 ], i.e., waiting for data to load. When a work-conserving scheduler migrates a thread between processor cores, it forces cache lines to move across the processor, further congesting shared interconnects and degrading the performance of all co-located workloads. Operating systems provide mechanisms like cpusets to strictly limit thread execution to specific cores. However, static partitioning is ill-suited for modern datacenters for two reasons. First, workloads are notoriously bursty; strict limits cause severe latency penalties during spikes in paral-lelism. Second, datacenter operators frequently overcommit 
+
+[ 2, 3 ] resources—the sum of CPU resources sold on a machine exceeds the physical machine capacity—making it impossible to assign each application a disjoint set of CPUs. Thus, while 
+
+cpusets can preserve microarchitectural state, they are fun-damentally incompatible with the bursty, overcommitted environment of modern datacenters. In the literature, hardware-assisted resource partitioning mechanisms [ 4, 5 , 20 , 27 , 32 ] have been discussed as a means of managing the use of shared system resources between co-located applications, but these systems do not govern thread-to-core placement. Separately, the Nest scheduler [ 17 ] concentrates threads onto a dense set of warm cores to exploit higher turbo frequencies, but lacks the notion of per-application isolation. Cache Aware Scheduling patches [ 6] in the Linux kernel propose LLC-affinity heuristics in the load balancer, but operate with minimal insight into applica-tions’ execution histories. None of these systems provide the dynamic, locality-aware, application-isolating scheduling needed in modern warehouse-scale datacenters. We introduce Affinity Tailor, an OS scheduling architec-ture that opportunistically maximizes spatial locality without strictly sacrificing work-conservation. Affinity Tailor intro-duces a novel Linux kernel mechanism, Preferred Cores , to provide soft affinity . Threads are drawn to dynamically sized, "hot" execution domains during nominal load, thus improv-ing spatial locality and better retaining microarchitectural state. Specifically, Affinity Tailor promotes thread execution on "hot" preferred cores—featuring primed caches, prefetch-ers, and an accurate branch predictor. The Preferred Cores mechanism acts as a permeable boundary, permitting threads to burst onto external cores during momentary parallelism spikes to prevent excessive thread queuing. Affinity Tailor utilizes two distinct core allocation strate-gies. We initially developed a chiplet-granularity algorithm for split-LLC architectures. By applying soft affinity to pack applications into the absolute minimum number of required chiplets, this algorithm sought to reduce cross-boundary migrations to alleviate shared interconnect saturation. Our initial fleet deployments revealed unexpected efficiency gains in per-core predictive structures—specifically L1/L2 caches and branch predictors—independent of the LLC. Driven by these insights, we developed a secondary, fine-grained core allocation algorithm tailored specifically for monolithic-LLC architectures. Unlike previously proposed microsecond-scale scheduling systems [ 9 , 12 , 14 , 15 , 18 , 19 , 26 ] that replace the OS sched-uler with custom scheduling stacks, Affinity Tailor functions transparently within the kernel to maximize spatial local-ity, and is compatible with arbitrary server hardware and software applications. We deployed and evaluated both algorithms of Affinity Tai-lor across thousands of machines in Google’s global fleet over one week across a highly diverse mix of latency-sensitive user-facing services and throughput-oriented batch work-loads. Our evaluation demonstrates that Affinity Tailor im-proves aggregate application throughput by up to 12% per-CPU and up to 7% per-GB memory, enabling systems to harvest most of the performance benefits of isolated sched-uling domains without sacrificing work-conservation. In summary, this paper makes the following key contribu-tions: 
+
+• We present Preferred Cores, a novel Linux kernel mechanism providing cgroup-based soft affinity that preserves work-conservation. 
+
+• We introduce a userspace system that dynamically sizes soft affinity regions using short-horizon demand predictions. 
+
+• We deployed Affinity Tailor in Google’s production fleet, evaluating it across four distinct server platforms and observing aggregate application throughput im-provements of up to 12% per-CPU and up to 7% per-GB memory on highly utilized machines. 
+
+• We empirically demonstrate that aggressively load-balancing threads to prevent immediate queueing—the foundational principle of modern OS schedulers—is ac-tively detrimental on modern hardware and software architectures. 
+
+## 2 Background and Motivation 
+
+Affinity Tailor is motivated by three converging hardware and operational trends: the economic realities of warehouse-scale computing, the constraints of modern multi-core topolo-gies, and the limitations of existing operating system isola-tion mechanisms. 
+
+2.1 Economics of Overcommitment 
+
+Hyperscalers operate under tight economic constraints: en-ergy, power, and physical hardware are scarce resources [ 1, 20 , 23 ]. Furthermore, organic growth in computational demand routinely outpaces the physical supply of newly procured hardware. While modern datacenter processors now feature massive topologies with 256 logical cores per socket, individual ap-plication sizes have largely not followed this trend. Some 
+
+> 2Affinity Tailor: Dynamic Locality-Aware Scheduling at Scale
+
+workloads simply cannot scale proportionally due to Am-dahl’s Law, as vertical scaling is ultimately bottlenecked by serial computation. However, many others are restricted by operational constraints, such as strict reliability and failover requirements that favor distributed instances, or by the ne-cessity of provisioning fragmented capacity to handle diurnal traffic patterns [ 30 , 31 ]. Figure 2 shows that the vast majority of applications in Google’s fleet request fewer than 10 CPUs. 
+
+2017 2018 2019 2020 2021 2022 2023 2024 2025 
+
+0
+
+100 
+
+200 
+
+300     
+
+> 56 56 72
+> 112 128 128 128
+> 192
+> 256
+
+Year (Server Generations) Logical Cores 
+
+Figure 1. Logical CPU cores per socket across recent server generations, showing a 4.6x increase from 56 to 256 CPUs over the last eight years. 0.1 1 10 100 
+
+> 0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1
+> Normalized CPU Limit (Log Scale)
+> Percentage of Instances (limit  < 𝑥 )
+
+Figure 2. The proportion of application instances executing at or below a given normalized CPU limit in Google’s fleet. CPU limits are normalized to represent equivalent computa-tional power across server generations. To bridge this massive core-count vs. application size gap and minimize Total Cost of Ownership (TCO), cluster man-agers like Google’s Borg [ 31 ] must rely on aggressive multi-tenancy. Dedicated servers are only economically viable in limited circumstances such as truly latency-critical work-loads, as they come with a price premium. For general ser-vices, hundreds of disparate workloads are co-located onto the same physical server to maximize hardware utilization. Cluster managers employ a technique known as overcom-mitment [2 , 3 ] to ensure even higher load factors—allowing the sum of requested CPUs to frequently exceed the sum of 
+
+physical CPUs on the system. Statistical models are used to ensure that individual applications are likely to have access to their requested CPUs. Crucially, high machine utilization exacerbates underlying physical bottlenecks, such as in mem-ory bandwidth saturation and overheads through the loss of microarchitectural state. 
+
+2.2 Microarchitectural Interference 
+
+The aggressive multi-tenancy required by modern econom-ics is fundamentally at odds with the trajectory of modern hardware architectures. The most critical structural bottle-neck exacerbated by overcommitment is memory bandwidth. Over the last several generations of server CPUs, the ratio of memory bandwidth available per CPU core has stagnated. 
+
+2017 2018 2019 2020 2021 2022 2023 2024 2025 
+
+0.5
+
+1
+
+1.5
+
+2   
+
+> 1.26 1.3
+> 1.56
+> 1.77
+> 1.46
+> 1.36
+> 0.96 0.96
+> 1.44 1.52
+
+Year (Server Generations) MemBW per CPU (GB/s) 
+
+Figure 3. Memory bandwidth per logical core across recent server generations. Relative to the rise in core counts, mem-ory bandwidth per core has remained comparatively flat while per-core compute efficiency has generally improved. This degradation is compounded by operating systems’ ineffective preservation of spatial locality. When an OS sched-uler such as CFS strictly adheres to work-conservation, it ag-gressively load-balances threads across the entire processor socket to prevent immediate thread queueing. While theo-retically optimal for cycle utilization, this constant thread migration induces severe microarchitectural interference: 
+
+Core-Level Predictive Structures The most immediate consequence of aggressive thread migration is the contin-uous pollution of core-local predictive state. Every time a thread is migrated, it leaves behind its "warm" execution his-tory. As the thread begins executing on a new, "cold" remote core, it suffers a steep increase in branch mispredictions and L1/L2 cache misses while simultaneously evicting the state of the previous tenant. Furthermore, modern datacenter processors depend on highly tuned cache replacement and prefetching algorithms      
+
+> 3Affinity Tailor: Dynamic Locality-Aware Scheduling at Scale
+> 10 −410 −310 −210 −110 010 1
+> 0
+> 5
+> 10
+> Context Switches per Million Instructions
+> LLC MPKI
+> Weighted Median
+> Weighted IQR Box
+
+Figure 4. Impact of context switching rates on last-level cache misses per-kilo-instruction (LLC MPKI) in Google’s fleet. The trend demonstrates that as context switching rates increase, LLC MPKI increases, highlighting the penalties of frequent thread re-scheduling. to mask latency [ 13 ]. Aggressive thread migration effectively blinds these predictive mechanisms; without a stable execu-tion history, their accuracy drops, leading to degradations in overall processor efficiency. Additionally, individual cores are forced to handle diverse working sets from distinct work-loads, further degrading the efficacy of these predictive struc-tures. 
+
+Last-Level Cache (LLC) Beyond private caches, thread migration degrades the shared LLC. As demonstrated in Figure 4, we observe a clear correlation between increased context switching rates and higher LLC misses per-kilo-instruction. This is particularly severe in chiplet-based de-signs where the LLC is split into discrete slices. When a thread is load-balanced across a chiplet boundary, its previ-ously established LLC cache lines are effectively orphaned, forcing the hardware to fetch data from remote cache slices. 
+
+Memory Bandwidth As migrating threads suffer local-LLC misses due to degraded LLC performance, they trigger a flood of cross-chiplet, and main-memory reads. In modern architectures, constant data movement saturates the shared memory interconnects, starving all co-located tenants of the already scarce per-core memory bandwidth. Memory bandwidth congestion is severely compounded by hardware prefetchers, which aggressively issue mem-ory fetches in an attempt to hide data access latency. As recent work such as Limoncello [ 13 ] has demonstrated, in bandwidth-constrained environments, aggressive hardware prefetching becomes actively detrimental; modern systems must dynamically disable these prefetchers under load to improve overall throughput. Conversely, minimizing cross-chiplet data movement inherently reduces memory inter-connect saturation, thus allowing hardware prefetchers to remain active and effective for longer durations. 
+
+2.3 Hard Affinity & Bursting 
+
+To combat microarchitectural interference, one seemingly obvious solution is to enforce strict execution isolation via the Linux kernel’s native cpuset subsystem. This imposes 
+
+hard affinity , strictly binding threads to rigid CPU boundaries. However, these static solutions categorically fail at the scale of modern datacenters for two primary reasons. First, hard affinity is mathematically incompatible with ag-gressive resource overcommitment. In overcommitted envi-ronments where the aggregate requested CPU limits exceed physical machine capacity, it is impossible to assign disjoint CPU sets to all tenants without violating the pigeonhole prin-ciple. Attempting to overlap hard affinity boundaries forces arbitrary contention on shared CPU. Because workloads peak at unpredictable intervals, co-locating tightly-bound workloads risks causing throughput violations due to severe thread queueing. Workloads could be starved of requested CPU resources while cores outside the overlapping bound-ary remain idle. Furthermore, relying on userspace cluster agents to resolve these violations by altering the assigned CPU sets is ineffective; their second-scale reaction times are incapable of mitigating microsecond-scale workload bursts. Second, even in the absence of overcommitment, strict CPU limits are hostile to microsecond-scale traffic bursts. Fleet telemetry from Google’s production servers in Figure 5 indicates that individual applications routinely rely on burst-ing well beyond their requested CPU limits. Unpredictable spikes in parallelism quickly saturate strictly bounded CPU sets. Under hard affinity, this saturation results in imme-diate, localized thread queueing, generating unacceptable tail-latency spikes for user-facing services. To accommodate these bursty workloads without stranding capacity, oper-ating systems seeking to improve spatial locality require dynamic, permeable boundaries rather than rigid jails. 
+
+## 3 System Architecture 
+
+Affinity Tailor comprises three components: a kernel mecha-nism that implements preferential thread steering, a demand predictor that estimates short-term CPU requirements, and a topologically-aware core allocation algorithm that assigns disjoint affinity regions to the containers on a given machine. 
+
+3.1 The Preferred Cores Kernel Mechanism 
+
+Preferred Cores is a novel Linux kernel mechanism which op-erates on a per-cgroup basis, providing a cgroupfs interface to specify a set of preferred CPUs. Unlike cpusets , which impose hard affinity by strictly restricting thread placement, Preferred Cores introduces a soft affinity heuristic. The sched-uler favors these cores to maximize locality but retains the flexibility to use non-Preferred Cores. The custom scheduling mechanism is built into a compo-nent that we named Core-Aware Scheduling (CAS). CAS was inserted into the thread wakeup and load-balancing paths in 
+
+> 4Affinity Tailor: Dynamic Locality-Aware Scheduling at Scale
+
+Figure 5. Density map of maximum per-second CPU usage within each 5-minute interval versus requested CPU limit, showing that workloads frequently burst well beyond their nominal CPU allocations. the Linux scheduler. When a thread becomes runnable, CAS evaluates placement using a tiered approach: 
+
+• Fast path (preferred cores scan): CAS intersects the container’s runnable cpuset with its dynamically assigned Preferred Cores mask. It scans this subset for an idle 1 core. If found, the thread is enqueued there immediately. 
+
+• Slow path (runnable cores scan): If an idle core is not found in the fast path, i.e., if capacity within the Preferred Cores mask is fully saturated, CAS falls back to scanning the broader runnable cpuset for an idle core. During load-balancing, CAS prevents threads queued within Preferred Cores from being migrated to non-Preferred Cores, and aggressively migrates both running and runnable threads towards idle Preferred Cores at regular intervals. The design of CAS strictly preserves work-conservation, as runnable threads are still permitted to use any available CPU, irrespective of the configured Preferred Cores. Notably, if all containers can be given disjoint sets of Preferred Cores, threads of distinct containers would be strongly "attracted" to those disjoint regions, thereby minimizing spillover into the shared CPU regions and maximizing spatial locality. 
+
+3.2 Demand-Based Dynamic Region Sizing 
+
+The efficacy of soft affinity depends on the sizing and assign-ment of the Preferred Cores masks. While modern cluster    
+
+> 1We additionally use a set of heuristics to identify a core which is likely to become idle soon, in similar fashion to CFS.
+> Thread Wakes Up
+> Fast Path
+> Scan intersection of cpuset &
+> preferred_cores
+> Idle core found?
+> Enqueue on
+> Preferred Core
+> Slow Path
+> Scan remaining cpuset
+> Idle core found?
+> Enqueue on
+> Non-preferred Core
+> Queue Thread
+> Yes
+> No
+> Yes
+> No
+
+Figure 6. Core-Aware Scheduling (CAS) wakeup decision tree. CAS first scans a container’s preferred cores for an idle CPU and falls back to the broader runnable cpuset only when no preferred core is available, preserving work-conservation while biasing placement toward locality. agents,such as those used by Borg, utilize complex machine-learning models to inform machine-level overcommitment capabilities [ 3 ], we find that such models produce forecasts at time horizons too long for the sizing of Preferred Cores masks. The peak CPU utilization of individual containers over a 24-hour horizon tends to be near-or-equal to their requested limits, resulting in the same pigeonhole problem described in Section 2.1. We observed that while the aggregate requested CPU lim-its on Google machines routinely exceed physical capacity, the aggregate actual CPU utilization consistently remains well below the hardware’s physical capacity. Therefore, we reasoned that we could reasonably size soft affinity regions based on the recent high-percentile CPU utilization of con-tainers. Specifically, the cluster agent samples a container’s CPU utilization every second. Let 𝑢 𝑖 represent the CPU utilization measured during the 1-second interval 𝑖 . For a trailing 5-minute window ending at time 𝑡 (consisting of 300 discrete 1-second measurements), we formally define 𝐷𝑒𝑚𝑎𝑛𝑑 (𝑡 ) as the 𝑝 -th percentile of this set of observations: 
+
+𝐷𝑒𝑚𝑎𝑛𝑑 (𝑡 ) = Percentile 𝑝 
+
+
+
+{𝑢 𝑡 −𝜏 | 𝜏 ∈ [ 1, 300 ]} 
+
+
+
+By utilizing a high percentile (e.g., 𝑝 = 99 ), this scheme allows us to ensure the soft affinity regions are sized to comfortably match or exceed the actual CPU demand for the vast majority of time, without encountering the pigeonhole 
+
+> 5Affinity Tailor: Dynamic Locality-Aware Scheduling at Scale
+
+problem. We integrated this predictor into our userspace cluster agent daemon, Borglet [31]. Figure 7 shows the correlation between the trailing 5-minute p99 CPU usage and the subsequent 5-minute p99 CPU usage of containers, indicating that our method projects near-term demand with high accuracy. 
+
+Figure 7. Density map of p99 workload CPU utilization across consecutive 5-minute intervals. The concentration near the 𝑌 = 𝑋 line indicates that recent p99 utilization is strongly predictive of near-term demand ( 𝑅 2 of 0.934). 
+
+3.2.1 Peak Parallelism Handling. As seen in Figure 5, datacenter workloads are typically bursty, with peak par-allelism that often exceeds their requested limits and av-erage CPU usage. For that reason, while the scheme de-scribed above would ensure soft affinity regions are sized to accommodate average CPU usage, it would fail to handle microsecond-scale bursts of CPU usage. To minimize thread spillover beyond the soft affinity re-gion when applications’ parallelism exceeds average usage, we enlarge the assigned soft affinity regions to better load-balance usage across the remainder of the processor. Doing so adds a buffer for applications to spill threads, instead of immediately spilling to shared CPU regions. This scheme is feasible since the sum of actual usage rarely exceeds physi-cal capacities; in most of the fleet, we typically see machine utilization below 50%. The specific algorithms are discussed in the following section. 
+
+3.3 Topology-Aware Core Allocation 
+
+Using the per-container demand predictions, the Borglet core allocator assigns containers disjoint Preferred Cores while respecting the processor’s physical topology. The allocation granularity varies by the dominant source of interference on platform-specific architectures. 
+
+3.3.1 Chiplet-Based / Split-LLC Systems. We initially designed Algorithm 1 of Affinity Tailor for processor archi-tectures that feature numerous core complexes (chiplets) with their own individual LLC. Data crossing chiplet bound-aries must travel through shared memory interconnects, re-sulting in higher access latencies. The chiplet boundaries impose a steep performance cliff, making it suited as a natural partitioning mechanism to which we aligned our algorithm’s allocation units. Algorithm 1 first schedules workloads with CPU demand under 1 chiplet in ascending order of demand, as single-chiplet assignment obviates the need for inter-chiplet assign-ment. It then proceeds with scheduling remaining workloads in descending order of demand to minimize fragmentation of large containers. The algorithm performs an ascending combinatorial search to find the absolute minimum number of chiplets required to satisfy each container’s demand. When multiple valid chiplet sets of the same size exist, the algorithm breaks ties by se-lecting the set with the largest residual capacity, effectively inflating the Preferred Cores regions to provide the most ad-ditional capacity for bursting. We find that the combinatorial search is viable, since the number of chiplets per processor remains small, ranging only up to 16 chiplets. A combinato-rial search is used due to additional core allocation policy constraints not discussed in this paper. 
+
+3.3.2 Monolithic-LLC Systems. We later developed Al-gorithm 2 of Affinity Tailor for processor architectures that feature a monolithic LLC. In this architecture, the perfor-mance cliff imposed by LLC boundaries does not exist, since the LLC is shared equally among all cores. We reasoned that the dominant source of interference on these systems are core-local structures such as the L1/L2 caches, branch predic-tors, and prefetchers. Therefore, we designed the algorithm to have core-granularity allocation units. The design of this algorithm was also driven by the significant core-level ef-fects we observed during the evaluation of the chiplet-based Algorithm 1. Algorithm 2 calculates a per-socket scaling factor, equal to the ratio of available physical cores to the aggregate pre-dicted demand of containers assigned to the socket. This scaling factor is used to enlarge the Preferred Cores regions, providing for a buffer region to absorb bursts of CPU utiliza-tion without spilling. We plan to unify these two algorithms in future work, which will be discussed in Section 7. 
+
+## 4 Evaluation Methodology 
+
+We deployed Affinity Tailor across Google’s production fleet. Our evaluation baseline is a heavily modified, latency-optimized version of the Linux Completely Fair Scheduler (CFS). While recent work on scheduling architectures frequently leverages userspace dataplanes or kernel-bypass frameworks [ 9 , 12 , 14 ,
+
+> 6Affinity Tailor: Dynamic Locality-Aware Scheduling at Scale
+
+Algorithm 1 Affinity Tailor for Split-LLC Systems  
+
+> 1:
+
+Input: Set of containers 𝑇 , Set of chiplets 𝐶  
+
+> 2:
+
+Output: Chiplet soft affinity masks for containers  
+
+> 3:
+
+𝐶 𝑐𝑎𝑝 [𝑐 ] ← Initial CPU capacity for each chiplet 𝑐 ∈ 𝐶  
+
+> 4:
+
+𝐶𝑎𝑝 𝑐ℎ𝑖𝑝𝑙𝑒𝑡 ← CPU capacity of a single chiplet  
+
+> 5:
+
+𝑇 𝑠𝑖𝑛𝑔𝑙𝑒 ← { 𝑡 ∈ 𝑇 | Demand (𝑡 ) ≤ 𝐶𝑎𝑝 𝑐ℎ𝑖𝑝𝑙𝑒𝑡 } 
+
+> 6:
+
+𝑇 𝑚𝑢𝑙𝑡𝑖 ← 𝑇 \ 𝑇 𝑠𝑖𝑛𝑔𝑙𝑒  
+
+> 7:
+
+SortedT ← SortAscending (𝑇 𝑠𝑖𝑛𝑔𝑙𝑒 ) 
+
+> 8:
+
+SortedT ← SortedT ∪ SortDescending (𝑇 𝑚𝑢𝑙𝑡𝑖 ) 
+
+> 9:
+
+for each container 𝑡 ∈ SortedT do  
+
+> 10:
+
+𝑑 𝑡 ← Demand (𝑡 ) 
+
+> 11:
+
+BestSet ← ∅  
+
+> 12:
+
+// Search for smallest chiplet combos fitting demand  
+
+> 13:
+
+for 𝑖 = 1 to |𝐶 | do  
+
+> 14:
+
+Sets 𝑖 ← All combinations of 𝐶 of size 𝑖  
+
+> 15:
+
+ValidSets ← { 𝑠 ∈ Sets 𝑖 | Í𝑥 ∈𝑠 𝐶 𝑐𝑎𝑝 [𝑥 ] ≥ 𝑑 𝑡 } 
+
+> 16:
+
+if ValidSets ≠ ∅ then  
+
+> 17:
+
+// Tie-break: Maximize capacity for bursts  
+
+> 18:
+
+BestSet ← arg max 𝑠 ∈ValidSets (Í𝑥 ∈𝑠 𝐶 𝑐𝑎𝑝 [𝑥 ])  
+
+> 19:
+
+break  
+
+> 20:
+
+end if  
+
+> 21:
+
+end for  
+
+> 22: 23:
+
+if BestSet ≠ ∅ then  
+
+> 24:
+
+ApplySoftAffinity (𝑡, BestSet ) 
+
+> 25:
+
+UpdateCapacities (𝐶 𝑐𝑎𝑝 , BestSet , 𝑑 𝑡 ) 
+
+> 26:
+
+end if  
+
+> 27:
+
+end for Algorithm 2 Affinity Tailor for Monolithic-LLC Systems  
+
+> 1:
+
+Input: Set of containers 𝑇  
+
+> 2:
+
+Output: CPU affinity masks for eligible containers  
+
+> 3:
+
+𝐶 𝑝𝑢𝑏𝑙𝑖𝑐 ← Identify all non-reserved CPU cores  
+
+> 4:
+
+𝐴 𝑐𝑜𝑟𝑒𝑠 ← Count of non-reserved cores  
+
+> 5:
+
+// Step 1: Compute scaling factor  
+
+> 6:
+
+𝐷 𝑡𝑜𝑡𝑎𝑙 ← Í𝑡 ∈𝑇 Demand (𝑡 ) 
+
+> 7:
+
+𝐹 𝑠𝑐𝑎𝑙𝑒 ← 𝐴 𝑐𝑜𝑟𝑒𝑠 /𝐷 𝑡𝑜𝑡𝑎𝑙  
+
+> 8:
+
+// Step 2: Compute and assign cores to each container  
+
+> 9:
+
+for each container 𝑡 ∈ 𝑇 do  
+
+> 10:
+
+𝐷 𝑠𝑐𝑎𝑙𝑒𝑑 ← ⌈ Demand (𝑡 ) × 𝐹 𝑠𝑐𝑎𝑙𝑒 ⌉ 
+
+> 11:
+
+𝐶 𝑎𝑙𝑙𝑜𝑐 ← Pick 𝐷 𝑠𝑐𝑎𝑙𝑒𝑑 cores from 𝐶 𝑝𝑢𝑏𝑙𝑖𝑐  
+
+> 12:
+
+𝐶 𝑝𝑢𝑏𝑙𝑖𝑐 ← 𝐶 𝑝𝑢𝑏𝑙𝑖𝑐 \ 𝐶 𝑎𝑙𝑙𝑜𝑐  
+
+> 13:
+
+ApplySoftAffinity (𝑡, 𝐶 𝑎𝑙𝑙𝑜𝑐 ) 
+
+> 14:
+
+end for 
+
+15 , 18 , 19 , 26 ], deploying such systems in a warehouse-scale setting involves significant friction. Specifically, they require the use of custom runtimes [ 8 , 9 , 15 , 26 ], compiler-level in-strumentation [ 12 ], or new hardware features [ 14 , 18 , 19 ]. In contrast, Affinity Tailor is explicitly designed to retain broad compatibility across processor generations and appli-cations. Evaluation against CFS provides the most accurate and realistic comparison with the deployable state-of-the-art in Google’s production environment. Each evaluated machine runs hundreds of live production services, ranging from highly latency-sensitive user-facing production applications (e.g., Search, Spanner) to throughput-oriented background workloads. As Affinity Tailor is specif-ically targeted at latency-sensitive applications, we report results exclusively for this class of workloads. Our evaluation spans four distinct hardware architectures: 
+
+• Platforms 1, 2, 3 are successive generations of out-of-order multicores featuring split-LLC chiplet topolo-gies. 
+
+• Platform 4 is a recent out-of-order multicore featur-ing a monolithic LLC. To quantify fleet-wide efficiency, we measure application throughput, which represents the number of requests served by the application per unit of time. We utilize hardware performance counters to capture detailed microarchitectural metrics, specifically LLC references per kilo-instruction (RPKI), LLC misses per kilo-instruction (MPKI), and branch predictor MPKI, in addition to overall system memory bandwidth uti-lization. We use LLC RPKI as a proxy metric for the combined efficacy of the L1 and L2 data caches. 
+
+## 5 Evaluation 
+
+5.1 Preferred Core Residency 
+
+We first validate that Affinity Tailor successfully confines threads to their Preferred Cores. We define Preferred Core Residency (PCR) as the fraction of an application’s to-tal CPU time spent executing within its assigned Preferred Cores. Figure 8 plots the observed PCR across the evaluated platforms. 
+
+𝑃𝐶𝑅 = 𝑇 𝑝𝑟𝑒 𝑓 𝑒𝑟𝑟𝑒𝑑 
+
+𝑇 𝑡𝑜𝑡𝑎𝑙 
+
+Across the evaluated chiplet-based platforms, we see that 72% of total CPU time was executed with a PCR exceeding 60%, while approximately 60% of CPU time achieved a PCR greater than 80%. In contrast, the monolithic-LLC Platform 4 exhibited a comparatively lower aggregate PCR. These findings suggest that Algorithm 1 provisions a larger Pre-ferred Cores region for individual applications, thereby bet-ter accommodating thread spilling during microsecond-scale bursts than the proportional scaling approach of Algorithm 2. 
+
+5.2 Application Throughput Impact 
+
+Figure 9 shows that the deployment of Affinity Tailor yields substantial application throughput improvements across all evaluated platforms. We observed aggregate per-CPU throughput improvements ranging from 3.6% on Platform 4 up to 11.7% on Platform 3. When evaluating the aggregate throughput impact per-GB of memory, we see parallel gains      
+
+> 7Affinity Tailor: Dynamic Locality-Aware Scheduling at Scale 00.20.40.60.81
+> 0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1
+> Preferred Core Residency (PCR)
+> Proportion of CPU  ≥ PCR
+> Platform 1
+> Platform 2
+> Platform 3
+> Platform 4
+
+Figure 8. The proportion of total CPU cycles that achieve at least a given Preferred Core Residency (PCR) threshold. Platform 4, which uses Algorithm 2 has lower PCR, indicating that Algorithm 1 is more effective at accommodating bursts. ranging from 2.9% to 7.5%. Faster execution shortens mem-ory residency and reduces memory footprints. Our telemetry reveals that these throughput improvements are correlated with improved microarchitectural efficiency, discussed in the following subsection. 
+
+5.3 Microarchitectural Improvements 5.3.1 Core-Level Cache Efficacy. We evaluate Last-Level Cache References Per Kilo-Instruction (LLC RPKI) as an in-verse proxy for L1 and L2 cache hit rates; because a reference is only issued to the LLC when a memory access misses in both core-private caches, a lower LLC RPKI indicates im-proved L1/L2 efficacy. Across the evaluated platforms, LLC RPKI exhibited varying behavior dictated by the specific Affinity Tailor algorithm in use. On Platform 4, which utilizes the fine-grained Algorithm 2, we observe a 0.9% decrease in LLC RPKI. Algorithm 2 gen-erally provisions smaller, strictly disjoint Preferred Core re-gions, ensuring that distinct applications rarely interleave on the same physical cores. We reason that the per-application working sets remains tightly bound to disjoint sets of core-private caches, allowing better retention of relevant cache lines without requiring trips to the LLC. Conversely, on Platforms 2 and 3—which utilize the chiplet-granularity Algorithm 1—LLC RPKI stayed flat or increased by up to 0.8%. Because Algorithm 1 allocates in multiples of whole chiplets, the Preferred Cores regions are larger and shared between more applications. Consequently, it is more likely for threads of distinct applications to be interleaved on the same core. Furthermore, CAS lacks some of the CPU-granularity wakeup affinity mechanisms that are present in CFS. 
+
+5.3.2 Branch Prediction Accuracy. Across all evaluated platforms, we observed a reduction in Branch Predictor Misses Per Kilo-Instruction (Branch MPKI), ranging from a 0.5% reduction on Platforms 2, up to a 2.2% reduction on Platform 1. We believe these reductions arise from improved retention of execution history by the branch predictors, since Affinity Tailor reduces context switching of disparate work-loads onto the same physical core. Thus, Affinity Tailor al-lows execution units to maintain deep, highly accurate and relevant historical state. 
+
+5.3.3 Last-Level Cache Effects. The impact of Affinity Tailor is most pronounced at the LLC level, particularly on split-LLC systems where chiplet boundaries act as severe performance cliffs. This is evidenced by steep reductions in both LLC MPKI and overall LLC Miss Rates. On Platform 2, LLC miss rates dropped by 7%, and on Platform 3, they dropped by 26%. These results are expected, since Algorithm 1 was designed to minimize cross-chiplet sharing of cache lines. On Platform 4, which has a monolithic LLC, we reason that the 1.1% and 0.3% improvement in LLC MPKI and LLC miss rates, respectively, are downstream effects of improved L1/L2 cache efficacy and improved branch predictor accuracy. 
+
+5.3.4 Memory Bandwidth and Prefetcher Activation. 
+
+The reductions in LLC misses naturally lead to significantly less main memory access, thereby reducing memory band-width utilization. As shown in Figure 10, Affinity Tailor re-duces high-percentile (P90 and P99) memory bandwidth uti-lization across all evaluated platforms. We note that Platform 2 shows an increase in average memory bandwidth utiliza-tion, and observe that this is an experimental artifact by CPU-load-based dynamic load balancers, which direct ad-ditional work to the experiment group due to its improved efficiency. At Google, we employ Limoncello [ 13 ] to dynamically disable hardware prefetchers when memory bandwidth ap-proaches the saturation threshold, to avoid severe memory access latency increases. Therefore, the aforementioned re-duction in memory bandwidth saturation triggers a com-pounding microarchitectural benefit: sustained hardware prefetcher activation. Because Affinity Tailor lowers main memory-bound traffic, it keeps the system below the hardware prefetcher disable-ment threshold longer, allowing the prefetchers to remain active longer. As illustrated in Figure 11, the percentage of time hardware prefetchers remained enabled increased when memory bandwidth utilization on the platform decreased. Ul-timately, this allows the system to reclaim the latency-hiding benefits of hardware prefetchers that are typically lost un-der high memory bandwidth utilization, thereby improving application performance. 
+
+> 8Affinity Tailor: Dynamic Locality-Aware Scheduling at Scale
+
+Platform 1 Platform 2 Platform 3 Platform 4 
+
+−30 
+
+−20 
+
+−10 
+
+0 N/A* 0.1 0.8    
+
+> -0.9
+> N/A*
+> -7.3
+> -24.4
+> -1.1
+> N/A*
+> -7.3
+> -25.6
+> -0.3
+> −2.2−0.5−1.8−0.6
+> % Change vs. Baseline
+
+LLC RPKI LLC MPKI LLC Miss Rate Branch MPKI 
+
+> *We were unable to collect these metrics on Platform 1.
+
+Platform 1 
+
+Platform 2 
+
+Platform 3 
+
+Platform 4 
+
+0
+
+5
+
+10 
+
+15   
+
+> 7.67.3
+> 11 .7
+> 3.6
+> 4.64.1
+> 7.5
+> 2.9
+> Throughput Uplift (%)
+
+per-CPU per-GB 
+
+Figure 9. Performance impact of Affinity Tailor. The left plot details the effect on cache and branch predictor misses, while the right plot highlights the aggregate application throughput uplift (per-CPU and per-GB). We see significant throughput gains across all evaluated platforms, correlated with improved microarchitectural efficacy.      
+
+> Avg P90 P99
+> −5
+> −4
+> −3
+> −2
+> −1
+> 0
+> 1
+> 0
+> Change in MemBW Util (%)
+> Platform 1 Platform 2 Platform 3 Platform 4
+
+Figure 10. Change in average, P90, and P99 memory band-width utilization percentage under Affinity Tailor. Tail mem-ory bandwidth utilization declines across all evaluated plat-forms. 
+
+5.4 Thread Scheduling Latency 
+
+A consequence of Affinity Tailor’s current implementation is an increase in thread scheduling latency. By prioritizing the CAS fast-path—which restricts initial thread placement to a container’s dynamically sized Preferred Cores—the scheduler bypasses the aggressive load-balancing heuristics present in the baseline CFS that immediately seek out idle cores across the broader socket. Because CAS currently lacks these mature latency optimizations, threads frequently experience localized queueing while waiting for a preferred core to become available, rather than being instantly migrated to a    
+
+> Platform 1 Platform 2 Platform 3
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 70
+> Prefetcher Enabled %
+> Affinity Tailor Disabled Affinity Tailor Enabled
+
+Figure 11. Impact of Affinity Tailor on hardware prefetcher enablement with Limoncello in-use. Prefetchers remain en-abled for a larger fraction of time when Affinity Tailor re-duces memory bandwidth utilization. remote idle core. Threads that are scheduled outside their Preferred Cores are also aggressively migrated back to their Preferred Cores. Figure 12 illustrates the percentage increase in P99 sched-uling latency (the time a thread spends in the runnable state waiting for CPU dispatch). As expected from the absence of aggressive idle-search optimizations, the deployment of Affinity Tailor causes substantial latency regressions in the tail. Across all evaluated platforms, we observe 99th per-centile scheduling latencies increasing by as much as 17%.    
+
+> 9Affinity Tailor: Dynamic Locality-Aware Scheduling at Scale
+> P99
+> 0
+> 10
+> 20
+> 0
+> Latency Increase (% Diff)
+> Platform 1 Platform 2 Platform 3 Platform 4
+
+Figure 12. A comparison of the percentage increase in thread scheduling latency at the 99th percentile when Affinity Tailor is enabled. We observed significantly increased tail schedul-ing latencies across all evaluated platforms. In traditional operating-system design, as exemplified by CFS and EEVDF, increases in thread-queueing delay are typi-cally avoided, as it is assumed to directly degrade application performance. However, our fleet-wide evaluation reveals that despite an "undesirable" increase in scheduling latency, overall application throughput significantly improves (as detailed in Section 5.2). 
+
+## 6 Related Work 
+
+Locality-Aware System Design: Affinity Tailor builds upon a history of chiplet-aware design practices. The Nest sched-uler [ 17 ] concentrates threads onto a dense set of warm cores to exploit higher turbo frequencies, thus improving perfor-mance and energy efficiency in lightly-loaded environments. It does not incorporate per-application demand forecasting or target overcommitted multi-tenant environments. Recent proposals like Cache Aware Scheduling [ 6 ] seek to imple-ment LLC affinity directly within the mainline Linux kernel’s load balancer, using purely kernel load metrics without ad-ditional context from userspace. Zhou et al. [ 33 ] showed that sharding TCMalloc’s transfer caches into chiplet-local structures improved application throughput. 
+
+Extensible Scheduling Frameworks: There have been many recent efforts to modularize the Linux kernel’s sched-uling policies, which would allow for faster implementation of Affinity Tailor’s Preferred Cores policy. The sched_ext 
+
+framework [ 10 ] was merged into Linux 6.12, enabling the use of dynamically-loaded BPF scheduling policies. ghOSt [11 ] delegates scheduling to userspace agents with shared-memory queues. Enoki [ 24 ] supports rapid kernel scheduler development, and Plugsched [ 22 ] decouples the Linux sched-uler into a loadable module. 
+
+Resource Partitioning and Throttling: Prior systems have extensively studied shared resource contention through the lens of partitioning and throttling. 𝐶𝑃𝐼 2 [ 32 ] utilizes hard-ware performance counters to continuously monitor, detect, and throttle antagonistic workloads. Heracles [ 20 ] employs feedback controllers to safely isolate latency-critical work-loads from best-effort background workloads by dynamically managing CPU, memory, and network resources. PARTIES [ 5] introduced QoS-aware partitioning of LLC ways, memory bandwidth, and cores for multiple services. CLITE [ 27 ] and OLPart [ 4 ] improved upon PARTIES with Bayesian optimiza-tion and online learning, respectively. These systems govern shared resource allocation (cache ways, memory bandwidth, time-on-core); Affinity Tailor governs thread-to-core place-ment. 
+
+## 7 Discussion and Future Directions 
+
+7.1 Unifying Affinity Tailor Algorithms 
+
+Our evaluation of Affinity Tailor revealed a notable diver-gence in microarchitectural behavior between our two Pre-ferred Cores allocation algorithms. Algorithm 1 (chiplet-granularity) successfully mitigated cross-chiplet LLC thrash-ing on split-LLC architectures (Platforms 2 and 3). However, it yielded minimal improvements in core-private L1/L2 cache hit rates, as evidenced by stagnant to increased LLC RPKI. Conversely, Algorithm 2 (core-granularity) deployed on the monolithic-LLC Platform 4 demonstrated strong L1/L2 cache efficacy improvements by tightly packing threads onto dis-joint sets of CPUs. This dichotomy highlights a clear path for future opti-mization: unifying the two algorithms into a tiered, hierar-chical allocation algorithm. For massively parallel, chiplet-based processors, the cluster agent should first bin applica-tions into the optimal minimum set of chiplets to minimize cross-chiplet and main-memory-bound traffic. Subsequently, 
+
+within those selected chiplets, the agent should apply the fine-grained, demand-scaled core allocation logic to better govern core-level predictive state sharing. By combining these approaches, future systems may simultaneously har-vest the LLC improvements of coarse-grained chiplet-based partitioning and the deep, core-level state preservation of fine-grained partitioning. 
+
+7.2 Towards Locality-Aware Scheduling 
+
+Perhaps the most profound architectural insight from the deployment of Affinity Tailor is the observation that aggres-sively migrating threads to minimize immediate queueing is a flawed optimization target in hyperscale datacenters built on hardware with deeply stateful microarchitectures. Our findings provide compelling evidence that a strict adherence to work-conservation—a foundational principle in modern 
+
+> 10 Affinity Tailor: Dynamic Locality-Aware Scheduling at Scale
+
+schedulers like CFS and EEVDF—can be counterproductive on modern hardware and software architectures. Currently, Affinity Tailor implements improved spatial locality via a cooperative hardware-software architecture: a userspace daemon calculates the boundaries, and the kernel enforces the Preferred Cores soft affinity fast-path through CAS. However, these results suggest that operating system schedulers could benefit from a more fundamental evolution. Future OS schedulers may need to natively treat spatial lo-cality and microarchitectural state “warmth” as first-class scheduling parameters. Such schedulers could dynamically weigh the microsecond penalty of localized queueing against the latency costs of remote memory fetches, cold branch pre-dictors, and degraded hardware prefetchers. Shifting the core scheduling paradigm from aggressive load-balancing to a dynamic, locality-aware approach represents a promising frontier in datacenter efficiency. Conversely, these results suggest a parallel evolution path in hardware design. Because deeply stateful predictors are vulnerable to frequent context switching, future architec-tures might benefit from explicitly accommodating these OS scheduling realities. Hardware designers could explore mechanisms for rapid state recovery rather than presuming prolonged, consistent execution of applications. 
+
+7.3 Cross-Stack Layering for Scheduling 
+
+While Affinity Tailor demonstrates the value of coordinat-ing userspace demand prediction with kernel-enforced soft affinity, its current implementation applies spatial locality heuristics uniformly across all configured workloads. Operat-ing systems, functioning purely at the hardware abstraction layer, lack semantic understanding of the applications they schedule. Consequently, the kernel alone is ill-equipped to determine which workloads actually benefit from microar-chitectural state preservation. Future scheduling architectures can embrace deeper cross-stack layering, leveraging the rich contextual metadata ac-cessible to userspace cluster agents like Borglet. The agent possesses comprehensive knowledge of a job’s planned re-source constraints, historical execution phases, and over-all workload archetype. These signals can directly inform thread-scheduling decisions. For instance, a lightweight RPC forwarding service is pri-marily network I/O bound; tightly packing its threads into a constrained set of Preferred Cores may artificially bottle-neck its processing throughput without yielding particu-larly meaningful cache-hit improvements. The agent could proactively classify workloads by their affinity-sensitivity, supplying these semantic hints to Affinity Tailor. In turn, Affinity Tailor can restrict spatial locality heuristics to state-heavy, compute-bound applications, while allowing state-less or network-bound microservices to aggressively load-balance across the socket. This targeted application of spatial locality would allow overcommitted systems to more effec-tively apportion scarce resources. 
+
+## 8 Conclusion 
+
+As hyperscalers aggressively overcommit hardware, con-ventional operating system schedulers inadvertently exac-erbate microarchitectural interference by prioritizing work-conservation, constantly dispersing workloads across mas-sive processor topologies and destroying core-local predic-tive state. Affinity Tailor is a dynamic scheduling architec-ture utilizing a novel Preferred Cores kernel mechanism to establish permeable, per-application, soft affinity bound-aries sized to near-term demand forecasts. Deployed across Google’s global production fleet, Affinity Tailor confines execution to warm microarchitectural domains while still permitting bursts onto external cores, improving aggregate application throughput by up to 12% per-CPU and 7% per-GB memory. Ultimately, our deployment demonstrates that the microsecond-scale queueing penalty incurred by waiting for a preferred core is eclipsed by the execution speedups gained from inheriting a hot microarchitectural environment, sug-gesting that future operating system designs should consider prioritizing spatial locality over strict work-conservation. 
+
+## Acknowledgments 
+
+Affinity Tailor was made possible by numerous Google engi-neering teams across many years. We would like to especially thank Yiyan Lin and Sundar Dev for their early work in pro-ductionizing Preferred Cores. We also thank Xiangling Kong, Nan Deng, Zhiyuan Liu, Li Li, Dagang Wei, Trang Tran, Sahil Shekhawat, Shiyu Hu, Peilin Ye, Corentin Pescheloche, Steve Zekany, Colin Rioux, Darryl Gove, Aleksei Shchekotikhin, Nilay Vaish, Patrick Xia, Wanying Lu, Tae Jun Ham, Haim-ing Liu, and Akanksha Jain for their guidance and support. Furthermore, we are grateful to Sotiris Apostolakis, Tipp Moseley, and Sree Kodakara for their invaluable feedback. Gemini was utilized to generate sections of this Work, in-cluding text, figures, and citations. 
+
+## References         
+
+> [1] Luiz André Barroso, Urs Hölzle, and Parthasarathy Ranganathan. 2018.
+> The datacenter as a computer: Designing warehouse-scale machines .Morgan & Claypool Publishers. doi: 10.1007/978-3-031-01761-2
+> [2] Salman A Baset, Long Wang, and Chunqiang Tang. 2012. Towards an understanding of oversubscription in cloud. In 2nd USENIX Workshop on Hot Topics in Management of Internet, Cloud, and Enterprise Networks and Services (Hot-ICE 12) .[3] Noman Bashir, Nan Deng, Krzysztof Rzadca, David Irwin, Sree Ko-dak, and Rohit Jnagal. 2021. Take it to the limit: peak prediction-driven resource overcommitment in datacenters. In Proceedings of the Sixteenth European Conference on Computer Systems . 556–573. doi: 10.1145/3447786.3456259
+> [4] Ruobing Chen, Haosen Shi, Yusen Li, Xiaoguang Liu, and Gang Wang. 2023. OLPart: Online learning based resource partitioning for colo-cating multiple latency-critical jobs on commodity computers. In Pro-ceedings of the Eighteenth European Conference on Computer Systems .11
+
+Affinity Tailor: Dynamic Locality-Aware Scheduling at Scale 
+
+347–364. doi: 10.1145/3552326.3567490 
+
+[5] Shuang Chen, Christina Delimitrou, and José F Martínez. 2019. PAR-TIES: QoS-Aware Resource Partitioning for Multiple Interactive Ser-vices. In Proceedings of the twenty-fourth international conference on architectural support for programming languages and operating systems .107–120. doi: 10.1145/3297858.3304005 
+
+[6] Tim Chen, Peter Zijlstra, and Yu Chen. 2026. Cache Aware Scheduling. Linux Kernel Mailing List (LKML). https://lkml.org/lkml/2026/2/10/ 1369 
+
+[7] Jonathan Corbet. 2023. An EEVDF CPU scheduler for Linux. https: //lwn.net/Articles/925371/ .[8] Joshua Fried, Gohar Irfan Chaudhry, Enrique Saurez, Esha Choukse, Íñigo Goiri, Sameh Elnikety, Rodrigo Fonseca, and Adam Belay. 2024. Making kernel bypass practical for the cloud with junction. In 21st USENIX Symposium on Networked Systems Design and Implementation (NSDI 24) . 55–73. [9] Joshua Fried, Zhenyuan Ruan, Amy Ousterhout, and Adam Belay. 2020. Caladan: Mitigating interference at microsecond timescales. In 14th USENIX Symposium on Operating Systems Design and Implementation (OSDI 20) . 281–297. [10] Tejun Heo, David Vernet, Josh Don, and Barret Rhoden. 2024. sched_ext: The BPF Extensible Scheduler Class. Linux Plumbers Con-ference 2024, Vienna, Austria. https://lpc.events/event/18/sessions/ 192/ 
+
+[11] Jack Tigar Humphries, Neel Natu, Ashwin Chaugule, Ofir Weisse, Barret Rhoden, Josh Don, Luigi Rizzo, Oleg Rombakh, Paul Turner, and Christos Kozyrakis. 2021. ghOSt: Fast & flexible user-space delegation of linux scheduling. In Proceedings of the ACM SIGOPS 28th Symposium on Operating Systems Principles . 588–604. doi: 10.1145/3477132.3483542 
+
+[12] Rishabh Iyer, Musa Unal, Marios Kogias, and George Candea. 2023. Achieving Microsecond-Scale Tail Latency Efficiently with Approxi-mate Optimal Scheduling. In Proceedings of the ACM SIGOPS 29th Symposium on Operating Systems Principles (SOSP ’23) . 466–481. doi: 10.1145/3600006.3613136 
+
+[13] Akanksha Jain, Hannah Lin, Carlos Villavieja, Baris Kasikci, Chris Ken-nelly, Milad Hashemi, and Parthasarathy Ranganathan. 2024. Limon-cello: Prefetchers for scale. In Proceedings of the 29th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 3 . 577–590. doi: 10.1145/3620666.3651373 
+
+[14] Yuekai Jia, Kaifu Tian, Yuyang You, Yu Chen, and Kang Chen. 2024. Skyloft: A General High-Efficient Scheduling Framework in User Space. In Proceedings of the ACM SIGOPS 30th Symposium on Operating Systems Principles (SOSP ’24) . 265–279. doi: 10.1145/3694715.3695973 
+
+[15] Kostis Kaffes, Timothy Chong, Jack Tigar Humphries, Adam Belay, David Mazières, and Christos Kozyrakis. 2019. Shinjuku: Preemptive Scheduling for {𝜇 second-scale } Tail Latency. In 16th USENIX Sym-posium on Networked Systems Design and Implementation (NSDI 19) .345–360. [16] Svilen Kanev, Juan Pablo Darago, Kim Hazelwood, Parthasarathy Ranganathan, Tipp Moseley, Gu-Yeon Wei, and David Brooks. 2015. Profiling a warehouse-scale computer. In Proceedings of the 42nd annual international symposium on computer architecture . 158–169. doi: 10.1145/2749469.2750392 
+
+[17] Julia Lawall, Himadri Chhaya-Shailesh, Jean-Pierre Lozi, Baptiste Lep-ers, Willy Zwaenepoel, and Gilles Muller. 2022. Os scheduling with nest: Keeping tasks close together on warm cores. In Proceedings of the Seventeenth European Conference on Computer Systems . 368–383. doi: 10.1145/3492321.3519585 
+
+[18] Yueying Li, Nikita Lazarev, David Koufaty, Tenny Yin, Andy Anderson, Zhiru Zhang, G Edward Suh, Kostis Kaffes, and Christina Delimitrou. 2024. LibPreemptible: Enabling Fast, Adaptive, and Hardware-Assisted User-Space Scheduling. In 2024 IEEE International Symposium on High-Performance Computer Architecture (HPCA) . IEEE, 922–936. doi: 10. 1109/HPCA57654.2024.00075 
+
+[19] Jiazhen Lin, Youmin Chen, Shiwei Gao, and Youyou Lu. 2024. Fast core scheduling with userspace process abstraction. In Proceedings of the ACM SIGOPS 30th symposium on operating systems principles .280–295. doi: 10.1145/3694715.3695976 
+
+[20] David Lo, Liqun Cheng, Rama Govindaraju, Parthasarathy Ran-ganathan, and Christos Kozyrakis. 2015. Heracles: Improving resource efficiency at scale. In Proceedings of the 42nd annual international symposium on computer architecture . 450–462. doi: 10.1145/2749469. 2749475 
+
+[21] Jean-Pierre Lozi, Baptiste Lepers, Justin Funston, Fabien Gaud, Vivien Quéma, and Alexandra Fedorova. 2016. The Linux Scheduler: a Decade of Wasted Cores. In Proceedings of the Eleventh European Conference on Computer Systems (EuroSys ’16) . 1–16. doi: 10.1145/2901318.2901326 
+
+[22] Teng Ma, Shanpei Chen, Yihao Wu, Erwei Deng, Zhuo Song, Quan Chen, and Minyi Guo. 2023. Efficient scheduler live update for linux kernel with modularization. In Proceedings of the 28th ACM Inter-national Conference on Architectural Support for Programming Lan-guages and Operating Systems, Volume 3 . 194–207. doi: 10.1145/3582016. 3582054 
+
+[23] Cy McGeady, Joseph Majkut, Barath Harithas, and Karl Smith. 2025. The Electricity Supply Bottleneck on U.S. AI Dominance. https://www. csis.org/analysis/electricity-supply-bottleneck-us-ai-dominance .[24] Samantha Miller, Anirudh Kumar, Tanay Vakharia, Ang Chen, Danyang Zhuo, and Thomas Anderson. 2024. Enoki: High veloc-ity linux kernel scheduler development. In Proceedings of the Nine-teenth European Conference on Computer Systems . 962–980. doi: 10. 1145/3627703.3629569 
+
+[25] Ingo Molnár. 2007. Modular scheduler core and completely fair sched-uler. https://lwn.net/Articles/230501/ .[26] Amy Ousterhout, Joshua Fried, Jonathan Behrens, Adam Belay, and Hari Balakrishnan. 2019. Shenango: Achieving high CPU efficiency for latency-sensitive datacenter workloads. In 16th USENIX Symposium on Networked Systems Design and Implementation (NSDI 19) . 361–378. [27] Tirthak Patel and Devesh Tiwari. 2020. CLITE: Efficient and QoS-Aware Co-Location of Multiple Latency-Critical Jobs for Warehouse Scale Computers. In 2020 IEEE International Symposium on High Per-formance Computer Architecture (HPCA) . IEEE, 193–206. doi: 10.1109/ HPCA47549.2020.00025 
+
+[28] Akshitha Sriraman and Abhishek Dhanotia. 2020. Accelerometer: Understanding Acceleration Opportunities for Data Center Over-heads at Hyperscale. In Proceedings of the Twenty-Fifth Interna-tional Conference on Architectural Support for Programming Languages and Operating Systems (Lausanne, Switzerland) (ASPLOS ’20) . As-sociation for Computing Machinery, New York, NY, USA, 733–750. doi: 10.1145/3373376.3378450 
+
+[29] Ion Stoica, Hussein Abdel-Wahab, Kevin Jeffay, Sanjoy K. Baruah, Johannes E. Gehrke, and C. Greg Plaxton. 1996. A proportional share resource allocation algorithm for real-time, time-shared systems. In 
+
+Proceedings of the 17th IEEE Real-Time Systems Symposium . 288–299. doi: 10.1109/REAL.1996.563725 
+
+[30] Muhammad Tirmazi, Adam Barker, Nan Deng, Md E Haque, Zhi-jing Gene Qin, Steven Hand, Mor Harchol-Balter, and John Wilkes. 2020. Borg: the next generation. In Proceedings of the fifteenth European conference on computer systems . 1–14. doi: 10.1145/3342195.3387517 
+
+[31] Abhishek Verma, Luis Pedrosa, Madhukar Korupolu, David Oppen-heimer, Eric Tune, and John Wilkes. 2015. Large-scale cluster man-agement at Google with Borg. In Proceedings of the Tenth European Conference on Computer Systems . 1–17. doi: 10.1145/2741948.2741964 
+
+[32] Xiao Zhang, Eric Tune, Robert Hagmann, Rohit Jnagal, Vrigo Gokhale, and John Wilkes. 2013. CPI2: CPU performance isolation for shared compute clusters. In Proceedings of the 8th ACM European Conference on Computer Systems . 379–391. doi: 10.1145/2465351.2465388 
+
+[33] Zhuangzhuang Zhou, Vaibhav Gogte, Nilay Vaish, Chris Kennelly, Patrick Xia, Svilen Kanev, Tipp Moseley, Christina Delimitrou, and 12 Affinity Tailor: Dynamic Locality-Aware Scheduling at Scale 
+
+Parthasarathy Ranganathan. 2024. Characterizing a memory alloca-tor at warehouse scale. In Proceedings of the 29th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 3 . 192–206. doi: 10.1145/3620666.3651350 
+
+13
