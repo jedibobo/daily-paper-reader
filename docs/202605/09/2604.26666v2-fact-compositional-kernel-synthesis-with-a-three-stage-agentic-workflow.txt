@@ -1,0 +1,306 @@
+Title: FACT: Compositional Kernel Synthesis with a Three-Stage Agentic Workflow
+
+URL Source: https://arxiv.org/pdf/2604.26666v2
+
+Published Time: Wed, 06 May 2026 00:18:43 GMT
+
+Number of Pages: 10
+
+Markdown Content:
+# FACT: Compositional Kernel Synthesis with a Three-Stage Agentic Workflow 
+
+# Sina Heidari 
+
+sinaheidari@vt.edu Virginia Tech Blacksburg, Virginia, USA 
+
+# Dimitrios S. Nikolopoulos 
+
+dsn@vt.edu Virginia Tech Blacksburg, Virginia, USA 
+
+## Abstract 
+
+Deep learning compilers and vendor libraries deliver strong baseline performance but their performance is bounded by finite, engineer-curated catalogs. When these omit needed optimizations, practi-tioners substitute hand-written CUDA or CUTLASS, demanding expertise in GPU microarchitecture and C++ template metapro-gramming. Recent LLM-based agents target kernel generation in raw CUDA, forcing rediscovery of optimizations already encoded in mature libraries. We present FACT (Framework for Agentic CUT-LASS Transpilation), a three-stage agent-driven workflow optimiz-ing PyTorch modules through multi-pattern composition while grounding synthesis in CUTLASS C++. Pattern discovery inspects the traced graph, matches subgraphs to optimization rules, retrieves vetted examples, and outputs prioritized patterns. Pattern realiza-tion implements each pattern as a CUTLASS kernel, verifies, and auto-tunes. Pattern composition assembles extensions into an op-timized module for benchmarking. We evaluate the workflow on KernelBench across NVIDIA A100 and H100 GPUs. On Level 1 GEMM problems (square, batched, large-K matrix multiply), auto-tuned CUTLASS kernels achieve 1.06 ×–1.18 × speedups on A100 and 0.84 ×–1.80 × performance variations on H100 over cuBLAS. On Level 3 transformer blocks against PyTorch eager baseline, FACT achieves 2.03 × speedup on MiniGPT (vs. Inductor: 1.89 ×, TensorRT: 
+
+1.85 ×) and 1.41 × on Llama 3 8B (vs. Inductor: 1.17 ×, TensorRT: 
+
+1.18 ×). Our framework couples agentic graph-level pattern discov-ery with architecture-specific auto-tuning and a dynamic pattern registry, offering a practical path from traced PyTorch modules to deployable kernels. 
+
+## CCS Concepts 
+
+• Computing methodologies → Parallel computing method-ologies ; Machine learning ; • Software and its engineering ;
+
+## Keywords 
+
+CUTLASS Kernel Synthesis, Architecture-aware Optimization, Agen-tic Code Generation, GPU Kernel Optimization, Multi-pattern Com-position, Large Language Models  
+
+> Permission to make digital or hard copies of all or part of this work for personal or classroom use is granted without fee provided that copies are not made or distributed for profit or commercial advantage and that copies bear this notice and the full citation on the first page. Copyrights for components of this work owned by others than the author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or republish, to post on servers or to redistribute to lists, requires prior specific permission and/or a fee. Request permissions from permissions@acm.org.
+> ,
+> ©2026 Copyright held by the owner/author(s). Publication rights licensed to ACM. ACM ISBN 978-1-4503-XXXX-X/26/09 https://doi.org/XXXXXXX.XXXXXXX
+
+ACM Reference Format: 
+
+Sina Heidari and Dimitrios S. Nikolopoulos. 2026. FACT: Compositional Kernel Synthesis with a Three-Stage Agentic Workflow. In Proceedings of . 
+
+ACM, New York, NY, USA, 10 pages. https://doi.org/XXXXXXX.XXXXXXX 
+
+## 1 Introduction 
+
+Deep learning compilers and SDKs such as TVM [ 2], Ansor [ 21 ], PyTorch Inductor [ 1 ], and NVIDIA TensorRT [ 15 ] have made sig-nificant strides in automating the compilation of tensor programs. However, their ability to generate high-performance GPU kernels is fundamentally constrained by the optimization patterns that their developers have codified. When a new model architecture or a new GPU generation is released, developing optimized kernels that exploit its novel hardware features requires significant engi-neering effort, and integrating these optimizations into compiler backends adds further delay before they become available to practi-tioners. Even when optimized kernels are eventually integrated into a compiler—as CUrator [ 8 ] does by incorporating CUTLASS [ 14 ]into TVM’s Bring-Your-Own-Codegen (BYOC) pipeline [ 3]—the compiler relies on a fixed, developer-specified pattern registry for graph node matching and fusion, which cannot discover or add new optimization patterns without manual intervention. The alternative to waiting for compiler support is to hand-optimize kernels using low-level languages such as CUDA or vendor-specific template libraries such as CUTLASS. Expert GPU programmers can write custom kernels that exploit architecture-specific features and integrate them into a PyTorch computation graph via custom exten-sions. This approach routinely achieves performance competitive with or exceeding compiler output, but it demands deep expertise in GPU microarchitecture and months of engineering effort per kernel. Over the past two years, large language model (LLM)-based agents have demonstrated remarkable capabilities in code gener-ation [ 11 ], program synthesis [ 20 ], and multi-step reasoning [ 19 ]. These capabilities have been applied directly to GPU kernel opti-mization: CUDA Agent [ 4] scales agentic reinforcement learning to generate high-performance CUDA kernels; KernelBlaster [ 6]uses memory-augmented in-context RL to transfer optimization knowledge across tasks; Astra [ 18 ] employs a multi-agent work-flow to iteratively transform existing kernels using profiling-driven feedback; and StitchCUDA [ 10 ] targets end-to-end GPU programs with a planner/coder/verifier decomposition. However, these approaches share a common limitation: they syn-thesize kernels in raw CUDA, which forces them to rediscover—in generated source code—optimizations that mature libraries have already encapsulated as vetted, architecture-parameterized tem-plates. Despite the promise of agentic kernel optimization, we are  
+
+> arXiv:2604.26666v2 [cs.DC] 4 May 2026 , , Heidari and Nikolopoulos
+
+not aware of any prior framework that combines library-grounded synthesis with a dynamic pattern registry—addressing both the static registry limitation of compiler-based approaches and the raw-code generation focus of prior agentic systems. We propose FACT (Framework for Agentic CUTLASS Transpila-tion), a framework that combines multi-pattern composition with library-grounded synthesis through a dynamic pattern registry that grows as the agent discovers new patterns—where each pattern corresponds to a subgraph identifiable by an optimization rule (e.g., GEMM, FMHA), data type, and target GPU architecture—unlike static registries, this enables accumulation across workloads. FACT performs architecture-specific synthesis by matching patterns to the target GPU’s capabilities. It also enables architecture-specific auto-tuning where the agent automatically infers which parameters to sweep at each level of CUTLASS’s hierarchical API. FACT realizes this through a three-stage agentic workflow. (1) Pat-tern Discovery: an LLM agent analyzes the PyTorch computation graph and proposes optimization patterns by retrieving vetted ex-amples from an architecture-specific kernel repository. (2) Pattern Realization: each pattern is implemented as a CUTLASS kernel, ver-ified for correctness, auto-tuned, and added to the dynamic pattern registry. (3) Pattern Composition: realized kernels are composed with the original computation graph for end-to-end benchmarking. Both synthesis and auto-tuning navigate CUTLASS’s three-level hierarchy. At the tile level, synthesis configures Tensor Core primi-tives and tile shapes. At the kernel level, synthesis selects pipelin-ing strategies appropriate for the target architecture. At the grid level, synthesis chooses scheduling policies that balance load across thread blocks. These levels must be addressed coherently—incom patible choices across levels cause failures. Auto-tuning sweeps parameters at each level to find optimal configurations. The contributions of this paper are as follows: 
+
+• Library-grounded agentic kernel synthesis with a dy-namic pattern registry. We ground the agent’s synthesis in CUTLASS C++ templates rather than raw CUDA, enabling reuse of architecture-parameterized patterns that accumu-late across workloads. 
+
+• Architecture-specific auto-tuning where the agent in-fers relevant parameters based on the target architec-ture and kernel type. For Ampere multistage pipelines, the agent sweeps tile shapes and pipeline stages; for Hop-per warp-specialized kernels, it sweeps tile shapes, kernel schedules and cluster shapes. 
+
+• KernelBench-style evaluation on representative prob-lems spanning CUTLASS’s capabilities. On Level 1 GEMM problems (square, batched, and large-K matrix multiply), auto-tuned CUTLASS kernels achieve 1.06 ×–1.18 × speedups on A100 and 0.84 ×–1.80 × performance variations on H100 over cuBLAS. On Level 3 transformer blocks, FACT achieves 
+
+2.03 × speedup on MiniGPT and 1.41 × on Llama 3 8B, con-sistently outperforming compiler baselines. 
+
+• Open-source artifacts and reproducibility. We release the pattern registry and synthesized kernels (via GLM 4.7) de-veloped through the framework, along with the LLM prompts for our three-stage agentic workflow, enabling reproducibil-ity and community extensions. Available at github.com/Project-FACT/FACT. 
+
+## 2 Background & Motivation 2.1 KernelBench Evaluation Framework 
+
+KernelBench [ 17 ] introduces a standardized benchmark for evaluat-ing LLM agents on GPU kernel generation. The framework adopts a two-stage evaluation: (1) correctness , where synthesized kernels are compiled and compared against PyTorch references, and (2) per-formance , where correctly-executing kernels are benchmarked and compared to baselines. KernelBench defines three difficulty tiers: 
+
+Level 1 (single operators like GEMM), Level 2 (fused operators), and Level 3 (complex blocks from real models). The optimization problem is formulated as transpiling a PyTorch computation graph into functionally equivalent kernel implementations that replace baseline subgraphs in the execution trace, closely mirroring real-world kernel optimization workflows. 
+
+CUTLASS. CUTLASS [ 14 ] is a C++ template library for efficient GPU kernel synthesis and optimization. It provides a modular, com-posable architecture spanning three levels of abstraction: tile-level primitives for Tensor Core operations (e.g., WGMMA for Hopper’s matrix-multiply-accumulate units), kernel-level pipelining strate-gies (warp-specialized pipelines for Hopper, multistage pipelines with cp.async for Ampere), and grid-level work scheduling (dual mode vs. warp-specialized modes for load balancing and synchro-nization). This multi-level design enables architecture-specific ker-nel customization while maintaining a consistent programming model, making CUTLASS an ideal foundation for automated kernel synthesis. We leverage CUTLASS to implement fused multi-head attention (FMHA) kernels inspired by FlashAttention [ 5], which reduces memory I/O by tiling over the attention computation and keeping intermediate results in on-chip SRAM rather than writing to and reading from HBM. 
+
+## 3 Task Definition 
+
+We adopt a task formulation extending KernelBench’s transpilation paradigm with two key contributions. First, we target multi-pattern composition rather than isolated operators: the agent operates over the complete computation graph to discover and optimize mul-tiple subgraph patterns simultaneously. Second, we introduce a 
+
+dynamic pattern registry indexed by a pattern table T that maps optimization rules ( 𝑟 ), data types ( 𝜏 ), and target architectures ( 𝛼 )to CUTLASS kernel implementations. This design enables efficient retrieval of architecture-specific kernels and accumulation of opti-mization knowledge across workloads. The agent’s objective is to discover optimization patterns P =
+
+{𝑝 1, 𝑝 2, . . . , 𝑝 𝑛 } where each pattern 𝑝 𝑖 corresponds to a computa-tion subgraph that can be replaced with an optimized kernel. Each pattern is associated with a rule —such as GEMM, FMHA (Fused Multi-Head Attention), or epilogue fusion—that determines the kernel synthesis template. The pattern table T dynamically grows as new patterns are synthesized: when the agent discovers a cor-rect kernel implementation, it is added to the registry indexed by 
+
+(𝑟, 𝜏, 𝛼 ), enabling future retrieval and reuse across models. FACT: Compositional Kernel Synthesis with a Three-Stage Agentic Workflow , ,   
+
+> Comp. Graph
+> G
+> PyTorch model
+> Agent
+> Pattern Discovery
+> Patterns
+> P
+> Subgraphs
+> Pattern Table
+> T
+> Dynamic catalog
+> Index
+> (𝑟, 𝜏, 𝛼 )
+> 𝑟 : Rule (GEMM, FMHA)
+> 𝜏 : Type (FP32, BF16)
+> 𝛼 : Arch (Ampere, Hopper)
+> CUTLASS Kernels
+> Specialized impl.
+
+Figure 1: Pattern mapping hierarchy. The agent identifies optimization patterns from the computation graph, each associated with a rule (e.g., GEMM, FMHA). The pattern table 
+
+T indexes kernels by a tuple (𝑟, 𝜏, 𝛼 ) capturing rule, data type, and target architecture, enabling retrieval of workload-matched CUTLASS implementations. 
+
+## 4 Proposed Approach 
+
+Figure 2 illustrates our three-stage agentic workflow for whole-model kernel optimization. The workflow maps directly to CUT-LASS’s API hierarchy [ 14 ] and leverages LLM-based actions to orchestrate complex optimization tasks that would otherwise re-quire manual intervention. Each stage decomposes into a sequence of well-defined actions—graph extraction and analysis, kernel syn-thesis and verification, composition and extension loading—that the agent executes systematically. By structuring optimization as a pipeline of discrete actions, we enable the agent to reason about each decision point independently while maintaining coherence across the entire workflow. 
+
+## 4.1 Pattern Discovery 
+
+The first stage begins with the baseline PyTorch model and executes five sequential actions to discover optimization opportunities. 
+
+Action 1: Read instruction template. The agent first reads an instruction template that defines the pattern discovery task. This template specifies the optimization objectives, the target GPU architecture, data type constraints, and examples of CUTLASS pat-terns to search for. The instruction grounds the agent’s analysis in domain knowledge about CUTLASS capabilities. 
+
+Action 2: Analyze computation graph. Using PyTorch’s trac-ing mechanism, the agent extracts the computation graph G =
+
+(𝑉 , 𝐸 ) as a sequence of tensor operations. This analysis preserves operator semantics, tensor shapes, and data type information. The agent then performs structural pattern matching to locate sub-graphs that correspond to known CUTLASS patterns. The agent leverages PyTorch’s tracing infrastructure—specifically torch.jit.tra ce() and torch.fx.Tracer()—to programmatically extract computation graphs from the target model, enabling systematic identification of subgraphs that match known CUTLASS patterns. During this anal-ysis, the agent may not find exact matches in the examples index; however, it can retrieve multiple examples that, when combined, provide the necessary components to realize the target pattern. 
+
+Action 3: Query examples index. For each candidate subgraph, the agent retrieves relevant CUTLASS kernel implementations from an architecture-specific examples index organized by optimization rule, data type, and input shape. By grounding synthesis in proven implementations rather than generating from scratch, the agent improves reliability and performance. Table 1 summarizes avail-able examples across KernelBench difficulty levels (Level 1: single operators; Level 2: fused operators; Level 3: complex transformer blocks) and GPU architectures. 
+
+Action 4: Propose patterns. Based on the subgraph analysis and retrieved examples, the agent proposes a set of optimization pat-terns Pproposed = {𝑝 1, 𝑝 2, . . . , 𝑝 𝑚 }. Each proposed pattern includes the subgraph to be optimized, the associated optimization rule (e.g., GEMM, FMHA), and references to the retrieved examples that guide kernel synthesis. 
+
+Action 5: Prioritize patterns. The agent prioritizes the pro-posed patterns based on expected performance impact and imple-mentation complexity. This prioritization considers factors such as operator granularity, memory access patterns, and the quality of retrieved examples. The output is an ordered list of prioritized patterns P = {𝑝 1, 𝑝 2, . . . , 𝑝 𝑛 } that are passed to the next stage for kernel synthesis. 
+
+## 4.2 Pattern Realization 
+
+The second stage synthesizes concrete CUTLASS kernels for each prioritized pattern. For each pattern 𝑝 𝑖 ∈ P , the agent executes an iterative workflow with six actions, including a feedback loop for correctness verification and an optional auto-tuning step. 
+
+Action 1: Select supporting examples. The agent queries the examples index to retrieve CUTLASS kernel implementations that serve as references for synthesizing the target pattern. These supporting examples are selected based on similarity to the target pattern in terms of optimization rule, data type, input shape, and GPU architecture. The agent may retrieve multiple examples that, when combined, provide the necessary components to realize the pattern. 
+
+Action 2: Synthesize CUTLASS + PyTorch extension. Guided by supporting examples, the agent synthesizes a CUTLASS kernel by configuring three API levels as shown in Figure 3: (1) tile-level primitives for Tensor Core operations, (2) kernel-level pipelining strategies appropriate for the target architecture (warp-specialized for Hopper, multistage pipelines for Ampere), and (3) grid-level work scheduling (Data Parallel, Split-K, or Stream-K). The synthe-sized kernel is wrapped as a PyTorch extension, compiled into a shared library, and registered as a custom operation. 
+
+Action 3: Create per-pattern ModelNew(nn.Module). The agent constructs a new PyTorch module, ModelNew , that integrates the synthesized CUTLASS extension. This module inherits from , , Heidari and Nikolopoulos 
+
+Figure 2: Three-stage agentic workflow for whole-model kernel optimization. Stage 1 (Pattern Discovery) extracts and analyzes the computation graph to identify optimization opportunities. Stage 2 (Pattern Realization) synthesizes CUTLASS kernels for each pattern, verifying correctness and benchmarking performance before adding to the dynamic pattern registry. Stage 3 (Pattern Composition) assembles the optimized kernels into a deployable model with PyTorch extensions and measures end-to-end speedup. LLM-based actions enable systematic execution of complex optimization tasks across all stages.                         
+
+> Architecture Level 1: Single Operator Level 2: Fused Operators Level 3: Complex Blocks Hopper Warp-Specialized GEMM Epilogue Swizzle FMHA (SM90) Topk-Softmax GEMM Gather-Scatter Fusion Grouped GEMM Sparse GEMM GEMM-Permute FP8 Grouped GEMM FP8 GEMM Mixed-DType Grouped GEMM
+> Ampere TF32 TensorOp GEMM Operand-Reduction Fusion Fused Multi-Head Attention (SM80) Sparse TensorOp GEMM Fprop Mainloop Fusion Grouped GEMM TensorOp Conv2dFprop Wgrad Mainloop Fusion GEMM-LayerNorm-GEMM Fusion FP64 Affine2 GEMM GEMM-Softmax Multi-GEMM IR Codegen TensorOp Group Conv Gather-Scatter Fusion Dual GEMM
+
+Table 1: CUTLASS examples organized by KernelBench difficulty level and GPU architecture. Level 1: single linear algebra operators; Level 2: fused operators with epilogue or data movement fusion; Level 3: complex multi-operator patterns requiring interdependent scheduling decisions. 
+
+nn.Module and implements the forward method to invoke the cus-tom CUTLASS operation. The module preserves the input/output interface of the original subgraph, enabling drop-in replacement within the computation graph. 
+
+Action 4: Verification and benchmarking. The agent exe-cutes ModelNew against a reference implementation using identical test inputs. For correctness verification, output tensors are com-pared element-wise to ensure functional equivalence. For perfor-mance benchmarking, the kernel is executed multiple times on the target GPU hardware, and CUDA events measure end-to-end exe-cution time. The resulting speedup relative to the baseline PyTorch implementation is recorded. At this point, the agent evaluates whether the pattern is accepted .If the pattern passes both correctness verification and achieves satisfactory performance, the workflow proceeds to Action 5. If the pattern fails verification or performs poorly, the workflow loops back to Action 1: the agent re-selects supporting examples, inspects the synthesized code to identify correctness issues, and modifies the implementation to fix the problems. This iterative refinement continues until the pattern is accepted. FACT: Compositional Kernel Synthesis with a Three-Stage Agentic Workflow , , 
+
+Figure 3: Three-level hierarchy of CUTLASS kernel synthesis. From innermost to outermost: (1) Tile-level primitives; (2) Kernel-level pipelining; (3) Grid-level scheduling. Action 5: Auto-tune kernel. After correctness verification, the agent performs auto-tuning to optimize performance. The search space is inferred from the CUTLASS API levels and target archi-tecture rather than hardcoded. For Ampere multistage pipelines, the agent sweeps threadblock tile shapes, warp tile shapes, and pipeline stages. For Hopper warp-specialized kernels, the agent sweeps threadblock tile shapes, cluster shapes, and kernel schedules (cooperative and pingpong). Each configuration is compiled, exe-cuted with warmup and timed iterations, and the best-performing variant is selected for subsequent stages. 
+
+Action 6: Add to pattern registry. Once a pattern is accepted, the agent adds it to the dynamic pattern registry indexed by T .The entry includes the pattern 𝑝 𝑖 , the synthesized CUTLASS kernel implementation, the auto-tuning results (if performed), the bench-mark results (speedup metrics), and metadata about the supporting examples used. The entry is indexed by the tuple (𝑟, 𝜏, 𝛼 ), enabling future queries to retrieve the kernel without re-synthesis. This action expands the optimization catalog, allowing the agent to ac-cumulate knowledge across patterns and reuse kernels for similar workloads. 
+
+## 4.3 Pattern Composition 
+
+The third stage composes realized kernels into an optimized model. The agent constructs a new computation graph G′ by replacing each subgraph G𝑖 with a CUTLASS kernel call, preserving semantic equivalence. Each kernel is compiled as a PyTorch extension and loaded into the Python runtime. The agent then performs end-to-end benchmarking to validate that kernel optimizations translate to model-level speedup. The final output is a deployable PyTorch model with integrated CUTLASS kernels, and the pattern registry persists for future optimization sessions. 
+
+## 5 Performance Evaluation 5.1 Experimental Setup 
+
+Notation. Throughout the evaluation, we use (𝐵,𝑇 , 𝐶 ) to denote tensor dimensions: 𝐵 is batch size, 𝑇 is sequence length, and 𝐶 is hidden dimension. 
+
+Hardware. All experiments were conducted on two NVIDIA GPU systems: an A100-SXM4-80GB (Ampere architecture, SM80), which provides theoretical peak throughput of 156 TFLOPS in TF32 mode and 312 TFLOPS in FP16 mode [ 12 ], and an H100-SXM (Hopper architecture, SM90) with theoretical peak throughput of 989 TFLOPS in TF32 mode and 1,979 TFLOPS in FP16 mode [13]. 
+
+Benchmark problems. We evaluate on three KernelBench Level 1 problems drawn from the GEMM family (Problems 1, 3, and 6), each exercising a different grid-level scheduling policy: Data Parallel, Batched, and Stream-K, respectively. Problem 1 computes 
+
+𝐶 = 𝐴 × 𝐵 for 4096 × 4096 matrices in FP32, exercising a standard square GEMM workload that maps directly to CUTLASS’s TF32 tensor-op GEMM template with Data Parallel scheduling. Problem 3 
+
+computes a batched matrix multiplication 𝐶 [𝑏 ] = 𝐴 [𝑏 ] × 𝐵 [𝑏 ] for 
+
+𝑏 ∈ [ 0, 128 ) with per-batch dimensions 512 × 1024 and 1024 × 2048 ,evaluating Batched GEMM via CUTLASS’s kBatched mode. Prob-lem 6 computes 𝐶 = 𝐴 × 𝐵 for 256 × 524 ,288 and 524 ,288 × 256 
+
+matrices, stressing the K dimension to evaluate Stream-K grid-level scheduling [ 16 ]. Together, Problems 1, 3, and 6 span the three dom-inant scheduling regimes for GEMM on modern GPUs. For multi-pattern workloads, we evaluate on two Level 3 trans-former blocks: (1) KernelBench problem 44_MiniGPTBlock, a Min iGPT-Style block with LayerNorm, GELU activation, and dimen-sions (128 , 512 , 768 ). (2) A Llama 3 8B decoder block extracted from HuggingFace (not part of KernelBench), featuring RMSNorm, SwiGLU activation, Grouped-Query Attention (GQA), and dimen-sions (16 , 2048 , 4096 ) with intermediate dimension 14,336. This block presents a more complex computation graph than MiniGPT .
+
+Software environment. Kernels were implemented using CUT-LASS 3.8.0 (git commit ea46e277), compiled with NVCC through PyTorch’s torch.utils.cpp_extension interface, and loaded as custom CUDA extensions. Experiments on the A100 node were conducted on Ubuntu 24.04 with CUDA 12.4, PyTorch 2.4.1+cu124, and Torch-TensorRT 2.4.0. Experiments on the H100 node were conducted with CUDA 12.8 and PyTorch 2.8.0. Random inputs were generated using torch.manual.seed(42) for reproducibility. For Level 1 representative GEMM problems, the baseline is Py-Torch eager-mode execution with torch.backends.cuda.matmul.a llow_tf32=True, which dispatches to cuBLAS’s TF32 tensor core GEMM implementation. For the Level 3 multi-pattern problems, we additionally evaluated compiler baselines: PyTorch Inductor (using torch.compile with backend="inductor" and mode="max-autotune") and Torch-TensorRT (using torch.compile with back-end="torch_tensorrt" and dynamic=False). Correctness was verified using torch.allclose() with rtol=1e-3 and atol=1e-5, comparing the CUTLASS kernel output against the PyTorch reference. 
+
+Auto-tuning methodology. Auto-tuning is performed by the agent as Action 5 in the Pattern Realization stage (Section 4.2). The agent infers the search space from the CUTLASS test files for the target architecture and data type. For Ampere (SM80) multi-stage pipelines, the agent sweeps threadblock tile shapes, warp tile , , Heidari and Nikolopoulos 
+
+shapes, and pipeline stages. For Hopper (SM90) warp-specialized kernels, the agent sweeps threadblock tile shapes, cluster shapes, and kernel schedules (cooperative and pingpong). Each configura-tion was compiled as a standalone shared library, executed with 5 warmup iterations followed by 20 timed iterations, and measured using time.perf_counter with CUDA synchronization. All reported timings are averaged over 20 trials; variance was negligible (<1% across configurations), so we report means only. Configurations that exceeded shared-memory capacity or register limits at high pipeline stages were recorded as launch failures. 
+
+## 5.2 Evaluation Results 
+
+For each KernelBench problem, we report the output of all three stages of the workflow. Stage 1 (Pattern Discovery) describes the patterns the agent identified from the computation graph. Stage 2 (Pattern Realization) presents correctness verification, auto-tuning results, and performance comparisons against the PyTorch cuBLAS baseline. Stage 3 (Pattern Composition) applies only to multi-opera tor problems, where multiple realized kernels are composed into a single optimized computation graph. We evaluate CUTLASS GEMM synthesis and auto-tuning (Sec-tion 4.2) on three KernelBench Level 1 problems: square GEMM (Problem 1), large-K GEMM (Problem 6), and batched GEMM (Prob-lem 3), presenting results across both Ampere and Hopper archi-tectures that differ significantly in their tunable parameters and schedules. For multi-pattern composition, we run the full three-stage workflow on two Level 3 blocks: the MiniGPT block from KernelBench problem 44_MiniGPTBlock and the Llama 3 8B de-coder block extracted from HuggingFace (Section 5.1). 
+
+5.2.1 KernelBench Problem 1: Square Matrix Multiplication. In Stage 1, The agent identified the operation type and tensor dimensions for the square matrix multiplication benchmark and proposed op-timization patterns for both Ampere (SM80) and Hopper (SM90) architectures. For brevity, we show only the patterns for the square GEMM in Listing 1; the JSON pattern for all patterns follow the same format. 
+
+Listing 1: Proposed patterns for square matrix multiplication (4096 × 4096 ). Pattern p1_ampere (TF32 on Ampere SM80) and p1_hopper (FP16 on Hopper SM90) are shown.                                                            
+
+> {" pattern_id ": " p1_ampere ", " name ": " Ampere TF32 Tensor - Core GEMM ", " optimization_rule ": " GEMM ", " target_architecture ": " SM80 ( Ampere )", " input_shapes ": {" A ": [4096 ,4096] , "B ": [4096 ,4096]} , " data_type ": " tf32 ", " implementation_notes ": {" pipelining ": " Multistage cp . async pipeline ", " grid_schedule ": " Data - parallel 2D tiling ", " tensor_cores ": " TF32 tensor cores , inst shape 16 x16x16 " }, " supporting_example ": " cutlass /3.8.0/ examples /41 _tensorop_ampere_tf32_gemm " }{" pattern_id ": " p1_hopper ", " name ": " Hopper FP16 Tensor - Core GEMM ", " optimization_rule ": " GEMM ", " target_architecture ": " SM90 ( Hopper )", " input_shapes ": {" A ": [4096 ,4096] , "B ": [4096 ,4096]} , " data_type ": " fp16 ", " computation_precision ": " fp16 with fp32 accumulator ", " implementation_notes ": {" pipelining ": " Warp - specialized pipeline with TMA ", " grid_schedule ": " Data - parallel 2D tiling ", " tensor_cores ": " FP16 tensor cores , inst shape 16 x16x32 " }, " supporting_example ": " cutlass / examples /48 _hopper_warp_specialized_gemm "}
+
+Pattern p1_ampere targets Ampere’s TF32 tensor cores with a multistage software pipeline using cp.async for data prefetching, which is the standard high-performance configuration for GEMM on SM80. Pattern p1_hopper proposes a Hopper warp-specialized design with TMA, targeting the H100. In Stage 2, The CUTLASS kernel for pattern p1_ampere was syn-thesized based on CUTLASS example 41 and successfully passed correctness verification with bit-exact agreement against PyTorch’s cuBLAS output. The agent then performed auto-tuning by inferring the search space from the CUTLASS test files for the target archi-tecture and data type, sweeping 98 configurations across 14 tile shapes and pipeline stages 2–8. Of these, 66 executed successfully and 32 failed due to shared-memory or register overflow at high pipeline stages. Figure 4 (a) plots all 66 successful configurations as a scatter of hardware efficiency versus speedup over PyTorch. The best overall configuration—threadblock tile 128 × 256 × 32 with 3 pipeline stages (marked by the star)—achieves 124.4 TFLOPS (79.8% of peak) and a 
+
+1.14 × speedup over PyTorch. For Hopper (SM90), the agent synthesized pattern p1_hopper (FP16 with FP32 accumulator) based on CUTLASS example 48 and verified correctness. The agent swept 48 configurations across tile shapes and cluster shapes (cooperative and pingpong schedules). Figure 5 (a) shows the results; the best configuration (tile 128 ×
+
+256 × 64 , cluster 2 × 1 × 1) achieved 705.0 TFLOPS (35.6% of FP16 peak) at 0.195 ms, but was 0.92 × slower than PyTorch FP16 baseline (0.180 ms), indicating room for further optimization on Hopper. 
+
+5.2.2 KernelBench Problem 3: Batched Matrix Multiplication. In Stage 1, The agent examined the operation and input shapes for the batched matrix multiplication benchmark ( 𝐴 ∈ R128 ×512 ×1024 ,
+
+𝐵 ∈ R128 ×1024 ×2048 ) and proposed optimization patterns for both Ampere (SM80) and Hopper (SM90) architectures following the same pattern structure. Pattern p1_ampere targets Ampere’s TF32 tensor cores with CUT-LASS’s kBatched mode for batched workloads. Pattern p1_hopper proposes a Hopper warp-specialized design with TMA and Ptr-Array Batched mode, supporting both cooperative and pingpong schedules. In Stage 2, The CUTLASS kernel for pattern p1_ampere was synthesized based on CUTLASS example 5 and passed correctness verification for all 30 auto-tuned configurations using. The agent swept 30 configurations across tile shapes and pipeline stages. Fig-ure 4 (b) plots the results: configurations with wider N-dimension tiles ( 𝑁 tile = 256 ) consistently outperform narrower variants, and the best configuration achieves 73.3% of peak. The best configurati on—threadblock tile 128 × 256 × 32 with 3 pipeline stages—achieves 114.4 TFLOPS (73.3% of peak) and a 1.18 × speedup over PyTorch cuBLAS. For Hopper (SM90), the agent synthesized pattern p1_hopper (FP16 with FP32 accumulator) based on CUTLASS example 56 and verified correctness. The agent swept 48 configurations across tile shapes and cluster shapes (cooperative and pingpong schedules). Figure 5 (b) shows the results; the best configuration (tile 128 ×
+
+256 × 64 , cluster 1 × 1 × 1) achieved 577.4 TFLOPS (29.2% of FP16 FACT: Compositional Kernel Synthesis with a Three-Stage Agentic Workflow , , 
+
+Figure 4: Auto-tuning results for all three Level 1 problems on A100. Each point is one configuration; stars mark the best. Dashed lines indicate parity with PyTorch (cuBLAS, TF32). For Problem 6 (c), CUTLASS configurations use mixed precision (FP16 inputs with FP32 compute/output) while the PyTorch baseline uses TF32; the speedup is computed against this TF32 baseline. 
+
+Figure 5: Auto-tuning results for all three Level 1 problems on H100. Each point is one configuration; stars mark the best. For Batched GEMM (b), cooperative (blue) and pingpong (orange triangles) schedules are shown separately. All kernels use FP16 inputs with FP32 accumulation. For Large-K GEMM (c), dashed lines indicate parity with PyTorch TF32 baseline (FP16 accumulators overflow for this problem size). 
+
+peak) at 0.476 ms, compared to cuBLAS FP16 at 0.400 ms ( 0.84 ×
+
+speedup). 
+
+5.2.3 KernelBench Problem 6: Large-K Matrix Multiplication. In Stage 1, The agent analyzed the operation requirements and di-mensions for the large-K matrix multiplication benchmark ( 𝐴 ∈
+
+R256 ×524 ,288 , 𝐵 ∈ R524 ,288 ×256 ) and proposed optimization patterns for both Ampere (SM80) and Hopper (SM90) architectures following the same pattern structure. Pattern p1_ampere targets Ampere tensor cores with Stream-K scheduling [16] for extreme K/M aspect ratios. Pattern p1_hopper proposes a Hopper warp-specialized cooperative Stream-K design with TMA. In Stage 2, The CUTLASS kernel for pattern p1_ampere was synthesized based on CUTLASS example 47 and verified correctness. PyTorch FP16 failed due to overflow; the agent configured FP16 for A/B inputs with FP32 accumulator and output to resolve this. The agent swept 29 configurations across 14 tile shapes and varying pipeline stages. Figure 4 (c) plots the 23 successful configurations; the best configuration ( 64 × 128 × 64 , 4 stages) achieves a 1.06 ×
+
+speedup over PyTorch TF32 baseline. For Hopper (SM90), the agent synthesized pattern p1_hopper (FP16 with FP32 accumulator) based on CUTLASS example 48 and verified correctness. Just as with Ampere, PyTorch FP16 overflow occurred in Hopper experiments; using FP32 for both accumulator and output resolved this. The agent swept 16 configurations across tile shapes and cluster shapes. Figure 5 (c) shows the results; the best configuration (tile 128 × 128 × 64 , cluster 2 × 2 × 1) achieved 284.8 TFLOPS (14.4% of FP16 peak) at 0.241 ms, achieving 1.80 ×
+
+speedup over PyTorch TF32 baseline (0.433 ms). On representative GEMM problems (square, batched, and large-K matrix multiply), the agent-synthesized CUTLASS kernels achieved speedups over the cuBLAS baseline after auto-tuning. On Ampere (A100), speedups ranged from 1.06 × to 1.18 ×, with the largest gains on the batched workload where the 128 × 256 × 32 tile shape better exploits non-square output dimensions than cuBLAS’s internal , , Heidari and Nikolopoulos 
+
+Figure 6: Backend speedup comparison on multi-pattern Level 3 transformer blocks: MiniGPT and Llama 3 8B. Bars show FACT, PyTorch Inductor (max-autotune), and Torch-TensorRT (dynamic=False) speedups relative to PyTorch ea-ger baseline. FACT’s excels on multi-pattern blocks where subgraph-specific tuning provides substantial gains. 
+
+heuristics. For the large-K problem, the agent resolved PyTorch FP16 overflow by using FP16 inputs with FP32 accumulator and output, demonstrating the importance of adaptive precision handling when compiler-generated templates fail. On Hopper (H100), auto-tuning achieved 0.84 ×–1.80 × speedups across the same representative problems, with large-K GEMM showing the strongest improvement (1.80 ×) due to effective FP16+FP32 precision handling and stream-K scheduling. 
+
+5.2.4 KernelBench Level 3: MiniGPT Block ( 44_MiniGPTBlock ). 
+
+We evaluate KernelBench Level 3 problem 44_MiniGPTBlock : a causal self-attention block paired with a two-layer MLP (expansion to 3072, GELU, projection to 768), at (𝐵,𝑇 , 𝐶 ) = (128 , 512 , 768 ) on the same A100 hardware and PyTorch eager baseline as above. In Stage 1, The agent analyzed the traced computation graph and identified two high-priority patterns for optimization: 
+
+Pattern p1 (FMHA): Fused Multi-Head Attention over the self-attention subgraph. Inputs are FP32, computed in FP16 with FP32 accumulation, and output as FP32. 
+
+Pattern p2 (MLP with GELU): Fuses two consecutive linear transformations with GELU activation in the feedforward network: 
+
+• GEMM 1: First linear projection (dense layer) with dimen-sions 768 →3072 and GELU activation. FP16 inputs, FP32 accumulation and output. 
+
+• GEMM 2: Second linear projection (dense layer) with dimen-sions 3072 →768 and standard epilogue. FP16 inputs, FP32 accumulation and output. In Stage 2, Pattern p1 was realized as a fused multi-head atten-tion kernel and verified against the PyTorch reference at multiple 
+
+(𝐵,𝑇 ) settings. Pattern p2 was realized as two fused CUTLASS GEMMs: the first with GELU epilogue fusion (768 →3072) and the second with standard epilogue (3072 →768), with the auto-tuned configuration passing correctness verification. Both patterns use 
+
+Figure 7: KernelBench 44_MiniGPTBlock on A100 with 
+
+(𝐵,𝑇 , 𝐶 ) = (128 , 512 , 768 ). (a) End-to-end latency for PyTorch baseline, single-pattern optimizations, and both patterns composed. (b) Speedup relative to the PyTorch baseline mea-sured in the same benchmark run as each optimized con-figuration (ablations leave the non-target subgraph in eager PyTorch). 
+
+mixed-precision kernels with element-wise comparison and toler-ance thresholds to ensure numerical accuracy. In Stage 3, The two extensions were composed into a single 
+
+ModelNew module, replacing the attention and MLP subgraphs while preserving numerics. End-to-end benchmarks were conducted on the reference shape (128 , 512 , 768 ). With both patterns enabled, the optimized model achieves 2.03 × speedup over the PyTorch base-line (25.665 ms → 12.654 ms). Ablation studies reveal: FMHA-only yields 1.27 × speedup (20.195 ms), MLP-only yields 1.44 × speedup (17.803 ms), and both combined yield 2.03 × speedup, as shown in Figure 7. These measurements show that the MLP pattern con-tributes more than the FMHA pattern on this block. Compiler baselines on the same configuration: PyTorch Inductor (max-autotune) achieves 13.573 ms, and Torch-TensorRT achieves 13.907 ms, both slower than FACT’s optimized result. Figure 6 compares FACT against compiler baselines on both transformer blocks. 
+
+5.2.5 Llama 3 8B Decoder Block. We evaluate a Llama 3 8B decoder block extracted from HuggingFace: a causal self-attention block with Grouped-Query Attention (GQA) paired with a SwiGLU feed-forward network, at (𝐵,𝑇 , 𝐶 ) = (16 , 2048 , 4096 ) on the same A100 hardware. In Stage 1, The agent analyzed the traced computation graph and identified two high-priority patterns: 
+
+Pattern p1 (FMHA-GQA): Grouped-Query Attention with K/V heads (8) fewer than Q heads (32). FP32 inputs are expanded via 
+
+repeat_interleave before the FMHA kernel call. Computation uses FP16 with FP32 accumulation and FP32 output. Tile param-eters: kQueriesPerBlock =32, kKeysPerBlock =128, optimized for 
+
+head_dim =128. FACT: Compositional Kernel Synthesis with a Three-Stage Agentic Workflow , , 
+
+Figure 8: Llama 3 8B decoder block on A100 with (𝐵,𝑇 , 𝐶 ) =
+
+(16 , 2048 , 4096 ). (a) End-to-end latency for PyTorch baseline, single-pattern optimizations (FMHA-GQA and SwiGLU), and both patterns composed. (b) Speedup relative to the PyTorch baseline measured in the same benchmark run as each opti-mized configuration. Pattern p2 (SwiGLU MLP): Fuses four operations across two GEMMs: 
+
+• GEMM 1: gate_proj (4096 →14,336) with SiLU epilogue; 
+
+up_proj (4096 →14,336) with standard epilogue; element-wise multiply SiLU (gate ) × up . FP16 inputs, FP32 accumula-tion and output. 
+
+• GEMM 2: down_proj (14,336 →4096) with standard epilogue. FP16 inputs, FP32 accumulation and output. In Stage 2, Pattern p1 was realized as a fused multi-head attention kernel with GQA support and verified against the PyTorch reference across multiple input shapes. Pattern p2 was realized as two fused CUTLASS kernels: the first combining gate projection with SiLU activation and up projection, and the second implementing down projection. Both patterns use mixed-precision kernels verified using the method described in Section 5.1. In Stage 3, The two extensions were composed into a single 
+
+ModelNew module, replacing the attention and MLP subgraphs. End-to-end benchmarks were conducted on the reference shape 
+
+(16 , 2048 , 4096 ). With both patterns enabled, the optimized model achieves 1.41 × speedup over the PyTorch baseline (135.215 ms 
+
+→ 96.038 ms). Ablation studies reveal: FMHA-GQA-only yields 
+
+1.22 × speedup (110.541 ms), SwiGLU-only yields 1.12 × speedup (120.887 ms), and both combined yield 1.41 × speedup, as shown in Figure 8. The FMHA-GQA pattern contributes more substantial improvement than SwiGLU on this larger, more attention-heavy block. Compiler baselines on the same configuration: PyTorch Inductor (max-autotune) achieves 115.741 ms, and Torch-TensorRT achieves 114.133 ms, both substantially slower than FACT’s optimized result and showing only marginal speedup over eager PyTorch. Figure 6 compares FACT against compiler baselines on both transformer blocks. 
+
+## 5.3 Discussion 
+
+Key findings. Our evaluation demonstrates that library-grounded agentic kernel synthesis can achieve competitive performance on both single-operator and multi-pattern workloads. On Level-1 GEMM problems, auto-tuned CUTLASS kernels achieved 1.06 ×–1.18 × speedups over PyTorch’s cuBLAS baseline, with the strongest improvement (1.18 ×) on batched GEMM where cuBLAS’s heuristics are less tuned for irregular shapes. On Level-3 MiniGPT block, com-posing fused multi-head attention with GELU-fused MLP yields 
+
+2.03 × end-to-end speedup, with MLP contributing more (1.44 ×)than FMHA (1.27 ×). On the larger Llama 3 8B block with GQA and SwiGLU, composing FMHA-GQA with SwiGLU MLP yields 
+
+1.41 × end-to-end speedup, with FMHA-GQA contributing more (1.22 ×) than SwiGLU (1.12 ×). These results demonstrate that the rel-ative contribution of patterns depends on workload characteristics: smaller blocks benefit more from MLP optimization, while larger attention-heavy models benefit more from attention optimization. 
+
+Compiler baseline comparison. We evaluated PyTorch In-ductor and Torch-TensorRT on multi-pattern transformer blocks (MiniGPT and Llama 3 8B), excluding Level-1 GEMM problems from compiler comparison as they represent isolated single-operator workloads rather than multi-pattern composition targets. For Mini-GPT, Inductor achieves 1.89 × and Torch-TensorRT achieves 1.85 ×
+
+speedups—both lower than FACT’s 2.03 ×. For Llama 3 8B, Inductor achieves 1.17 × and Torch-TensorRT achieves 1.18 × speedups—both lower than FACT’s 1.41 ×. Our results suggest that multi-pattern composition with library-grounded kernels can outperform general-purpose compilers when workload-specific patterns are known. 
+
+## 6 Related Work 
+
+Agentic GPU kernel generation and optimization. Recent work demonstrates that LLM-driven agents can generate and op-timize CUDA kernels by closing the loop with compilation, cor-rectness checking, and profiling. KernelBlaster proposes memory-augmented in-context RL to transfer optimization knowledge across tasks and improve KernelBench speedups [ 6]. CUDA Agent scales agentic RL with automated verification/profiling to learn high-performance CUDA kernel generation behavior [ 4]. StitchCUDA extends this direction to end-to-end GPU programs with a planner/-coder/verifier decomposition and rubric-based RL, emphasizing robust rewards from real executions [ 10 ]. Astra studies a multi-agent workflow that starts from existing CUDA kernels (rather than purely from high-level specs) and iteratively applies profiling-driven transformations to improve performance [18]. 
+
+LLM-guided optimization for accelerators and compilers. 
+
+Autocomp targets tensor accelerators and frames optimization as an LLM-driven search guided by domain knowledge and hardware feedback, and shows that optimization schedules can be reused across related tensor operations [7]. 
+
+Subgraph-aware auto-tuning. Closest to our dynamic pattern registry is prior work on exploiting subgraph similarities for effi-cient auto-tuning [ 9], which introduces FamilySeer, a framework that caches and reuses tuning results across similar tensor program subgraphs. Our work differs in three key respects: (1) we use LLM agents to discover patterns automatically rather than relying on manual subgraph extraction; (2) our pattern registry is indexed by architecture, data type, and shape in addition to subgraph structure; and (3) we focus on CUTLASS template instantiation rather than search-space exploration within a single compiler backend. 
+
+Library-centric execution engines and tuning. CUrator fo-cuses on efficient LLM execution by integrating CUDA libraries , , Heidari and Nikolopoulos 
+
+(cuBLAS/CUTLASS) through compiler infrastructure and profiling-driven selection of tiling and split-K strategies for GEMM vari-ants [ 8 ]. Collectively, these systems motivate our focus on expand-ing the search space to newer CUTLASS 3.x kernel schedules (e.g., warp-specialized cooperative and pingpong) and enabling agent-driven exploration for Hopper-specific performance regimes. 
+
+## 7 Conclusion and Future Work 
+
+We presented FACT, a framework that combines two key contri-butions: (1) GEMM synthesis with architecture-aware auto-tuning to optimize matrix multiplication kernels, and (2) compositional kernel synthesis with a dynamic pattern registry to optimize com-plex multi-operator patterns. Our three-stage workflow—Pattern Discovery, Pattern Realization, and Pattern Composition—enables automated discovery and synthesis of optimized kernel patterns. On square, large-K, and batched GEMM problems with input shapes from KernelBench Level-1, auto-tuned CUTLASS kernels achieved speedups ranging from 1.06 ×–1.18 × on Ampere A100 and 0.84 ×–1.80 × performance variations on H100 over cuBLAS. On Level-3 transformer blocks, FACT achieves 2.03 × end-to-end speedup on MiniGPT and 1.41 × on Llama 3 8B, consistently outperforming com-piler baselines (Inductor: 1.89 × and 1.17 × respectively; TensorRT: 1.85 × and 1.18 ×). 
+
+Limitations and Future Work. 
+
+Our framework currently relies on the CUTLASS example index as a foundation for pattern synthesis. While the example catalog is extensive, patterns that significantly deviate from existing examples may require the agent to synthesize entirely new kernels from scratch—a scenario we have not yet explored. We plan to investigate this capability in future work to understand the boundaries of library-grounded synthesis versus de novo kernel generation. Additionally, FACT is currently scoped to CUTLASS, which limits its applicability to NVIDIA GPUs. We are planning to extend FACT to incorporate multiple kernel generation DSLs, including Triton and CuTe. We believe our agentic workflow and pattern registry design are sufficiently generalizable that extending to new DSLs will not require fundamental rearchitecting of the framework. Finally, FACT targets GPU acceleration only. A significant fron-tier lies in supporting diverse accelerators such as Google TPUs and NPUs, which, despite their computational power, lack mature programming ecosystems comparable to NVIDIA’s. We are work-ing toward extending FACT to these accelerators, which would enable broader adoption of kernel optimization techniques across heterogeneous hardware platforms. 
+
+## References 
+
+[1] Jason Ansel, Peng Wu, Horace He, Animesh Jain, Mario Lezcano, Doricha Lazowska, Peter Gan, Melissa Gormish, Zhiqiang Chen, Mu Li Li, Zain Li, Selu Ramezani, et al . 2024. PyTorch 2: Faster Machine Learning Through Dynamic Python Bytecode Transformation and Graph Compilation. In Pro-ceedings of the 29th ACM International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS ’24) . 1150–1166. doi:10.1145/3620665.3640366 [2] Tianqi Chen, Thierry Moreau, Ziheng Jiang, Lianmin Zheng, Eddie Yan, Haichen Shen, Meghan Cowan, Leyuan Wang, Yuwei Hu, Luis Ceze, et al . 2018. {TVM }:An automated {End-to-End } optimizing compiler for deep learning. In 13th USENIX symposium on operating systems design and implementation (OSDI 18) .578–594. [3] Zhi Chen, Cody Hao Yu, Trevor Morris, Jorn Tuyls, Yi-Hsiang Lai, Jared Roesch, Elliott Delaye, Vin Sharma, and Yida Wang. 2021. Bring Your Own Codegen to Deep Learning Compiler. arXiv preprint arXiv:2105.03215 (2021). doi:10.48550/ arXiv.2105.03215 [4] Weinan Dai, Hanlin Wu, Qiying Yu, Huan-ang Gao, Jiahao Li, Chengquan Jiang, Weiqiang Lou, Yufan Song, Hongli Yu, Jiaze Chen, Wei-Ying Ma, Ya-Qin Zhang, Jingjing Liu, Mingxuan Wang, Xin Liu, and Hao Zhou. 2026. CUDA Agent: Large-Scale Agentic RL for High-Performance CUDA Kernel Generation. arXiv preprint arXiv:2602.24286 (2026). doi:10.48550/arXiv.2602.24286 [5] Tri Dao, Dan Fu, Stefano Ermon, Atri Rudra, and Christopher Ré. 2022. FlashAtten-tion: Fast and Memory-Efficient Exact Attention with IO-Awareness. In Advances in Neural Information Processing Systems (NeurIPS) .[6] Kris Shengjun Dong, Sahil Modi, Dima Nikiforov, Sana Damani, Edward Lin, Siva Kumar Sastry Hari, and Christos Kozyrakis. 2026. KernelBlaster: Continual Cross-Task CUDA Optimization via Memory-Augmented In-Context Reinforcement Learning. arXiv preprint arXiv:2602.14293 (2026). doi:10.48550/arXiv.2602.14293 [7] Charles Hong, Sahil Bhatia, Alvin Cheung, and Sophia Shao. 2025. Autocomp: LLM-Driven Code Optimization for Tensor Accelerators. In MLArchSys 2025 (Oral) . https://openreview.net/forum?id=bPdQZedlsr [8] Yoon Noh Lee, Yongseung Yu, and Yongjun Park. 2025. CUrator: An Efficient LLM Execution Engine with Optimized Integration of CUDA Libraries. In Proceedings of the 23rd ACM/IEEE International Symposium on Code Generation and Optimization (CGO ’25) . ACM, 209–224. doi:10.1145/3696443.3708944 [9] Mingzhen Li, Hailong Yang, Shanjun Zhang, Fengwei Yu, Ruihao Gong, and Yi Liu. 2023. Exploiting Subgraph Similarities for Efficient Auto-tuning of Tensor Programs. In Proceedings of the 52nd International Conference on Parallel Processing (ICPP ’23) . 786–796. doi:10.1145/3605573.3605596 [10] Shiyang Li, Zijian Zhang, Winson Chen, Yuebo Luo, Mingyi Hong, and Caiwen Ding. 2026. StitchCUDA: An Automated Multi-Agents End-to-End GPU Pro-graming Framework with Rubric-based Agentic Reinforcement Learning. arXiv preprint arXiv:2603.02637 (2026). doi:10.48550/arXiv.2603.02637 [11] Erik Nijkamp, Bo Pang, Hiroki Hayashi, Lifu Tu, Huan Wang, Yingbo Zhou, Silvio Savarese, and Caiming Xiong. 2023. CodeGen: An Open Large Language Model for Code with Multi-Turn Program Synthesis. arXiv preprint arXiv:2203.13474 
+
+(2023). doi:10.48550/arXiv.2203.13474 [12] NVIDIA Corporation. 2020. NVIDIA A100 Tensor Core GPU Datasheet. Datasheet. https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/ a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf. [13] NVIDIA Corporation. 2022. NVIDIA Hopper GPU Architecture. White Paper. https://resources.nvidia.com/en-us-hopper-architecture. [14] NVIDIA Corporation. 2025. CUTLASS Documentation. https://docs.nvidia.com/ cutlass/latest/. Accessed: 2026-03-16. [15] NVIDIA Corporation. 2025. NVIDIA TensorRT: High Performance Deep Learning Inference. https://developer.nvidia.com/tensorrt. Accessed: 2026-03-16. [16] Muhammad Osama, Duane Merrill, Cris Cecka, Michael Garland, and John D. Owens. 2023. Stream-K: Work-Centric Parallel Decomposition for Dense Matrix-Matrix Multiplication on the GPU. In Proceedings of the 28th ACM SIGPLAN Symposium on Principles and Practice of Parallel Programming (PPoPP ’23) . 367– 381. doi:10.1145/3572848.3577479 [17] Anne Ouyang, Simon Guo, Simran Arora, Alex L. Zhang, William Hu, Christopher Ré, and Azalia Mirhoseini. 2025. KernelBench: Can LLMs Write Efficient GPU Kernels? arXiv preprint arXiv:2502.10517 (2025). [18] Anjiang Wei, Tianran Sun, Yogesh Seenichamy, Hang Song, Anne Ouyang, Azalia Mirhoseini, Ke Wang, and Alex Aiken. 2025. Astra: A Multi-Agent System for GPU Kernel Performance Optimization. arXiv preprint arXiv:2509.07506 (2025). doi:10.48550/arXiv.2509.07506 [19] Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Brian Ichter, Fei Xia, Ed Chi, Quoc V. Le, and Denny Zhou. 2023. Chain-of-Thought Prompting Elicits Reasoning in Large Language Models. arXiv preprint arXiv:2201.11903 
+
+(2023). doi:10.48550/arXiv.2201.11903 [20] Eric Zelikman, Qian Huang, Gabriel Poesia, Noah Goodman, and Nick Haber. 2023. Parsel: Algorithmic Reasoning with Language Models by Composing Decompositions. In Neural Information Processing Systems (NeurIPS) . doi:10. 48550/arXiv.2212.10561 [21] Lianmin Zheng, Chengfan Jia, Minmin Sun, Zhao Wu, Cody Hao Yu, Ameer Haj-Ali, Yida Wang, Jun Yang, Danyang Zhuo, Koushik Sen, et al . 2020. Ansor: Generating {High-Performance } tensor programs for deep learning. In 14th USENIX symposium on operating systems design and implementation (OSDI 20) .863–879.
