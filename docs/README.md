@@ -6,72 +6,76 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-09
-- 运行时间：2026-05-09 19:56:17 UTC
+- 最新运行日期：2026-05-10
+- 运行时间：2026-05-10 19:59:09 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
+- 本次总论文数：18
+- 精读区：7
 - 速读区：11
 
 ### 今日简报（AI）
-今日聚焦分布式编译与 MoE 推理优化，深度解析 17 篇大模型算力前沿进展。
-重点关注 DITRON 编译器对多级分块
-- 详情：[/202605/09/README](/202605/09/README)
+今日深度研读18篇论文，聚焦星载实时监测与超算能效优化等前沿硬件应用。
+满分论文揭示了受限资源下星载野火检测的突破，同时Grace Hopper芯片的多模态训练能效分析值得重点关注。
+建议关注边缘计算与类脑硬件的融合趋势，探索低功耗实时处理的更多可能。
+- 详情：[/202605/10/README](/202605/10/README)
 
 ### 精读区论文标签
-1. [DITRON: Distributed Multi-level Tiling Compiler for Parallel Tensor Programs](/202605/09/2605.02953v1-ditron-distributed-multi-level-tiling-compiler-for-parallel-tensor-programs)  
+1. [On-Orbit Real-Time Wildfire Detection Under On-Board Constraints](/202605/10/2605.06273v1-on-orbit-real-time-wildfire-detection-under-on-board-constraints)  
+   标签：评分：10.0/10、query:hwnas
+   evidence：具有严格星载内存和延迟限制的在轨火灾检测系统
+2. [Cross-Layer Energy Analysis of Multimodal Training on Grace Hopper Superchips](/202605/10/2605.01938v1-cross-layer-energy-analysis-of-multimodal-training-on-grace-hopper-superchips)  
    标签：评分：9.0/10、query:hwnas
-   evidence：用于将张量程序映射到异构硬件的分块编译器
-2. [Relay Buffer Independent Communication over Pooled HBM for Efficient MoE Inference on Ascend](/202605/09/2605.06055v1-relay-buffer-independent-communication-over-pooled-hbm-for-efficient-moe-inference-on-ascend)  
+   evidence：异构超级芯片的跨层能量分析
+3. [WindowQuant: Mixed-Precision KV Cache Quantization based on Window-Level Similarity for VLMs Inference Optimization](/202605/10/2605.02262v1-windowquant-mixed-precision-kv-cache-quantization-based-on-window-level-similarity-for-vlms-inference-optimization)  
    标签：评分：9.0/10、query:hwnas
-   evidence：昇腾硬件上MoE的内存带宽与通信优化
-3. [Efficient, VRAM-Constrained xLM Inference on Clients](/202605/09/2604.26334v1-efficient-vram-constrained-xlm-inference-on-clients)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：在显存限制下最大化计算利用率的CPU-GPU混合调度
-4. [Hierarchical adaptive control for real-time dynamic inference at the edge](/202605/09/2604.26470v1-hierarchical-adaptive-control-for-real-time-dynamic-inference-at-the-edge)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：针对具有延迟、功耗和内存限制的边缘节点的动态机器学习模型
-5. [Combined Dictionary Unfolding Network with Gradient-Adaptive Fidelity for Transferable Multi-Source Fusion](/202605/09/2605.00461v1-combined-dictionary-unfolding-network-with-gradient-adaptive-fidelity-for-transferable-multi-source-fusion)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限边缘设备的轻量化网络设计
-6. [Silicon Showdown: Performance, Efficiency, and Ecosystem Barriers in Consumer-Grade LLM Inference](/202605/09/2605.00519v1-silicon-showdown-performance-efficiency-and-ecosystem-barriers-in-consumer-grade-llm-inference)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：分析英伟达和苹果芯片上大模型部署的软硬件权衡
+   evidence：面向硬件效率的混合精度 KV 缓存量化搜索
+4. [EdgeLPR: On the Deep Neural Network trade-off between Precision and Performance in LiDAR Place Recognition](/202605/10/2605.02275v1-edgelpr-on-the-deep-neural-network-trade-off-between-precision-and-performance-in-lidar-place-recognition)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对资源受限边缘AI的高效LiDAR位置识别
+5. [DICE: Enabling Efficient General-Purpose SIMT Execution with Statically Scheduled Coarse-Grained Reconfigurable Arrays](/202605/10/2605.05496v1-dice-enabling-efficient-general-purpose-simt-execution-with-statically-scheduled-coarse-grained-reconfigurable-arrays)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：静态调度CGRA的软硬件协同设计
+6. [Neuromorphic visual attention for Sign-language recognition on SpiNNaker](/202605/10/2605.06005v1-neuromorphic-visual-attention-for-sign-language-recognition-on-spinnaker)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：用于实时部署的能效神经形态架构
+7. [XtraMAC: An Efficient MAC Architecture for Mixed-Precision LLM Inference on FPGA](/202605/10/2605.06052v1-xtramac-an-efficient-mac-architecture-for-mixed-precision-llm-inference-on-fpga)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对FPGA上混合精度LLM推理的软硬件协同设计
 
 ### 速读区论文标签
-1. [DUAL-BLADE: Dual-Path NVMe-Direct KV-Cache Offloading for Edge LLM Inference](/202605/09/2604.26557v1-dual-blade-dual-path-nvme-direct-kv-cache-offloading-for-edge-llm-inference)  
+1. [Energy-Efficient Plant Monitoring via Knowledge Distillation](/202605/10/2604.27178v1-energy-efficient-plant-monitoring-via-knowledge-distillation)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对边缘大模型推理的内存感知KV缓存卸载
-2. [FACT: Compositional Kernel Synthesis with a Three-Stage Agentic Workflow](/202605/09/2604.26666v2-fact-compositional-kernel-synthesis-with-a-three-stage-agentic-workflow)  
+   evidence：通过蒸馏为移动和边缘设备提供高效架构
+2. [Neuronal arithmetic operators based on Ovonic threshold switches (OTS) for biologically inspired analog computing](/202605/10/2604.27650v1-neuronal-arithmetic-operators-based-on-ovonic-threshold-switches-ots-for-biologically-inspired-analog-computing)  
    标签：评分：8.0/10、query:hwnas
-   evidence：深度学习编译器的组合算子内核综合
-3. [COPUS: Co-adaptive Parallelism and Batch Size Selection in Large Language Model Training](/202605/09/2604.26687v1-copus-co-adaptive-parallelism-and-batch-size-selection-in-large-language-model-training)  
+   evidence：用于模拟计算的神经元算术硬件实现
+3. [Eliminating Hidden Serialization in Multi-Node Megakernel Communication](/202605/10/2605.00686v1-eliminating-hidden-serialization-in-multi-node-megakernel-communication)  
    标签：评分：8.0/10、query:hwnas
-   evidence：协同自适应并行和批大小选择以最大化硬件吞吐量
-4. [Edge AI for Automotive Vulnerable Road User Safety: Deployable Detection via Knowledge Distillation](/202605/09/2604.26857v1-edge-ai-for-automotive-vulnerable-road-user-safety-deployable-detection-via-knowledge-distillation)  
+   evidence：数据传输与计算重叠以最大化利用率
+4. [SURGE: SuperBatch Unified Resource-efficient GPU Encoding for Heterogeneous Partitioned Data](/202605/10/2605.01060v1-surge-superbatch-unified-resource-efficient-gpu-encoding-for-heterogeneous-partitioned-data)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过知识蒸馏和量化在边缘硬件上部署精确的目标检测
-5. [Scalable Learning in Structured Recurrent Spiking Neural Networks without Backpropagation](/202605/09/2605.00402v1-scalable-learning-in-structured-recurrent-spiking-neural-networks-without-backpropagation)  
+   evidence：用于嵌入生成的GPU利用率最大化
+5. [Practical Formal Verification for MLIR Programs](/202605/10/2605.01124v1-practical-formal-verification-for-mlir-programs)  
    标签：评分：7.0/10、query:hwnas
-   evidence：具有硬件可扩展性的能效SNN架构
-6. [Silicon Showdown: Performance, Efficiency, and Ecosystem Barriers in Consumer-Grade LLM Inference](/202605/09/2605.00519v2-silicon-showdown-performance-efficiency-and-ecosystem-barriers-in-consumer-grade-llm-inference)  
+   evidence：MLIR优化编译器的形式化验证
+6. [Visual Implicit Autoregressive Modeling](/202605/10/2605.01220v1-visual-implicit-autoregressive-modeling)  
    标签：评分：7.0/10、query:hwnas
-   evidence：LLM推理硬件-软件权衡的实证分析
-7. [AGoQ: Activation and Gradient Quantization for Memory-Efficient Distributed Training of LLMs](/202605/09/2605.00539v1-agoq-activation-and-gradient-quantization-for-memory-efficient-distributed-training-of-llms)  
+   evidence：具有逐尺度迭代旋钮的隐式层，用于计算控制和内存效率
+7. [PACE: Post-Causal Entropy Modeling for Learned LiDAR Point Cloud Compression](/202605/10/2605.01320v1-pace-post-causal-entropy-modeling-for-learned-lidar-point-cloud-compression)  
    标签：评分：7.0/10、query:hwnas
-   evidence：通过层感知量化实现内存高效的分布式训练
-8. [Make Your LVLM KV Cache More Lightweight](/202605/09/2605.00789v1-make-your-lvlm-kv-cache-more-lightweight)  
+   evidence：模型设计中的性能与延迟权衡
+8. [Colinearity Decay: Training Quantization-Friendly ViTs with Outlier Decay](/202605/10/2605.01330v1-colinearity-decay-training-quantization-friendly-vits-with-outlier-decay)  
    标签：评分：7.0/10、query:hwnas
-   evidence：通过减少KV缓存大小来解决LVLM中的GPU内存开销
-9. [Sim-FA: A Simulator Frontend for Asynchronous Pipelines](/202605/09/2605.00555v1-sim-fa-a-simulator-frontend-for-asynchronous-pipelines)  
+   evidence：量化友好的ViT训练以实现高效部署
+9. [LEAP: Layer-wise Exit-Aware Pretraining for Efficient Transformer Inference](/202605/10/2605.01058v1-leap-layer-wise-exit-aware-pretraining-for-efficient-transformer-inference)  
    标签：评分：6.0/10、query:hwnas
-   evidence：针对异步流水线和线程束专业化的模拟器
-10. [Sim-FA: A GPGPU Simulator Framework for Fine-Grained FlashAttention Pipeline Analysis](/202605/09/2605.00555v2-sim-fa-a-gpgpu-simulator-framework-for-fine-grained-flashattention-pipeline-analysis)  
+   evidence：通过早期退出的高效Transformer推理
+10. [Component-Aware Self-Speculative Decoding in Hybrid Language Models](/202605/10/2605.01106v1-component-aware-self-speculative-decoding-in-hybrid-language-models)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于细粒度流水线分析和硬件特性的GPGPU模拟器
-11. [Hierarchical Federated Learning for Networked AI: From Communication Saving to Architecture-Aware Design](/202605/09/2605.00931v1-hierarchical-federated-learning-for-networked-ai-from-communication-saving-to-architecture-aware-design)  
+   evidence：利用内部架构异构性实现零成本推理加速
+11. [Evolution of NVENC Efficiency: A Longitudinal Analysis of HQ and UHQ Tuning Efficiency, Latency and Energy Trade-offs](/202605/10/2605.01187v1-evolution-of-nvenc-efficiency-a-longitudinal-analysis-of-hq-and-uhq-tuning-efficiency-latency-and-energy-trade-offs)  
    标签：评分：6.0/10、query:hwnas
-   evidence：网络化AI与联邦学习的架构感知设计
+   evidence：硬件编码效率与能耗权衡
 
 
 <div class="dpr-home-promo-card">

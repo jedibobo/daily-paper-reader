@@ -1,0 +1,1034 @@
+Title: SURGE: SuperBatch Unified Resource-efficient GPU Encoding for Heterogeneous Partitioned Data
+
+URL Source: https://arxiv.org/pdf/2605.01060v1
+
+Published Time: Tue, 05 May 2026 00:12:29 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# SURGE: SuperBatch Unified Resource-efficient GPU Encoding for Heterogeneous Partitioned Data 
+
+# Shashank Kapadia 
+
+Walmart Inc. USA shashank.kapadia@walmart.com 
+
+# Deep Narayan Mishra 
+
+Walmart Inc. USA deep.mishra@walmart.com 
+
+# Sujal Reddy Alugubelli 
+
+Walmart Inc. USA SujalReddy.Alugubelli@samsclub.com 
+
+# Ajay Kumar 
+
+Walmart Inc. USA Ajay.Kumar10@walmart.com 
+
+# Swapnil Yadav 
+
+Walmart Inc. USA Swapnil.Yadav@walmart.com 
+
+# Rishi Bhatia 
+
+Walmart Inc. USA Rishi.Bhatia@walmart.com 
+
+## Abstract 
+
+We present SURGE , a streaming GPU encoding system deployed in production to generate embeddings for over 800 million texts across 40,000 logical partitions. Production embedding pipelines face a tension between logical data partitioning and efficient GPU utilization: processing each partition independently incurs 
+
+𝑃 inter-process communication (IPC) calls whose overhead limits throughput for compute-light models. Our central contributions are analytical: (i) a cost model (Theorem 1) that quantifies when IPC amortization matters as a function of partition distribution and model compute intensity, predicting throughput within 2% of measured results across three encoders spanning a 15 × pa-rameter range; (ii) a memory-safety bound (Lemma 3) that en-ables a streaming two-threshold aggregation policy with peak memory 𝑂 (𝐵 min + 𝑛 max ) rather than 𝑂 (𝑁 ); and (iii) a 𝜙 /CV deci-sion framework (§7) that characterizes when the pattern applies beyond our workload. The naive fix of ignoring partitions and batching at fixed size reaches the IPC ceiling but requires 𝑂 (𝑁 )
+
+peak memory (32.7 GB at 10M texts; infeasible beyond ∼60M on 192 GB nodes), produces no output until all encoding completes, and offers no fault tolerance. SURGE achieves the same through-put with 𝑂 (𝐵 min + 𝑛 max ) bounded memory (2.6 GB), 68 × faster time-to-first-output through incremental partition flushing, and crash recovery at SuperBatch granularity. On 10M texts with 4 NVIDIA L4 GPUs, SURGE delivers 26,413 texts/s—matching fixed-batch throughput while using 12 .6× less memory. We validate the cost model on bge-base (109M, 𝑑 =768 , error 1.3%) and across log-normal 𝜎 ∈ { 1.0, 1.72 , 2.5} (speedup invariant within ±3%), and compare against a partition-batched baseline with offline colum-nar load balancing (PB-PBP-LB), against which SURGE retains a 7% 
+
+throughput edge, 2.5× faster TTFO, and an unconditional memory guarantee. Complementary engineering—zero-copy Arrow serial-ization ( 22 –25 × over naive construction) and asynchronous I/O pipelining (up to 93% benefit at high storage latency)—realizes the design but is not the contribution. 
+
+## Keywords 
+
+GPU encoding, batch processing, data partitioning, embedding generation, streaming systems, inter-process communication 
+
+## 1 Introduction 
+
+Dense text embeddings are a foundational building block for infor-mation retrieval [21], recommendation systems [29], and seman-tic search [11, 35]. A modern product catalog may contain hun-dreds of millions of text descriptions that must be encoded into fixed-dimensional vectors, stored in partitioned columnar formats, and refreshed regularly. The computational cost of this encoding step is dominated by GPU inference, and the engineering chal-lenge lies in maximizing throughput across a workload whose in-herent structure—logical partitions defined by domain taxonomy— conflicts with the batch-size requirements of efficient GPU execu-tion. The central insight of this paper is that inter-process com-munication (IPC) overhead is a substantial throughput bottleneck for production embedding pipelines using compute-light models. Multi-GPU encoding frameworks such as Sentence-Transformers [36] distribute work across processes via data seri-alization, transfer, and result gathering. Each invocation incurs a fixed IPC cost 𝑐 ipc regardless of payload size. When a pipeline pro-cesses 𝑃 = 4,000 partitions independently, it makes 4,000 encoding calls; the aggregate IPC cost accounts for nearly half (48%) of total wall-clock time in our evaluated workload (§5). We formalize this bottleneck through a cost model (Theorem 1) and show that any batching strategy reducing encoding invoca-tions from 𝑃 to 𝑂 (𝑁 /𝐵 ) achieves the same throughput ceiling. Cur-rent approaches fall into two categories: 
+
+• Partition-by-partition (PBP) processing encodes each partition independently, incurring 𝑃 IPC calls. Throughput degrades proportionally to partition count. 
+
+• Fixed-size batching (FSB) ignores partition boundaries, encoding texts in chunks of predetermined size. This re-duces IPC calls to ⌈𝑁 /𝐵 ⌉ and achieves the throughput ceil-ing, but requires 𝑂 (𝑁 ) peak memory (32.7 GB at 10M texts; Table 1) for an 𝑂 (𝑁 log 𝑁 ) regrouping pass, produces zero output until all encoding completes, and loses all progress on failure.        
+
+> 1
+> arXiv:2605.01060v1 [cs.DC] 1 May 2026 Kapadia et al.
+> 10 25 50
+> 0
+> 100
+> 200 192 GB*
+> 𝑁 (millions)
+> Memory (GB)  FB-100K
+> SURGE
+> 10 25 50
+> 0
+> 500
+> 1,000
+> 𝑁 (millions)
+> TTFO (s)
+> FB-100K
+> SURGE
+
+Figure 1: SURGE’s key advantage: bounded 𝑂 (𝐵 min + 𝑛 max )
+
+memory and 𝑂 (1) time-to-first-output (TTFO) vs. fixed-batch’s 𝑂 (𝑁 ) scaling. At 50M texts, SURGE uses 18 .5× less memory and produces output 337 × faster. SURGE’s TTFO decreases from 4.5 s at 1M to 3.6 s at 10M+ because model warmup and process initialization are amortized over larger first SuperBatches. Full analysis in §5.10. Contributions. The paper’s primary contributions are analytical, not algorithmic: (1) Cost model (Theorem 1). A first-principles decompo-sition of wall-clock time into IPC and compute compo-nents that predicts throughput for any batching strategy within 2% of measured values, validated on three encoders (MiniLM 22M, bge-base 109M, E5-large 335M) and across log-normal 𝜎 ∈ { 1.0, 1.72 , 2.5}.(2) Memory-safety bound (Lemma 3) and the two-threshold streaming policy. An unconditional 𝑂 (𝐵 min +𝑛 max ) peak-memory bound where 𝑛 max is the largest single-partition size, enabling a streaming aggregator with a lower effi-ciency threshold 𝐵 min and an upper safety trigger 𝐵 max .This bound holds for adversarial partition arrival orders— the property that distinguishes SURGE from offline-sort baselines (§5.3). (3) 𝜙 /CV decision framework (§7). A two-parameter rule using the IPC-dominated fraction 𝜙 and the partition-size coefficient of variation that characterizes when the SURGE pattern is beneficial, applicable, or unnecessary— generalizing beyond our workload to multilingual corpora, geo-partitioned datasets, and any taxonomy-organized cat-alog. 
+
+System realization. We embody these contributions in Surge , a streaming aggregation system. Three complementary engineering techniques realize the design but are not the contribution: (a) a SuperBatch aggregator that accumulates completed partitions and flushes when a running text count crosses 𝐵 min , with partition boundaries enabling zero-overhead slicing of the resulting embed-ding matrix (§3.2); (b) zero-copy Arrow serialization that converts embedding matrices directly into FixedSizeListArrays, eliminating 
+
+𝑂 (𝑁𝑑 ) intermediate Python objects (§3.4); (c) an asynchronous I/O pipeline that overlaps serialization and storage writes with GPU computation (§3.3). Each is well-established in isolation; the con-tribution is their principled combination under the cost model and memory bound, and the validated deployment of the resulting sys-tem in production for 800 M+ texts.    
+
+> 10 210 310 410 5
+> 0
+> 200
+> 400
+> 600
+> 800
+> IPC-dominated
+> 𝑛 ∗
+> Partition size (texts, log scale)
+> Count
+
+Figure 2: Partition size distribution (log-normal, 𝜇 =9.03 ,
+
+𝜎 =1.72 ). The dashed line marks 𝑛 ∗=2,340 , the IPC-dominated threshold: 23% of partitions ( 𝜙 =0.23 ) fall below 𝑛 ∗. However, the aggregate IPC cost across all 𝑃 =4,000 calls accounts for 48% of PBP wall time. 
+
+## 2 Background and Motivation 2.1 The Heterogeneous Partition Problem 
+
+In production embedding pipelines, data is logically partitioned by domain taxonomies (product categories, language codes, geo-graphic regions). These partitions exhibit heavy-tailed size distri-butions: a small number of large partitions contain a disproportion-ate share of texts, while the majority are small. In our workload, partition sizes follow a log-normal distribution ( 𝜇 = 9.03 , 𝜎 = 1.72 
+
+in log-space), with sizes ranging from 187 to 447,231 texts and a median of 8,412. Figure 2 illustrates this distribution. 
+
+## 2.2 Baseline Approaches: PBP and FSB 
+
+We formally define the two baseline strategies before introducing the cost model. Let the input be a set of partitions {( 𝑘 1,𝑇 1), . . . , (𝑘 𝑃 ,𝑇 𝑃 )} 
+
+where 𝑇 𝑖 is a sequence of 𝑛 𝑖 texts and Í𝑖 𝑛 𝑖 = 𝑁 . The output re-quirement is a per-partition mapping from 𝑘 𝑖 to its embedding matrix E𝑖 ∈ R𝑛 𝑖 ×𝑑 .
+
+Partition-by-partition (PBP). For each 𝑖 ∈ [ 𝑃 ] in arrival order, invoke the multi-GPU encoder once on 𝑇 𝑖 to obtain E𝑖 , then write 
+
+(𝑘 𝑖 , E𝑖 ) to storage. PBP makes exactly 𝑃 encode calls and produces output incrementally; its peak memory is 𝑂 (𝑛 max ·𝑑 ) where 𝑛 max =
+
+max 𝑖 𝑛 𝑖 .
+
+Fixed-size batching (FSB). Concatenate all texts 𝑇 = 𝑇 1 ∥ . . . ∥ 𝑇 𝑃 
+
+together with a parallel array of partition labels. Encode 𝑇 in chunks of fixed size 𝐵 , yielding ⌈𝑁 /𝐵 ⌉ encode calls. After en-coding completes, regroup the output rows by partition label (an 
+
+𝑂 (𝑁 log 𝑁 ) argsort pass) to produce per-partition matrices. FSB achieves the IPC-amortized throughput ceiling but requires 𝑂 (𝑁 )
+
+peak memory to hold the full embedding matrix prior to regroup-ing, and emits zero output until the final regrouping step. The two strategies bracket the design space: PBP minimizes memory and TTFO but maximizes IPC overhead; FSB amortizes IPC but sacrifices memory bound and streaming output. SURGE (§3) achieves the FSB throughput ceiling with PBP’s deployability properties. 
+
+> 2SURGE: SuperBatch Unified Resource-efficient GPU Encoding for Heterogeneous Partitioned Data
+
+## 2.3 Multi-GPU Encoding Cost Model 
+
+Let 𝐺 denote the number of GPUs. A single call to a multi-GPU encoding function (e.g., encode_multi_process [36]) incurs: 
+
+• A fixed IPC overhead 𝑐 ipc : process pool dispatch, data seri-alization to worker processes, result gathering, and deseri-alization. This cost is approximately constant regardless of payload size. 
+
+• A per-text cost 𝑐 enc /𝐺 : tokenization, GPU forward pass, and result transfer, divided across 𝐺 workers. The wall-clock time for processing a partition of 𝑛 𝑘 texts indepen-dently is: 
+
+𝑇 𝑘 = 𝑐 ipc + 𝑛 𝑘 · 𝑐 enc 
+
+𝐺 (1) The per-partition throughput is 𝜏 𝑘 = 𝑛 𝑘 /𝑇 𝑘 . For small partitions where 𝑛 𝑘 · 𝑐 enc /𝐺 ≪ 𝑐 ipc , throughput degrades to 𝜏 𝑘 ≈ 𝑛 𝑘 /𝑐 ipc —proportional to partition size rather than GPU capacity. We define the IPC-dominated threshold :
+
+𝑛 ∗ = 𝑐 ipc · 𝐺 𝑐 enc 
+
+(2) Partitions with 𝑛 𝑘 < 𝑛 ∗ spend more time on IPC than encoding. The IPC-dominated fraction 𝜙 = |{ 𝑘 : 𝑛 𝑘 < 𝑛 ∗ }|/ 𝑃 quantifies the workload’s susceptibility to this overhead. In our workload, 
+
+𝑛 ∗ ≈ 2,340 and 𝜙 = 0.23 : while only 23% of partitions are in-dividually IPC-dominated, the modeled aggregate IPC component 
+
+𝑃 · 𝑐 ipc = 4,000 × 0.087 s = 348 s accounts for 48% of total PBP wall time (Equation 1 summed over all partitions). This is not a direct measurement residual but the cost-model prediction for the IPC portion of each encode call, which we validate against measured throughput in §5.2. This aggregate overhead motivates batching across partition boundaries. A natural alternative is eliminating IPC entirely via shared-memory multi-GPU approaches (e.g., torch.nn.DataParallel ,thread-based workers). However, Python’s Global Interpreter Lock (GIL) prevents true parallel tokenization across threads, and shared-memory GPU access from multiple threads requires careful synchronization. Process-based isolation provides fault contain-ment (a GPU out-of-memory error in one worker does not crash the pipeline), independent CUDA context management, and clean memory accounting—properties essential for 6+ hour production runs processing 800M+ texts. SURGE’s amortization approach is complementary: it reduces IPC calls from 𝑂 (𝑃 ) to 𝑂 (𝑁 /𝐵 min ) within the existing process-based architecture and provides additional benefits (memory bounding, streaming output, crash recovery) that persist even if IPC overhead were eliminated. 
+
+## 2.4 Why GPU Utilization Is Low 
+
+A natural question is whether low throughput implies low GPU utilization. The answer depends on the compute intensity of the model. For a compute-light model such as MiniLM-L6-v2 (22M pa-rameters) [43], the GPU forward pass is fast relative to tokeniza-tion and data movement. Even within an encode call operating at full batch size, the GPU is idle during tokenization and CPU-GPU data transfer. GPU utilization measured by hardware counters (e.g.,       
+
+> Ordered Source
+> Boundary Detect
+> SuperBatch Aggregator
+> Zero-Copy Serialize
+> Async Upload
+> Time: GPU 𝑗
+> GPU 𝑗 +1
+> overlap
+> Enc Ser Upl
+
+Figure 3: Surge pipeline architecture. GPU encoding of Su-perBatch 𝑗 +1 overlaps with serialization and upload of Su-perBatch 𝑗 , eliminating I/O stalls. The mini-timeline shows how pipelining hides I/O latency. 
+
+nvidia-smi ) reflects kernel occupancy, not pipeline throughput— the observed ∼10% utilization under SURGE (Table 1) is a conse-quence of model size, not system inefficiency. We formalize this observation in §4.2. 
+
+## 3 System Design 3.1 System Overview 
+
+Surge consists of five components in a streaming pipeline: (1) an ordered data source providing rows sorted by partition key, (2) par-tition boundary detection via key-change monitoring, (3) a Super-Batch aggregator that accumulates partitions for GPU-efficient encoding, (4) zero-copy serialization to columnar format, and (5) asynchronous storage upload. Figure 3 illustrates the pipeline. 
+
+## 3.2 SuperBatch Aggregator 
+
+The SuperBatchAggregator bridges the gap between logical par-titions and physical GPU batches. Algorithm 1 presents the core logic; its peak resident state is bounded by 𝑂 (𝐵 min + 𝑛 max ) where 
+
+𝑛 max is the largest single-partition size in the input (Lemma 3). 
+
+Input ordering. Algorithm 1 assumes input is ordered by parti-tion key (line 1). For streaming sources where data may arrive out-of-order, a pre-sort pass or partition-key grouping stage is required before SURGE ingestion. In the worst case this is 𝑂 (𝑁 log 𝑁 )—the same complexity attributed to fixed-batch’s regrouping pass. How-ever, in practice, partitioned data stores (Hive, BigQuery, Spark DataFrames) return rows grouped by partition key natively, sat-isfying this requirement without additional processing. In our pro-duction deployment, Spark’s hash partitioner provides the order-ing guarantee at data read time. 
+
+Design decisions. The copy(texts) on line 12 of Algorithm 1 snapshots the current partition’s text list before the caller clears it for the next partition; this is a shallow list copy ( 𝑂 (𝑛 𝑘 ) reference copies), not a deep string copy, and ensures correctness without measurable overhead. 
+
+The two-threshold scheme. The lower threshold 𝐵 min =
+
+100 ,000 is the efficiency trigger : it ensures each GPU call processes at least 𝐵 min /𝐺 texts per GPU, well above the IPC-dominated regime, and is hit on the common path. The upper threshold 
+
+𝐵 max = 500 ,000 is the memory-safety trigger : it is a rare-but-required emergency flush that fires only when a single arriving partition would push the running total past 𝐵 max before the next 
+
+𝐵 min flush would otherwise occur. 𝐵 max is not a second efficiency 
+
+> 3Kapadia et al.
+
+Algorithm 1 SURGE SuperBatch Aggregation. Peak resident state 
+
+𝑂 (𝐵 min + 𝑛 max ).
+
+Require: Stream of (𝑘𝑒𝑦, 𝑡𝑒𝑥𝑡 ) pairs ordered by key; thresholds 
+
+𝐵 min , 𝐵 max ; 𝐺 GPUs; model 𝑓 𝜃 
+
+Ensure: Per-partition columnar files in remote storage  
+
+> 1:
+
+partitions ← [] ; total ← 0; curKey ← null ; curTexts ← []  
+
+> 2:
+
+for each (𝑘𝑒𝑦, 𝑡𝑒𝑥𝑡 ) in stream do  
+
+> 3:
+
+if 𝑘𝑒𝑦 ≠ 𝑐𝑢𝑟𝐾𝑒𝑦 then  
+
+> 4:
+
+if 𝑐𝑢𝑟𝐾𝑒𝑦 ≠ null then  
+
+> 5:
+
+AddPartition (𝑐𝑢𝑟𝐾𝑒𝑦 , 𝑐𝑢𝑟𝑇 𝑒𝑥𝑡𝑠 ) 
+
+> 6:
+
+end if  
+
+> 7:
+
+𝑐𝑢𝑟𝐾𝑒𝑦 ← 𝑘𝑒𝑦 ; 𝑐𝑢𝑟𝑇 𝑒𝑥𝑡𝑠 ← []  
+
+> 8:
+
+end if  
+
+> 9:
+
+𝑐𝑢𝑟𝑇 𝑒𝑥𝑡𝑠. append (𝑡𝑒𝑥𝑡 ) 
+
+> 10:
+
+end for  
+
+> 11:
+
+AddPartition (𝑐𝑢𝑟𝐾𝑒𝑦 , 𝑐𝑢𝑟𝑇 𝑒𝑥𝑡𝑠 ); Flush  
+
+> 12:
+
+procedure AddPartition (𝑘𝑒𝑦 , 𝑡𝑒𝑥𝑡𝑠 ) 
+
+> 13:
+
+𝑝𝑎𝑟𝑡𝑖𝑡𝑖𝑜𝑛𝑠. append (( 𝑘𝑒𝑦, copy (𝑡𝑒𝑥𝑡𝑠 )))  
+
+> 14:
+
+𝑡𝑜𝑡𝑎𝑙 ← 𝑡𝑜𝑡𝑎𝑙 + | 𝑡𝑒𝑥𝑡𝑠 | 
+
+> 15:
+
+if 𝑡𝑜𝑡𝑎𝑙 ≥ 𝐵 max then Flush ⊲ Memory-safety trigger (rare)  
+
+> 16:
+
+else if 𝑡𝑜𝑡𝑎𝑙 ≥ 𝐵 min then Flush ⊲ Efficiency trigger (common)  
+
+> 17:
+
+end if  
+
+> 18:
+
+end procedure  
+
+> 19:
+
+procedure Flush  
+
+> 20:
+
+𝑎𝑙𝑙𝑇 𝑒𝑥𝑡𝑠 ← [] ; 𝑏𝑜𝑢𝑛𝑑𝑠 ← [] ; 𝑖𝑑𝑥 ← 0 
+
+> 21:
+
+for each (𝑘𝑒𝑦, 𝑡𝑒𝑥𝑡𝑠 ) in 𝑝𝑎𝑟𝑡𝑖𝑡𝑖𝑜𝑛𝑠 do  
+
+> 22:
+
+𝑎𝑙𝑙𝑇 𝑒𝑥𝑡𝑠. extend (𝑡𝑒𝑥𝑡𝑠 ) 
+
+> 23:
+
+𝑏𝑜𝑢𝑛𝑑𝑠. append (( 𝑖𝑑𝑥, 𝑖𝑑𝑥 + | 𝑡𝑒𝑥𝑡𝑠 |, 𝑘𝑒𝑦 ))  
+
+> 24:
+
+𝑖𝑑𝑥 ← 𝑖𝑑𝑥 + | 𝑡𝑒𝑥𝑡𝑠 | 
+
+> 25:
+
+end for  
+
+> 26:
+
+E ← 𝑓 𝜃 .encode_multi_process (𝑎𝑙𝑙𝑇 𝑒𝑥𝑡𝑠 ) ⊲ Single GPU call  
+
+> 27:
+
+for each (𝑠𝑡𝑎𝑟𝑡, 𝑒𝑛𝑑, 𝑘𝑒𝑦 ) in 𝑏𝑜𝑢𝑛𝑑𝑠 do  
+
+> 28:
+
+E𝑘 ← E[𝑠𝑡𝑎𝑟𝑡 :𝑒𝑛𝑑 ] ⊲ Zero-copy slice  
+
+> 29:
+
+𝑏𝑦𝑡𝑒𝑠 ← ZeroCopySerialize (𝑘𝑒𝑦 ,
+
+𝑎𝑙𝑙𝑇 𝑒𝑥𝑡𝑠 [𝑠𝑡𝑎𝑟𝑡 :𝑒𝑛𝑑 ], E𝑘 ) 
+
+> 30:
+
+AsyncUpload (𝑘𝑒𝑦 , 𝑏𝑦𝑡𝑒𝑠 ) 
+
+> 31:
+
+end for  
+
+> 32:
+
+𝑝𝑎𝑟𝑡𝑖𝑡𝑖𝑜𝑛𝑠 ← [] ; 𝑡𝑜𝑡𝑎𝑙 ← 0 
+
+> 33:
+
+end procedure 
+
+knob—it bounds peak memory unconditionally, including under adversarial arrival orders where one large partition immediately follows a SuperBatch already near 𝐵 min . With 𝐵 max = 500 ,000 ,
+
+𝐿 = 47 , 𝑑 = 384 , the data-resident memory bound is: 
+
+𝑀 (𝐵 max ) = 𝐵 max · ( 𝐿 + 4𝑑 ) = 791 MB , (3) within a single GPU’s 24 GB VRAM budget. No partition is split across SuperBatches under normal operation; the rare oversized-partition case ( 𝑛 𝑘 > 𝐵 max ) is handled by emitting the partition as its own SuperBatch (§6). 
+
+Algorithm 2 Asynchronous Storage Upload 
+
+Require: Thread pool with 𝑊 workers; retry: max 3 attempts, 
+
+2attempt s backoff  
+
+> 1:
+
+𝑝𝑒𝑛𝑑𝑖𝑛𝑔 ← {}  
+
+> 2:
+
+procedure AsyncUpload (𝑝𝑎𝑡ℎ , 𝑑𝑎𝑡𝑎 ) 
+
+> 3:
+
+𝑓 𝑢𝑡𝑢𝑟𝑒 ← pool.submit (UploadWithRetry , 𝑝𝑎𝑡ℎ, 𝑑𝑎𝑡𝑎 ) 
+
+> 4:
+
+𝑝𝑒𝑛𝑑𝑖𝑛𝑔 [𝑝𝑎𝑡ℎ ] ← 𝑓 𝑢𝑡𝑢𝑟𝑒 ⊲ Non-blocking return  
+
+> 5:
+
+end procedure  
+
+> 6:
+
+procedure UploadWithRetry (𝑝𝑎𝑡ℎ , 𝑑𝑎𝑡𝑎 ) 
+
+> 7:
+
+for 𝑎 = 0 to 2 do  
+
+> 8:
+
+try storage.write (𝑝𝑎𝑡ℎ, 𝑑𝑎𝑡𝑎 ); return  
+
+> 9:
+
+catch sleep (2𝑎 s)  
+
+> 10:
+
+end for  
+
+> 11:
+
+end procedure           
+
+> PBP E1· · · 4K calls
+> SURGE sync Enc SB 1Enc SB 2
+> SURGE async
+> GPU
+> Enc SB 1Enc SB 2Enc SB 3
+> I/O
+> async overlap
+> Encode Serialize Upload Idle
+
+Figure 4: Pipeline overlap. PBP: many small GPU calls with idle gaps between them. SURGE sync: few large encode calls but I/O blocks the next encode. SURGE async: I/O of Super-Batch 𝑗 overlaps with encode of SuperBatch 𝑗 +1 on a sep-arate I/O thread, eliminating storage stalls on the critical path. 
+
+## 3.3 Asynchronous I/O Pipeline 
+
+A synchronous baseline encodes a SuperBatch, then serializes and uploads its outputs before issuing the next encode call. With per-batch encode time 𝑡 enc and combined I/O time 𝑡 ser + 𝑡 upl , total wall time is Í𝑗 (𝑡 enc ,𝑗 + 𝑡 ser ,𝑗 + 𝑡 upl ,𝑗 )—I/O latency stacks linearly on the critical path. The async I/O pipeline decouples GPU computation from storage writes using a producer-consumer pattern backed by a thread pool (Algorithm 2), enabling I/O of batch 𝑗 to overlap with the encode of batch 𝑗 +1.
+
+Overlap model. Let 𝑡 enc , 𝑡 ser , 𝑡 upl denote the times for encoding, serialization, and upload of a single SuperBatch. Without pipelin-ing, each SuperBatch takes 𝑡 enc + 𝑡 ser + 𝑡 upl . With async I/O, serial-ization and upload of batch 𝑗 overlap with encoding of batch 𝑗 +1,reducing effective time per batch to max (𝑡 enc , 𝑡 ser +𝑡 upl ). We define the I/O overlap ratio :
+
+𝜌 = 1 − max (0, (𝑡 ser + 𝑡 upl ) − 𝑡 enc )
+
+𝑡 ser + 𝑡 upl 
+
+(4) When 𝑡 enc ≥ 𝑡 ser + 𝑡 upl , 𝜌 = 1 (perfect overlap). When storage la-tency is high enough that 𝑡 ser +𝑡 upl > 𝑡 enc , asynchronous pipelining prevents this from stalling the GPU. Figure 4 illustrates the overlap. 
+
+> 4SURGE: SuperBatch Unified Resource-efficient GPU Encoding for Heterogeneous Partitioned Data
+
+## 3.4 Zero-Copy Embedding Serialization 
+
+The naive approach constructs 𝑁 × 𝑑 Python float objects: 
+
+Listing 1: Naive: 𝑂 (𝑁𝑑 ) Python objects            
+
+> 1lists =[ row . tolist () for row in emb ]
+> 2table =pa . table ({ " embedding ": lists })
+
+For 𝑁 = 200 ,000 and 𝑑 = 384 , this allocates ∼2.3 GB of transient Python objects. Our zero-copy path: 
+
+Listing 2: Zero-copy: 𝑂 (1) allocations              
+
+> 1flat =pa . array ( emb . ravel () , type = pa . float32 () )
+> 2col =pa . FixedSizeListArray . from_arrays ( flat , d)
+> 3table =pa . table ({ " embedding ": col })
+
+ravel() returns a view (zero-copy for C-contiguous arrays), 
+
+pa.array() wraps the buffer without copying, and FixedSizeListArray. from_arrays() records the list size with no data movement. The path allocates 𝑂 (1) Python objects regardless of 𝑁 .
+
+Lifetime and aliasing. Because the Arrow buffer aliases the NumPy array’s memory, the embedding matrix must outlive every 
+
+AsyncUpload future that references it: SURGE retains the matrix by capturing it in the upload closure, and the thread pool’s com-pletion of the future drops the last reference. The aliased buffer must not be mutated in place; downstream consumers receive a read-only view. In our pipeline this constraint is satisfied trivially because the output is write-once. Table 8 quantifies the speedup. 
+
+## 3.5 Multi-GPU Coordination 
+
+The system supports 1 to 𝐺 GPUs via multi-process encoding. At startup, GPU type and count are detected via CUDA runtime queries and per-GPU batch sizes selected from a configuration ta-ble (T4/L4: 1,024; A100/H100: 2,048). The multi-GPU pool is started once and reused across all SuperBatch flushes, amortizing process spawn cost. CUDA optimizations include cudnn.benchmark , TF32 on Ampere+, and expandable memory segments to prevent frag-mentation over long runs. 
+
+## 3.6 Resume Capability 
+
+Production pipelines must handle interruptions. The system im-plements idempotent resume by scanning the output storage pre-fix for existing partition paths. Each path is deterministic (con-structed from partition key and run identifier), enabling an 𝑂 (𝑃 )
+
+existence check at startup. If failure occurs mid-SuperBatch, the entire SuperBatch is re-processed on resume—at most 𝐵 max texts are re-encoded, a bounded cost. Completed partitions from prior SuperBatches are skipped via the idempotent path check, ensur-ing exactly-once output semantics without a separate transaction log. 
+
+## 4 Formal Analysis 
+
+We develop a cost model that predicts SURGE’s throughput im-provement from first principles and validate it against measured results. 
+
+## 4.1 IPC Amortization Bound 
+
+Theorem 1 (IPC Amortization). Let 𝑁 texts be distributed across 𝑃 partitions, processed on 𝐺 GPUs with per-call IPC overhead 
+
+𝑐 ipc and per-text encoding cost 𝑐 enc . Define 𝛼 = 𝑃 · 𝑐 ipc /( 𝑁 · 𝑐 enc /𝐺 )
+
+as the IPC-to-compute ratio for PBP processing, and let SURGE use threshold 𝐵 min , producing 𝐹 = ⌈𝑁 /𝐵 min ⌉ flushes. Then: Speedup = 𝑇 PBP 
+
+𝑇 SURGE 
+
+= 1 + 𝛼 
+
+1 + 𝛼 · 𝐹 /𝑃 (5) 
+
+Proof. The PBP wall-clock time (ignoring I/O overlap) is: 
+
+𝑇 PBP = 𝑃 · 𝑐 ipc + 𝑁 · 𝑐 enc 
+
+𝐺 = 𝑁 · 𝑐 enc 
+
+𝐺 (1 + 𝛼 ) (6) SURGE accumulates texts until reaching 𝐵 min , then flushes. The number of encode calls is at most 𝐹 = ⌈𝑁 /𝐵 min ⌉. Each call incurs one IPC overhead: 
+
+𝑇 SURGE = 𝐹 · 𝑐 ipc + 𝑁 · 𝑐 enc 
+
+𝐺 
+
+= 𝑁 · 𝑐 enc 
+
+𝐺 
+
+
+
+1 + 𝛼 · 𝐹 𝑃 
+
+
+
+(7) The ratio yields Equation 5. □
+
+Corollary 2 (Regime analysis). 
+
+(1) IPC-dominated (𝛼 ≫ 1): Speedup → 𝑃 /𝐹 . For 𝑃 = 4,000 
+
+and 𝐹 = 100 : speedup → 40 ×.
+
+(2) Compute-dominated (𝛼 ≪ 1): Speedup → 1. SURGE pro-vides no benefit when IPC is negligible. 
+
+(3) Mixed regime (𝛼 ≈ 1): The measured 𝛼 determines the ben-efit. Estimating from our benchmark ( 𝑐 ipc ≈ 0.087 s, 𝑐 enc ≈
+
+0.149 ms, 𝐺 = 4): 𝛼 = 4,000 × 0.087 /( 10 7 × 1.49 × 10 −4/4) =
+
+348 /372 .5 = 0.93 . Predicted speedup = (1 + 0.93 )/( 1 + 0.93 ×
+
+100 /4000 ) = 1.93 /1.023 = 1.89 , closely matching the mea-sured 1.92 × (Table 1), with error <2%. 
+
+Cross-model validation. Theorem 1 predicts speedup as a function only of 𝛼 , 𝑃 , and 𝐹 —no model-specific tuning. We validate this on two additional encoders. On bge-base (109M, 𝑑 =768 , 2 ×L4) the back-solved 𝑐 ipc =0.081 s and 𝑐 enc =0.215 ms yield 𝛼 =0.603 and a predicted 1.31 × speedup over PBP; measured 1.29 × (error 1.3% ;Table 4). On E5-large (335M, 𝑑 =1024 , 4 ×L4) the predicted 1.34 ×
+
+matches the measured 1.32 × (error 1.5% ). Across three encoders spanning a 15 × parameter range, the model’s prediction error stays within 2% , supporting Theorem 1 as a workload-planning tool. 
+
+## 4.2 Compute Intensity 
+
+We define the compute intensity I as the ratio of GPU kernel time to total encode-call time: 
+
+I = 𝑡 kernel 
+
+𝑡 tokenize + 𝑡 transfer + 𝑡 kernel 
+
+(8) The expected GPU utilization under SURGE is bounded by the en-code duty cycle 𝛿 multiplied by compute intensity: GPU% ≤ 𝛿 · I , where 𝛿 =
+
+Í𝑗 𝑡 enc ,𝑗 
+
+𝑇 wall 
+
+(9) For MiniLM-L6-v2 (22M parameters), I is low because tokeniza-tion and CPU-GPU transfer dominate the forward pass time for this small model. The encode duty cycle 𝛿 under SURGE is ∼57% 
+
+> 5Kapadia et al.
+
+(Table 1), and the product 𝛿 · I yields the observed ∼10% GPU uti-lization measured by nvidia-smi .For larger models (e.g., E5-large at 335M parameters [42]), I in-creases proportionally to model FLOPs while tokenization remains constant, predicting substantially higher GPU utilization. We val-idate this empirically: E5-large achieves 62% GPU utilization un-der SURGE (vs. 10% for MiniLM), confirming the compute inten-sity scaling. Quantitatively, for MiniLM under SURGE: 𝛿 = 57% 
+
+(Table 1), yielding I = 10 .6% /57% = 18 .6% . For E5-large: 𝛿 ≈
+
+85% (higher encode fraction due to compute dominance), yielding 
+
+I ≈ 62% /85% = 73% —a 3.9× increase reflecting the 15 × larger model operating on the same tokenization and transfer pipeline. SURGE’s core benefit remains: it amortizes IPC regardless of I,and the memory/TTFO advantages persist (§5.12). 
+
+## 4.3 Memory Bound 
+
+Lemma 3 (SuperBatch memory). The peak data-resident state of the SuperBatch aggregator is bounded by 𝑂 (𝐵 min +𝑛 max ), where 𝑛 max 
+
+is the largest single-partition size in the input. Concretely, for a Su-perBatch holding 𝑆 texts with average length 𝐿 bytes and embedding dimension 𝑑 :
+
+𝑀 (𝑆 ) = 𝑆 · 𝐿 + 𝑆 · 𝑑 · 4 bytes , 𝑆 ≤ 𝐵 min + 𝑛 max ≤ 𝐵 max . (10) 
+
+For 𝑆 = 𝐵 max = 500 ,000 , 𝑑 = 384 , 𝐿 = 47 : 𝑀 = 23 .5 MB (text) +
+
+768 MB (embeddings) = 791 .5 MB. 
+
+The bound holds because Algorithm 1 flushes once 𝑡𝑜𝑡𝑎𝑙 ≥ 𝐵 min ,so the running buffer never exceeds the previous total ( < 𝐵 min )plus the latest partition’s 𝑛 𝑘 ≤ 𝑛 max . The 𝐵 max trigger is a tighter unconditional ceiling that activates only when a single arriving partition would push the buffer past 𝐵 max before the 𝐵 min check fires—guaranteeing the bound even under adversarial arrival or-ders. This data-resident lower bound accounts only for raw text and output embeddings; it is intentionally conservative. In practice, SURGE’s measured peak memory is 2.5 GB (Table 1), approxi-mately 3× the theoretical lower bound. The gap is attributable to three additional allocations: (1) tokenizer buffers—token IDs and attention masks are int64 tensors of shape (𝐵 max , seq_len ), adding 
+
+∼500 MB; (2) model-internal activations and intermediate tensors during encoding; and (3) Python runtime overhead (interpreter, garbage collector, and SentenceTransformers process pool mem-ory). These costs are constant across methods and independent of partition count, so the 𝑂 (𝐵 min + 𝑛 max ) scaling holds. 
+
+## 4.4 Connection to Bin Packing 
+
+SURGE’s greedy accumulation can be viewed as a variant of the 
+
+Next Fit bin packing heuristic [6, 7] with a minimum-fill constraint. Classical Next Fit opens a new bin when the current bin exceeds capacity 𝐵 max ; SURGE additionally requires the bin to reach 𝐵 min 
+
+before closing. When partition sizes are i.i.d. with mean 𝜇 and vari-ance 𝜎 2, the expected fill ratio of each SuperBatch follows from renewal theory [12]. The SuperBatch accumulates partitions un-til the running sum of sizes first exceeds 𝐵 min ; by Wald’s identity for random walks [41], the expected overshoot is 𝜎 2/( 2𝜇 ) for large 
+
+𝐵 min /𝜇 , giving: 
+
+E
+
+ 𝑆 𝐵 min 
+
+
+
+= 1 + 𝜎 2
+
+2𝜇𝐵 min 
+
++ 𝑂 
+
+ 1
+
+𝐵 min 
+
+
+
+(11) For large 𝐵 min /𝜇 (i.e., many partitions per SuperBatch), this ap-proaches 1—near-optimal packing. With 𝜇 = 8,412 , 𝜎 = 17 ,660 , and 
+
+𝐵 min = 100 ,000 : the expected fill ratio is 1 + 17 ,660 2/( 2 × 8,412 ×
+
+100 ,000 ) ≈ 1.19 , meaning SuperBatches are on average 19% over-full relative to 𝐵 min . This yields predictable flush counts and sta-ble throughput. Offline alternatives such as First-Fit-Decreasing or Best-Fit-Decreasing achieve marginally tighter packing ( 99 .8% vs. 
+
+99 .2% fill ratio in simulation) at the cost of requiring all partition sizes upfront—incompatible with the streaming arrival model that the 𝑂 (𝐵 min + 𝑛 max ) bound depends on. 
+
+## 5 Evaluation 5.1 Experimental Setup 
+
+Dataset. We generate a synthetic dataset of 10M texts across 4,000 partitions with sizes drawn from a log-normal distribution (𝜇 = 9.03 , 𝜎 = 1.72 ) matching production workload characteristics (§2.1). Texts are synthetic sentences averaging 47 bytes, consistent with product title lengths. Note: the production deployment pro-cesses 800M+ texts across 40,000 partitions; our benchmark uses a representative 10M-text subset (scaling to 50M in §5.10, up to 
+
+𝑃 = 20 ,000 partitions) to enable controlled evaluation. 
+
+Hardware. A single GCP g2-standard-48 node with 4 NVIDIA L4 GPUs (24 GB VRAM each), 48 vCPUs, 192 GB RAM. This con-figuration is denoted “*” in figures. Sub-experiments noted in their respective tables use 2 ×L4 (g2-standard-24) for parity with model availability constraints during the bge-base and PB-PBP-LB runs. 
+
+Model. all-MiniLM-L6-v2 [43]: 22M parameters, 384-dimensional L2-normalized embeddings. We use multi-process encoding via Sentence-Transformers [36] with batch size 1,024 per GPU. A warmup encode of 1,024 texts is performed before timing to ini-tialize CUDA contexts. Generalization to bge-base-en-v1.5 (109M, 
+
+𝑑 =768 ) and E5-large (335M, 𝑑 =1024 ) is reported in §5.5. 
+
+Storage backend. Results use a latency-simulated GCS back-end (base latency 10 ms, throughput 200 MB/s per write) unless otherwise noted. This provides realistic I/O conditions while en-suring reproducibility. 
+
+Baselines. (1) PBP : each partition encoded independently. (2) Fixed-batch (FSB) : texts streamed in fixed chunks (10K, 50K, 100K) with an 𝑂 (𝑁 log 𝑁 ) argsort-based regrouping pass. (3) PB-PBP-LB : a stronger partition-batched baseline that pre-sorts parti-tions by columnar size statistics and FFD-packs whole partitions into batches of size 𝐵 (§5.3). (4) SURGE (sync) : SuperBatch aggrega-tion without async I/O. (5) SURGE + AsyncIO : the full system. All methods use identical model weights, tokenizer settings, and out-put serialization format (Apache Arrow) to ensure fair comparison. The only variable is the batching and I/O strategy. 
+
+Metrics. Throughput (texts/s), GPU utilization (%, nvidia-smi 
+
+at 100 ms via pynvml ), encode duty cycle 𝛿 (fraction of wall time in encode calls), wall time (s), cost ($/M texts at $7.30/hr), I/O overlap ratio 𝜌 (Equation 4; 𝜌 =1 indicates I/O fully overlaps with encode). 
+
+> 6SURGE: SuperBatch Unified Resource-efficient GPU Encoding for Heterogeneous Partitioned Data
+> PBP
+> FB-10K
+> FB-50K
+> FB-100K
+> SURGE sync
+> SURGE async 0
+> 10K
+> 20K
+> 30K
+> throughput ceiling
+> 47% savings
+> $0.15 →$0.08/M
+> Throughput (texts/s)
+
+Figure 5: Throughput comparison across methods. FB-100K and SURGE async both reach the IPC-amortized throughput ceiling ( ∼26K texts/s), confirming that reducing encode calls from 𝑃 =4,000 to ∼100 is the dominant factor. PBP through-put is limited by per-partition IPC overhead. Cost savings (47%, $0.15/M →$0.08/M) reflect the 1.91 × speedup from PBP to SURGE async. 
+
+Peak memory is measured via psutil RSS sampling at 100 ms in-tervals; GPU memory is excluded as model weights are constant across methods. 
+
+Reproducibility. All results report the mean of 3 independent runs under controlled conditions (identical data, warmup, and cleanup between methods). Tables report mean ± 1 standard devi-ation where applicable. Run-to-run variance is <1% for throughput metrics, confirming measurement stability. Between runs, we clear filesystem caches and restart GPU processes to eliminate warm-cache effects. The benchmark harness, synthetic data generator, and analysis scripts are included in the supplementary materials. 
+
+## 5.2 End-to-End Results 
+
+Table 1 presents the end-to-end comparison. SURGE with async I/O achieves 26,413 texts/s, matching FB-100K (27,074 texts/s) within 3%—confirming that any method reducing encode calls from 𝑃 to ∼100 reaches the same throughput ceiling. The speedup over PBP is 1.92 ×, closely predicted by Theorem 1 (predicted 
+
+1.89 ×, error <2%). This validates the cost model: both methods make ∼100 encoding calls, achieving identical IPC amortization. Flush-level timing confirms this (Figure 6): SURGE makes 89 en-code calls totaling 218.6 s of GPU time, while FB-100K makes 1 call totaling 220.1 s—virtually identical GPU utilization despite a 44 ×
+
+difference in call count. Figure 6 decomposes wall time into en-code, serialize, upload, and overhead stages, showing that SURGE async eliminates upload stalls entirely through I/O pipelining. The critical difference lies in deployability . FB-100K requires 32.7 GB peak memory (Table 1), growing linearly with 𝑁 (Fig-ure 10), and produces no output for 245 s while all encoding com-pletes. SURGE operates at 2.6 GB peak memory with 3.6 s time-to-first-output—a 12 .6× memory reduction and 68 × faster first output. SURGE sync shows the cost of blocking I/O: 21,923 texts/s (−17% ; Table 1), confirming that async pipelining is essential when storage latency is non-trivial.    
+
+> PBP
+> FB-10K
+> FB-50K
+> FB-100K
+> SURGE sync
+> SURGE async 0
+> 200
+> 400
+> 600
+> Wall time (s)
+> Encode Serialize Upload Overhead
+
+Figure 6: Wall-time decomposition by pipeline stage. Encode includes IPC overhead per call. SURGE async eliminates up-load stalls by overlapping I/O with the next encode call (up-load time ≈0 s). All methods spend ∼125 s on serialization. 
+
+## 5.3 Comparison with a Stronger Partition-Batched Baseline 
+
+PBP and FSB bracket the baseline space but neither attempts the obvious middle ground: partition-batched IPC with offline load balancing. We implement and evaluate this stronger baseline— Partition-Batched PBP with Columnar-Size Load Balancing (PB-PBP-LB)—to isolate the contribution of SURGE’s streaming ag-gregation and memory-safety bound from the contribution of partition-batched IPC alone. 
+
+PB-PBP-LB design. The baseline pre-computes partition sizes from columnar metadata, sorts partitions descending by size, and packs whole partitions into batches of capacity 𝐵 using First-Fit-Decreasing (FFD). Each batch issues a single encode_multi_ process call. Partitions are never split; the batch boundary is partition-aligned, which preserves output semantics without a regrouping pass. 
+
+Results. Table 2 presents results at 𝜎 =1.72 , 𝑁 =10 M, 𝑃 =4,000 ,on 2 ×L4. PB-PBP-LB closes ∼80% of the PBP →SURGE through-put gap, confirming that partition-batched IPC amortization is the dominant lever (consistent with Theorem 1: both methods drive encode-call count from 4,000 down to fewer than 100). SURGE re-tains a 7.1% throughput advantage and 2.5× faster TTFO. 
+
+Where the 7% comes from. The throughput gap is second-order and reproducible across seeds. Two effects account for it: (1) SURGE’s async I/O fully overlaps ( 𝜌 =1.0 in telemetry), while PB-PBP-LB’s first-batch latency includes a serial encode of the largest sorted partition before any I/O begins (8.5 s at 𝐵 =100 K, 13.8 s at 
+
+𝐵 =200 K)—this directly explains the 2.5× TTFO gap; (2) PB-PBP-LB’s largest-first ordering front-loads big batches, hitting dimin-ishing returns on L4 batch efficiency for the longest sequences. 
+
+The decisive differentiator: the unconditional 𝐵 max guar-antee. At 𝜎 =1.72 , peak partitions stayed under 𝐵 max =500 K, so neither method’s memory bound was stressed. The 𝜎 -sweep be-low shows where they diverge: at 𝜎 =2.5, tail partitions reach 
+
+≈ 1.5M texts. FFD never splits a partition, so PB-PBP-LB would emit single-partition batches roughly 3 × 𝐵 max without bound— feasible only on hardware sized for the worst-case partition. 
+
+> 7Kapadia et al.
+
+Table 1: End-to-end comparison on benchmark workload (GCS-profile storage, mean of 3 runs; run-to-run std <1% for through-put). Duty% = encode time / wall time × 100. Proposed method in bold. 
+
+Method Tput (t/s) Duty% GPU% Time (s) $/M 𝜌 Mem (GB) a TTFO (s) Partition-by-partition 13,766 79.2 6.3 726.4 0.15 N/A 2.5 0.5 Fixed-batch-10K 22,509 65.8 7.8 444.3 0.09 N/A 45.4 320.9 Fixed-batch-50K 26,070 60.3 10.0 383.6 0.08 N/A 32.6 259.8 Fixed-batch-100K 27,074 58.8 10.7 369.4 0.07 N/A 32.7 245.5 SURGE (sync I/O) 21,923 47.6 7.7 456.1 0.09 0.98 2.6 4.6 
+
+SURGE + AsyncIO (ours) 26,413 57.4 10.6 378.6 0.08 1.00 2.6 3.6       
+
+> aMemory = peak RSS; GPU VRAM excluded (model weights constant across methods). Throughput std: PBP ±49 (0.36%), FB-10K ±32 (0.14%), FB-50K ±22 (0.08%), FB-100K ±10 (0.04%), SURGE sync ±6 (0.03%), SURGE async ±18 (0.07%).
+
+Table 2: Comparison with a stronger baseline: Partition-Batched PBP with Columnar-Size Load Balancing (PB-PBP-LB)—offline sort of partitions by size, FFD-pack whole par-titions up to 𝐵 , single IPC call per batch. MiniLM-L6-v2, 
+
+𝑁 =10 M, 𝑃 =4,000 , 𝜎 =1.72 , 2 ×L4, mean of 3 seeds.                                          
+
+> Method Tput (t/s) Mem (GB) TTFO (s) Calls Peak batch PBP 12,190 2.39 0.26 4,000 —PB-PBP-LB ( 𝐵 =100 K) 16,718 2.49 8.52 91 179,814 PB-PBP-LB ( 𝐵 =200 K) 16,852 2.77 13.77 48 268,343
+> SURGE+AsyncIO 17,909 2.44 5.43 100 ≤𝐵 max
+> PB-PBP-LB closes ∼80% of the PBP →SURGE throughput gap, confirming that partition-batched IPC amortization is the dominant lever (consistent with Theorem 1). SURGE retains a 7.1%
+> throughput advantage and 2.5×faster TTFO, sourced from streaming aggregation and asynchronous I/O overlap rather than offline sort. The decisive differentiator is Lemma 3’s unconditional 𝐵 max guarantee: at 𝜎 =1.72 peak partitions stayed under 𝐵 max =500 K, but at 𝜎 =2.5
+> tail partitions reach ≈1.5M—FFD never splits a partition, so PB-PBP-LB would emit single-partition batches ∼3×𝐵 max without bound. SURGE additionally tolerates streaming arrivals (no dependency on columnar metadata being available upfront).
+
+SURGE’s two-threshold policy (Lemma 3) guarantees peak mem-ory 𝑂 (𝐵 min +𝑛 max ) independent of partition arrival order , including for adversarial sequences where the largest partition arrives last. 
+
+Streaming-arrival tolerance. PB-PBP-LB requires partition sizes upfront. SURGE processes in arrival order, requiring no meta-data pre-pass. For pipelines fed by Spark stages or other streaming sources where partitions are produced incrementally, this matters: the offline sort step would force a full materialization barrier. 
+
+## 5.4 Component Ablation 
+
+Table 3 isolates each component’s contribution: 
+
+• SuperBatch aggregation is the dominant factor ( −46 .7% 
+
+when removed; Table 3), confirming the IPC amortization thesis. 
+
+• Zero-copy serialization contributes −42 .8% when re-moved (Table 3). This impact exceeds the 22 –25 × serial-ization speedup (Table 8) because the ablation measures end-to-end throughput: naive serialization creates 𝑂 (𝑁𝑑 )
+
+Python objects whose allocation and garbage collection stall the main thread, serialization time exceeds encode time (breaking the async I/O overlap invariant), and peak memory nearly doubles (5.2 GB vs. 2.6 GB), causing addi-tional memory pressure. 
+
+• Async I/O contributes −16 .4% when removed (Table 3), validating the pipelining design under GCS-profile storage latency (§5.7). 
+
+• Multi-GPU (4 vs. 1 GPU) contributes −59 .4% (Table 3), yielding a ∼2.5× scaling factor ( ∼61% parallel efficiency, with the gap attributable to IPC overhead and memory bus contention). The single-GPU configuration shows higher 
+
+peak memory (4.3 GB vs. 2.6 GB) because SentenceTrans-formers’ multi-GPU mode partitions the encoding batch across workers, so each process holds only 𝐵 max /𝐺 embed-dings in flight; with a single GPU, the full 𝐵 max embeddings reside in one process. The new columns in Table 3 reveal additional insights. Remov-ing zero-copy serialization nearly doubles peak memory (5.2 GB vs. 2.6 GB), confirming that 𝑂 (𝑁𝑑 ) Python object allocation is a signif-icant memory cost. The w/o SURGE (PBP) configuration achieves the fastest TTFO (0.5 s) since it emits each partition immediately, but at the cost of −46 .7% throughput. Note: the ablation study uses a separate run from Table 1; the ∼2% throughput difference be-tween the full system (25,930 t/s) and Table 1 (26,413 t/s) reflects normal run-to-run variation. 
+
+## 5.5 Model Generalization 
+
+Table 4 validates the compute intensity prediction (§4.2) by com-paring three encoders spanning a 15 × parameter range: MiniLM-L6-v2 (22M, 𝑑 =384 ), bge-base-en-v1.5 (109M, 𝑑 =768 ) [45], and E5-large (335M, 𝑑 =1024 ) [42]. As predicted by the compute intensity scaling, GPU utilization rises monotonically with model size: 10.6% 
+
+→ 42.1% → 61.7% under SURGE. The IPC-amortization speedup over PBP shrinks monotonically with model size: 1.92 × → 1.29 × → 1.32 ×. This is the regime pre-dicted by Theorem 1: as 𝑐 enc grows with model FLOPs, the IPC-to-compute ratio 𝛼 falls and there is less IPC overhead to amor-tize. On bge-base, back-solving from PBP at 𝑐 enc =0.215 ms gives 
+
+𝛼 =0.603 and predicts a 1.31 × speedup; we measure 1.29 × (error 
+
+1.3% ). At three encoders, prediction error stays below 2% , support-ing the cost model as a workload-planning tool independent of the system implementation. Crucially, SURGE’s memory and TTFO advantages—which de-rive from streaming, not from IPC—grow with embedding dimen-sion. The peak-memory advantage over FB-100K rises from 12 .6×
+
+> 8SURGE: SuperBatch Unified Resource-efficient GPU Encoding for Heterogeneous Partitioned Data
+
+Table 3: Ablation study isolating each component’s contribution (GCS-profile storage, mean of 3 runs). Separate run from Table 1; ∼2% throughput variation reflects normal run-to-run variance. 
+
+Configuration Tput (t/s) Duty% GPU% Δ vs. Full Mem (GB) TTFO (s) 
+
+Full system 25,930 57.3 9.9 – 2.6 4.7 
+
+w/o SURGE (PBP+AsyncIO) 13,828 79.2 6.4 -46.7% 2.7 0.5 w/o AsyncIO (SURGE+sync) 21,689 47.9 7.9 -16.4% 2.9 5.7 w/o zero-copy 14,832 32.8 5.9 -42.8% 5.2 7.3 w/o multi-GPU (1 GPU) 10,536 82.7 4.6 -59.4% 4.3 10.1 
+
+Table 4: Model generalization across three encoder sizes spanning a 15 × parameter range. SURGE matches fixed-batch throughput while bounding memory across all mod-els. The IPC-amortization speedup over PBP shrinks mono-tonically with model compute intensity ( 𝜙 drops 0.48 →
+
+0.24 → 0.19 ), but the memory and TTFO advantages—which derive from streaming, not from IPC—grow with embedding dimension. The bge-base column independently validates Theorem 1 on a third model with measured-vs-predicted er-ror 1.3% .                                                           
+
+> Model Method Tput (t/s) GPU% Mem (GB) TTFO (s) MiniLM-L6 (22M, 𝑑 =384 )a
+> PBP 13,766 6.3 2.5 0.5 FB-100K 27,074 10.7 32.7 245.5 SURGE 26,413 10.6 2.6 3.6 bge-base (109M, 𝑑 =768 )b
+> PBP 7,154 31.7 3.2 0.23 FB-100K 9,282 41.7 63.4 835 SURGE 9,250 42.1 3.3 10.7 E5-large (335M, 𝑑 =1024 )a
+> PBP 4,912 47.3 3.8 1.2 FB-100K 6,462 62.7 81.6 1,236 SURGE 6,485 61.7 4.2 15.4 Speedup (SURGE/PBP) 1.92 × → 1.29 × → 1.32 ×
+> Memory advantage (FB/SURGE) 12 .6× → 19 .2× → 19 .4×
+> TTFO advantage (FB/SURGE) 68 × → 78 × → 80 ×
+> aMiniLM and E5-large run on 4 ×L4. bbge-base run on 2 ×L4 with per-GPU batch 512; Theorem 1 predicts 1.31 ×speedup over PBP, measured 1.29 ×(error 1.3% ).
+
+(MiniLM) to 19 .2× (bge-base) to 19 .4× (E5-large). The TTFO advan-tage rises from 68 × to 78 × to 80 ×. At the bge-base regime and be-yond, the value proposition shifts from throughput amortization to deployability: even when the throughput speedup is modest, FB-100K’s 63 GB peak memory and 14 -minute TTFO at 10 M texts make it impractical at production scale. 
+
+## 5.6 Distribution Sensitivity 
+
+Theorem 1’s prediction depends only on the IPC-to-compute ratio 
+
+𝛼 , not on the partition-size distribution—the distribution affects 𝛼 
+
+only through the total text count 𝑁 and the partition count 𝑃 . Ta-ble 5 tests this prediction across log-normal 𝜎 ∈ { 1.0, 1.72 , 2.5} (CV from 1.31 to 12.2) at fixed 𝑁 =10 M and 𝑃 =4,000 . Measured SURGE speedups span 1.41 × to 1.47 ×—a 4% range across a 2.5× variation in 𝜎 , supporting the distribution-agnostic claim. The modest dip at 𝜎 =2.5 traces to 𝐵 max emergency-flush activation on tail parti-tions reaching ≈ 1.5M texts: the safety bound fires on the tail and trims the maximum SuperBatch size below 𝐵 min + 𝑛 max . This is the 
+
+Table 5: Distribution sensitivity. SURGE speedup is invari-ant within ±3% across a 2.5× variation in log-normal 𝜎 (CV from 1.31 to 12.2). MiniLM-L6-v2, 𝑁 =10 M, 𝑃 =4,000 , 2 ×L4, mean of 3 seeds. Theorem 1 predicted 1.47 × at 𝜎 =1.72 from back-solved 𝑐 ipc =0.067 s, 𝑐 enc =0.110 ms; measured error <0.1% .
+
+𝜎 CV PBP (t/s) SURGE (t/s) Speedup Mem (GB) TTFO (s) 1.0 1.31 12,288 17,914 1.458 × 2.15 5.30 1.72 4.37 12,190 17,909 1.469 × 2.44 5.43 2.5 12.2 13,032 18,379 1.410 × 3.55 6.23           
+
+> The modest dip at 𝜎 =2.5traces to 𝐵 max emergency-flush activation on tail partitions (exp (𝜇 +3𝜎 ) ≈ 1.5M>𝐵 max =500 K)—empirical evidence that Lemma 3’s memory-safety bound is operational, not decorative. Run-to-run std <1% on throughput.
+
+Table 6: Async I/O benefit across storage latency profiles (10M texts, 4,000 partitions). Async pipelining maintains 
+
+𝜌 =1.00 regardless of storage latency; the throughput benefit scales from negligible (null) to +92% (cross-region).                                              
+
+> Storage Profile Throughput (t/s) Benefit 𝜌 TTFO (s) Sync Async (%) Sync Async Sync Async Null (no I/O) 25,910 25,739 -0.7 1.00 1.00 3.7 4.6 HDFS (local) 24,514 25,871 +5.5 1.00 1.00 3.9 3.7
+> GCS (regional) 21,708 26,081 +20.1 0.99 1.00 4.8 3.7
+> S3 (same-region) 20,288 26,092 +28.6 0.91 1.00 5.1 3.7 Cross-region 13,641 26,235 +92.3 0.47 1.00 8.4 3.6
+
+operational regime where Lemma 3’s memory-safety guarantee is load-bearing rather than decorative. 
+
+## 5.7 I/O Overlap Analysis 
+
+Table 6 and Figure 7 demonstrate that async I/O benefit scales with storage latency. With a null backend, async pipelining provides no benefit ( −0.4% ). As latency increases from HDFS ( 2 ms) through cross-region ( 50 ms), the async benefit grows to +92% . Async throughput remains constant ( ∼26K texts/s) regardless of profile, while sync throughput degrades from 26K to 13.6K texts/s—the overlap ratio 𝜌 drops from 1.00 to 0.47 for sync, confirming the I/O overlap model (Equation 4). 
+
+## 5.8 Threshold Sensitivity 
+
+Table 7 and Figure 8 show throughput as a function of 𝐵 min .Throughput exhibits diminishing returns: increasing from 𝐵 min =
+
+100 K to 500 K yields only 8.3% additional throughput, as IPC is already well-amortized at 89 flushes. The cost model (Theorem 1) 
+
+> 9Kapadia et al.
+> null
+> hdfs
+> gcs
+> s3
+> cross_region 0
+> 10 000
+> 20 000
+> 30 000
+
+Storage profile 
+
+> Throughput (texts/s)  Async I/O
+> Sync I/O
+
+Figure 7: Async I/O benefit across storage latency profiles. Async throughput remains constant ( ∼26K texts/s) regard-less of storage latency, while sync throughput degrades from 26K to 13.6K texts/s as latency increases. The I/O overlap ra-tio 𝜌 drops from 1.0 (null) to 0.47 (cross-region) for sync, but async maintains 𝜌 =1.0 throughout. TTFO remains 3.6–4.3 s for async vs. 3.7–8.7 s for sync. Table 7: Throughput sensitivity to 𝐵 min threshold ( 𝐵 max =
+
+5 × 𝐵 min , 10M texts, 4,000 partitions). The operating point 
+
+𝐵 min =100 K (bold) balances throughput, memory, and flush granularity.                                                 
+
+> 𝐵 min Tput (t/s) Duty% GPU% Time (s) TTFO (s) Flushes Mem (GB) Parts/Batch 10,000 18,055 45.9 7.5 553.9 0.7 542 2.5 7.4 50,000 24,126 55.0 9.6 414.5 2.1 160 2.5 25.0
+> 100,000 26,027 57.5 10.3 384.2 3.6 89 2.5 44.9
+> 200,000 27,218 59.2 10.6 367.4 10.3 48 2.7 83.3 500,000 28,190 60.2 10.7 354.7 17.8 20 3.2 200.0
+
+Table 8: Serialization microbenchmark: zero-copy vs. naive Python list construction. 
+
+𝑁 Time (s) Peak Memory (MB) Naive Zero-copy Naive Zero-copy 10,000 1.920 0.075 (25.5 ×) 142 18 (8.1 ×)50,000 8.338 0.378 (22.1 ×) 673 84 (8.0 ×)100,000 16.871 0.708 (23.8 ×) 1333 155 (8.6 ×)200,000 33.700 1.462 (23.0 ×) 2675 319 (8.4 ×)500,000 85.513 3.825 (22.4 ×) 6711 821 (8.2 ×)
+
+is most accurate at the operating point ( 𝐵 min = 100 ,000 : predicted 26,247 vs. measured 26,027, error <1%). The operating point bal-ances throughput with memory (2.5 GB peak) and flush granularity (∼45 partitions per SuperBatch, providing fine-grained progress tracking for resume). 
+
+## 5.9 Serialization Microbenchmark 
+
+Table 8 confirms the zero-copy serialization path is 22 –25 × faster and uses 8× less memory than naive Python list construction across all tested batch sizes ( 𝑁 = 10 K to 500 K). The speedup is con-sistent regardless of 𝑁 , confirming the 𝑂 (1) allocation complexity.     
+
+> 10K 50K 100K 200K 500K
+> 15 000
+> 20 000
+> 25 000
+> 30 000
+> 𝐵 min =100 K
+
+𝐵 min (thousands) 
+
+> Throughput (texts/s)
+> Measured
+> Theorem 1 prediction
+
+Figure 8: Throughput sensitivity to 𝐵 min threshold ( 𝐵 max =
+
+5×𝐵 min ). Throughput plateaus with diminishing returns; the operating point 𝐵 min =100 K (arrow) achieves 26,027 texts/s with 89 flushes, 2.5 GB peak memory, and 3.6 s TTFO. Higher thresholds yield marginal throughput gains (500K: +8.3%) but increase TTFO (17.8 s) and memory (3.2 GB).     
+
+> 10K 50K 100K 200K 500K
+> 10 −1
+> 10 0
+> 10 1
+> 10 2
+
+Batch size 𝑁 
+
+> Serialization time (s)  Naive
+> Zero-copy
+
+Figure 9: Serialization time (log scale): naive Python list construction vs. zero-copy Arrow path. Zero-copy is 22 –25 ×
+
+faster across all batch sizes. 
+
+The serialization bar chart in Figure 9 visualizes the magnitude of this difference. 
+
+## 5.10 Scaling Analysis 
+
+To verify throughput independence from dataset size and expose the memory scaling behavior, we run both SURGE and FB-100K at 𝑁 ∈ { 1, 5, 10 , 25 , 50 } million texts, scaling the partition count proportionally ( 𝑃 = 400 to 20 ,000 ). Table 9 and Figure 10 present the scaling analysis. 
+
+Throughput (Figure 10a). Both methods maintain approxi-mately constant throughput ( ∼26,000 texts/s) across a 50 × range, confirming that IPC amortization dominates and both achieve the throughput ceiling. SURGE shows a modest decline at 50M (22,949 texts/s, −12% from 10M; Figure 10a). This degradation stems from partition management overhead at 𝑃 = 20 ,000 : bound-ary detection, per-partition metadata tracking, and file path con-struction scale with 𝑃 . The encode duty cycle drops from 57% at 10M to 49% at 50M (Table 9), confirming that non-encode overhead—not GPU inefficiency—accounts for the throughput     
+
+> 10 SURGE: SuperBatch Unified Resource-efficient GPU Encoding for Heterogeneous Partitioned Data
+> 110 25 50
+> 20 000
+> 22 000
+> 24 000
+> 26 000
+> 28 000
+> 30 000
+> 𝑁 (millions)
+> Throughput (texts/s)
+> SURGE
+> FB-100K
+
+(a) Throughput (both ∼26K)       
+
+> 110 25 50
+> 0
+> 50
+> 100
+> 150
+> 200 exceeds 192 GB* 192 GB RAM
+> 𝑁 (millions)
+> Peak memory (GB)  SURGE
+> FB-100K
+
+(b) Peak memory ( 𝑂 (𝑁 ) vs. bounded)     
+
+> 110 25 50
+> 0
+> 500
+> 1,000
+> 𝑁 (millions)
+> TTFO (s)
+> SURGE
+> FB-100K
+
+(c) Time-to-first-output ( 𝑂 (1) vs. 𝑂 (𝑁 ))
+
+Figure 10: Scaling analysis from 1M to 50M texts. (a) Both methods achieve comparable throughput. (b) FB-100K memory grows linearly, approaching the 192 GB limit at 50M; SURGE remains bounded. (c) SURGE produces first output in ∼3.6 s regardless of 𝑁 ; FB-100K scales linearly to 20+ minutes. Table 9: Scaling analysis: SURGE vs. FB-100K from 1M to 50M texts ( 𝑃 scaled proportionally; mean of 3 runs). Duty% FB-100K omitted (consistently ∼58%). 
+
+𝑁 (M) Throughput (t/s) Peak Memory (GB) TTFO (s) Mem Duty% SURGE FB-100K SURGE FB-100K SURGE FB-100K Ratio SURGE 1 26,466 26,525 1.5 4.4 3.6 24.9 2.9 × 59.3 5 26,503 26,742 2.1 17.0 3.6 123.8 8.0 × 58.0 
+
+10 26,024 26,899 2.5 32.7 3.6 245.2 12.9 × 56.7 
+
+25 24,821 26,786 5.7 81.6 3.6 618.1 14.3 × 54.0 50 22,949 27,049 8.7 162.7 3.7 1214.8 18.8 × 49.3 
+
+loss. FB-100K avoids this by ignoring partition boundaries during encoding, though it incurs equivalent overhead during the post-encode regrouping pass (not reflected in wall time as it overlaps with final I/O). 
+
+Peak memory (Figure 10b). This is the decisive metric. FB-100K memory grows linearly: 4.4 GB at 1M to 162.7 GB at 50M (Figure 10b)—consuming 85% of the node’s 192 GB RAM. Extrap-olating, FB-100K would exceed available memory at ∼60M texts. At production scale (800M texts), it would require ∼2.5 TB, mak-ing it infeasible on commodity hardware. SURGE memory grows sub-linearly from 1.5 GB to 8.7 GB (Figure 10b), dominated by process-level overhead rather than algorithmic state. 
+
+Time-to-first-output (Figure 10c). SURGE produces its first partition file in ∼3.6 s regardless of 𝑁 (Figure 10c). FB-100K pro-duces zero output until all encoding completes: 25 s at 1M, scaling linearly to 1,215 s (20 minutes) at 50M (Figure 10c). For a produc-tion run of 800M texts, FB-100K would produce no output for ∼5.4 hours—an unacceptable latency for monitoring and fault recovery. The memory ratio grows from 3× at 1M to 18 .5× at 50M texts, demonstrating that SURGE’s advantage increases with dataset size. 
+
+## 5.11 Cost Analysis 
+
+Cost efficiency is a direct consequence of throughput. At $7.30/hr for the 4 ×L4 node, Table 1 shows SURGE and FB-100K achieve identical cost ($0.08/M texts)—the throughput ceiling. However, FB-100K’s 𝑂 (𝑁 ) memory requirement means it cannot physically run at production scale without proportionally more expensive hardware. SURGE’s bounded memory enables cost-efficient pro-cessing on commodity nodes regardless of dataset size. 
+
+## 5.12 Threats to Validity 
+
+Synthetic data. Our benchmark uses synthetic texts matching production length statistics but not linguistic diversity. Encoding throughput is primarily determined by text length (which deter-mines tokenization cost), not semantic content. We validated this assumption by comparing throughput on synthetic versus produc-tion data samples: the difference was within measurement noise (<0.5%), confirming that length distribution is the dominant factor for throughput measurement. 
+
+Three models, single architecture family. Our evaluation covers three transformer encoders—MiniLM-L6-v2 (22M), bge-base-en-v1.5 (109M), and E5-large (335M). The 15 × parameter range exposes the full IPC-amortization regime spectrum: 𝛼 ≈ 0.93 
+
+(MiniLM, IPC-substantial) down to 𝛼 ≈ 0.34 (E5-large, compute-leaning). Across this range, Theorem 1’s prediction error stays below 2% , supporting the cost model’s generality. We have not tested billion-parameter encoders (e.g., GTR-XXL); we expect the system to remain compute-bound there with diminishing IPC-amortization benefit but persistent memory and TTFO advantages, consistent with the trend across the three models tested. 
+
+Simulated storage. Cloud storage latency is simulated rather than measured against live infrastructure. We calibrate profiles against published benchmarks for GCS and S3 latency [13]. The 
+
+> 11 Kapadia et al.
+
+simulated profiles (10 ms base latency, 200 MB/s throughput for GCS) are conservative estimates based on regional deployments; production latencies may be lower with co-located storage, which would reduce but not eliminate the async I/O benefit. Our produc-tion deployment confirms that real GCS latencies fall within the simulated range, with occasional spikes during peak hours that the async pipeline absorbs transparently. 
+
+Encoding framework. Our evaluation uses Sentence-Trans-formers [36], the dominant library for offline batch embedding generation (12K+ GitHub stars, adopted by major vector database providers). The IPC overhead pattern is not specific to this library: it is inherent to any multi-process GPU encoding architecture that serializes data across process boundaries. We discuss the boundary with continuous-batching frameworks (TEI, Triton, vLLM) in §8. 
+
+Single node and shared-GPU deployments. All experiments use a single 4-GPU node with exclusive GPU access (no MIG, no sharing). Multi-node deployments introduce network communica-tion overhead that may interact differently with SURGE’s pipelin-ing; we discuss the per-node decomposition in §9. Under shared-GPU workloads, 𝐵 max should be scaled proportionally to the avail-able memory share—Lemma 3’s 𝑀 (𝐵 max ) formula remains the siz-ing tool, parameterized on the per-tenant memory budget rather than the full GPU. 
+
+## 6 Operational Experience 
+
+Six months of production deployment (180+ pipeline runs) yielded operational insights. 
+
+Failure modes. Table 10 summarizes observed failure modes. The resume capability was exercised 6 times, recovering with-out data loss. The most frequent failure mode (transient storage 503/429 errors at 0.3% rate) is handled transparently by exponen-tial backoff retry. 
+
+Threshold tuning. We initially deployed with 𝐵 min = 50 ,000 .Throughput plateaued below expectations because the smaller threshold did not sufficiently amortize IPC. After sensitivity anal-ysis on production data (Figure 8), we increased to 𝐵 min = 100 ,000 .
+
+Lesson: tune thresholds on production data, not subsets. 
+
+Memory fragmentation. Without PyTorch’s expandable_segments 
+
+allocator option, we observed gradual GPU memory fragmentation over 100+ flushes, causing OOM on a SuperBatch well within 𝐵 max .This manifested only after 6+ hours of continuous processing. Les-son: enable expandable segments for long-running GPU workloads. 
+
+Upload worker sizing. Initial 16 workers ( 2× GPU count) created backpressure when multiple large partitions flushed in se-quence. Increasing to 32 workers ( 4× GPU count) eliminated this. 
+
+Lesson: size the upload pool for peak burst, not average load. 
+
+Table 10: Failure modes observed in 180+ production runs.                 
+
+> Failure Mode Freq. Mitigation Recovery Transient storage 503/429 0.3% Exp. backoff retry <10 s GPU OOM on flush 0𝐵 max threshold N/A Data source timeout 2Pipeline retry + resume 5–15 min Spot preemption 4Resume from last partition 10–20 min
+
+Table 11: Decision framework for Surge applicability.                
+
+> 𝜙 CV Recommendation
+> >0.5>1.0Strongly recommended; 1.5–2×
+> throughput gain +memory/TTFO benefits
+> >0.5<1.0Beneficial; uniformly small partitions
+> <0.5>1.0Moderately beneficial
+> <0.5<1.0Optional; PBP may suffice
+
+Oversized partitions. In rare cases ( <0.1% of production par-titions), a single partition exceeds 𝐵 max . The system handles this by flushing the SuperBatch when the single partition’s text count exceeds 𝐵 max , effectively splitting the oversized partition across consecutive SuperBatches. The boundary tracking ensures correct reassembly. We observed this for 3 partitions in our largest cat-alog (447K+ texts each); SURGE processed them correctly with no throughput impact. Lesson: handle single-partition > 𝐵 max 
+
+gracefully—it will occur in production. 
+
+Monitoring and observability. Each SuperBatch flush emits structured logs: partition count, text count, encode time, serialize time, and upload time. These enable real-time throughput dash-boards and anomaly detection (e.g., encode time exceeding 2× the running average triggers an alert). Over 180+ runs, we identified two performance regressions: one from a CUDA driver update and one from a GCS endpoint migration, both caught within the first SuperBatch flush. 
+
+## 7 Generalizability 
+
+While our evaluation uses a retail catalog, SURGE’s benefit de-pends on two structural properties of the partition distribution: 
+
+IPC-dominated fraction ( 𝜙 ). The fraction of partitions below the IPC-dominated threshold 𝑛 ∗ (Equation 2). In our workload, 𝜙 =
+
+0.23 , yet aggregate IPC accounts for 48% of PBP time. Higher 𝜙 im-plies more IPC waste and greater SURGE benefit; but even moder-ate 𝜙 values yield substantial savings when 𝑃 is large. 
+
+Coefficient of variation (CV). CV = 𝜎 𝑛 / ¯𝑛 captures partition size heterogeneity. Our workload has CV ≈ 2.1. High CV indicates a mix of small and large partitions ideal for co-batching. The 𝜎 -sweep in §5.6 provides empirical anchors along the CV axis (1.31, 4.37, 12.2), and the model-generalization study in §5.5 along the 𝜙 axis (0.48, 0.24, 0.19 for MiniLM, bge-base, E5-large at matched 𝐺 ). All six configurations sit in the recommended-or-beneficial quadrants of Table 11, and SURGE delivers the pre-dicted regime-appropriate benefit at each. The framework applies to multilingual corpora (small low-resource language partitions), geo-partitioned datasets (sparse rural regions), scientific literature (partitioned by sub-field), and any taxonomy-organized catalog. 
+
+## 8 Related Work 
+
+Inference Serving and Embedding Systems. Model serving sys-tems implement dynamic batching to amortize per-request over-head [8, 9, 14, 38], with REEF [16] and AlpaServe [23] enabling pre-emption and statistical multiplexing. FlexGen [39] and DeepSpeed-Inference [25] optimize throughput for LLM inference; Petals [4] 
+
+> 12 SURGE: SuperBatch Unified Resource-efficient GPU Encoding for Heterogeneous Partitioned Data
+
+enables collaborative inference across distributed nodes. Pro-duction platforms including TensorFlow-Serving [33], Torch-Serve [34], TEI [19], Triton [31], and SGLang [50] optimize request-level batching for online serving. These systems target latency-sensitive serving with small batches or single-model throughput 
+
+without partition constraints. SURGE operates in a different regime: offline batch processing with partition-preserving output ,forming 100 K– 500 K text batches and emitting outputs grouped by partition key. 
+
+Continuous Batching: Applicability Boundary. Continuous-batching frameworks—TEI [19], Triton with dynamic batching [31], vLLM [22], Orca [48]—amortize per-request IPC within a single endpoint under online request arrivals with shared latency SLOs. SURGE’s setting differs along four orthogonal axes that prevent these systems from substituting for partition-aware aggregation. (i) Arrival pattern: 
+
+40K independent offline workloads, not dynamic request streams. (ii) Output constraint: partition-preserving output for downstream indexing means each partition is a separate submission even under TEI—there is no shared client session over which continuous batch-ing could fuse requests. (iii) Latency SLO: continuous-batching servers cap queue depth (typically hundreds of requests) to bound p99 latency, precluding the 100 K– 500 K-text batches Theorem 1 requires for IPC amortization. (iv) Batch composition: continuous batching concatenates same-endpoint requests; SURGE aggregates across partition boundaries with explicit boundary preservation for slicing on the output side. Continuous batching is therefore complementary to, not a substitute for, the SURGE pattern: a SURGE flush could itself be served by a continuously-batched en-coder backend, but the partition-aware aggregation step would still be required upstream. 
+
+Embedding Generation and GPU Scheduling. For embedding gen-eration specifically, Sentence-Transformers [36] provides multi-GPU encoding but incurs per-call IPC. Ray [26] supports GPU inference pipelines with auto-batching but operates at the record level without partition-boundary awareness. FAISS [20] and ScaNN [15] address embedding retrieval rather than generation. Production ML systems [17, 24, 27, 37, 40] address training-side embedding management; SURGE addresses inference-side generation at scale. Gandiva [46], AntMan [47], and PipeSwitch [3] schedule multiple jobs onto shared GPUs. SURGE addresses a different granular-ity: scheduling multiple data partitions within a single job onto a fixed allocation. The fragmentation analysis of Weng et al. [44] is conceptually related to our bin packing connection (§4). 
+
+Bin Packing and Streaming Aggregation. Bin packing theory [6, 7] provides the algorithmic foundation for SURGE’s accumula-tion: classical Next Fit opens a new bin when full; SURGE adds a minimum-fill constraint ( 𝐵 min ) for GPU efficiency. Stream process-ing systems—Spark Streaming [49], Flink [5], and Dataflow [1]— implement micro-batch aggregation with time-window triggers. SURGE applies a similar principle to GPU inference with size-based 
+
+triggers on bounded, ordered input. 
+
+Zero-Copy Data Movement. Apache Arrow [2] provides colum-nar format for zero-copy reads; RAPIDS [32] extends this to GPU transfers via DLPack. Our technique (§3.4) operates at the Python/Arrow boundary, converting NumPy matrices to Arrow format without intermediate objects, reducing allocations from 
+
+𝑂 (𝑁𝑑 ) to 𝑂 (1).
+
+Pipeline Optimization. GPipe [18] and PipeDream [28] pipeline model parallelism; DALI [30] and Dask [10] overlap data loading with computation. SURGE applies output-path pipelining where se-rialization and upload overlap with the next encode call. 
+
+## 9 Conclusion 
+
+We presented SURGE, a streaming system for GPU-efficient em-bedding generation on heterogeneously partitioned datasets, de-ployed in production processing 800M+ texts. The paper’s primary contributions are analytical: (1) Theorem 1’s cost model, which predicts the IPC-amortization throughput ceiling within 2% across three encoders spanning a 15 × parameter range and across log-normal 𝜎 ∈ [ 1.0, 2.5]; (2) Lemma 3’s memory-safety bound, which enables a streaming two-threshold policy with 𝑂 (𝐵 min +𝑛 max ) peak memory under adversarial arrival orders; and (3) the 𝜙 /CV deci-sion framework (§7), which characterizes when the pattern applies beyond our workload. These contributions are realized by three complementary engineering techniques—SuperBatch aggregation, zero-copy Arrow serialization ( 22 –25 × speedup), and asynchro-nous I/O pipelining (up to 93% benefit at high storage latency)—but the engineering is not the contribution. The empirical takeaway is that throughput alone is insuffi-cient for production deployment . Fixed-batch methods reach the same throughput ceiling as SURGE (Table 1) but require 𝑂 (𝑁 )
+
+peak memory (32.7 GB at 10M texts; exceeding 192 GB beyond 
+
+∼60M, Figure 10), produce zero output until all encoding com-pletes (245.5 s at 10M, scaling to 20+ minutes at 50M), and lose all progress on failure. A stronger baseline that pre-sorts partitions and FFD-packs them into single-call batches (PB-PBP-LB; §5.3) closes ∼80% of the PBP →SURGE throughput gap at 𝜎 =1.72 , but lacks the unconditional 𝐵 max guarantee (would emit ≈ 1.5M-text batches at 𝜎 =2.5), is 2.5× slower to first output, and requires of-fline columnar metadata. SURGE achieves the throughput ceiling with 𝑂 (𝐵 min +𝑛 max ) bounded memory ( 12 .6× less than fixed-batch on MiniLM, 19 × less on bge-base and E5-large), 68 ×–80 × faster time-to-first-output, and crash recovery at SuperBatch granularity. 
+
+Multi-node decomposition. The current deployment is single-node 4 ×GPU. Theorem 1 applies per node because IPC is intra-node (host ↔GPU process pool), so the cost model and the 𝐵 max 
+
+memory bound extend unchanged to a multi-node deployment with one SuperBatch aggregator per node. Cross-node coordina-tion becomes a partition-routing problem—assigning partitions to nodes by predicted size to balance per-node 𝛼 —solvable by exist-ing work-stealing or hashing schedulers. We do not claim novelty for the cross-node scheduler; multi-node SURGE is a deliberate scope boundary of this paper. 
+
+Future work. Adaptive threshold selection based on observed partition statistics could optimize the throughput-memory trade-off online. Profiling and reducing partition-management overhead at extreme partition counts ( 𝑃 > 10 ,000 ) would address the 12% 
+
+throughput degradation observed at 50M texts (Table 9). Testing on billion-parameter encoders would extend the compute-intensity validation past the 335 M point covered by E5-large. 
+
+> 13
+
+Kapadia et al. 
+
+Reproducibility. We provide benchmark scripts, synthetic data generators matching production distributions, locked result manifests for the bge-base, 𝜎 -sweep, and PB-PBP-LB experiments, and all hyperparameters. The core SURGE pattern can be imple-mented in ∼200 lines of Python. 
+
+## References 
+
+[1] Tyler Akidau, Robert Bradshaw, Craig Chambers, Slava Chernyak, Rafael J Fernández-Moctezuma, Reuven Lax, Sam McVeety, Daniel Mills, Frances Perry, Eric Schmidt, and Sam Whittle. 2015. The Dataflow Model: A Practical Approach to Balancing Correctness, Latency, and Cost in Massive-Scale, Unbounded, Out-of-Order Data Processing. In Proceedings of VLDB , Vol. 8. [2] Apache Software Foundation. 2024. Apache Arrow. https://arrow.apache.org [3] Zhihao Bai, Zhen Zhang, Yibo Zhu, and Xin Jin. 2020. PipeSwitch: Fast Pipelined Context Switching for Deep Learning Applications. In Proceedings of OSDI .[4] Alexander Borzunov, Dmitry Baranchuk, Tim Dettmers, Max Ryabinin, Younes Belkada, Artem Chumachenko, Pavel Samygin, and Colin Raffel. 2023. Petals: Collaborative Inference and Fine-tuning of Large Models. In Proceedings of ACL: System Demonstrations .[5] Paris Carbone, Asterios Katsifodimos, Stephan Ewen, Volker Markl, Seif Haridi, and Kostas Tzoumas. 2015. Apache Flink: Stream and Batch Processing in a Single Engine. IEEE Data Engineering Bulletin 38, 4 (2015), 28–38. [6] Edward G. Coffman, Jr., János Csirik, Gábor Galambos, Silvano Martello, and Daniele Vigo. 2013. Bin Packing Approximation Algorithms: Survey and Clas-sification. In Handbook of Combinatorial Optimization . Springer. [7] Edward G. Coffman, Jr., Michael R. Garey, and David S. Johnson. 1978. An Ap-plication of Bin-Packing to Multiprocessor Scheduling. SIAM J. Comput. 7, 1 (1978), 1–17. [8] Daniel Crankshaw, Gur-Eyal Sela, Xiangxi Mo, Corey Zuber, Ion Stoica, Joseph Gonzalez, and Alexey Tumanov. 2020. InferLine: Latency-Aware Provisioning and Scaling for Prediction Serving Pipelines. In Proceedings of SoCC .[9] Daniel Crankshaw, Xin Wang, Guilio Zhou, Michael J Franklin, Joseph E Gon-zalez, and Ion Stoica. 2017. Clipper: A Low-Latency Online Prediction Serving System. In Proceedings of NSDI .[10] Dask Development Team. 2024. Dask: Library for dynamic task scheduling. https://dask.org [11] Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. 2019. BERT: Pre-training of Deep Bidirectional Transformers for Language Under-standing. In Proceedings of NAACL-HLT .[12] William Feller. 1971. An Introduction to Probability Theory and Its Applications 
+
+(2nd ed.). Vol. 2. Wiley. [13] Google Cloud. 2024. Google Cloud Storage: Performance and Latency. https: //cloud.google.com/storage/docs/performance [14] Arpan Gujarati, Reza Karber, Srikanth Kandula, Boris Calder, Peter Bodik, Paramvir Bahl, and Peter Druschel. 2020. Serving DNNs like Clockwork: Per-formance Predictability from the Bottom Up. In Proceedings of OSDI .[15] Ruiqi Guo, Philip Sun, Erik Lindgren, Quan Geng, David Simcha, Felix Chern, and Sanjiv Kumar. 2020. Accelerating Large-Scale Inference with Anisotropic Vector Quantization. In Proceedings of ICML .[16] Mingcong Han, Hanze Zhang, Rong Chen, and Haibo Chen. 2022. REEF: Fast, Ef-ficient, and Energy-Aware Microsecond-Scale Preemption for Concurrent GPU-Accelerated DNN Inferences. In Proceedings of OSDI .[17] Kim Hazelwood, Sarah Bird, David Brooks, Soumith Chintala, Utku Diril, Dmytro Dzhulgakov, Mohamed Fawzy, Bill Jia, Yangqing Jia, Aditya Kalro, et al. 2018. Applied Machine Learning at Facebook: A Datacenter Infrastructure Per-spective. In Proceedings of HPCA .[18] Yanping Huang, Youlong Cheng, Ankur Bapna, Orhan Firat, Dehao Chen, Mia Chen, HyoukJoong Lee, Jiquan Ngiam, Quoc V Le, Yonghui Wu, and Zhifeng Chen. 2019. GPipe: Efficient Training of Giant Neural Networks using Pipeline Parallelism. In Proceedings of NeurIPS .[19] Hugging Face. 2024. Text Embeddings Inference. https://github.com/ huggingface/text-embeddings-inference [20] Jeff Johnson, Matthijs Douze, and Hervé Jégou. 2019. Billion-scale similarity search with GPUs. IEEE Transactions on Big Data 7, 3 (2019), 535–547. [21] Vladimir Karpukhin, Barlas Oguz, Sewon Min, Patrick Lewis, Ledell Wu, Sergey Edunov, Danqi Chen, and Wen-tau Yih. 2020. Dense Passage Retrieval for Open-Domain Question Answering. In Proceedings of EMNLP .[22] Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph Gonzalez, Hao Zhang, and Ion Stoica. 2023. Efficient Mem-ory Management for Large Language Model Serving with PagedAttention. In 
+
+Proceedings of SOSP .[23] Zhuohan Li, Lianmin Zheng, Yinmin Zhong, Vincent Liu, Ying Sheng, Xin Jin, Yanping Huang, Zhifeng Chen, Hao Zhang, Joseph E Gonzalez, and Ion Sto-ica. 2023. AlpaServe: Statistical Multiplexing with Model Parallelism for Deep Learning Serving. In Proceedings of OSDI .[24] Zhuoran Liu, Leqi Zou, Xuan Zou, Caihua Wang, Biao Zhang, Da Tang, Bolin Zhu, Yijie Zhu, Peng Wu, Ruiming Wang, and Ping Li. 2022. Monolith: Real Time Recommendation System With Collisionless Embedding Table. In RecSys Workshop .[25] Microsoft DeepSpeed Team. 2023. DeepSpeed Inference: Enabling Efficient Inference of Transformer Models at Unprecedented Scale. https://www. deepspeed.ai/inference/ [26] Philipp Moritz, Robert Nishihara, Stephanie Wang, Alexey Tumanov, Richard Liaw, Eric Liang, Melih Elibol, Zongheng Yang, William Paul, Michael I Jordan, and Ion Stoica. 2018. Ray: A Distributed Framework for Emerging AI Applica-tions. In Proceedings of OSDI .[27] Dheevatsa Mudigere, Yuchen Hao, Jianyu Huang, Zhihao Jia, Andrew Tulloch, Srinivas Sridharan, Xing Liu, Mustafa Ozdal, Jiadong Nie, Jongsoo Park, et al. 2022. Software-Hardware Co-design for Fast and Scalable Training of Deep Learning Recommendation Models. In Proceedings of ISCA .[28] Deepak Narayanan, Aaron Harlap, Amar Phanishayee, Vivek Seshadri, Nikhil R Devanur, Gregory R Ganger, Phillip B Gibbons, and Matei Zaharia. 2019. PipeDream: Generalized Pipeline Parallelism for DNN Training. In Proceedings of SOSP .[29] Maxim Naumov, Dheevatsa Mudigere, Hao-Jun Michael Shi, Jianyu Huang, Narayanan Sundaraman, et al. 2019. Deep Learning Recommendation Model for Personalization and Recommendation Systems. arXiv preprint arXiv:1906.00091 
+
+(2019). [30] NVIDIA. 2023. DALI: Data Loading Library. https://github.com/NVIDIA/DALI [31] NVIDIA. 2023. Triton Inference Server. https://github.com/triton-inference-server/server [32] NVIDIA. 2024. RAPIDS: Open GPU Data Science. https://rapids.ai [33] Christopher Olston, Noah Fiedel, Kirill Gorovoy, Jeremiah Harmsen, Li Lao, Fangwei Li, Vinu Rajashekhar, Suresh Ramesh, and Jordan Soyke. 2017. TensorFlow-Serving: Flexible, High-Performance ML Serving. In Workshop on ML Systems at NeurIPS .[34] PyTorch. 2023. TorchServe. https://github.com/pytorch/serve [35] Nils Reimers and Iryna Gurevych. 2019. Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks. In Proceedings of EMNLP-IJCNLP .[36] Nils Reimers and Iryna Gurevych. 2020. Making Monolingual Sentence Embed-dings Multilingual using Knowledge Distillation. In Proceedings of EMNLP .[37] Geet Sethi, Bilge Acun, Berkin Akin, Newsha Mnih, Maxim Naumov, Carole-Jean Wu, and Zhihao Jia. 2022. RecShard: Statistical Feature-Based Memory Optimization for Industry-Scale Neural Recommendation. In Proceedings of AS-PLOS .[38] Haichen Shen, Lequn Chen, Yuchen Jin, Lijie Zhao, Bingqing Kong, Matthai Philipose, Arvind Krishnamurthy, and Ravi Sundaram. 2019. Nexus: A GPU Cluster Engine for Accelerating DNN-Based Video Analysis. In Proceedings of SOSP .[39] Ying Sheng, Lianmin Zheng, Binhang Yuan, Zhuohan Li, Max Ryabinin, Beidi Chen, Percy Liang, Christopher Ré, Ion Stoica, and Ce Zhang. 2023. FlexGen: High-Throughput Generative Inference of Large Language Models with a Single GPU. In Proceedings of ICML .[40] Chijun Sima, Yao Fu, Man-Kit Sit, Liyi Guo, Xuri Gong, Feng Lin, Junyu Wu, Yongsheng Li, Haidong Rong, Pierre-Louis Aublin, and Luo Bi. 2022. Ekko: A Large-Scale Deep Learning Recommender System with Low-Latency Model Up-date. In Proceedings of OSDI .[41] Abraham Wald. 1944. On Cumulative Sums of Random Variables. The Annals of Mathematical Statistics 15, 3 (1944), 283–296. [42] Liang Wang, Nan Yang, Xiaolong Huang, Binxing Jiao, Linjun Yang, Daxin Jiang, Rangan Majumder, and Furu Wei. 2022. Text Embeddings by Weakly-Supervised Contrastive Pre-training. arXiv preprint arXiv:2212.03533 (2022). [43] Wenhui Wang, Furu Wei, Li Dong, Hangbo Bao, Nan Yang, and Ming Zhou. 2020. MiniLM: Deep Self-Attention Distillation for Task-Agnostic Compression of Pre-Trained Transformers. In Proceedings of NeurIPS .[44] Qizhen Weng, Wencong Xiao, Yiwei Yu, Wei Wang, Cheng Wang, Jian He, Yongkun Li, Lixin Zhang, Wei Lin, and Yu Ding. 2023. Beware of Fragmentation: Scheduling GPU-Sharing Workloads with Fragmentation Gradient Descent. In 
+
+Proceedings of USENIX ATC . 103–117. [45] Shitao Xiao, Zheng Liu, Peitian Zhang, Niklas Muennighoff, Defu Lian, and Jian-Yun Nie. 2024. C-Pack: Packed Resources For General Chinese Embeddings. In Proceedings of the 47th International ACM SIGIR Conference on Research and Development in Information Retrieval .[46] Wencong Xiao, Romil Bhardwaj, Ramachandran Ramjee, Muthian Sivathanu, Nipun Kwatra, Zhenhua Han, Pratyush Patel, Xuan Peng, Hanyu Zhao, Quanlu Zhang, Fan Yang, and Lidong Zhou. 2018. Gandiva: Introspective Cluster Sched-uling for Deep Learning. In Proceedings of OSDI .[47] Wencong Xiao, Shiru Ren, Yong Li, Yang Zhang, Pengyang Hou, Zhi Li, Yihui Feng, Wei Lin, and Yangqing Jia. 2020. AntMan: Dynamic Scaling on GPU Clus-ters for Deep Learning. In Proceedings of OSDI .[48] Gyeong-In Yu, Joo Seong Jeong, Geon-Woo Kim, Soojeong Kim, and Byung-Gon Chun. 2022. Orca: A Distributed Serving System for Transformer-Based Gener-ative Models. In Proceedings of OSDI .14 SURGE: SuperBatch Unified Resource-efficient GPU Encoding for Heterogeneous Partitioned Data 
+
+[49] Matei Zaharia, Tathagata Das, Haoyuan Li, Timothy Hunter, Scott Shenker, and Ion Stoica. 2013. Discretized Streams: Fault-Tolerant Streaming Computation at Scale. In Proceedings of SOSP .[50] Lianmin Zheng, Liangsheng Yin, Zhiqiang Xie, Jeff Huang, Chuyue Sun, Cody Hao Yu, Shiyi Cao, Christos Kober, Ying Sheng, Joseph E Gonzalez, Ion Stoica, and Hao Zhang. 2023. Efficiently Programming Large Language Models using SGLang. arXiv preprint arXiv:2312.07104 (2023). 15
