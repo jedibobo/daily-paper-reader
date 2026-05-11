@@ -1,0 +1,922 @@
+Title: ShiftLIF: Efficient Multi-Level Spiking Neurons with Power-of-Two Quantization
+
+URL Source: https://arxiv.org/pdf/2605.01866v1
+
+Published Time: Tue, 05 May 2026 01:23:54 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# ShiftLIF: Efficient Multi-Level Spiking Neurons with Power-of-Two Quantization 
+
+## Kaiwen Tang ∗
+
+National University of Singapore 
+
+## Di Yu ∗
+
+Zhejiang University 
+
+## Jiaqi Zheng 
+
+Sea AI Lab 
+
+## Changze Lv 
+
+Fudan University 
+
+## Qianhui Liu 
+
+Shandong University 
+
+## Zhanglu Yan †
+
+National University of Singapore 
+
+## Weng-Fai Wong 
+
+National University of Singapore 
+
+## Abstract 
+
+Spiking neural networks (SNNs) are promising for edge sensing due to their event-driven computation and temporal filtering capability. However, standard leaky integrate-and-fire (LIF) neurons commu-nicate only through binary spikes, which severely limit representa-tional capacity. Existing multi-level spiking neurons improve infor-mation transmission, but often rely on uniform quantization that mismatches membrane-potential distributions or introduces costly synaptic multiplications. In this paper, we propose ShiftLIF , a multi-level spiking neuron that maps membrane potentials to a logarith-mically spaced power-of-two spike set. This design provides finer representation in the small-amplitude regime, where membrane potentials are densely concentrated, while enabling multiplier-free synaptic computation through bit-shift and accumulation oper-ations. As a result, ShiftLIF improves spike-level expressiveness without sacrificing the hardware-friendly nature of standard SNN computation. We evaluate ShiftLIF on 10 datasets spanning wire-less, acoustic, motion, and visual sensing tasks. Results show that ShiftLIF consistently matches or exceeds the accuracy of existing multi-level spiking neurons while maintaining synaptic energy consumption close to standard binary LIF. These results indicate that ShiftLIF provides a favorable accuracy-efficiency trade-off for cross-modal edge sensing. 
+
+## CCS Concepts 
+
+• Computing methodologies → Machine learning ; Neural networks .
+
+## Keywords 
+
+Spiking Neural Networks, Edge Computing, Multimodal Sensing, Energy-efficient Computing 
+
+## 1 Introduction 
+
+The rapid expansion of edge computing has driven an increasing de-mand for sensing applications across wireless, acoustic, and motion domains [ 20 , 34 , 44 ]. However, processing these continuous streams on edge devices poses a challenge to energy consumption [ 29 ]. 
+
+Spiking neural networks (SNN) have emerged as a highly promising paradigm to address this [ 39 , 51 , 53 ]. The most widely adopted mechanism in these networks is the leaky integrate-and-fire (LIF) 
+
+> ∗Both authors contributed equally to this research.
+> †Corresponding author.
+
+neuron [ 41 ]. Beyond providing event-driven energy efficiency, the leaky integration dynamics intrinsically act as a temporal low-pass filter [ 4, 11 ]. This enables the neuron to smooth out high-frequency environmental noise and effectively capture slowly varying tempo-ral patterns in real-world physical signals. Despite this advantage, standard LIF neurons suffer from a severe representational bottleneck [ 47 ]. Fundamentally, spiking neurons compute rich analog membrane potentials but encode them with only one bit. Because neurons communicate strictly through binary spikes, this extreme quantization discards much of the amplitude information preserved by temporal integration [ 16 , 27 ]. As a result, the expressive capacity of the network is significantly constrained, limiting its ability to capture the full complexity of continuous sensory signals. Recent efforts to address this limitation generally follow two directions. The first line of work enhances neuron expressiveness by modifying membrane dynamics, such as PLIF [ 9], GLIF [ 50 ], CLIF [ 19 ], and RPLIF [ 26 ], which introduce learnable time con-stants or additional state variables. While these approaches enrich temporal modeling, they increase computational overhead and still constrain neuron outputs to binary spikes, leaving the quantization bottleneck unresolved. The second line of work increases repre-sentational bandwidth by introducing multi-level spikes, such as LM-HT SNN [ 17 ] and INT-LIF [ 27 ]. However, these methods typi-cally rely on uniformly spaced spike levels, which introduce two limitations: multi-bit spike amplitudes require synaptic multiplica-tions, increasing hardware cost, and uniform quantization poorly matches the intrinsic distribution of membrane potentials, which are often concentrated near small values with a long tail toward larger ones. Consequently, uniform grids allocate excessive reso-lution to rare large activations while under-representing densely clustered small activations. To address these challenges, we propose ShiftLIF, a novel spiking neuron that both improves representational capacity and hardware efficiency. ShiftLIF maps the continuous membrane potential to a logarithmically spaced set of spikes defined by powers of two, 
+
+{0, 2−𝐾 , 2− ( 𝐾 −1) , . . . , 2−1, 1}. This design provides two key advan-tages. Algorithmically, the power-of-two grid is naturally denser near zero, which better matches the heavy-tailed distribution of membrane potentials and captures fine-grained variations in small activations that uniform quantization often misses [ 14 , 31 ]. From a hardware perspective, because spike amplitudes are restricted 
+
+> 1
+> arXiv:2605.01866v1 [cs.NE] 3 May 2026 Tang et al.
+
+to powers of two and synaptic weights are represented as inte-gers, spike–weight interactions can be implemented using simple bit-shift operations followed by integer accumulation [ 24 , 40 ]. Con-sequently, ShiftLIF enables fully multiplier-free synaptic compu-tation, preserving the core energy efficiency advantage of spiking neural networks. Moreover, since the bit-shift operation effectively reduces the bit-width of the shifted weights, the subsequent ac-cumulation involves smaller operands, which can further reduce switching activity and energy consumption compared to standard accumulation [5, 36]. To evaluate ShiftLIF, we conduct extensive experiments across 11 diverse datasets encompassing wireless, acoustic, motion, and visual sensing modalities. Empirical results demonstrate that ShiftLIF con-sistently achieves competitive or superior classification accuracy compared to state-of-the-art multi-level spiking neurons. Further-more, it accomplishes this while consuming lower synaptic energy comparable to that of standard binary LIF models. The main contributions of this paper are: (1) We identify the fundamental accuracy–efficiency dilemma in existing multi-level SNNs, where uniform quantization increases computational overhead and poorly matches the natural distribution of membrane potentials. (2) We propose ShiftLIF, a novel spiking neuron that gener-ates multi-level spikes constrained to powers of two, en-abling distribution-aware representation while preserving multiplier-free synaptic computation. (3) We establish a comprehensive cross-modal benchmark across wireless, acoustic, motion, and visual sensing tasks, demon-strating that ShiftLIF achieves state-of-the-art accuracy while significantly improving energy efficiency over other LIF variants. 
+
+## 2 Related Work 2.1 SNNs for Edge Sensing Data 
+
+Spiking Neural Networks have been increasingly explored for edge sensing applications, including acoustic recognition, wearable mo-tion analysis, event-based vision, and wireless sensing, due to their event-driven sparsity and native temporal processing capa-bility [ 3, 6 , 25 , 32 ]. Existing sensing-oriented SNN studies have primarily emphasized architectural adaptation, temporal feature extraction, encoding strategies, and surrogate gradient for direct training [ 13 , 28 , 30 ]. In comparison, the spike representation mech-anism itself, especially the design of the neuron output alphabet beyond binary communication, remains relatively underexplored in SNNs for sensing applications design. 
+
+## 2.2 LIF Neurons and Their Variants 
+
+To overcome the representational limitations of standard LIF dy-namics, numerous variants have been proposed, broadly falling into two categories. The first category enriches internal membrane dynamics while strictly retaining binary spike communication. For instance, PLIF [ 9 ] introduces learnable membrane time constants, GLIF [ 50 ] incorporates complex gating mechanisms, and CLIF [ 19 ]adds complementary paths for better gradient flow. While these variants significantly improve temporal modeling and optimization behavior, they ultimately compress the rich, continuous membrane state into a 1-bit binary spike, leaving the inter-layer communica-tion bottleneck unresolved. The second category directly expands the spike alphabet to mitigate this 1-bit limitation. Representative works include multi-threshold or ternary neurons, such as Ternary Spike [ 12 ], MT-SNN [ 45 ], I-LIF [ 38 ], and INT-LIF [ 27 ]. While these multi-level neurons increase the information carried per spike, they typically rely on uniformly spaced quantization grids or generic multi-bit integer am-plitudes. This introduces two critical flaws: first, as demonstrated by recent studies [ 14 , 15 ], uniform discretization severely mismatches the zero-concentrated, heavy-tailed distribution of membrane po-tentials, leading to suboptimal level utilization and high relative quantization error [ 24 ]. Second, utilizing generic multi-bit spikes in-evitably reintroduces dense Multiply-Accumulate (MAC) operations at the synapses, fundamentally destroying the hardware-efficiency premise of SNNs. ShiftLIF structurally advances this second category. By introduc-ing a logarithmic, power-of-two quantization grid, it simultaneously achieves distribution-aware information maximization and strictly MAC-free, shift-based synaptic computation. 
+
+## 3 Method 3.1 Preliminary: Standard Leaky IF 
+
+The leaky integrate-and-fire (LIF) neuron is the most widely adopted computational unit in spiking neural networks [ 30 , 42 ]. At each discrete time step 𝑡 , the neuron integrates the incoming synaptic current into its membrane potential while gradually decaying pre-vious states. Incorporating a soft-reset mechanism, the membrane dynamics can be formulated as 
+
+𝑢 𝑡 = 𝜆𝑢 𝑡 −1 + 𝑥 𝑡 − 𝑠 𝑡 −1𝑉 th , (1) where 𝑢 𝑡 denotes the membrane potential, 𝜆 ∈ [ 0, 1) is the leak factor, 𝑥 𝑡 is the input current, 𝑉 th is the firing threshold, and 𝑠 𝑡 −1
+
+represents the spike emitted at the previous time step. When the accumulated membrane potential exceeds the threshold, the neuron generates an output spike according to a Heaviside step function: 
+
+𝑠 𝑡 =
+
+(
+
+1, if 𝑢 𝑡 ≥ 𝑉 th ,
+
+0, otherwise . (2) From a signal processing perspective, the leakage term 𝜆 endows the LIF neuron with the behavior of a first-order infinite impulse response low-pass filter [ 11 ]. It enables the neuron to temporally integrate recent inputs, effectively suppressing high-frequency en-vironmental noise while preserving slowly varying signal compo-nents that are important for real-world sensory perception. The binary firing mechanism also makes synaptic computation highly efficient, since the interactions between spikes and weights are reduced to simple accumulation without multiplications. How-ever, the LIF neuron suffers from a representational bottleneck be-cause its continuous membrane state is communicated only through binary spikes 𝑠 𝑡 ∈ { 0, 1} [ 12 , 14 ]. This extreme quantization dis-cards fine-grained amplitude information accumulated through temporal integration, thereby limiting the expressive capacity of the neuron, especially in continuous sensing scenarios where subtle signal variations are often informative.    
+
+> 2ShiftLIF: Efficient Multi-Level Spiking Neurons with Power-of-Two Quantization (a) Standard LIF
+> t
+> input spike temporal
+> accumulation
+> output spike
+> membrane
+> potential
+> Continuos membrane potential is
+> compressed into binary spikes
+> Binary Spike
+> {0,1}
+> (b) Existing Solutions
+> (b1) Enhanced membrane dynamics
+> learnable time constant
+> adaptive dynamics
+> extra state
+> Binary Spike
+> {0,1}
+> (b2) Uniform multi-level spikes
+> Poor distribution match, higher cost
+> Improved dynamics, but binary output
+> t
+> input spike
+> 1
+> 1
+> 1
+> 1
+> 2
+> 3
+> (c) ShiftLIF (ours)
+> Distribution aware
+> power-of-two
+> quantization
+> output spike
+> membrane
+> potential
+> Hardware
+> efficient shift
+> computation
+> 0.25
+> 0.5
+> 1
+> Int Spike
+> {0, 1, 2…} Log Spike
+> {0, 0.25, 0.5…}
+
+Figure 1: Comparison of standard LIF, existing solutions, and ShiftLIF. In (c), the colored dashed lines mark the thresholds of different power-of-two output levels, and the top inset shows a small-value-dominant membrane distribution with quantization points denser near zero. At the bottom, 𝑊 ≫ 𝑘 denotes a bitwise right shift by 𝑘 bits, highlighting that ShiftLIF replaces multiplication with shift-and-accumulate computation. 
+
+To overcome this limitation, the next section introduces ShiftLIF, which replaces the binary spike output of conventional LIF neu-rons with a power-of-two multi-level spike representation while preserving hardware-friendly computation. 
+
+## 3.2 ShiftLIF 
+
+The design principle of ShiftLIF is to break the binarized rep-resentation bottleneck while preserving the hardware effi-ciency of standard LIF neurons . To this end, ShiftLIF retains the membrane integration dynamics of the conventional LIF neuron and modifies only the spike generation and reset processes. 
+
+3.2.1 Shift-Quantized Activation. The central challenge in reformu-lating spike generation is to increase spike-level representational bandwidth without sacrificing hardware efficiency. Existing multi-level spiking neurons typically rely on uniformly spaced quantiza-tion levels. While such designs improve amplitude representation, they generally require synaptic multiplications and therefore do not naturally preserve the multiplier-free nature of standard LIF computation. In addition, uniform quantization allocates equal res-olution across the full dynamic range, which is not well matched to the non-uniform distribution of membrane potentials that typically cluster near small values [14, 15, 24, 31]. To address both issues, ShiftLIF replaces the standard Heaviside step function with a shift-quantization operator 𝑄 shift , which maps the continuous membrane potential to a discrete power-of-two spike set. This design naturally produces a logarithmically spaced output space, providing finer resolution for small activations while preserving shift-friendly computation. Without loss of generality, we normalize the firing threshold to 𝑉 th = 1.0. The quantization operator is defined as 
+
+𝑆 𝑡 = 𝑄 shift (𝑉 𝑡 ), 𝑄 shift (𝑣 ) =
+
+
+
+0, if 𝑣 < 2− ( 𝐾 +1) ,
+
+2−⌈− log 2 𝑣 ⌉, if 2− ( 𝐾 +1) ≤ 𝑣 ≤ 1,
+
+(3) where 𝑣 = max (0, min (𝑉 𝑡 , 1)) denotes the bounded membrane po-tential, and 𝐾 ∈ N controls the smallest non-zero spike magnitude. The corresponding output alphabet is 
+
+S = {0, 2−𝐾 , 2− ( 𝐾 −1) , . . . , 2−1, 1}, |S| = 𝐾 + 2. (4) For example, setting 𝐾 = 7 yields 9 discrete spike levels span-ning multiple orders of magnitude, enabling substantially richer amplitude encoding than standard binary spikes. 
+
+3.2.2 Logarithmic Quantization. The quantization grid of 𝑄 shift 
+
+is logarithmically spaced as the bin corresponding to the output 
+
+2−𝑘 , defined on the interval [2− ( 𝑘 +1) , 2−𝑘 ), has width 2− ( 𝑘 +1) . This width shrinks exponentially as 𝑘 increases, i.e., as activation values approach zero. In contrast, the uniform grid used in INT-LIF assigns a constant bin width Δ = 1/𝑁 across the full dynamic range. This non-uniform spacing is motivated by the membrane-potential distribution in SNNs. Due to the continuous leakage dynamics, membrane potentials are typically concentrated near small val-ues rather than being uniformly distributed over the full range. Prior studies on activation quantization and recent analyses of deep SNNs have shown that such non-uniform distributions are closely related to quantization error [ 14 , 15 , 24 , 31 ]. As further illustrated by our empirical measurements across multiple sensing modalities 
+
+> 3Tang et al.
+
+in Figure 2, the membrane potentials in trained models consistently cluster near zero. For such non-uniform distributions, uniformly spaced quanti-zation levels allocate equal resolution to both dense and sparse regions, which can under-represent the small-amplitude regime where membrane potentials occur most frequently. By contrast, the logarithmic power-of-two grid in ShiftLIF provides finer reso-lution near zero while maintaining coarser spacing for rare large values. This makes the quantization grid better aligned with the empirical membrane-potential distribution and naturally supports shift-based computation. Section 3.3 further analyzes the resulting representational properties. After spike generation, the membrane potential must be reset. To retain the residual sub-threshold charge that is not encoded into the current spike, ShiftLIF employs a proportional soft-reset mechanism: 
+
+𝑉 𝑡 ← 𝑉 𝑡 − 𝑆 𝑡 · 𝑉 th .
+
+Compared with the standard LIF soft reset, which subtracts a fixed threshold after each spike, ShiftLIF decrements the membrane po-tential proportionally to the emitted multi-level spike magnitude 
+
+𝑆 𝑡 ∈ S . This preserves residual membrane charge across time steps and reduces information loss caused by hard state truncation. The complete forward dynamics of a ShiftLIF neuron at a single time step are summarized in Algorithm 1. 
+
+Algorithm 1 ShiftLIF Forward Pass 
+
+Input: Current input 𝑋 𝑡 at timestep 𝑡 , membrane potential 𝑉 𝑡 −1
+
+Hyperparameters: Time constant 𝜏 , threshold 𝑉 th = 1.0, resting potential 𝑉 reset = 0.0, precision factor 𝐾  
+
+> 1:
+
+1. Leaky Integration  
+
+> 2:
+
+𝑉 𝑡 ← 𝑉 𝑡 −1 + 1 
+
+> 𝜏
+
+(𝑉 reset − 𝑉 𝑡 −1) + 𝑋 𝑡  
+
+> 3:
+
+2. Bounding (Clamp)  
+
+> 4:
+
+𝑣 ← max (0, min (𝑉 𝑡 , 𝑉 th ))  
+
+> 5:
+
+3. Shift-Quantized Activation  
+
+> 6:
+
+if 𝑣 < 2− ( 𝐾 +1) then  
+
+> 7:
+
+𝑆 𝑡 ← 0 
+
+> 8:
+
+else  
+
+> 9:
+
+𝑘 ← ⌈− log 2 𝑣 ⌉ 
+
+> 10:
+
+𝑆 𝑡 ← 2− min (𝑘,𝐾 ) 
+
+> 11:
+
+end if  
+
+> 12:
+
+4. Proportional Soft Reset  
+
+> 13:
+
+𝑉 𝑡 ← 𝑉 𝑡 − 𝑆 𝑡 · 𝑉 th  
+
+> 14:
+
+Return 𝑆 𝑡 , 𝑉 𝑡 
+
+For continuous sequence processing, this forward pass is itera-tively applied over 𝑡 = 1, . . . ,𝑇 , updating the membrane state and accumulating the output spike train {𝑆 𝑡 }𝑇 𝑡 =1.
+
+## 3.3 Theoretical Analysis 
+
+We next compare ShiftLIF with INT-LIF [ 27 ], a representative multi-level spiking baseline based on uniformly spaced integer levels. Standard binary LIF is recovered as the special case 𝐾 = 0 of INT-LIF, so the comparison with LIF is already covered by this formulation and is not discussed separately here. Let 𝑋 denote a nonnegative random variable representing the membrane potential normalized by the firing threshold, and let 𝑣 denote a generic realization of 𝑋 .We use 𝑋 in distribution-level expressions such as probabilities and expectations, and 𝑣 in pointwise definitions of the quantizers. Let 
+
+𝐾 be the precision factor introduced in Section 3.2.1. To match the same output budget, we compare the two level sets 
+
+Sshift = {0, 2−𝐾 , 2− ( 𝐾 −1) , . . . , 1},
+
+Sint = {0, 1, 2, . . . , 𝐾 + 1}, (5) which both contain 𝐾 + 2 discrete outputs. INT-LIF, and hence standard LIF as its 𝐾 = 0 special case, follows the nearest-level rule on a uniform integer grid. ShiftLIF instead selects the largest admis-sible dyadic level not exceeding the membrane value; this preserves power-of-two spike magnitudes and can be implemented efficiently with bit-shift operations, making it more hardware-friendly. Ac-cordingly, the ShiftLIF quantizer can be interpreted as 
+
+𝑄 shift (𝑣 ) = max {𝑠 ∈ S shift : 𝑠 ≤ 𝑣 }. (6) The INT-LIF quantizer is defined by 
+
+𝑄 int (𝑣 ) =
+
+
+
+0, 0 ≤ 𝑣 < 12 ,𝑗, 𝑗 − 12 ≤ 𝑣 < 𝑗 + 12 , 𝑗 = 1, . . . , 𝐾, 𝐾 + 1, 𝑣 ≥ 𝐾 + 12 .
+
+(7) 
+
+3.3.1 Quantization Error Analysis. Assuming E[𝑋 ] < ∞, we first analyze the expected absolute quantization error 
+
+E𝐴 = E[| 𝑋 − 𝑄 𝐴 (𝑋 )|] , 𝐴 ∈ { shift , int }. (8) For the sensing applications considered in this paper, the membrane distributions are not naturally uniform on the original linear scale. Instead, as illustrated by the empirical measurements in Figure 2, they are concentrated near zero while remaining spread across mul-tiple logarithmic scales. In this regime, the dyadic grid of ShiftLIF is a more natural match to the underlying distribution, because it allocates finer resolution to the low-value region where most mem-brane mass is concentrated while still preserving multiple spike levels across scales. The lemma below gives a simple sufficient condition under which this allocation yields a smaller expected absolute error than INT-LIF. 
+
+Lemma 3.1. The expected absolute quantization error Eshift is strictly less than Eint if 
+
+2−𝐾 Pr (2−𝐾 ≤ 𝑋 < 12 ) > 12 Pr ( 34 ≤ 𝑋 < 1) + 𝐾 Pr (𝑋 ≥ 32 ). (9) 
+
+Proof. Define 
+
+Δ(𝑣 ) = |𝑣 − 𝑄 int (𝑣 )| − ( 𝑣 − 𝑄 shift (𝑣 )) , 𝑣 ≥ 0. (10) Since 𝑄 shift (𝑣 ) ≤ 𝑣 for all 𝑣 ≥ 0, we have 
+
+|𝑣 − 𝑄 shift (𝑣 )| = 𝑣 − 𝑄 shift (𝑣 ). (11) A direct interval-by-interval comparison of the two quantizers yields the pointwise lower bound 
+
+Δ(𝑣 ) ≥ 2−𝐾 1{2−𝐾 ≤𝑣 < 12 } − 12 1{ 34 ≤𝑣 <1} − 𝐾 1{𝑣 ≥ 32 }, 𝑣 ≥ 0. (12) Indeed, on [2−𝐾 , 12 ), one has Δ(𝑣 ) ≥ 2−𝐾 . On [ 34 , 1), one has Δ(𝑣 ) ≥ − 12 . On [ 32 , ∞) , all cases satisfy Δ(𝑣 ) ≥ − 𝐾 . On the remaining 
+
+> 4
+
+ShiftLIF: Efficient Multi-Level Spiking Neurons with Power-of-Two Quantization 0.0 0.5 1.0 1.5 2.0 2.5 3.0                                 
+
+> Membrane potential ( u/Vth )
+> 0
+> 1
+> 2
+> 3
+> 4
+> 5
+> Frequency (%)
+> LeNet | lif3
+> 57.8% < 0, 0.0% > 3
+> (a) Distribution ARIL
+> Membrane potential
+> ShiftLIF
+> INT-LIF
+> LIF (binary)
+> 0123456
+> K
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> Average quantization error
+> (b) Quant. Error & UKARIL
+> ShiftLIF error INT-LIF error U(shift)
+> KU(int)
+> K
+> 0.0 0.5 1.0 1.5 2.0 2.5 3.0
+> Membrane potential ( u/Vth )
+> 0
+> 1
+> 2
+> 3
+> 4
+> 5
+> Frequency (%)
+> LeNet | lif3
+> 10.7% < 0, 0.0% > 3
+> (c) Distribution BullyDetect
+> Membrane potential
+> ShiftLIF
+> INT-LIF
+> LIF (binary)
+> 0123456
+> K
+> 0.000
+> 0.025
+> 0.050
+> 0.075
+> 0.100
+> 0.125
+> 0.150
+> 0.175
+> 0.200
+> Average quantization error
+> (d) Quant. Error & UKBullyDetect
+> ShiftLIF error INT-LIF error U(shift)
+> KU(int)
+> K
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Bit utilization  UK
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Bit utilization  UK
+
+Figure 2: Membrane potential distribution, quantization error, and bit utilization metric on sensing datasets. Compared with INT-LIF, ShiftLIF yields lower quantization error and better bit utilization level as 𝐾 increases. 
+
+region, the right-hand side is nonpositive while the inequality is immediate. Taking expectations yields 
+
+E[Δ(𝑋 )] ≥ 2−𝐾 Pr (2−𝐾 ≤ 𝑋 < 12 )− 12 Pr ( 34 ≤ 𝑋 < 1) − 𝐾 Pr (𝑋 ≥ 32 ). (13) Since 
+
+Eshift − E int = −E[Δ(𝑋 )] , (14) the stated condition implies E[Δ(𝑋 )] > 0, which is equivalent to 
+
+Eshift < Eint . □
+
+A direct comparison of the two quantizers shows that ShiftLIF is favored on [2−𝐾 , 34 ), the two quantizers are tied on [0, 2−𝐾 ) ∪ [1, 32 ), and INT-LIF is favored on [ 34 , 1) ∪ [ 32 , ∞) . Consequently, the distribution of probability mass within the unit interval matters, not just the aggregate mass Pr (2−𝐾 ≤ 𝑋 < 1). The advantage in quantization error of ShiftLIF on real sensing datasets is evident in Figure 2. 
+
+3.3.2 Information-Theoretic Capacity. We now analyze how effec-tively the two quantizers use the same 𝐾 + 2 output levels. We measure this through the normalized output entropy relative to the bit budget required to encode these levels: 
+
+𝑈 (𝐴 )
+
+𝐾 = 𝐻 (𝑄 𝐴 (𝑋 )) ⌈log 2 (𝐾 + 2)⌉ , 𝐴 ∈ { shift , int }. (15) Here, ⌈log 2 (𝐾 + 2)⌉ is the number of bits needed to encode the 
+
+𝐾 + 2 quantization levels. Thus, 𝑈 (𝐴 )
+
+𝐾 measures how effectively those bits are utilized: larger values, especially those closer to 1,indicate better use of the available coding capacity and are therefore preferred. For a discrete random variable 𝑌 with probability mass function 𝑝 𝑌 , we define 
+
+𝐻 (𝑌 ) = −∑︁ 
+
+𝑦 
+
+𝑝 𝑌 (𝑦 ) log 2 𝑝 𝑌 (𝑦 ), (16) with the convention 0 log 2 0 : = 0. For a finite probability vector such as 𝑅 , 𝑉 , or 𝑇 , 𝐻 (𝑅 ), 𝐻 (𝑉 ), and 𝐻 (𝑇 ) are defined by the same formula. For the entropy comparison, the key split occurs at 12 : ShiftLIF preserves variation in the low-amplitude region by distributing the mass below 12 across dyadic shells, which can increase output entropy when membrane values are concentrated near zero. By contrast, INT-LIF collapses all mass below 12 to the single output 0,and only distributes mass across uniform cells above 12 . The next lemma makes this entropy decomposition explicit. 
+
+Lemma 3.2. Let 𝑟 = Pr (𝑋 < 12 ). Let 𝑅 , 𝑉 , and 𝑇 denote the condi-tional output distributions of ShiftLIF below 12 , of ShiftLIF on [ 12 , ∞) ,and of rounded INT-LIF on [ 12 , ∞) , respectively. Then 
+
+𝐻 (𝑄 shift (𝑋 )) = ℎ2 (𝑟 ) + 𝑟𝐻 (𝑅 ) + ( 1 − 𝑟 )𝐻 (𝑉 ),𝐻 (𝑄 int (𝑋 )) = ℎ2 (𝑟 ) + ( 1 − 𝑟 )𝐻 (𝑇 ), (17) 
+
+where ℎ2 (𝑟 ) = −𝑟 log 2 𝑟 − ( 1 − 𝑟 ) log 2 (1 − 𝑟 ) is the binary entropy. Consequently, 
+
+𝑈 (shift )
+
+𝐾 > 𝑈 (int )
+
+𝐾 ⇐⇒ 𝑟𝐻 (𝑅 ) + ( 1 − 𝑟 )𝐻 (𝑉 ) > (1 − 𝑟 )𝐻 (𝑇 ). (18) 
+
+The same formulas remain valid in the degenerate cases 𝑟 = 0 and 
+
+𝑟 = 1, with the absent conditional-entropy term interpreted as zero. 
+
+The proof is provided in the supplementary materials. This cri-terion shows that ShiftLIF is favored when a substantial fraction of the mass lies below 12 and is well spread across the dyadic shells there. INT-LIF is only favored when the mass above 12 is broadly spread across the nearest-integer cells. In Figure 2, we see that ShiftLIF behaves well in terms of bit utilization in sensing datasets. 
+
+## 3.4 Training Procedure 
+
+Surrogate Gradients. The shift-quantization operator 𝑄 shift is piecewise constant and therefore has zero derivative almost ev-erywhere, which prevents direct backpropagation. To enable end-to-end training, we adopt a straight-through estimator (STE) that is matched to the support of the ShiftLIF quantizer. In the forward pass, the spike output is generated by 
+
+𝑠 𝑡 = 𝑄 shift (𝑢 𝑡 ). (19) Since 𝑄 shift is defined on the bounded interval [0, 1], we approxi-mate its derivative in the backward pass by 
+
+𝜕𝑠 𝑡 
+
+𝜕𝑢 𝑡 
+
+≈ 1[0≤𝑢 𝑡 ≤1] . (20) Accordingly, the gradient of the loss is propagated as 
+
+𝜕 L
+
+𝜕𝑢 𝑡 
+
+≈ 𝜕 L
+
+𝜕𝑠 𝑡 
+
+· 1[0≤𝑢 𝑡 ≤1] . (21) That is, gradients are passed through unchanged within the quanti-zation support and set to zero outside it. This choice is consistent with the STE framework widely used in quantized and spiking neural networks, while being specifically adapted to the multi-level support of ShiftLIF. In contrast to binary surrogate functions that primarily provide a gradient around a sin-gle firing threshold, the proposed STE supplies a non-zero gradient 
+
+5Tang et al. 
+
+over the full activation range of the quantizer, allowing all active quantization regions to participate in optimization. 
+
+Spike rate regularization. To further control the firing activity during training, we add a spike rate regularizer to the task loss: 
+
+L = LCE + 𝜆 sr Lsr , (22) where 
+
+Lsr = 1
+
+𝐿 
+
+> 𝐿
+
+∑︁ 
+
+> ℓ=1
+
+h
+
+mean 
+
+
+
+|S (ℓ ) |
+
+
+
+− 𝑟 ∗ i+
+
+. (23) This term penalizes only layers whose average spike magnitude exceeds the target 𝑟 ∗, thereby reducing excessive firing activity without suppressing already sparse responses. We use an L1-style penalty so that the regularization signal remains stable near the target rate. 
+
+## 3.5 Hardware Computation 
+
+A key motivation for adopting a power-of-two spike alphabet is to avoid the general multiplication overhead introduced by con-ventional multi-level spiking neurons. In standard synaptic com-putation, the pre-synaptic input to neuron 𝑖 at time step 𝑡 is given by 
+
+𝑥 (𝑡 ) 
+
+> 𝑖
+
+=∑︁ 
+
+> 𝑗
+
+𝑊 𝑖 𝑗 𝑠 (𝑡 ) 
+
+> 𝑗
+
+, (24) where 𝑊 𝑖 𝑗 denotes the synaptic weight and 𝑠 (𝑡 ) 
+
+> 𝑗
+
+is the pre-synaptic spike. For conventional multi-level SNNs, 𝑠 (𝑡 ) 
+
+> 𝑗
+
+typically takes arbi-trary integer or floating-point values, so evaluating 𝑊 𝑖 𝑗 𝑠 (𝑡 ) 
+
+> 𝑗
+
+gener-ally requires standard multiplication. In ShiftLIF, all non-zero spikes are constrained to the form 
+
+𝑠 (𝑡 ) 
+
+> 𝑗
+
+= 2−𝑘 , 𝑘 ∈ { 0, 1, . . . , 𝐾 }. (25) Under integer or fixed-point weight representations, the corre-sponding synaptic product can be implemented as a right-shift operation, 
+
+𝑊 𝑖 𝑗 𝑠 (𝑡 ) 
+
+> 𝑗
+
+= 𝑊 𝑖 𝑗 · 2−𝑘 −→ 𝑊 𝑖 𝑗 ≫ 𝑘, (26) where ≫ denotes arithmetic right shift. When 𝑠 (𝑡 ) 
+
+> 𝑗
+
+= 0, the synaptic update is skipped entirely, preserving the event-driven sparsity of spiking computation. As a result, ShiftLIF replaces MAC(multiply-accumulate) opera-tions in multi-level synaptic interactions with shift-based accumu-lation. This preserves the hardware efficiency of standard binary SNN computation while enabling richer spike representations. In addition, the reduced effective bit width of shifted operands can make the subsequent accumulation more efficient in practical in-teger implementations. Compared with conventional multi-level spike designs, ShiftLIF therefore provides a more favorable trade-off between representational capacity and hardware efficiency. 
+
+## 4 Experiment 4.1 Setup 
+
+4.1.1 Dataset. To evaluate ShiftLIF, we benchmark across 10 datasets with four distinct sensing modalities: (1) Wireless Sensing: ARIL [ 43 ], UT-HAR [ 49 ], Fi-HumanID [ 49 ], and BullyDetect [ 21 ] for WiFi-based human activity and identification tasks; (2) Acoustic Sens-ing: UrbanSound8K [ 33 ] (10-fold cross-validation) and Google Speech Commands v2 (GSC, 35-class) [ 46 ]; (3) Motion Sensing: 
+
+UCI-HAR [ 2] and HHAR [ 37 ] for IMU-based activity recognition; and (4) Neuromorphic Vision: CIFAR10-DVS [ 23 ] and DVS128-Gesture [ 1]. These datasets include continuous signals that require initial encoding as well as data from native event sensors. This va-riety allows us to evaluate the proposed neuronal dynamics under different spatial and temporal distributions. Continuous motion signals are segmented using a sliding window with a size of 128 and a stride of 64, while acoustic waveforms are transformed into 128-dimensional Mel-spectrograms. 
+
+4.1.2 Besealine Neurons. We compare ShiftLIF against nine spiking neuron models: the standard binary LIF [ 30 ], PLIF [ 9], GLIF [ 50 ], CLIF [ 19 ], PSN [ 10 ], TLIF [ 12 ], I-LIF [ 38 ], RPLIF [ 26 ], and INT-LIF [27 ]. Among these, INT-LIF is the most direct comparator as it also provides multi-level spike outputs, while the remaining baselines emit binary {0, 1} or ternary {− 1, 0, 1} spikes. 
+
+4.1.3 Implementation. The comparison of different neurons is done with an identical spiking LeNet [ 22 ] backbone. Models are trained from scratch for 150 epochs using the Adam optimizer with the learning rate of 10 −3 and a cosine annealing schedule. The temporal simulation window is fixed to 𝑇 = 4 time steps across all tasks. The variants of spike neurons are implemented with spikingjelly [7]. For ShiftLIF, we set the precision factor to 𝐾 = 2, defining a 2-level spike alphabet S = {0, 2−2, 2−1, 1}. To ensure a perfectly fair comparison, the fundamental dynamic parameters are consistently aligned across all evaluated neuron models: the firing threshold is 𝑉 th = 1.0, the reset potential is 𝑉 reset = 0.0, and the membrane time constant is 𝜏 = 2.0. All experiments are executed on a single NVIDIA GPU with a fixed random seed. 
+
+## 4.2 Comparison Among Spiking Neurons 
+
+Table 1 compares ShiftLIF with standard LIF, dynamic enhanced variants, and existing multi-level spiking neurons on ten sensing benchmarks. ShiftLIF achieves the best average accuracy, reaching 
+
+89 .34% , surpassing the 88 .74% and 88 .63% of the strongest com-peting baselines, CLIF and I-LIF, and improving substantially over 
+
+82 .00% of the standard LIF. Its advantage is most evident on continuous sensing tasks. Across the eight benchmarks in wireless, acoustic, and motion sensing, ShiftLIF ranks first on ARIL, Fi-Humanid, GSC, UCIHAR, and HHAR, and ties for first on UT-HAR. It also achieves the second-best re-sult on BullyDetect and UrbanSound8K. On neuromorphic sensing benchmarks, it is less dominant but remains competitive, reaching 
+
+63 .65% on CIFAR10-DVS and 92 .36% on DVS-Gesture. Overall, these results show that ShiftLIF is particularly effective on continuous sensing data while maintaining competitive performance on the other event-based tasks. 
+
+## 4.3 Comparison Across Backbones 
+
+We further compare ShiftLIF and INT-LIF across a diverse set of backbones, including CNN, ResNet, and Transformer-style architec-tures [ 8, 18 , 35 , 52 , 54 ]. As shown in Table 2, ShiftLIF outperforms INT-LIF on the majority of backbone–dataset pairs. The improve-ment is especially consistent on ARIL, UT-HAR, and BullyDetect, 
+
+> 6ShiftLIF: Efficient Multi-Level Spiking Neurons with Power-of-Two Quantization
+
+Table 1: Comparison of different spiking neuron models across low-filtering wireless sensing, acoustic sensing, motion sensing, and neuromorphic sensing benchmarks. Results are reported as accuracy (%). Best and second-best results are highlighted in bold and underlined, respectively.                                                                                                                             
+
+> Method Low-filtering Wireless Sensing Acoustic Sensing Motion Sensing Neuromorphic Sensing Avg. ARIL UT-HAR Fi-Humanid BullyDetect UrbanSound8K GSC UCIHAR HHAR CIFAR10-DVS DVS-Gesture CLIF 92.09 99.20 99.45 81.38 83.06 89.54 93.86 91.77 63.65 93.40 88.74 GLIF 89.93 98.80 98.17 78.26 79.01 90.31 92.74 91.28 63.15 93.40 87.50 INTLIF 89.57 99.40 98.17 79.69 79.67 90.51 93.28 91.68 62.15 95.14 87.93 LIF 91.01 97.09 99.08 67.28 79.37 84.90 83.71 81.02 46.65 89.93 82.00 PLIF 91.73 98.90 98.72 79.91 82.76 90.39 93.25 91.71 64.35 93.06 88.48 PSN 85.61 96.89 99.27 63.39 76.29 89.31 92.91 90.50 56.65 91.32 84.21 TLIF 88.13 96.39 99.45 15.63 78.52 52.39 91.52 69.80 22.85 84.03 69.87 ILIF 91.37 99.40 99.08 82.37 81.97 90.70 93.69 91.36 64.35 92.01 88.63 RPLIF 87.77 97.39 99.27 67.68 80.94 85.59 91.25 81.71 45.05 88.19 82.48
+> ShiftLIF 92.81 99.40 99.63 82.14 83.00 91.31 94.30 94.75 63.65 92.36 89.34
+
+Table 2: Comparison between ShiftLIF and INT-LIF across different backbones on wireless sensing benchmarks. For each dataset, we report the accuracy (%) of ShiftLIF, the accuracy (%) of INT-LIF, and their difference Δ = ShiftLIF − INT-LIF. The better result between the two neurons is highlighted in bold. 
+
+Backbone ARIL UT-HAR Fi-Humanid BullyDetect ShiftLIF INT-LIF Δ ShiftLIF INT-LIF Δ ShiftLIF INT-LIF Δ ShiftLIF INT-LIF Δ
+
+SpikingLeNet 92.01 89.57 +2.44 99.40 99.40 0.00 99.63 98.17 +1.46 82.14 79.69 +2.45 SpikingVGG9 97.84 94.60 +3.24 99.90 99.60 +0.30 99.63 99.45 +0.18 80.36 30.62 +49.74 SEWResNet34 89.21 89.57 -0.36 99.80 99.30 +0.50 99.45 99.45 0.00 79.55 58.53 +21.02 MSResNet34 93.17 88.85 +4.32 99.60 99.40 +0.20 99.45 99.08 +0.37 80.13 77.86 +2.27 Spikformer256 94.96 89.57 +5.39 99.70 98.80 +0.90 99.63 99.82 -0.19 85.94 55.54 +30.40 MetaSpikformer256 94.24 92.45 +1.79 99.80 99.70 +0.10 99.63 99.08 +0.55 77.59 67.99 +9.60 QKformer256 96.04 89.21 +6.83 99.90 99.10 +0.80 99.63 99.82 -0.19 74.82 59.51 +15.31 
+
+where ShiftLIF is better for nearly all available backbones. On Fi-Humanid, the two neurons are close, but ShiftLIF still achieves equal or higher accuracy in most cases. Only a small number of cases show no gain or a slight decrease, such as SEWResNet34 on ARIL and QKformer256 on Fi-Humanid. Overall, these results indicate that the advantage of ShiftLIF is not tied to a particular architecture. Instead, it transfers across different backbone families, suggesting that the proposed spike representation is broadly compatible with existing SNN designs. 
+
+## 4.4 Energy Analysis 
+
+The computational cost of an SNN depends on both the tempo-ral window length 𝑇 and the average spike rate 𝑠 . A larger 𝑇 re-peats synaptic processing over more timesteps, while a larger 𝑠 
+
+increases the number of effective events that trigger computation and data movement. The energy of a spiking layer is modeled as 
+
+𝐸 total = 𝑇 · 𝑠 ·  𝐸 ACC + 𝐸 move + 𝐸 weight 
+
+, where 𝐸 ACC denotes the accumulation energy, 𝐸 move denotes the spike movement energy, and 𝐸 weight denotes the SRAM weight access energy. All reported energy values are derived from measurements on a commercial 22 nm process [48]. Since the temporal window is fixed to 𝑇 = 4 for all tasks, the energy differences in Table 4 are driven mainly by spike activity and synaptic efficiency. Training with spike rate regularization, ShiftLIF consistently achieves a stronger accuracy–energy trade-off than INT-LIF on the four wireless sensing benchmarks. At the same time, ShiftLIF delivers better accuracy on three of the four datasets. Compared with standard LIF, ShiftLIF also improves accuracy on three datasets while maintaining similar or lower energy in most cases. 
+
+## 4.5 Ablation Study 
+
+Effect of precision factor. We first study the effect of the precision factor 𝐾 , which determines the smallest non-zero spike magnitude 
+
+2−𝐾 and thus the granularity of the spike alphabet. As shown in Figure 3, the best performance is achieved at moderate values of 
+
+𝐾 rather than increasing monotonically with finer quantization. Specifically, the optimum appears at 𝐾 = 2 on ARIL and 𝐾 = 3 on BullyDetect, while the coarsest setting 𝐾 = 1 gives the worst result on both datasets. This indicates that the improvement of ShiftLIF does not come from simply increasing the number of spike levels. When 𝐾 becomes larger, the additional bits bring limited benefit. 
+
+> 7Tang et al.
+
+Table 3: Ablation study on quantization strategy. We compare the proposed logarithmic power-of-two quantization (ShiftLIF) with a uniform multi-level quantization under the same number of spike levels. Results are reported as accuracy (%). The better result in each column is highlighted in bold.                                                   
+
+> Method Wireless Sensing Acoustic Sensing Motion Sensing Neuromorphic Sensing Avg. ARIL UT-HAR Fi-HumanID BullyDetect UrbanSound8K GSC UCIHAR HHAR CIFAR10-DVS DVS-Gesture ShiftLIF 92.81 99.40 99.63 82.14 83.00 91.31 94.30 94.75 63.65 92.36 89.34
+> Uniform 89.21 99.50 99.27 81.25 82.21 91.63 94.37 93.51 64.40 95.14 89.05
+> Δ(ShiftLIF −Uniform) +3.60 -0.10 +0.36 +0.89 +0.79 -0.32 -0.07 +1.24 -0.75 -2.78 +0.29
+
+Table 4: Spike Rate and Accuracy Comparison Across Datasets and Neuron Types. ShiftLIF* indicates training with spike rate regularization. 
+
+Dataset Neuron Acc (%) Spike Rate Energy(mJ) UTHar ShiftLIF* 98.49 0.030 3.32 LIF 97.09 0.040 4.27 INTLIF 99.40 0.046 5.44 FiHumanID ShiftLIF* 98.35 0.021 2.51 LIF 99.08 0.109 10.58 INTLIF 98.17 0.203 25.71 BullyDetect ShiftLIF* 82.54 0.038 4.04 LIF 67.28 0.027 3.08 INTLIF 79.69 0.080 7.97 ARIL ShiftLIF* 92.45 0.049 5.03 LIF 91.01 0.047 4.91 INTLIF 89.57 0.151 15.19 Based on this observation, we use 𝐾 = 2 as the default setting in the main experiments. 
+
+Logarithmic vs. uniform quantization. We next compare the pro-posed logarithmic power-of-two quantization with a uniform multi-level quantization under the same number of spike levels. Table 3 shows that ShiftLIF achieves better overall performance, with clearer gains on continuous sensing tasks such as ARIL, Fi-HumanID, Bul-lyDetect, UrbanSound8K, and HHAR. This result is consistent with our design motivation: membrane potentials in trained SNNs are typically concentrated in the low-amplitude regime, where the log-arithmic grid provides finer resolution than a uniform one. The advantage is less consistent on event-based vision benchmarks, sug-gesting that the benefit of quantization depends on the underlying signal statistics. Overall, these results support the central design of ShiftLIF: the gain comes not only from using multi-level spikes, but from using a quantization scheme that is better matched to SNN membrane dynamics. 
+
+## 5 Discussion 
+
+The results show a clear pattern that ShiftLIF is most effective on continuous sensing tasks, including wireless, acoustic, and motion data, while its advantage is smaller on event-based vision bench-marks. A likely reason is that continuous signals contain useful amplitude variations over time, and these variations are not well 1 2 3 4 5 6 7       
+
+> K
+> 90.5
+> 91.0
+> 91.5
+> 92.0
+> 92.5
+> 93.0
+> Accuracy (%)
+> (a) ARIL 1234567
+> K
+> 78.0
+> 80.0
+> 82.0
+> 84.0
+> Accuracy (%) (b) BullyDetect
+
+Figure 3: Ablation on the precision factor 𝐾 of ShiftLIF on ARIL and BullyDetect. Moderate 𝐾 values achieve the best accuracy, while increasing 𝐾 further brings no consistent gain. 
+
+preserved by binary spikes. By using a multi-level spike set with finer resolution near small values, ShiftLIF can retain more of this information during neuron-to-neuron communication. This observation is also consistent with the membrane-potential distributions analyzed in our study. Since a large fraction of mem-brane states lie in the low-amplitude regime, a logarithmic quan-tization grid is better matched to the underlying signal statistics than a uniform grid. At the same time, the power-of-two constraint keeps synaptic computation efficient, since spike-weight interac-tions can still be implemented through shift and accumulation rather than general multiplication. The main benefit of ShiftLIF therefore, comes from combining richer spike representation with a lightweight computation path. 
+
+## 6 Conclusion 
+
+In this paper, we propose ShiftLIF, a simple multi-level spiking neuron that improves both accuracy and hardware efficiency. By using a logarithmic power-of-two spike set, ShiftLIF better matches the membrane potential distribution and preserves more useful information, especially for small activations. Experiments on ten datasets across four edge-sensing modalities show that ShiftLIF consistently achieves a better accuracy–energy trade-off than ex-isting neuron designs. The gains are especially clear on continuous sensing tasks, where fine signal changes matter. We also show that logarithmic quantization works better than uniform quantization, and that a moderate precision factor 𝐾 is enough to reach strong performance. Overall, ShiftLIF provides a simple and effective way to improve SNNs. 
+
+> 8
+
+ShiftLIF: Efficient Multi-Level Spiking Neurons with Power-of-Two Quantization 
+
+## References 
+
+[1] Arnon Amir, Brian Taba, David Berg, Timothy Melano, Jeffrey McKinstry, Carmelo Di Nolfo, Tapan Nayak, Alexander Andreopoulos, Guillaume Garreau, Marcela Mendoza, et al . 2017. A low power, fully event-based gesture recogni-tion system. In Proceedings of the IEEE conference on computer vision and pattern recognition . 7243–7252. [2] Davide Anguita, Alessandro Ghio, Luca Oneto, Xavier Parra, Jorge Luis Reyes-Ortiz, et al . 2013. A public domain dataset for human activity recognition using smartphones.. In Esann , Vol. 3. 3–4. [3] Suwhan Baek and Jaewon Lee. 2024. Snn and sound: a comprehensive review of spiking neural networks in sound. Biomedical Engineering Letters 14, 5 (2024), 981–991. [4] William M Connelly, Michael Laing, Adam C Errington, and Vincenzo Crunelli. 2016. The thalamus as a low pass filter: filtering at the cellular level does not equate with filtering at the network level. Frontiers in neural circuits 9 (2016), 89. [5] Samuel Coward, Theo Drane, Emiliano Morini, and George A Constantinides. 2024. Combining power and arithmetic optimization via datapath rewriting. In 
+
+2024 IEEE 31st Symposium on Computer Arithmetic (ARITH) . IEEE, 24–31. [6] Shuiguang Deng, Di Yu, Changze Lv, Xin Du, Linshan Jiang, Xiaofan Zhao, Wen-tao Tong, Xiaoqing Zheng, Weijia Fang, Peng Zhao, et al . 2025. Edge intelligence with spiking neural networks. arXiv preprint arXiv:2507.14069 (2025). [7] Wei Fang, Yanqi Chen, Jianhao Ding, Zhaofei Yu, Timothée Masquelier, Ding Chen, Liwei Huang, Huihui Zhou, Guoqi Li, and Yonghong Tian. 2023. Spiking-jelly: An open-source machine learning infrastructure platform for spike-based intelligence. Science Advances 9, 40 (2023), eadi1480. [8] Wei Fang, Zhaofei Yu, Yanqi Chen, Tiejun Huang, Timothée Masquelier, and Yonghong Tian. 2021. Deep residual learning in spiking neural networks. Ad-vances in neural information processing systems 34 (2021), 21056–21069. [9] Wei Fang, Zhaofei Yu, Yanqi Chen, Timothée Masquelier, Tiejun Huang, and Yonghong Tian. 2021. Incorporating learnable membrane time constant to enhance learning of spiking neural networks. In Proceedings of the IEEE/CVF international conference on computer vision . 2661–2671. [10] Wei Fang, Zhaofei Yu, Zhaokun Zhou, Ding Chen, Yanqi Chen, Zhengyu Ma, Timothée Masquelier, and Yonghong Tian. 2023. Parallel spiking neurons with high efficiency and ability to learn long-term dependencies. Advances in Neural Information Processing Systems 36 (2023), 53674–53687. [11] Yuetong Fang, Deming Zhou, Ziqing Wang, Hongwei Ren, ZeCui Zeng, Lusong Li, Renjing Xu, et al . [n. d.]. Spiking Neural Networks Need High-Frequency Information. In The Thirty-ninth Annual Conference on Neural Information Pro-cessing Systems .[12] Yufei Guo, Yuanpei Chen, Xiaode Liu, Weihang Peng, Yuhan Zhang, Xuhui Huang, and Zhe Ma. 2024. Ternary spike: Learning ternary spikes for spiking neural networks. In Proceedings of the AAAI conference on artificial intelligence ,Vol. 38. 12244–12252. [13] Yufei Guo, Xuhui Huang, and Zhe Ma. 2023. Direct learning-based deep spiking neural networks: a review. Frontiers in Neuroscience 17 (2023), 1209795. [14] Yufei Guo, Xiaode Liu, Yuanpei Chen, Liwen Zhang, Weihang Peng, Yuhan Zhang, Xuhui Huang, and Zhe Ma. 2023. Rmp-loss: Regularizing membrane potential distribution for spiking neural networks. In Proceedings of the IEEE/CVF International Conference on Computer Vision . 17391–17401. [15] Yufei Guo, Xinyi Tong, Yuanpei Chen, Liwen Zhang, Xiaode Liu, Zhe Ma, and Xuhui Huang. 2022. Recdis-snn: Rectifying membrane potential distribution for directly training spiking neural networks. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 326–335. [16] Bing Han, Gopalakrishnan Srinivasan, and Kaushik Roy. 2020. Rmp-snn: Residual membrane potential neuron for enabling deeper high-accuracy and low-latency spiking neural network. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition . 13558–13567. [17] Zecheng Hao, Xinyu Shi, Yujia Liu, Zhaofei Yu, and Tiejun Huang. 2024. Lm-ht snn: Enhancing the performance of snn to ann counterpart through learnable multi-hierarchical threshold model. Advances in Neural Information Processing Systems 37 (2024), 101905–101927. [18] Yifan Hu, Lei Deng, Yujie Wu, Man Yao, and Guoqi Li. 2024. Advancing spiking neural networks toward deep residual learning. IEEE transactions on neural networks and learning systems 36, 2 (2024), 2353–2367. [19] Yulong Huang, Xiaopeng Lin, Hongwei Ren, Haotian Fu, Yue Zhou, Zunchang Liu, Biao Pan, and Bojun Cheng. 2024. Clif: Complementary leaky integrate-and-fire neuron for spiking neural networks. arXiv preprint arXiv:2402.04663 
+
+(2024). [20] Meng-Huang Lai and Kang-Shuo Chang. 2023. Ai sensor applications in edge computing. IEEE Nanotechnology Magazine 17, 6 (2023), 23–28. [21] Bo Lan, Fei Wang, Lekun Xia, Fan Nai, Shiqiang Nie, Han Ding, and Jinsong Han. 2024. Bullydetect: Detecting school physical bullying with wi-fi and deep wavelet transformer. IEEE Internet of Things Journal 12, 5 (2024), 5160–5169. [22] Yann LeCun, Léon Bottou, Yoshua Bengio, and Patrick Haffner. 2002. Gradient-based learning applied to document recognition. Proc. IEEE 86, 11 (2002), 2278– 2324. [23] Hongmin Li, Hanchao Liu, Xiangyang Ji, Guoqi Li, and Luping Shi. 2017. Cifar10-dvs: an event-stream dataset for object classification. Frontiers in neuroscience 11 (2017), 244131. [24] Yuhang Li, Xin Dong, and Wei Wang. 2019. Additive powers-of-two quantization: An efficient non-uniform discretization for neural networks. arXiv preprint arXiv:1909.13144 (2019). [25] Yuhang Li, Ruokai Yin, Youngeun Kim, and Priyadarshini Panda. 2023. Effi-cient human activity recognition with spatio-temporal spiking neural networks. 
+
+Frontiers in Neuroscience 17 (2023), 1233037. [26] Yang Li, Xinyi Zeng, Zhe Xue, Pinxian Zeng, Zikai Zhang, and Yan Wang. 2025. Incorporating the Refractory Period into Spiking Neural Networks through Spike-Triggered Threshold Dynamics. In Proceedings of the 33rd ACM International Conference on Multimedia . 10876–10885. [27] Xinhao Luo, Man Yao, Yuhong Chou, Bo Xu, and Guoqi Li. 2024. Integer-valued training and spike-driven inference spiking neural network for high-performance and energy-efficient object detection. In European Conference on Computer Vision .Springer, 253–272. [28] Kai Malcolm and Josue Casco-Rodriguez. 2023. A comprehensive review of spik-ing neural networks: Interpretation, optimization, efficiency, and best practices. 
+
+arXiv preprint arXiv:2303.10780 (2023). [29] Mattia Merluzzi, Nicola Di Pietro, Paolo Di Lorenzo, Emilio Calvanese Strinati, and Sergio Barbarossa. 2021. Discontinuous computation offloading for energy-efficient mobile edge computing. IEEE Transactions on Green Communications and Networking 6, 2 (2021), 1242–1257. [30] Emre O Neftci, Hesham Mostafa, and Friedemann Zenke. 2019. Surrogate gradient learning in spiking neural networks. IEEE Signal Processing Magazine 36, 6 (2019), 51–63. [31] Dominika Przewlocka-Rus, Syed Shakib Sarwar, H Ekin Sumbul, Yuecheng Li, and Barbara De Salvo. 2022. Power-of-two quantization for low bitwidth and hardware compliant neural networks. arXiv preprint arXiv:2203.05025 (2022). [32] Hemanth Sabbella, Archit Mukherjee, Thivya Kandappu, Sounak Dey, Arpan Pal, Archan Misra, and Dong Ma. 2025. The Promise of Spiking Neural Networks for Ubiquitous Computing: A Survey and New Perspectives. arXiv preprint arXiv:2506.01737 (2025). [33] Justin Salamon, Christopher Jacoby, and Juan Pablo Bello. 2014. A dataset and taxonomy for urban sound research. In Proceedings of the 22nd ACM international conference on Multimedia . 1041–1044. [34] Weisong Shi, Jie Cao, Quan Zhang, Youhuizi Li, and Lanyu Xu. 2016. Edge computing: Vision and challenges. IEEE internet of things journal 3, 5 (2016), 637–646. [35] Karen Simonyan and Andrew Zisserman. 2014. Very deep convolutional net-works for large-scale image recognition. arXiv preprint arXiv:1409.1556 (2014). [36] Neeraj Solanki, Sepehr Tabrizchi, Samin Sohrabi, Jason Schmidt, and Arman Roohi. 2025. ATM-Net: Adaptive Termination and Multi-Precision Neural Net-works for Energy-Harvested Edge Intelligence. arXiv preprint arXiv:2502.09822 
+
+(2025). [37] Allan Stisen, Henrik Blunck, Sourav Bhattacharya, Thor Siiger Prentow, Mikkel Baun Kjærgaard, Anind Dey, Tobias Sonne, and Mads Møller Jensen. 2015. Smart devices are different: Assessing and mitigatingmobile sensing het-erogeneities for activity recognition. In Proceedings of the 13th ACM conference on embedded networked sensor systems . 127–140. [38] Kai Sun, Peibo Duan, Levin Kuhlmann, Beilun Wang, and Bin Zhang. 2025. Ilif: Temporal inhibitory leaky integrate-and-fire neuron for overactivation in spiking neural networks. arXiv preprint arXiv:2505.10371 (2025). [39] Kaiwen Tang, Jiaqi Zheng, Yuze Jin, Yupeng Qiu, Guangda Sun, Zhanglu Yan, and Weng-Fai Wong. 2026. SpikySpace: A Spiking State Space Model for Energy-Efficient Time Series Forecasting. arXiv preprint arXiv:2601.02411 (2026). [40] Hokchhay Tann, Soheil Hashemi, R Iris Bahar, and Sherief Reda. 2017. Hardware-software codesign of accurate, multiplier-free deep neural networks. In Proceed-ings of the 54th Annual Design Automation Conference 2017 . 1–6. [41] Corinne Teeter, Ramakrishnan Iyer, Vilas Menon, Nathan Gouwens, David Feng, Jim Berg, Aaron Szafer, Nicholas Cain, Hongkui Zeng, Michael Hawrylycz, et al .2018. Generalized leaky integrate-and-fire models classify multiple neuron types. 
+
+Nature communications 9, 1 (2018), 709. [42] Michael Voudaskas, Jack Iain MacLean, Neale AW Dutton, Brian D Stewart, and Istvan Gyongy. 2025. Spiking neural networks in imaging: A review and case study. Sensors 25, 21 (2025), 6747. [43] Fei Wang, Jianwei Feng, Yinliang Zhao, Xiaobin Zhang, Shiyuan Zhang, and Jinsong Han. 2019. Joint activity recognition and indoor localization with WiFi fingerprints. Ieee Access 7 (2019), 80058–80068. [44] Tian Wang, Yuzhu Liang, Xuewei Shen, Xi Zheng, Adnan Mahmood, and Quan Z Sheng. 2023. Edge computing and sensor-cloud: Overview, solutions, and direc-tions. ACM computing surveys 55, 13s (2023), 1–37. [45] Xiaoting Wang and Yanxiang Zhang. 2023. MT-SNN: enhance spiking neural network with multiple thresholds. arXiv preprint arXiv:2303.11127 (2023). [46] Pete Warden. 2018. Speech commands: A dataset for limited-vocabulary speech recognition. arXiv preprint arXiv:1804.03209 (2018). 9Tang et al. 
+
+[47] Yongjun Xiao, Xianlong Tian, Yongqi Ding, Pei He, Mengmeng Jing, and Lin Zuo. 2024. Multi-bit mechanism: A novel information transmission paradigm for spiking neural networks. arXiv preprint arXiv:2407.05739 (2024). [48] Zhanglu Yan, Zhenyu Bai, and Weng-Fai Wong. 2024. Reconsidering the energy efficiency of spiking neural networks. arXiv preprint arXiv:2409.08290 (2024). [49] Jianfei Yang, Xinyan Chen, Han Zou, Chris Xiaoxuan Lu, Dazhuo Wang, Sumei Sun, and Lihua Xie. 2023. SenseFi: A library and benchmark on deep-learning-empowered WiFi human sensing. Patterns 4, 3 (2023). [50] Xingting Yao, Fanrong Li, Zitao Mo, and Jian Cheng. 2022. Glif: A unified gated leaky integrate-and-fire neuron for spiking neural networks. Advances in Neural Information Processing Systems 35 (2022), 32160–32171. [51] Guanlei Zhang, Lei Feng, Fanqin Zhou, Zhixiang Yang, Qiyang Zhang, Alaa Saleh, Praveen Kumar Donta, and Chinmaya Kumar Dehury. 2024. Spiking neural networks in intelligent edge computing. IEEE Consumer Electronics Magazine 14, 4 (2024), 66–75. [52] Chenlin Zhou, Han Zhang, Zhaokun Zhou, Liutao Yu, Liwei Huang, Xiaopeng Fan, Li Yuan, Zhengyu Ma, Huihui Zhou, and Yonghong Tian. 2024. Qkformer: Hierarchical spiking transformer using qk attention. Advances in Neural Infor-mation Processing Systems 37 (2024), 13074–13098. [53] Yue Zhou, Jiawei Fu, Zirui Chen, Fuwei Zhuge, Yasai Wang, Jianmin Yan, Sijie Ma, Lin Xu, Huanmei Yuan, Mansun Chan, et al . 2023. Computational event-driven vision sensors for in-sensor spiking neural networks. Nature Electronics 6, 11 (2023), 870–878. [54] Zhaokun Zhou, Yuesheng Zhu, Chao He, Yaowei Wang, Shuicheng Yan, Yonghong Tian, and Li Yuan. 2022. Spikformer: When spiking neural network meets transformer. arXiv preprint arXiv:2209.15425 (2022). 10 ShiftLIF: Efficient Multi-Level Spiking Neurons with Power-of-Two Quantization 
+
+## A Theoretical Analysis 
+
+Lemma 3.2. Let 𝑟 = Pr (𝑋 < 12 ). Let 𝑅 , 𝑉 , and 𝑇 denote the condi-tional output distributions of ShiftLIF below 12 , of ShiftLIF on [ 12 , ∞) ,and of rounded INT-LIF on [ 12 , ∞) , respectively. Then 
+
+𝐻 (𝑄 shift (𝑋 )) = ℎ2 (𝑟 ) + 𝑟𝐻 (𝑅 ) + ( 1 − 𝑟 )𝐻 (𝑉 ),𝐻 (𝑄 int (𝑋 )) = ℎ2 (𝑟 ) + ( 1 − 𝑟 )𝐻 (𝑇 ), (27) 
+
+where ℎ2 (𝑟 ) = −𝑟 log 2 𝑟 − ( 1 − 𝑟 ) log 2 (1 − 𝑟 ) is the binary entropy. Consequently, 
+
+𝑈 (shift ) 
+
+> 𝐾
+
+> 𝑈 (int ) 
+
+> 𝐾
+
+⇐⇒ 𝑟𝐻 (𝑅 ) + ( 1 − 𝑟 )𝐻 (𝑉 ) > (1 − 𝑟 )𝐻 (𝑇 ). (28) 
+
+The same formulas remain valid in the degenerate cases 𝑟 = 0 and 
+
+𝑟 = 1, with the absent conditional-entropy term interpreted as zero. 
+
+Proof. Assume first that 0 < 𝑟 < 1, and define 
+
+𝑚 = Pr ( 12 ≤ 𝑋 < 1),𝑐 = Pr (𝑋 ≥ 1), (29) so that 𝑟 + 𝑚 + 𝑐 = 1. Let 𝑅 = (𝑅 0, 𝑅 2, . . . , 𝑅 𝐾 ) be the dyadic-shell distribution below 12 , where 
+
+𝑅 0 = Pr (𝑋 < 2−𝐾 | 𝑋 < 12 ),𝑅 𝑘 = Pr (2−𝑘 ≤ 𝑋 < 2−𝑘 +1 | 𝑋 < 12 ), 𝑘 = 2, . . . , 𝐾, (30) let 
+
+𝑉 =
+
+ 𝑚 
+
+1 − 𝑟 , 𝑐 
+
+1 − 𝑟 
+
+
+
+, (31) and let 𝑇 = (𝑇 1,𝑇 2, . . . ,𝑇 𝐾 +1) be the rounded-INT distribution on 
+
+[ 12 , ∞) , where 
+
+𝑇 𝑗 = Pr ( 𝑗 − 12 ≤ 𝑋 < 𝑗 + 12 | 𝑋 ≥ 12 ), 𝑗 = 1, . . . , 𝐾, 𝑇 𝐾 +1 = Pr (𝑋 ≥ 𝐾 + 12 | 𝑋 ≥ 12 ). (32) For ShiftLIF, the outputs below 12 have total mass 𝑟 and conditional distribution 𝑅 , while the two outputs on [ 12 , ∞) have total mass 
+
+1 − 𝑟 and conditional distribution 𝑉 . By the chain rule for Shannon entropy, 
+
+𝐻 (𝑄 shift (𝑋 )) = ℎ2 (𝑟 ) + 𝑟𝐻 (𝑅 ) + ( 1 − 𝑟 )𝐻 (𝑉 ). (33) For rounded INT-LIF, the output 0 corresponds to the single event 
+
+{𝑋 < 12 } of probability 𝑟 , while the remaining 𝐾 + 1 outputs have total mass 1 − 𝑟 and conditional distribution 𝑇 . Another application of the chain rule gives 
+
+𝐻 (𝑄 int (𝑋 )) = ℎ2 (𝑟 ) + ( 1 − 𝑟 )𝐻 (𝑇 ). (34) Because both utilizations are normalized by the same denominator 
+
+⌈log 2 (𝐾 + 2)⌉ ,
+
+𝑈 (shift ) 
+
+> 𝐾
+
+> 𝑈 (int ) 
+
+> 𝐾
+
+⇐⇒ 𝐻 (𝑄 shift (𝑋 )) > 𝐻 (𝑄 int (𝑋 )) . (35) Substituting the two entropy identities above yields 
+
+𝑈 (shift ) 
+
+> 𝐾
+
+> 𝑈 (int ) 
+
+> 𝐾
+
+⇐⇒ 𝑟𝐻 (𝑅 ) + ( 1 − 𝑟 )𝐻 (𝑉 ) > (1 − 𝑟 )𝐻 (𝑇 ), (36) which is the desired criterion. It remains to consider the edge cases. If 𝑟 = 1, then 𝑄 int (𝑋 ) ≡ 0
+
+and 𝐻 (𝑄 int (𝑋 )) = 0, while 𝑄 shift (𝑋 ) is distributed according to 𝑅 ;this agrees with the stated formula after setting (1 − 𝑟 )𝐻 (𝑉 ) = (1 −
+
+𝑟 )𝐻 (𝑇 ) = 0. If 𝑟 = 0, then ShiftLIF has only the two outputs 12 and 
+
+1, distributed according to 𝑉 , while rounded INT-LIF is distributed according to 𝑇 ; again the same formula holds with 𝑟𝐻 (𝑅 ) = 0. □
+
+Algorithm 2 SNN Training with Spike Rate Regularization 
+
+Require: Training set Dtrain , pretrained weights 𝜽 0, number of epochs 𝐸 , learning rate 𝜂 , spike rate penalty weight 𝜆 sr , target spike magnitude 𝑟 ∗
+
+Ensure: Trained model parameters 𝜽 ∗ 
+
+> 1:
+
+Initialize SNN model 𝑓 𝜽 with 𝐿 spiking layers; load 𝜽 ← 𝜽 0 
+
+> 2:
+
+acc best ← 0 
+
+> 3:
+
+for 𝑒 = 1 to 𝐸 do  
+
+> 4:
+
+for each mini-batch (X, y) ∈ D train do  
+
+> 5:
+
+// Forward pass over 𝑇 timesteps  
+
+> 6:
+
+for 𝑡 = 1 to 𝑇 do  
+
+> 7:
+
+for ℓ = 1 to 𝐿 do  
+
+> 8:
+
+v(ℓ ) 
+
+> 𝑡
+
+← v(ℓ )  
+
+> 𝑡 −1
+
++
+
+
+
+𝑣 reset − v(ℓ )  
+
+> 𝑡 −1
+
++ z(ℓ )
+
+> 𝑡
+
+
+
+/𝜏 ⊲ LIF charging  
+
+> 9:
+
+s(ℓ ) 
+
+> 𝑡
+
+← Q shift 
+
+
+
+v(ℓ )
+
+> 𝑡
+
+
+
+⊲ Multi-level spike: 
+
+{0, 2𝑘 min , . . . , 20 } 
+
+> 10:
+
+v(ℓ ) 
+
+> 𝑡
+
+← v(ℓ ) 
+
+> 𝑡
+
+− s(ℓ ) 
+
+> 𝑡
+
+· 𝑣 th ⊲ Soft reset  
+
+> 11:
+
+Collect s(ℓ ) 
+
+> 𝑡
+
+into spike buffer S (ℓ ) 
+
+> 12:
+
+end for  
+
+> 13:
+
+end for  
+
+> 14:
+
+ˆy ← 𝑓 𝜽 (X) 
+
+> 15:
+
+// Task loss  
+
+> 16:
+
+LCE ← CrossEntropy ( ˆy, y) 
+
+> 17:
+
+// Spike rate regularization (differentiable L1 penalty)  
+
+> 18:
+
+Lsr ← 1
+
+> 𝐿 𝐿
+
+∑︁ 
+
+> ℓ=1
+
+h
+
+mean 
+
+
+
+|S (ℓ ) |
+
+
+
+− 𝑟 ∗ i+ 
+
+> 19:
+
+L ← L CE + 𝜆 sr · L sr  
+
+> 20:
+
+// Backward with surrogate gradients and update  
+
+> 21:
+
+𝜽 ← 𝜽 − 𝜂 ∇𝜽 L 
+
+> 22:
+
+Clear all spike buffers S (ℓ ) 
+
+> 23:
+
+end for  
+
+> 24:
+
+Evaluate on Dtest ; if acc test > acc best then 𝜽 ∗ ← 𝜽 ,acc best ← acc test  
+
+> 25:
+
+end for  
+
+> 26:
+
+return 𝜽 ∗
+
+## B Training with Spike Activity Regularization 
+
+To control the overall spiking activity during training, we augment the task loss with a spike activity regularization term. The training objective is defined as 
+
+L = LCE + 𝜆 sr Lsr , (37) where LCE denotes the task loss, Lsr is the spike activity regularizer, and 𝜆 sr controls its strength. For the ℓ-th spiking layer, we collect its output spikes over all timesteps in the current mini-batch into 
+
+S (ℓ ) , and define 
+
+Lsr = 1
+
+𝐿 
+
+> 𝐿
+
+∑︁ 
+
+> ℓ=1
+
+h
+
+mean 
+
+
+
+S (ℓ ) 
+
+− 𝑟 ∗ i+
+
+, (38) where 𝐿 is the number of spiking layers, 𝑟 ∗ is the target spike activity, and [·] + = max (0, ·) . This term penalizes only the amount by which the average spike activity exceeds the target level, thereby encouraging sparse responses without unnecessarily suppressing already low-activity layers. Since our neuron emits multi-level 
+
+> 11 Tang et al.
+
+spikes, mean (|S (ℓ ) |) measures the average spike magnitude rather than a strictly binary firing count. The training process is shown as Algorithm 2, where Qshift de-notes the ShiftQuant surrogate function that maps membrane po-tentials to multi-level spikes in {0, 2𝑘 min , . . . , 20 }, S (ℓ ) denotes the spike buffer of the ℓ-th spiking layer that collects layer outputs over all timesteps in the current mini-batch, 𝐿 is the number of spiking layers, 𝑇 is the number of simulation timesteps, 𝑟 ∗ is the target spike activity, 𝜆 sr is the regularization weight, and [·] + denotes the positive-part operator max (0, ·) .
