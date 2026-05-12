@@ -1,0 +1,153 @@
+Title: Reconfigurable Computing Challenge: Real-Time Graph Neural Networks for Online Event Selection in Big Science
+
+URL Source: https://arxiv.org/pdf/2605.10612v1
+
+Published Time: Tue, 12 May 2026 03:23:53 GMT
+
+Number of Pages: 5
+
+Markdown Content:
+# Reconfigurable Computing Challenge: Real-Time Graph Neural Networks for Online Event Selection in Big Science 
+
+Marc Neu *1 , Frank Baptist +, Thomas Lobmaier +, Fabio Papagno *, Torben Ferber + and J¨ urgen Becker **Institute for Information Processing Technology, Karlsruhe Institute of Technology, Germany 
+
++Institute of Experimental Particle Physics, Karlsruhe Institute of Technology, Germany 
+
+1marc.neu@kit.edu 
+
+Abstract —Graph neural networks are increasingly adopted in trigger systems for collider experiments, where strict latency and throughput constraints render deployment on embedded plat-forms challenging. As detectors move towards higher granularity, the number of inputs per inference increase and FPGA-only solutions face resource bottlenecks. This work presents an end-to-end demonstrator for the real-time deployment of a dynamic Graph Neural Network for the Belle II electromagnetic calorime-ter hardware trigger on the AMD Versal VCK190, leveraging both FPGA fabric and AI Engine tiles. We develop a Python-based semi-automated design flow covering operator fusion, partitioning, mapping, spatial parallelization, and kernel-level optimization. Our design achieves a throughput of 2.94 million events per second at an end-to-end latency of 7.15 μs. Compared to the FPGA-only baseline, this represents a 53 % throughput improvement while reducing DSP utilization from 99 % to 19 % at 29 % AI Engine tile utilization. To validate the deployment, an interactive visualization pipeline enables real-time monitoring of inference results on the physical demonstrator. 
+
+I. I NTRODUCTION 
+
+Machine learning algorithms are increasingly adopted in first-level triggers in collider experiments [1, 2, 3]. In this context, Graph Neural Networks (GNNs) require efficient deployment strategies on FPGA-based hardware triggers to satisfy the stringent latency and throughput constraints [4, 5, 6]. Figure 1 illustrates a generalized data acquisition sys-tem (DAQ system). Hardware triggers are typically placed after the frontend electronics in parallel to the preprocessing and readout buffers. Their purpose is the selection of detector snapshots, so-called events, that are of interest for further offline processing. Their role as online filter comes with a distinct set of system requirements [7, 8] that make the deployment of state-of-the-art filtering techniques such as GNNs challenging: (1) Online filtering decisions must be made within 10 μs,due to limited buffer capacity. (2) Detector snapshots are sampled at rates of up to 40 million events per second, imposing high throughput require-ments. (3) Trigger decisions must maintain strict in-order process-ing to ensure correct event-by-event matching with the readout path, requiring hard real-time guarantees for all deployed algorithms. Experiment    
+
+> Actuators
+> Sensor Buffer
+> Frontend Electronics
+> Machine Control
+> Data Aquisition System
+> Preprocessor
+> Hardware Trigger
+> Buffer Filter Software Trigger
+> Calibration
+> Storage
+
+Fig. 1: Overview of a typical data acquisition system in large-scale scientific experiments. These requirements are exemplified by the hardware trigger of the Belle II Experiment [9] at the SuperKEKB electron-positron collider in Tsukuba, Japan, which serves as the case study in this work. The experiment studies flavour physics and searches for dark-sector particles at a collision energy of 10 .58 GeV . In order to further improve the sensitivity of the experiment, an upgrade of the Electromagnetic Calorime-ter (ECL) is currently discussed. This upgrade would require significant adaptations to the currently deployed GNN-based trigger system [10]: The current system processes up to 32 nonzero sparse inputs out of 576 per event. After the upgrade, at least 128 of 8736 nonzero sparse inputs must be considered per event, without a reduction of the overall throughput. To address this challenge, this work extends the exist-ing FPGA-only GNN baseline to a heterogeneous deploy-ment on the AMD Versal platform, leveraging the improved performance-to-area ratio of AI Engines (AIEs) in comparison to FPGA fabric [11]. II. R ELATED WORK 
+
+Two widely adopted frameworks for automated deployment of machine learning algorithms onto FPGAs are FINN [12] and hls4ml [13], the latter of which explicitly targets low-latency applications in experimental particle physics. Neither supports the deployment of GNNs for real-time applications. For application-specific deployment, prior work considers CaloClusterNet, a dynamic GNN, for the Belle II hardware trigger [10], and another study examines the scalability of dynamic GNNs for hardware triggers, providing an open-source High-Level-Synthesis (HLS) library [14]. For deployment onto AMD AI Engines, the mlir-aie frame-work provides a low-level programming model [15], but its 
+
+© 2026 IEEE. Personal use of this material is permitted. Permission from IEEE must be obtained for all other uses, in any current or future media, including reprinting/republishing this material for advertising or promotional purposes, creating new collective works, for resale or redistribution to servers or lists, or reuse of any copyrighted component of this work in other works by sending a request to pubs-permissions@ieee.org .
+
+> arXiv:2605.10612v1 [cs.AR] 11 May 2026
+
+tight coupling to host-side memory management renders it unsuitable for streaming applications in low-latency hardware triggers. The aie4ml framework [16] extends hls4ml to enable deployment of dense layers onto the AIEs, but supports neither partitioning across FPGA and AIEs nor the deployment of GNNs. The present work addresses this gap by developing atemplate library targeting AIEs and providing an end-to-end demonstrator for the deployment of CaloClusterNet onto the heterogeneous AMD Versal System-on-Chip (SoC). III. C ONCEPT 
+
+A. Deployment 
+
+As a starting point for our work, we consider an existing open-source deployment approach for the CaloClusterNet on FPGA-based hardware triggers [14]. In this reference imple-mentation, all neural network layers are deployed as a dataflow accelerator using HLS. While this approach offers promising performance, it does not utilize the heterogeneous compute resources available on modern SoC platforms. To aid the deployment of the CaloClusterNet onto hetero-geneous SoCs such as AMD Versal, we develop a Python-based semi-automated design flow. Our design flow requires two inputs: a pretrained, quantized neural network model (in our case trained with QKeras [17]), and a set of hardware requirements such as the target throughput and platform. As output, our design flow emits Vitis HLS C ++ source files for the FPGA partition and Vitis AIE C ++ source files for the AIE partition. Our deployment flow is separated into a series of stages: operator fusion, partitioning, mapping, spatial parallelization, and kernel-level optimizations. Internally, we represent the neural network as a dataflow graph, where nodes correspond to operators (individual layers) and edges describe data depen-dencies. Each stage transforms this graph until it is lowered to platform-specific source files. In the following, we describe each step. 
+
+Operator Fusion. First, Linear layers and their subsequent ReLU activations are fused into a single Dense operator. Second, parallel Dense operators with the same predecessor are merged into a single Dense operator whose output features are the concatenation of the individual operators’ outputs. These optimizations simplify the dataflow graph topology by removing the multicast on the preceding operator. The sim-plified topology is particularly critical, as no more than eight AIE memory buffers are connected to each tile on the first generation of AMD Versal. Introducing even a single multicast requires four memory buffers due to double buffering, leaving insufficient buffers for the remaining operators during tile placement. 
+
+Partitioning. Next, we assign each operator to one of two target platforms: FPGA logic or AIE tiles. We employ a greedy scheme that prioritizes the AIE platform, as AIE tiles offer better performance-per-area. All operators with regular, statically scheduled data access patterns are assigned to the AIE platform, including layers such as Linear, Dense, ReLU, Parsing  
+
+> Operator Fusion
+> Partitioning
+> Mapping
+> Parallelization
+> Kernel-Levl Opt.
+> Emitter
+> Parallelization
+> Emitter
+> HLS Library AIE Library
+> File
+> System Requirements
+> File
+> Neural Network Model
+> File
+> Vitis AIE C++
+> File
+> Vitis HLS C++
+
+Fig. 2: Overview of our deployment flow. Key transformation stages are green. Optimization stages are blue. All others stages are gray. or Concat, but excluding GNN-specific layers which require data-dependent memory access. All AIE kernels run fully decoupled, without global memory access, avoiding memory stalls at runtime. The remaining operators, including input and output layers interfacing with DDR RAM, are assigned to FPGA logic. As only operators with regular access patterns are eligible for AIE assignment, the space of valid configurations is small and the greedy scheme is sufficient without exhaustive search. The resulting partitioning is shown in Figure 4: seven segments are derived, of which four are implemented on FPGA and three on AIEs. 
+
+Mapping. After partitioning, each operator is mapped to a corresponding architecture template through pattern matching. For FPGA operators, we use the HLS templates from [14], which support the irregular, data-dependent access patterns required by graph convolutions ( GravNetConv ) and the Con-densation Point Selection ( CPS ) algorithm. For AIE operators, we develop an open-source, header-only C ++ kernel library for the AMD chess compiler, providing reusable templates for Dense, Linear, Concat, and ReLU operators. During mapping, the dataflow graph is also legalized: for each edge, if the output layout of the source operator does not match the expected input layout of the sink operator, a Retile kernel is inserted to reshape the intermediate tensor. Each AIE template encapsulates a single operator as a self-contained kernel. 
+
+Spatial Parallelization. After mapping, each AIE partition is optimized through spatial parallelization. GNN layers that do not perform feature aggregation across neighbors are fully spa-tially separable, meaning they can process independent spatial regions in parallel. The operator fusion step further improves separability by reducing each AIE partition to a linear chain of operators, eliminating cross-partition data dependencies. For each partition, we select a spatial parallelization factor 
+
+P ∈ { 2n | n ∈ N0}, which replicates the operator chain P
+
+times. On the AIE, resource utilization scales linearly with P ;on the FPGA, growth is superlinear due to additional routing and buffering overhead. We apply an exhaustive search to find the smallest P that satisfies the target throughput, minimizing resource utilization. 
+
+Kernel-Level Optimizations. Finally, we optimize individual AIE kernels to meet the strict timing constraints of our appli-cation. To sustain a throughput of 1 MHz, each kernel must complete within 1 μs. At this scale, loop pipelining overhead imposed by the chess compiler becomes significant relative to the total kernel runtime. The AMD Vitis AIE library [18] amortizes pipelining setup cost over many iterations, which is inefficient for the small matrix dimensions used here. In our kernel library, we replace loop pipelining with loop flattening via chess_flatten_loop annotations, trading larger program memory for better performance. The impact of this optimization is evaluated in Section IV. To evaluate the impact of each optimization stage, we define three successive design points. Design 1 serves as a baseline, implementing the partitioned network without further optimizations. Design 2 applies operator fusion and spatial parallelization with Pfpga = 2 and Paie = 4. Design 3additionally applies the kernel-level optimizations described above. 
+
+Fig. 3: System architecture of our demonstrator on the AMD Versal VCK190. 
+
+B. System Architecture 
+
+We implement an end-to-end demonstrator on the AMD Versal VCK190, shown in Figure 3. The system com-prises three partitions: the Arm Cortex A72 CPU, the FPGA, and the AIE array. Input data is read from DDR Bank 0 by the Load kernel on the FPGA, which feeds the first compute kernel of the accelerator pipeline. The seven compute kernels (A – G) alternate between FPGA and AIE partitions, forming a dataflow pipeline that processes inference requests without CPU intervention. Results are written back to DDR Bank 1 by the Store kernel. On the CPU, the Xilinx Runtime (XRT) manages kernel orchestration and DMA transfers. A visualization pipeline postprocesses the inference results and serves them to an external client via an integrated webserver over Ethernet, rendering a three-dimensional event display of the Belle II ECL detector with interactive selection among common physics-case datasets at varying background levels. IV. P ERFORMANCE ANALYSIS 
+
+For evaluation, we implement our end-to-end demon-strator on the AMD Versal VCK190 evaluation board us-ing AMD Vitis 2024.2 and AMD Vivado 2024.2. Profil-ing monitors are inserted on the Programmable Logic par-tition for all kernels to record execution timelines. AIE kernel execution times are derived indirectly from the cor-responding PLIO interface timestamps. All kernels on Pro-grammable Logic operate at ffpga = 250 MHz , and ker-nels on AIE at faie = 1.25 GHz . To reach timing clo-sure, the Flow_PerfOptimized_High synthesis strategy and Performance_ExplorePostRoutePhysOpt im-plementation strategy are used in AMD Vivado. Functional correctness is validated in software using QK-eras, in hardware emulation, and on hardware, with bit-accurate agreement across all three. We compare our implementation against the FPGA-only baseline from [14] on the AMD Versal VCK190; a GPU reference on an NVIDIA L40S using TensorRT, is included in the figures as baseline. All implementations support up to 128 inputs per inference; fewer inputs are supported through zero-padding. The FPGA-only version uses 8-bit quantization for all layers. The FPGA & AIE versions use 16-bit precision for partitions A and G to preserve inference quality at the system boundaries, and 8-bit for all remaining partitions. Performance results are depicted in Figure 5a and Figure 5b. Our initial design 1 performs worse than the FPGA baseline in both latency and throughput, due to overhead introduced by the heterogeneous partitioning. After optimization, design 2achieves a throughput of 2.36 million events per second at a latency of 7.47 μs. The best performance is achieved by design 3 , with a throughput of 2.94 million events per second and a latency of 7.15 μs. Relative to the FPGA-only baseline from [14], design 3 achieves a throughput improvement of 53 % at a latency overhead of 18 %. Designs 2 and 3 share identical tile allocation. The improvement in design 3 results solely from kernel-level optimization which reduces execution time without altering resource counts. System resource utilization is shown in Table I. The FPGA baseline uses 65 % of available lookup tables and 99 % of digital signal processors. Design 3 requires 53 % of lookup tables and 19 % of digital signal processors, at a cost of 29 % of available AI Engine tiles. V. C ONCLUSION 
+
+In this work, we presented an interactive end-to-end GNN hardware accelerator on the AMD Versal VCK190 for the Belle II ECL hardware trigger. Our design achieves a 53% throughput improvement at 18% latency overhead over the FPGA-only baseline. All source code and device images are publicly available, making our demonstrator a practical refer-ence design for real-time GNN deployment on AMD Versal SoCs. Fig. 4: The CaloClusterNet after partitioning onto the AMD Versal architecture. Partitions implemented on the FPGA are shown in yellow. Partitions implemented on the AI Engine fabric are shown in red. 1 μs    
+
+> 10 μs
+> 100 μs
+> GPU
+> Compute Latency
+> FPGA
+> 123
+> FPGA & AI Engines
+
+(a) End-to-end latency. 0 M 
+
+1 M 
+
+2 M 
+
+3 M 
+
+4 M 
+
+GPU 
+
+> Events per Second
+
+FPGA 
+
+1 2 3
+
+FPGA & AI Engines (b) End-to-end throughput. 
+
+Fig. 5: Performance evaluation for various versions of the hardware accelerator. TABLE I: System resource utilization for various design implementations on the AMD Versal VCK190 Evaluation Board. 
+
+FPGA AI Engines FF LUT DSP BRAM Tiles Compute Memory Target Precision Iter. abs. % abs. % abs. % abs. % abs. % abs. % abs. %FPGA 8 bit – 625 808 36 573 300 65 1951 99 170 19 – – – – – –FPGA & AIE mixed 1 384 395 22 287 284 33 186 9 98 10 39 10 25 6 39 10 
+
+FPGA & AIE mixed 2 484 210 28 462 972 53 372 19 292 33 117 29 84 21 117 29 
+
+FPGA & AIE mixed 3 484 210 28 462 972 53 372 19 292 33 117 29 84 21 117 29 CODE AVAILABILITY STATEMENT 
+
+The complete source code, included our performance measurements, device image, and visualization pipeline is available on GitHub: https://github.com/marcneu/vck190-caloclusternet-demo. ACKNOWLEDGMENT 
+
+This work was supported through the DEEP consortium (05D25VK1) funded by the German Federal Ministry of Research, Technology and Space (BMFTR) in the ErUM-Data action plan. REFERENCES 
+
+[1] N. Zipper et al. “Testing a Neural Network for Anomaly Detection in the CMS GlobalTrigger Test Crate during Run 3”. In: Journal of Instrumentation 19.03 (Mar. 2024), p. C03029. ISSN : 1748-0221. DOI : 10 . 1088 / 1748-0221/19/03/C03029. URL : https://iopscience.iop. org/article/10.1088/1748- 0221/19/03/C03029 (visited on 01/05/2026). [2] S. B¨ ahr et al. “The neural network first-level hardware track trigger of the Belle IIexperiment”. In: Nucl. In-strum. Meth. A 1073 (2025), p. 170279. DOI : 10.1016/ j.nima.2025.170279. arXiv: 2402.14962 [hep-ex] .[3] Y.-X. Liu et al. “Development of deep neural network first-level hardware track trigger for the Belle II ex-periment”. en. In: Nuclear Instruments and Methods in Physics Research Section A: Accelerators, Spec-trometers, Detectors and Associated Equipment 1084 (Apr. 2026), p. 171248. ISSN : 01689002. DOI : 10 . 1016 / j . nima . 2025 . 171248. URL : https : / / linkinghub. elsevier.com/retrieve/pii/S0168900225010502 (visited on 01/05/2026). [4] A. M. Deiana et al. “Applications and Techniques for Fast Machine Learning in Science”. In: Frontiers in Big Data 5 (Apr. 2022), p. 787421. ISSN : 2624-909X. 
+
+> DOI
+
+: 10.3389/fdata.2022.787421. URL : https://www. frontiersin.org/articles/10.3389/fdata.2022.787421/full (visited on 09/25/2023). [5] J. Shlomi et al. “Graph neural networks in particle physics”. In: Machine Learning: Science and Technol-ogy 2.2 (Jan. 2021), p. 021001. DOI : 10.1088/2632-2153/abbf9a. [6] S. Abadal et al. “Computing Graph Neural Networks: A Survey from Algorithms to Accelerators”. In: ACM Computing Surveys 54.9 (Jan. 2022), pp. 1–38. ISSN :0360-0300. DOI : 10.1145/3477141. [7] Y.-T. Lai et al. “Design of the Global Reconstruction Logic in the Belle II Level-1 Trigger system”. In: 
+
+Nuclear Instruments and Methods in Physics Research Section A: Accelerators, Spectrometers, Detectors and Associated Equipment 1078 (2025), p. 170577. ISSN :0168-9002. DOI : https://doi.org/10.1016/j.nima.2025. 170577. URL : https://www.sciencedirect.com/science/ article/pii/S016890022500378X. [8] S. Dasu et al. “CMS. The TriDAS project. Technical design report, vol. 1: The trigger systems”. In: (Dec. 2000). [9] T. Abe et al. “Belle II Technical Design Report”. In: (Nov. 2010). arXiv: 1011 . 0352 
+
+[physics.ins-det] .[10] I. Haide et al. Real-time graph neural networks on FPGAs for the Belle II electromagnetic calorimeter .2026. arXiv: 2602 . 15118 [physics.ins-det] .
+
+> URL
+
+: https://arxiv.org/abs/2602.15118. [11] I. Kuon et al. “Measuring the Gap Between FPGAs and ASICs”. In: IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems 26.2 (2007), pp. 203–215. DOI : 10.1109/TCAD.2006.884574. [12] Yaman Umuroglu et al. “FINN”. In: Proceedings of the 2017 ACM/SIGDA International Symposium on Field-Programmable Gate Arrays . Ed. by Jonathan Greene and Jason H. Anderson. New York, NY, USA: ACM, Jan. 2017, pp. 65–74. ISBN : 978-1-4503-4354-1. DOI :10.1145/3020078.3021744. [13] Jan-Frederik Schulte et al. Hls4ml: A Flexible, Open-Source Platform for Deep Learning Acceleration on Re-configurable Hardware . 2025. DOI : 10.48550/ARXIV. 2512.01463. (Visited on 02/18/2026). [14] M. Neu et al. “Real-Time Graph-based Point Cloud Networks on FPGAs via Stall-Free Deep Pipelining”. In: 2025 38th SBC/SBMicro/IEEE Symposium on In-tegrated Circuits and Systems Design (SBCCI) . 2025, pp. 1–5. DOI : 10.1109/SBCCI66862.2025.11218652. [15] Erwei Wang et al. From Loop Nests to Silicon: Mapping AI Workloads onto AMD NPUs with MLIR-AIR . Oct. 2025. DOI : 10.48550/arXiv.2510.14871. arXiv: 2510. 14871 [cs] . (Visited on 12/15/2025). [16] Dimitrios Danopoulos et al. AIE4ML: An End-to-End Framework for Compiling Neural Networks for the Next Generation of AMD AI Engines . 2025. DOI : 10.48550/ ARXIV.2512.15946. [17] Claudionor N. Coelho et al. “Automatic heterogeneous quantization of deep neural networks for low-latency inference on the edge for particle detectors”. en. In: Na-ture Machine Intelligence 3.8 (Aug. 2021), pp. 675–686. 
+
+> ISSN
+
+: 2522-5839. DOI : 10.1038/s42256-021-00356-5. 
+
+> URL
+
+: https : / / www. nature . com / articles / s42256 - 021 -00356-5. [18] AMD. Vitis Libraries . https://github.com/Xilinx/Vitis Libraries. Version 2024.2. 2024.
