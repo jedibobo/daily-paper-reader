@@ -1,0 +1,229 @@
+Title: ROMER: Expert Replacement and Router Calibration for Robust MoE LLMs on Analog Compute-in-Memory Systems
+
+URL Source: https://arxiv.org/pdf/2605.11800v1
+
+Published Time: Wed, 13 May 2026 01:09:39 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+Preprint. Under review. 
+
+# ROMER: Expert Replacement and Router Calibration for Ro-bust MoE LLMs on Analog Compute-in-Memory Systems 
+
+Wenyong Zhou 1, ∗ Yuannuo Feng 2, ∗ Yizhe Chen 2 Taiqiang Wu 1 Wendong Xu 1
+
+Wenbo Qi 1 Zhengwu Liu 1 Wang Kang 2 Ngai Wong 11The Department of Electrical and Computer Engineering, The University of Hong Kong, Hong Kong 
+
+> 2
+
+The School of Integrated Circuit Science and Engineering, Beihang University, Beijing, China 
+
+# Abstract 
+
+Large language models (LLMs) with mixture-of-experts (MoE) architectures achieve remarkable scalability by sparsely activating a subset of experts per token, yet their frequent expert switching creates memory bandwidth bottlenecks that compute-in-memory (CIM) architectures are well-suited to mitigate. However, analog CIM systems suffer from inherent hardware imperfections that perturb stored weights, and its negative impact on MoE-based LLMs in noisy CIM environments remains unexplored. In this work, we present the first systematic investigation of MoE-based LLMs under noise model calibrated with real chip measurements, revealing that hard-ware noise critically disrupts expert load balance and renders clean-trained routing decisions consistently suboptimal. Based on these findings, we propose ROMER , a post-training calibration framework that (1) replaces underactivated experts with high-frequency ones to restore load balance, and (2) recalibrates router logits via percentile-based normalization to stabilize routing under noise. Extensive experiments across multiple bench-marks demonstrate that ROMER achieves up to 58.6%, 58.8%, and 59.8% reduction in perplexity under real-chip noise conditions for DeepSeek-MoE, Qwen-MoE, and OLMoE, respectively, establishing its effectiveness and generalizability across diverse MoE architectures. 
+
+# 1 Introduction 
+
+Large language models (LLMs) have revolutionized natural language processing by achiev-ing remarkable performance across diverse tasks through exponential scaling Vaswani et al. (2017); Brown et al. (2020), yet this growth has introduced substantial computational and memory bottlenecks. Mixture-of-Experts (MoE) architectures have emerged as a compelling alternative Riquelme et al. (2021); Chen et al. (2022): unlike dense models that activate all parameters, MoE networks selectively engage only a subset of expert modules per token, significantly reducing active computation while preserving model capacity Shazeer et al. (2017); Fedus et al. (2022); Lepikhin et al. (2021). However, their massive parameter counts exceed GPU memory capacity, necessitating frequent expert swapping between memory and storage—creating substantial bandwidth bottlenecks and energy overhead that ulti-mately undermine the theoretical efficiency advantages of sparse activation Zhou et al. (2022); Yu et al. (2025). Compute-in-memory (CIM) architectures present a natural solution to these deployment challenges: by enabling direct computation within memory arrays where expert weights reside, CIM eliminates costly data movement, and its weight-stationary design ensures inac-tive experts remain dormant without energy consumption, aligning naturally with MoE’s sparse activation patterns Chen et al. (2023b); Kooli et al. (2018); Chen et al. (2023a); Geng et al. (2021); Lee et al. (2023). However, analog CIM systems suffer from inherent hardware imperfections—including programming noise and ADC/DAC noise—that perturb stored weights and degrade model accuracy monotonically with increasing noise intensity Zhou et al. (2023); Wang et al. (2025); Feng et al. (2026b). As shown in Figure 1, while MoE models 1
+
+> arXiv:2605.11800v1 [cs.LG] 12 May 2026
+
+Preprint. Under review. 
+
+Figure 1: Qualitative comparison of vanilla and our ROMER methods for OLMoE under various noise conditions. exhibit higher robustness than dense counterparts with equivalent active parameters, CIM noise still causes markedly degraded and often incoherent outputs, making robust mitiga-tion strategies critical for the practical adoption of CIM hardware in MoE deployment Zhou et al. (2025b); Bai et al. (2024); Feng et al. (2026a). Prior work has extensively studied the robustness of conventional neural networks (CNNs) under hardware perturbations Mao et al. (2025); Zhou et al. (2025a), but most existing methods rely on noise-aware training that impose prohibitive computational costs for large-scale deployment. More recent efforts targeting LLMs have focused exclusively on dense architectures, overlooking the unique structural sparsity and expert routing mechanisms intrinsic to MoE models. Consequently, the robustness of MoE-based LLMs under noisy analog hardware remains largely unexplored, leaving a significant gap in both understanding and mitigation . To address this gap, we present a comprehensive investigation of MoE-based LLMs under noise conditions calibrated with real chip measurements. Our analysis reveals two failure modes unique to MoE architectures: hardware noise disrupts expert load balance and ren-ders clean-trained routing decisions consistently suboptimal. Building on these findings, we propose ROMER , a post-training calibration framework that integrates expert replacement and router calibration to enhance the robustness of MoE inference under CIM noise. Our key contributions are: • We provide the first systematic characterization of MoE-based LLM vulnerability on analog CIM hardware, with noise models calibrated from real chip measurements. Our analysis identifies imbalanced expert allocation and suboptimal router logits as the two primary failure modes under CIM noise. • We propose ROMER , a training-free robustness framework that replaces underacti-vated experts with frequently-activated counterparts and recalibrates router logits via percentile-based normalization, requiring neither retraining nor labeled data. • Extensive experiments across multiple benchmarks demonstrate that ROMER achieves up to 58.6%, 58.8%, and 59.8% reduction in perplexity under real-chip noise conditions for DeepSeek-MoE, Qwen-MoE, and OLMoE, respectively. 
+
+# 2 Preliminary 
+
+2.1 Analog Computing-in-Memory 
+
+Analog CIM accelerates matrix-vector multiplication by performing computation directly within memory arrays, eliminating costly data movement between processing units and off-chip memory. In an analog CIM array, matrix entries are encoded as the conductance values of non-volatile memory devices (e.g., phase-change memory or resistive RAM), 2Preprint. Under review. 
+
+Figure 2: (Left) Comparison of in-memory computing chip and Von Neumann architectures. (Right) KL divergence between on-chip non-ideal effects plus Gaussian noise and our simulated noise model in end-to-end outputs, and standard deviation of per-layer errors. arranged in a crossbar structure. An input vector is applied as voltage signals along the wordlines, and the resulting currents accumulate along the bitlines via Kirchhoff’s current law, physically realizing the matrix-vector multiplication in a single step. Formally, let W ∈ Rm×n denote a matrix stored in an analog array, and let x ∈ Rn be an input vector. The ideal analog MVM computes: 
+
+y = Wx . (1) For KV cache deployment, the cached key and value matrices K≤t and V≤t are stored as conductance values in analog arrays. The attention score computation qtK⊤≤t and the weighted aggregation atV≤t are then executed as analog MVMs, enabling highly parallel and energy-efficient inference. 
+
+2.2 Noise Model for Analog CIM 
+
+Physical imperfections in analog CIM systems introduce stochastic perturbations that corrupt the ideal MVM output. We decompose the total noise into two additive components: 
+
+device noise arising from analog array elements, and ADC quantization noise at the array output. 
+
+Device Noise. Each conductance cell in the analog array is subject to hardware non-idealities including thermal fluctuations, programming variability, and read disturbances. We model the effective stored value of a cell with nominal conductance w as: ˜w = w + w · ϵdev , ϵdev ∼ N (0, σ2dev ), (2) where σdev characterizes the noise magnitude of the analog device. The perturbed MVM output due to device noise is therefore: ˜ydev = ( W + W · Edev )x, (3) where Edev is a noise matrix with i.i.d. entries drawn from N (0, σ2dev ).
+
+ADC Quantization Noise. The analog current accumulation along each bitline must be converted to a digital value by an analog-to-digital converter (ADC). Finite ADC resolution introduces quantization error, which we model as additive uniform noise on the output: ˜yADC = ˜ydev + ϵADC , ϵADC, i ∼ U 
+
+
+
+− ∆
+
+2 , ∆
+
+2
+
+
+
+, (4) where ∆ = Vref /(2b − 1) is the quantization step size determined by the ADC reference voltage Vref and bit-width b.3Preprint. Under review. 
+
+Figure 3: Bar chart(left) showing the Perplexity observed on both OLMOE-7B-A1B and Qwen3-30B-A3B models when applying varying degrees of perturbation to their expert selection functions under noisy conditions and expert activation heatmaps under clean (middle) and noisy (right) conditions on OLMOE-7B-A1B. 
+
+Combined Noise Model. The final noisy MVM output combining both noise sources is: ˜y = ( W + W · Edev )x + ϵADC . (5) The noise parameters σdev , σADC , and ∆ are calibrated against measurements from a real analog CIM chip, ensuring that our noise model faithfully reflects practical hardware behavior. The calibration results and validation against chip measurements are shown in Figure 2. 
+
+# 3 Methodology 
+
+3.1 Motivation 
+
+We investigate the impact of CIM hardware noise on MoE-based LLMs by examining two key failure modes: expert activation imbalance and routing suboptimality. To quantify activation behavior across the network, we define the cumulative activation magnitude of expert i in layer l over T input tokens as: 
+
+Al,i =
+
+> T
+
+# ∑
+
+> t=1
+
+p(t) 
+
+> l,i
+
+· 1{i∈S (xt )}, (6) where p(t) 
+
+> l,i
+
+is the gating probability assigned to expert i at layer l for token t, 1{·} is the indicator function, and S(xt) denotes the set of Top-k selected experts for token xt. By accumulating Al,i over a representative calibration corpus, we obtain a layer-wise expert activation map that captures the global routing behavior of the model under different hardware conditions. Figure 3 (right panels) shows that clean inference produces uniform activation distribu-tions across experts (0–60) and layers (0–22), preserving load-balanced specialization from pre-training. Under CIM noise, this pattern collapses into localized hotspots where few experts absorb disproportionate token assignments while most become dormant. This expert activation collapse forces the model to behave as a smaller dense network, sacrificing the distributed representational capacity of well-trained MoE architectures. Figure 3 (left panel) quantifies performance consequences. Clean inference yields per-plexities of 12 (OLMoE-1B-7B) and 11 (Qwen3-30B-A3B); under CIM noise, these rise catastrophically to 58 (5×) and 32 (3×), with OLMoE’s larger degradation indicating greater sensitivity of smaller active parameter counts to routing disruption. Naive compensation partially recovers performance (perplexities 35 and 27) but leaves significant gaps. Random tests of expert allocation permutations revealed suboptimal existing methods; combined with residual performance loss, this motivates ROMER , a calibration framework restoring balanced expert utilization and counteracting noise-induced routing bias without modifying pre-trained weights. 4Preprint. Under review. 
+
+Figure 4: Overview of our proposed ROMER framework. Hardware imperfections perturb the weights in experts and the router provides suboptimal combinations of experts. ROMER replaces the Last-k experts with Top-k experts for duplicate calculation to reduce noise and calibrates the router output towards optimal combination of noisy experts. 
+
+3.2 ROMER Framework 
+
+Based on our observation that CIM hardware noise induces expert load imbalance and suboptimal routing, we propose ROMER , a training-free framework to enhance the ro-bustness of MoE-based LLMs on analog CIM hardware, as illustrated in Figure 4. ROMER comprises two complementary components: expert replacement, which duplicates high-frequency experts into idle memory locations to mitigate noise on critical activations; and percentile-based router calibration, which corrects noise-induced logit distortion to restore stable expert allocation. 
+
+Expert Replacement. Based on the cumulative activation magnitudes {Al,i} defined in Section 3.1, we partition the experts in layer l into three disjoint sets: the top-k most activated experts Tl , the bottom-k least activated experts Bl , and the remaining normal experts. We establish a bijection σ : Tl → B l pairing each high-frequency expert with a low-frequency counterpart. During the programming phase, each bottom-k expert’s weights are overwritten with those of its paired top-k expert: 
+
+Wrep  
+
+> l,σ(i)
+
+← Wl,i, ∀ i ∈ T l . (7) During inference, given router logits zl = [ zl,1 , . . . , zl,E], the modified logits are: ˜zl,i =
+
+
+
+zl,i/2 if i ∈ T l ,0 if i ∈ B l ,
+
+zl,i otherwise. (8) Bottom-k experts are discarded by zeroing their logits, since those memory locations now store replicated top-k weights. For each top-k expert i ∈ T l , both the original and replicated memory locations contribute to the output. Modeling each computation as subject to independent additive noise ϵ1, ϵ2 ∼ N (0, σ2
+
+> w
+
+), the effective contribution of expert i is: ˆyi = ˜pl,i
+
+2
+
+( fi(x) + ϵ1) + ( fi(x) + ϵ2) = ˜pl,i · fi(x) + ˜pl,i
+
+2 (ϵ1 + ϵ2), (9) where ˜pl,i = softmax ( ˜zl )i. The noise variance on the output reduces from ˜p2
+
+> l,i
+
+σ2 
+
+> w
+
+to ˜p2
+
+> l,i
+
+σ2
+
+> w
+
+/ 2, yielding a factor-of-2 reduction in noise variance for the most critical expert activations. The total number of experts remains unchanged, minimizing modifications to the hardware design. 
+
+Percentile-Based Router Calibration. Hardware noise inflates the spread of router output logits. We model the noisy logit as ˜zi = zi + ηi, where ηi denotes the hardware-induced 5Preprint. Under review. perturbation. We verify this empirically: feeding 1000 tokens from WikiText-2 through OLMoE, the per-token per-layer logit variance nearly doubles on average and increases by up to 3 × in early layers. When the logit distribution becomes excessively spread, the router makes overconfident decisions based on noise-induced spurious peaks, yielding suboptimal expert allocation. We use the IQR as a robust, outlier-resistant measure of distributional spread to detect and correct this inflation. For the router output logits z = [ z1, z2, . . . , zE], we compute: IQR = Q3(z) − Q1(z), (10) and sort the logits in ascending order to obtain z(sorted ) = [ z(1), z(2), . . . , z(E)]. The calibrated logits are: 
+
+z(cal ) 
+
+> i
+
+=
+
+(
+
+z(sorted ) 
+
+> i
+
++ λ · IQR if i ≤ ⌊ E/2 ⌋,
+
+z(sorted ) 
+
+> i
+
+− λ · IQR if i > ⌊E/2 ⌋, (11) where λ ∈ (0, 0.5 ) is a calibration strength hyperparameter. This transformation compresses the logit distribution toward the median by simultaneously lifting the lower half and suppressing the upper half. Since Q1 lies in the lower half of the sorted logits and Q3 in the upper half, the IQR of the calibrated logits satisfies: IQR (z(cal )) = ( 1 − 2λ) · IQR (z), (12) providing an analytically exact reduction in logit spread controlled entirely by λ. Setting 
+
+λ → 0.5 fully collapses Q1 and Q3 to the median, while λ = 0 leaves the distribution unchanged. The calibrated logits are finally reordered to their original expert indices before routing. 
+
+# 4 Experiments 
+
+4.1 Experimental Setup 
+
+We evaluate four MoE-based LLMs: Qwen3-30B-A3B with 30B total and 14B active pa-rameters, DeepSeek-MoE-16B with 16B total parameters, OLMoE-1B-7B with 7B total and 1B active parameters, and Qwen1.5-MoE-A2.7B with 2.7B active parameters. We evaluate language modeling on WikiText-103, WikiText-2, and LAMBADA perplexity where lower is better, and reasoning on PIQA, ARC-Easy, and ARC-Challenge accuracy where higher is better. We compare ROMER against six methods: Clean serves as the noise-free ceiling, 
+
+Vanilla provides the no mitigation baseline, Bit-slicing decomposes weights into binary slices, Average applies per-channel weight averaging, Weight-remapping remaps weights to reduce noise sensitivity, and k-b Calibration performs per-layer scale and bias correction. 
+
+4.2 Experiment Result WikiText-103 Performance Under CIM Hardware Noise Table 1 reports WikiText-103 per-plexity across four MoE-based LLMs under T = 25°C and T = 80°C operating temperatures, corresponding to low- and high-noise regimes calibrated from real chip measurements. ROMER achieves the best results across all models and conditions. Vanilla deployment incurs perplexity increases of +0.15 to +0.97 at T = 25°C, escalating dramatically to +1.85 to +2.65 at T = 80°C. This confirms that higher operating tempera-tures introduce substantially stronger weight perturbations, posing serious challenges to MoE routing stability across all tested architectures. Bit-slicing exhibits extreme brittleness, achieving near-clean performance (10.86) on OLMoE-1B-7B at T = 25°C but degrading catastrophically to 14.62 at T = 80°C—the worst result in the table. Averaging-based methods and K-B calibration provide moderate improvements but leave substantial gaps. Weight-remapping performs best among baselines with residual degradations of +0.44 to +1.34 at T = 80°C, indicating weight-level correction alone cannot fully address disrupted routing behavior. 6Preprint. Under review.                                                                      
+
+> T=25 °C T=80 °C Method Qwen3 DeepSeek OLMoE Qwen1.5 Qwen3 DeepSeek OLMoE Qwen1.5 Clean 14.87 10.64 10.48 10.85 14.87 10.64 10.48 10.85 Vanilla 15.16 11.25 11.45 11.00 16.14 12.49 13.13 11.72 Bit-slicing 16.52 12.54 10.86 10.93 17.58 11.78 14.62 11.59 Average 15.64 11.13 11.07 11.09 15.44 12.47 12.90 11.95 Weight-remapping 15.02 10.95 10.96 10.93 15.51 11.58 11.82 11.29 k-b calibration 15.11 11.13 11.25 10.97 15.89 12.13 12.60 11.55 ROMER 14.97 10.86 10.82 10.90 15.32 11.31 11.43 11.16
+
+Table 1: WikiText-103 perplexity ( ↓) of four MoE-based LLMs under CIM hardware noise at 
+
+T = 25°C (low noise) and T = 80°C (high noise).                                                                                      
+
+> T=25 °C T=80 °C Method WT-2 PIQA ARC-C ARC-E LAM WT-2 PIQA ARC-C ARC-E LAM Clean 18.94 0.798 0.471 0.725 10.64 18.94 0.798 0.471 0.725 10.64 Vanilla 23.83 0.766 0.415 0.642 14.88 28.36 0.742 0.368 0.575 19.53 Bit-slicing 22.15 0.775 0.428 0.664 13.56 25.61 0.756 0.388 0.610 16.15 Average 22.68 0.773 0.425 0.660 13.85 26.92 0.754 0.384 0.606 17.42 Weight-remapping 21.46 0.781 0.442 0.682 12.83 23.86 0.768 0.417 0.647 15.29 k-b calibration 22.88 0.772 0.426 0.658 14.06 26.55 0.752 0.388 0.604 17.82 ROMER 20.73 0.786 0.450 0.694 12.20 22.48 0.777 0.432 0.669 13.99
+
+Table 2: Multi-benchmark evaluation of DeepSeek-MoE-16B under CIM hardware noise at 
+
+T = 25°C (low noise) and T = 80°C (high noise). WT-2/LAM: perplexity ( ↓); PIQA/ARC-C/ARC-E: accuracy ( ↑). Bold indicates best performance under noise. ROMER consistently achieves near-complete recovery with minimal degradations of +0.05 to +0.34 at T = 25°C and +0.31 to +0.95 at T = 80°C. Compared to the strongest baseline (weight-remapping), ROMER further reduces perplexity gaps by 0.13–0.39 points at high temperature, demonstrating that router-aware recalibration provides critical benefits be-yond weight-level correction. Model-specific sensitivities vary from OLMoE-1B-7B (most vulnerable) to Qwen1.5-MoE-A2.7B (most robust), yet ROMER consistently improves across all architectures. 
+
+Multi-Benchmark Evaluation on DeepSeek-MoE-16B Table 2 evaluates DeepSeek-MoE-16B across five benchmarks spanning language modeling (WikiText-2 and LAMBADA perplexity) and commonsense reasoning (PIQA, ARC-Easy, and ARC-Challenge accuracy) under two CIM noise regimes. ROMER achieves the best result on every benchmark at both temperatures. Under vanilla deployment at T = 25°C, WikiText-2 perplexity rises from 18.94 to 23.83 (+4.89), LAMBADA from 10.64 to 14.88 ( +4.24), and ARC-Challenge accuracy drops from 0.471 to 0.415 ( −5.6 points). At T = 80°C, degradations intensify dramatically: WikiText-2 perplexity surges to 28.36 ( +9.42), LAMBADA to 19.53 ( +8.89), and ARC-Challenge accuracy collapses to 0.368 ( −10.3 points)—a 21.9% relative drop. This confirms that analog noise critically impairs MoE routing across both generative and reasoning tasks. Bit-slicing and averaging offer mild improvements at T = 25°C but fail at high noise, with WikiText-2 perplexities of 25.61 and 26.92 at T = 80°C. K-B calibration performs comparably to or worse than vanilla, suggesting simple statistical recalibration is insufficient. Weight-remapping is the strongest baseline with WikiText-2 perplexity of 21.46 at T = 25°C and 23.86 at T = 80°C, but still leaves substantial gaps across all benchmarks. At T = 25°C, ROMER attains WikiText-2 perplexity of 20.73, LAMBADA of 12.20, and ARC-Challenge accuracy of 0.450, reducing vanilla degradation by 3.10, 2.68, and 3.5 points respectively. At T = 80°C, ROMER achieves WikiText-2 perplexity of 22.48 and 7Preprint. Under review. 
+
+Figure 5: Expert activation heatmaps of clean(left), vanilla (middle) and ROMER (right) under noise conditions for OLMoE-7B-A1B.                                                          
+
+> Model Latency (s) ↓Power (W) ↓Perplexity ↓
+> Noisy ROMER ∆Noisy ROMER ∆Noisy ROMER ∆
+> DeepSeek-MoE-16B 245.3 261.0 +6.4% 168.3 178.4 +6.0% 35.0 14.48 −58.6% Qwen1.5-MoE-A2.7B 258.9 274.9 +6.2% 179.1 190.2 +6.2% 35.8 14.76 −58.8% Qwen3-30B-A3B 361.9 405.7 +12.1% 245.8 273.6 +11.3% 27.5 13.84 −49.7% OLMoE-1B-7B 234.6 249.8 +6.5% 152.3 161.6 +6.1% 35.3 14.20 −59.8%
+> Average ∆–+7.8% –+7.4% –−56.7%
+
+Table 3: Hardware overhead and performance recovery of ROMER across four MoE models on a CIM hardware simulator at t = 85°C. Noisy : vanilla deployment; ROMER : calibrated deployment. LAMBADA of 13.99, recovering approximately 62% of vanilla degradation. Compared to weight-remapping, ROMER further reduces WikiText-2 perplexity by 1.38 and improves ARC-Challenge accuracy by +1.5 points at high temperature, demonstrating that router-aware recalibration addresses root causes rather than compensating for weight perturbations. The larger relative degradation on reasoning tasks (21.9% on ARC-Challenge and 49.7% on WikiText-2) suggests noisy routing selectively suppresses expert specializations critical for multi-step reasoning. 
+
+Expert Activation Heatmap Analysis Figure 5 visualizes expert activation frequency across all MoE layers under three conditions: clean inference, vanilla noisy deployment, and ROMER-calibrated inference. Each cell (i, j) encodes the cumulative activation count of expert j in layer i, with the colormap ranging from pale yellow (underactivated) to dark red (overactivated). The clean model (left panel) exhibits broadly uniform activation across all layers and experts, reflecting intended MoE routing behavior where load is distributed evenly. This balanced pattern serves as the target for noise-robust methods. Under CIM hardware noise (middle panel), the pattern becomes dramatically irregular with several experts showing disproportionately high activation counts (dark red cells) while large regions are rendered pale yellow, indicating severe expert underactivation. This routing collapse propagates across the full network depth, directly explaining the severe perplexity degradation in vanilla deployment as overloaded experts become bottlenecks while underactivated experts are wasted. ROMER (right panel) substantially recovers the balanced activation distribution, eliminating overactivation hotspots and repopulating underactivation regions with moderate counts. This visual evidence corroborates quantitative results: by replacing underactivated experts and recalibrating router logits, ROMER targets the root causes of routing collapse and restores load-balanced behavior consistently across all layers. 8Preprint. Under review. Temperature °C Expert Replacement Router Calibration                                                                        
+
+> n=0n=2n=4n=6n=8n=16 λ=0λ=0.2 λ=0.4 λ=0.6 λ=0.8 λ=1.0 clean 10.83 –––––10.83 –––––25 11.61 11.05 11.01 10.98 11.41 25.44 11.61 12.35 10.40 10.78 11.23 12.92 45 12.75 11.15 10.89 11.12 12.45 24.86 12.75 13.24 11.20 11.63 12.11 13.87 65 15.57 13.49 12.12 11.78 13.15 24.12 15.57 15.04 13.20 13.77 14.32 16.21 85 24.87 14.17 14.64 14.05 21.34 23.45 24.87 22.64 20.80 21.72 22.45 24.10
+
+Table 4: Ablation study of ROMER’s two components on WikiText-2 perplexity ( ↓) across five Temperature t, evaluated on Qwen3-30B-A3B. 
+
+Hardware Overhead Analysis Table 3 reports the inference latency, power consumption, and perplexity of vanilla noisy deployment and ROMER-calibrated deployment across all four MoE models on CIM hardware. For three models (DeepSeek-MoE-16B, Qwen1.5-MoE-A2.7B, and OLMoE-1B-7B), ROMER introduces consistent overheads of approximately 6.2–6.5% latency and 6.0–6.2% power relative to vanilla noisy inference. This overhead stems from expert replacement, which redirects tokens to higher-frequency experts that may reside in different memory banks, incurring additional data movement. Since ROMER’s calibration is performed entirely offline, the runtime overhead reflects only the modified routing pattern without additional computation. Qwen3-30B-A3B exhibits higher overheads of +12.1% latency and +11.3% power due to its substantially larger active parameter count of 3B parameters per forward pass, compared to ¡1B for OLMoE and 2.7B for Qwen1.5-MoE. A larger active footprint means remapping expert assignments incurs proportionally greater memory access overhead, amplifying the penalty. Despite this, ROMER achieves the lowest absolute perplexity (13.84) on Qwen3, confirming routing corrections remain highly effective at scale. The key result demonstrates asymmetry between hardware cost and performance benefit. ROMER introduces average overheads of +7.8% latency and +7.4% power while achiev-ing -56.7% perplexity reduction relative to vanilla noisy deployment. Vanilla inference degrades perplexity to 27.5–35.8, rendering models essentially unusable, while ROMER recovers perplexity to 13.84–14.76, approaching clean baseline performance with single-digit percentage overhead for three of four models. This trade-off is practically acceptable in CIM deployments, where model quality degradation is the primary bottleneck rather than marginal increases in inference cost. 
+
+Ablation Study Table 4 ablates ROMER’s expert replacement ( n) and router calibration (λ) on WikiText-2 across Temperature t ∈ { 25, 45, 65, 85 } using Qwen3-30B-A3B. Expert replacement with n=4–6 substantially recovers performance. At t=65, n=6 reduces perplex-ity from 24.87 to 14.05 ( −10.82). However, n≥8 degrades performance, with n=16 worse than no replacement. Router calibration at λ=0.4 consistently achieves lowest perplexity across all temperature. At t=85, it reduces perplexity to 20.80 ( −4.07); at t=25, it achieves 10.40—below the clean baseline of 10.83. Both λ=0.2 and λ=1.0 degrade performance. Both components address complementary failure modes and neither alone achieves ROMER’s full recovery. 
+
+# 5 Conclusion 
+
+In this work, we propose ROMER, a novel training-free method to enhance the robustness of MoE-based LLMs on analog CIM hardware against inherent noise by replacing inac-tive experts with their active counterparts and adaptively adjusting router logits through percentile-based statistics. Extensive experiments across various datasets demonstrate that ROMER achieves up to 58.6%, 58.8%, and 59.8% improvement under real-chip noise conditions for DeepSeek-MoE, Qwen-MoE, and OLMOE, respectively. 9Preprint. Under review. 
+
+# Ethics Statement 
+
+We have adhered to the COLM Code of Ethics in this research. Our work is based entirely on publicly available models and benchmarks, and involves no human subjects. 
+
+# Reproducibility Statement 
+
+We are committed to the reproducibility of our work. All experiments were conducted on publicly available models and benchmarks. 
+
+# References 
+
+Tianshuo Bai et al. An end-to-end in-memory computing system based on a 40-nm eflash-based imc soc: Circuits, toolchains, and systems co-design framework. IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems , 43(6):1729–1740, 2024. Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, et al. Language models are few-shot learners. Advances in neural information processing systems ,33:1877–1901, 2020. Jia Chen, Fengbin Tu, Kunming Shao, Fengshi Tian, Xiao Huo, Chi-Ying Tsui, and Kwang-Ting Cheng. AutoDCIM: An Automated Digital CIM Compiler. In 2023 60th ACM/IEEE De-sign Automation Conference (DAC) , pp. 1–6, 2023a. doi: 10.1109/DAC56929.2023.10247976. Xuan-Jun Chen, Cynthia Kuan, and Chia-Lin Yang. Unified Agile Accuracy Assessment in Computing-in-Memory Neural Accelerators by Layerwise Dynamical Isometry. In 
+
+2023 60th ACM/IEEE Design Automation Conference (DAC) , pp. 1–6, 2023b. doi: 10.1109/ DAC56929.2023.10247782. Zixiang Chen, Yihe Deng, Yue Wu, Quanquan Gu, and Yuanzhi Li. Towards understanding the mixture-of-experts layer in deep learning. Advances in neural information processing systems , 35:23049–23062, 2022. William Fedus, Barret Zoph, and Noam Shazeer. Switch transformers: Scaling to trillion parameter models with simple and efficient sparsity. Journal of Machine Learning Research ,23(120):1–39, 2022. URL https://jmlr.org/papers/v23/21-0998.html . arXiv preprint arXiv:2101.03961. Yuannuo Feng, Wenyong Zhou, Yuexi Lyu, Hanjie Liu, Zhengwu Liu, Ngai Wong, and Wang Kang. Hpd: Hybrid projection decomposition for robust state space models on analog cim hardware. In 2025 IEEE 16th International Conference on ASIC (ASICON) , 2026a. Yuannuo Feng, Wenyong Zhou, Yuexi Lyu, Yixiang Zhang, Zhengwu Liu, Ngai Wong, and Wang Kang. Extending straight-through estimation for robust neural networks on analog cim hardware. In 2025 IEEE 16th International Conference on ASIC (ASICON) , 2026b. Yiwen Geng et al. An On-chip Layer-wise Training Method for RRAM based Computing-in-memory Chips. In 2021 Design, Automation & Test in Europe Conference & Exhibition (DATE) , pp. 248–251, 2021. doi: 10.23919/DATE51398.2021.9473931. Maha Kooli et al. Smart Instruction Codes for in-Memory Computing Architectures Com-patible with Standard SRAM Interfaces. In 2018 Design, Automation & Test in Europe Conference & Exhibition (DATE) , pp. 1634–1639, 2018. doi: 10.23919/DATE.2018.8342276. Mingyen Lee, Wenjun Tang, Yiming Chen, Juejian Wu, Hongtao Zhong, Yixin Xu, Yongpan Liu, Huazhong Yang, Vijaykrishnan Narayanan, and Xueqing Li. Victor: A Variation-resilient Approach Using Cell-Clustered Charge-domain computing for High-density High-throughput MLC CiM. In 2023 60th ACM/IEEE Design Automation Conference (DAC) ,pp. 1–6, 2023. doi: 10.1109/DAC56929.2023.10247934. 10 Preprint. Under review. Dmitry Lepikhin, HyoukJoong Chen, Blake Withers, Elias Stengel-Eskin, Zihang Huang, Kensho Toyama, Mark Omernick, Rewon Child, Scott Gray, Jie Wang, Michael Ganger, Jeff Dean, Yonghui Wu, and Zhifeng Chen. Gshard: Scaling giant models with conditional computation and automatic sharding. In International Conference on Learning Representations (ICLR) , 2021. URL https://arxiv.org/abs/2006.16668 . arXiv preprint arXiv:2006.16668. Wanru Mao et al. Hyimc: Analog-digital hybrid in-memory computing soc for high-quality low-latency speech enhancement. In 2025 Design, Automation & Test in Europe Conference (DATE) , pp. 1–2. IEEE, 2025. Carlos Riquelme, Joan Puigcerver, Basil Mustafa, Maxim Neumann, Rodolphe Jenatton, Andr ´e Susano Pinto, Daniel Keysers, and Neil Houlsby. Scaling vision with sparse mixture of experts. Advances in Neural Information Processing Systems , 34:8583–8595, 2021. Noam Shazeer, Azalia Mirhoseini, Krzysztof Maziarz, Andy Davis, Quoc Le, Geoffrey Hinton, and Jeff Dean. Outrageously large neural networks: The sparsely-gated mixture-of-experts layer. In International Conference on Learning Representations (ICLR) , 2017. URL 
+
+https://arxiv.org/abs/1701.06538 . arXiv preprint arXiv:1701.06538. Ashish Vaswani et al. Attention is All You Need. Proceedings of Advances in Neural Information Processing Systems , 30, 2017. Guangyao Wang et al. Noiseguard: A comprehensive framework with noise modeling, noise-aware training and noise compensation for in-memory computing soc. IEEE TCAD ,2025. doi: 10.1109/TCAD.2025.3626453. Hanfei Yu et al. fmoe: Fine-grained expert offloading for large mixture-of-experts serving. 
+
+arXiv preprint arXiv:2502.05370 , 2025. URL https://arxiv.org/abs/2502.05370 .Wenyong Zhou et al. A time- and energy-efficient cnn with dense connections on memristor-based chips. In 2023 IEEE 15th International Conference on ASIC (ASICON) , pp. 1–4, 2023. doi: 10.1109/ASICON58565.2023.10396267. Wenyong Zhou et al. RRAM-Based Isotropic CNNs with High Robustness and Resource Utilization Rate. In EDTM , pp. 1–3, 2025a. doi: 10.1109/EDTM61175.2025.11040595. Wenyong Zhou et al. Binary Weight Multi-Bit Activation Quantization for Compute-in-Memory CNN Accelerators. IEEE TCAD , 2025b. doi: 10.1109/TCAD.2025.3595830. Yanqi Zhou et al. Mixture-of-experts with expert choice routing. In Advances in Neural Information Processing Systems 35 (NeurIPS 2022) , pp. 7103–7114, 2022. 11

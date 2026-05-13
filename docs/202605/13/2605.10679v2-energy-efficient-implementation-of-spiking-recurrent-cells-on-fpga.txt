@@ -1,0 +1,399 @@
+Title: Energy-Efficient Implementation of Spiking Recurrent Cells on FPGA
+
+URL Source: https://arxiv.org/pdf/2605.10679v2
+
+Published Time: Wed, 13 May 2026 01:21:06 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+# Energy-Efficient Implementation of Spiking Recurrent Cells on FPGA 
+
+Pascal Harmeling 1,∗ , Florent De Geeter 1 and Guillaume Drion 1
+
+May 13, 2026 
+
+Abstract 
+
+Spiking Neural Networks (SNNs) can reduce energy consumption compared to conventional Artificial Neural Networks (ANNs) when spiking activity is sparse and the neuron model is hardware-friendly. However, biologically faithful models are often too costly to implement on FPGAs, whereas very simple models (e.g., IR/LIF) sacrifice part of the neuronal dynamics. In this work, we present an FPGA accelerator for an SNN using Spiking Recurrent Cell (SRC) neurons, providing a trade-off between biological plausibility and hardware cost. We propose a set of mathematical simplifications that remove costly unary operators ( tanh , exp ) and avoid floating-point arithmetic through scaling and piecewise-defined approximations. The complete network is implemented in VHDL and validated using spiking traces derived from the MNIST dataset. The weight matrices computed off-line are stored directly in LUT-registers without any adaptation. This demonstrates the robustness of SRC cells. Experiments were conducted on an Artix-7 XC7A200T clocked at 100 MHz. The reference implementation achieves 96.31% accuracy with a 220-image spiking trace and a processing time of 1.7424 ms per digit. We then investigate accuracy/energy trade-offs by reducing the spiking trace length and quantizing synaptic weights down to 4 bits, achieving 93.32% accuracy at 0.55 mJ per digit (55 images, 5-bit weights) and 92.89% at 0.45 mJ (44 images, 4-bit weights). These results show that SRC-based SNNs can deliver competitive performance with reduced energy consumption, while preserving richer neuronal dynamics than standard LIF/IR models. 
+
+# 1 Introduction 
+
+Artificial neural networks (ANNs) have undergone constant evolution over the past few decades, surpassing human performance in many areas. However, their energy consumption for learning and inference is increasing [20], which hinders their large-scale deployment in energy-constrained environments. On the other hand, biological brains only consume a few tens of watts of power to function, due to the sparse spiking nature of their computation. Spiking neural networks (SNNs) have emerged as a low-power alternative to traditional ANNs, leveraging event-driven processing to emulate the efficiency of biological neural computations. SNNs have shown promising performance-consumption trade-offs, especially when deployed on dedicated hardware [5, 23]. However, SNN energy consumption strongly depends on spiking model complex-ity, as well as on spiking frequency, i.e., sparsity [2]. There exists a plethora of spiking neuron model types, ranging from simple Integrate-and-Fire (IF) models [1, 7] up to biologically-inspired conductance-based model that follows the Hodgkin–Huxley formalism [11, 19]. Although the field of neuronal modeling is in constant evolution, SNNs mostly implement leaky integrate-and-fire (LIF) models and their variants, due to their computational simplicity. 1
+
+> arXiv:2605.10679v2 [cs.NE] 12 May 2026
+
+SNNs performance and power efficiency also strongly depend on the type of hardware being used. SNNs can be implemented on Central Processing Units (CPUs), similarly to classical ANNs, but these implementations bring little advantage as CPU architecture is poorly suited for sparse computations. In particular, the limited parallelism of CPU processing makes such implementations unable to deliver real-time performance for large-scale networks [21]. Application-Specific Integrated Circuits (ASICs) can overcome this limitation [16]. Full parallelization then becomes possible by tailoring the hardware architecture to the entire neural network. However, this advantage is offset by the inability to reprogram the device once it has been manufactured. Field-Programmable Gate Arrays (FPGAs) provide a third alternative, allowing for programmable, energy-efficient implementation of a very large number of tasks in parallel. In addition, the integra-tion of memory blocks (BRAM) and Digital Signal Processing (DSP) modules within FPGAs makes it possible to closely emulate the behavior of neural networks, while ensuring efficient learning and adaptation to the target tasks with minimal energy consumption [14]. This hardware approach, commonly referred to as an FPGA-based accelerator, constitutes a particularly relevant solution for the study of SNNs. FPGA implementations of SNNs using LIF models have emerged over the past few years (e.g., Carpegna et al. [3, 4], Gupta et al. [8], Han et al. [9], He et al. [10], Li et al. [14, 13]). LIF model simplicity allows for reduced hardware resources and computation time, but they rely on a reset mechanism that deviates from biological behavior. In this work, we introduce an SNN FPGA implementation based on Spiking Recurrent Cell (SRC) [6]. SRC neurons are derived from classical recurrent neural network (RNN) architectures and integrate spiking behavior directly into their dynamics, eliminating the need for an explicit reset. We propose a series of simplifications of the original SRC equations to improve implementation efficiency on the FPGA, and construct a modulatory architecture aiming at general-purpose deployment. We trained and tested the system on the MNIST dataset. To investigate the robustness properties of the SRC network, we first trained the original, unsimplified network of De Geeter et al. [6], and directly transferred the weight matrices into the simplified FPGA system without modification. We then explored the impact of weight quantization, which reduces the memory footprint at the expense of accuracy. We demonstrate that the FPGA implementation of the SRC network achieves performance comparable to leading LIF approaches in terms of accuracy and power consumption. 
+
+# 2 Related work 
+
+Tables 1 and 2 summarize the performance of FPGA implementations of LIF-based SNNs in terms of, e.g., computation time, energy consumption per processed MNIST image, and image recognition accuracy. Table 1 contains models with online learning rules embedded on the FPGA. Table 2 shows models for which learning is performed offline. In both cases, the image recognition rate remains high and is often above 90%. The solutions proposed by Gupta et al. [8], Carpegna et al. [3, 4], Li et al. [13] achieve image processing times below one millisecond. In all cases, the use of LIF-type neurons enables a simpler yet efficient implementation of the neural network. The work by Carpegna et al. [3] presents a layered architecture and an associated implementation method, achieving low resource utilization and reduced energy consumption. The study of Han et al. [9] highlights that excessive quantization of the weights W leads to a significant degradation in accuracy, suggesting the existence of a minimum word-length threshold. However, depending on the learning method, good performance can still be achieved with a 4-bit weight representation [17]. In this work, we explore a wide quantization range, from 9 down to 2 bits (including the sign bit). Spike management and inter-layer data transfer must also be carefully designed. The event-
+
+2Table 1. Comparison of FPGA-based SNN implementations (MNIST) - On-chip learning. Design Li et al. [14] Gupta et al. [8] He et al. [10] Year 2021 2020 2021 Model LIF LIF LIF Neurons 784-200-100-10 784-16 784-2048-100 FPGA VIRTEX-7 XC6VLX240T Zynq7045 
+
+f req. [MHz] 100 100 100 (200) 1
+
+Cells log. - 79,468 23180 DSP used - 64 8BRAM used - 16 129 Weight (bits) 16 24 
+
+T /img [ms] 3.15 0.5 66.6 (33.3) 1
+
+E/img [mJ] 5.04 -Accuracy [%] 92.93 - 93.00  
+
+> 1
+
+Initial values tested at 200 MHz 
+
+driven approach proposed by Roy et al. [18] is highly efficient when spikes are sparse, but becomes less effective under dense or bursty activity. In such cases, synchronous layer-by-layer processing [22] is commonly adopted. Here, we employ a synchronous per-layer processing scheme, leveraging the parallelism offered by the FPGA. 
+
+# 3 Adaptation of SRC equations for efficient FPGA imple-mentation 
+
+In our implementation, we use the SRC model in the intermediate layer to preserve continuous neu-ronal dynamics while remaining compatible with efficient hardware simplification. We first describe original SRC equations and then propose a set of mathematical simplifications that allow for efficient FPGA implementation. 
+
+3.1 Original SRC equations 
+
+The SRC equations are written as 
+
+
+
+h[t] = tanh( I[t] + r · h[t − 1] + rs · hs[t − 1] + bh),hs[t] = zs[t] · hs[t − 1] + (1 − zs[t]) · h[t − 1] ,zs[t] = zhyp s − (zhyp s − zdeep s ) 11+ exp (−10( h[t−1] −0.5)) ,
+
+(1) where I[t] represents the current input to the system and h[t] corresponds to its output (the spike-generation equation). The equation for hs[t] introduces refractory-type dynamics whose relaxation time is defined by zs[t]. Higher values of zs[t] < 1 lead to slower relaxation, hence lower firing frequencies. The parameters r, rs, bh, zhyp s , and zdeep s are fixed and depend on the implementation method and the desired sensitivity. The values used by De Geeter et al. [6] are respectively r = 2, 
+
+rs = −7, bh = −6, zhyp s = 0 .9, and zdeep s = 0 .0. 3Table 2. Comparison of FPGA-based SNN implementations (MNIST) - Offline learning. Design Carpegna et al. [3] Carpegna et al. [4] Han et al. [9] Li et al. [13] Year 2022 2024 2020 2023 Model LIF LIF LIF IF/LIF Neurons 1384 784-128-10 784-1024-1024-10 784-16C3-..-10 1
+
+FPGA ARTIX-7 XC7Z020 XC7Z045 SoC XCZU3eg 
+
+f req. [MHz] 100 100 100 2 300 Cells log. - 7,612 12,690 -DSP used - 0 - -BRAM used 45 18 40.5 -Weight (bits) 5 4 16 -
+
+T /img [ms] 0.215 0.78 12.42 2 0.491 E/img [mJ] 13 0.14 5.92 2 1.25 FPGA accur[%] 73.96 93.85 97.06 98.12  
+
+> 1
+
+784-16c3-64c3-p2-128c3-p2-256c3-256c3-10  
+
+> 2
+
+adjust from 150 to 100 MHz This study primarily focuses on the benefits of a hardware implementation on an FPGA. The learning process is deliberately only briefly addressed, since the parameters (bias bh and weights 
+
+wi,j ) are directly taken from the network implemented in Julia. No transformation is required, which represents a significant advantage when porting the design to the VHDL language. 
+
+3.2 Simplified SRC equations 
+
+A key step in the FPGA implementation is the simplification of the SRC neuron equations while preserving their dynamics. Unary operators such as tanh and exp , as well as the use of floating-point number representations, are hardware-expensive and often highly energy-consuming. The first simplification consists in eliminating floating-point arithmetic. To achieve this, all variables and parameters are scaled by a factor 1000 and converted into integer values. This provides sufficient precision while limiting the register size to 11 bits (numerical representation from −1024 to +1023). Secondly, the unary operator tanh is replaced by a piecewise-defined function ( Stanh ) to simplify the number of operations to be implemented (Figure 1). A slope of 0.75 is selected in order to minimize the approximation error. Third, the operation y = (3 x)/4 is implemented in VHDL as 
+
+y = (2 x + x)/4 using shift operations: 
+
+y = shiftright((shiftleft( x, 1) + x), 2) (2) The operator exp () used in zs[t] cannot be easily simplified, and its use within a fraction further increases the complexity.However, one can observe that zs[t] acts as a switching mechanism between a slow and a fast dynamical regime, as shown in Figure 2. In practice, the values of zs remain close to either zdeep s or zhyp s . By determining a switching threshold, the function determining zs[t] can be replaced by a simple threshold rule: if h[t − 1] is greater than Vth (z), then zs[t] = zdeep s ; otherwise, 
+
+zs[t] = zhyp s . This operation can be implemented in VHDL using a if statement. Finally, the parameter rs is adjusted from −7 to −8. This modification yields even-valued parameters, enabling multiplications to be implemented using shift operations, without affecting 4-1         
+
+> -0,8
+> -0,6
+> -0,4
+> -0,2
+> 0
+> 0,2
+> 0,4
+> 0,6
+> 0,8
+> 1
+> -4 -3 -2 -1 01234
+
+Figure 1. Simplification of the tanh function using Stanh .Tanh() - Stanh() - Error Vth 
+
+H[t] 
+
+Z[t] 
+
+Figure 2. Simplification of the function z[t] into a threshold rule with detection threshold Vth (z)model dynamics. This also makes it possible to remove the explicit parameters r and rs and to adjust bh (which becomes 3000 after scaling). Likewise, factoring out zs[t] allows us to merge two multiplications into a single operation. The simplified SRC equations are written as 
+
+
+
+W ork = I[t] + ( h[t − 1] − (hs[t − 1] << 2) + bh) << 1,h[t] = Stanh ((( W ork << 1) + W ork ) >> 2) ,hs[t] = (( zs[t] · (hs[t − 1] − h[t − 1])) >> 10 + h[t − 1]) ,zs[t] : if (h[t] < 500) → zhyp s else → zdeep s ,
+
+(3) where W ork serves as an intermediate variable. We next investigate the impact of these simplifications on model dynamics by comparing the outputs of the two different SRC implementations. The first SRC is implemented in Julia using a FLOAT32 representation and does not undergo any simplification. The second SRC uses only an 
+
+INT16 representation together with all the simplifications proposed above. This second version is referred to as Pseudo-VHDL (PsV). During this evaluation step, zhyp s and zdeep s are initialized to 0.910 and 0.000 in the original implementation, and to 902 and 100 in the PsV implementation. The values 902 and 100 are selected to best approximate the frequency behavior reported by De Geeter et al. [6]. Figure 3 illustrates the behavior of the output h[t] when implemented in Julia (green) and 5in PsV (red), showing a very good match between the two versions.  
+
+> (a) (b)
+
+Figure 3. (a) Behavior of the output h[t] as a function of the implementation, Julia and PsV, (b) with a zoomed comparison of spikes generated in Julia and PsV. Inferences of the complete PsV network implementation are first carried out in Julia in order to compare the original SRC network with our simplified version. To ensure a fair comparison, it is essential to use exactly the same Spiking Trace (SpT) sequences. A spiking trace is a sequence of binary images (0/1) intended to simulate a stream of spikes at the input. This set is constructed from a single MNIST sample. All elements of the MNIST test set are processed by a Julia code following the procedure illustrated in Figure 4. The first step consists in discretizing an MNIST image into binary values (0/1): pixels with values greater than 0.5 are set to 1, otherwise to 0. This binary image is then used to generate a sequence of 200 images using a Bernoulli process with a maximum probability of 0.25. A filtering step prevents a given pixel from remaining at 1 in two consecutive images. Finally, 20 all-black images are added at the beginning, serving as a reset window as done by De Geeter et al. [6]. The resulting sequence of 220 images constitutes a spiking trace. This processing is applied to all 10,000 images of the MNIST test set and saved into 10,000 NPY files. Over the entire test set, the original implementation achieves an accuracy of 96.48%, while the PsV implementation reaches 96.31%. To test performance stability with respect to spike frequency, a second series of tests is performed by modifying the value of the parameter zhyp s . Figure 5a shows spiking frequency as a function of 
+
+zhyp s . Approximately three times fewer spikes are observed when zhyp s increases from 880 to 980. For this test, zdeep s is fixed to 0.000 in the original implementation and to 100 in the PsV implementation. Figure 5b shows the accuracy of both models as a function of zhyp s . Both models show a high and stable accuracy for a large range of parameter values. This shows that it is possible to reduce the spike generation rate at the output of the SRC neurons without significantly affecting accuracy, thereby enabling a reduction in energy consumption through increased spike sparsity. The range 
+
+zhyp s ∈ [880 , 980] will later be used to evaluate the stability and accuracy of the SRC network when implemented in VHDL and executed on an FPGA. Finally, we compare the dynamics of IR outputs in both implementations (Figure 8). In most 6Handwritten Digit Image  ‘Spiking Trace ’ Sequence (SpT)  
+
+> 20 Full black 200 bernouilli(P=0.25)
+> Black pixel = 0
+> white pixel = 1
+> 28 x 28 pixels
+> NPY files
+
+Figure 4. MNIST dataset processed by a Julia code, spiking traces. cases, both models show very similar output dynamics, the only difference occurs when the classifi-cation decision is unclear (Figure 9). 
+
+# 4 Implementation architecture 
+
+The architecture presented in this work is a layered system, similar to that described in the work of Carpegna et al. [3]. Our network is composed of four layers: the input interface (Neuron BramInLine pkg), the SRC neuron layer (Neuron Src2F pkg), the IR integrator neuron layer (Neuron LIfB pkg), and finally a comparator that outputs a value between 0 and 9 (Neuron Cmp pkg). Figure 6 presents the detailed construction of the architecture. In order to obtain an efficient network, all neurons are processed in parallel using the GENERATE 
+
+operator in VHDL. Since each layer may have a different computation time, synchronization of data transfers between layers is essential. This synchronization is handled by the main module, referred to as the Binder . The Go , Ready , and Latch signals ensure synchronization across the different levels. All processes share the same clock (100 MHz) and the same reset signal. The Binder also routes signals and spike vectors between the different levels. Figure 7 shows the internal structure of each “NetWorkLevelxx.vhd” module. They contain a weight matrix encoded in a file named “WeightMatrixx.vhd”, as well as the code associated with the neuron type used in that layer. To facilitate the layered construction of the network, NetWorkLevel module structures are identical and each module only differ in its internal neuron package. 
+
+4.1 Input interface 
+
+The input layer provides the SRC layer with a vector representing one image from a SpT sequence. Each image is composed of 28 × 28 pixels,yielding a vector size of 784 bits. The FPGA board used is an Alinx AX7A200B equipped with an AMD Xilinx Artix-7 XC7A200T shown in Figure 10. It includes internal BRAM memory in which the spiking traces are stored. The NPY files are converted into COE files compatible with Vivado. During this conversion, six additional bits are appended to each image: two bits dedicated to a micro-machine ( μ-RESET and μ-CMP ) and four bits containing the target digit CMP VAL . These six bits can be considered as neuromodulatory signals. The μ-RESET signal is activated at the beginning of each spiking trace to reset the neurons, while μ-CMP 
+
+7(a) 
+
+> (b)
+
+Figure 5. (a) Spike generation frequency at the output of hs as a function of the value of zhyp s .(b) Stability results and accuracy is activated at the end of the trace to enable the comparison between the discriminator output and 
+
+CMP VAL .
+
+4.2 SRC layer and IR layer 
+
+The SRC layer receives an input vector of 784 spikes along with 2 neuromodulatory bits. It is composed of 100 fully connected SRC neurons. The input current of each SRC is computed following the equation 
+
+I[t] = βI [t − 1] + 
+
+> n
+
+∑
+
+> i=0
+
+WiInput i (4) where n = 783 in our experiments. The weight matrix Wij is imported into the FPGA using a Julia script that generates a file named “WeightMatrix01 pkg.vhd”, which can be directly used in VHDL. In order to analyze the effect of quantization, the script adjusts the weight bit-width from 9 down to 2 bits (including the sign bit). No additional processing is applied to the weight matrices, in order to validate the robustness of the SRC model. The corresponding results are presented in the following section. The IR layer receives as input a vector of 100 spikes generated by the SRC layer. The ten IR neurons are fully connected and perform the summation of their inputs as described in equation 5. 8Sout [t] = Sout [t − 1] + 
+
+> n
+
+∑
+
+> i=1
+
+Input (i) ∗ k(i), (5) Since all weights in the IR weight matrix take values of either −1 or +10, and in order to limit memory usage, the value −1 is encoded as ‘0’ and the value +10 as ‘1’. A subsequent if statement is then used to restore the original values. This reduces each IR weight to a single bit. A Julia script exports this matrix into the file “WeightMatrix02 pkg.vhd”, which is directly usable in VHDL. The SRC and IR weight matrices are stored in LUT-registers. This choice provides faster access than BRAM, which typically requires at least one clock cycle. This is made possible by the moderate size of the network and the large number of LUTs available on the XC7A200T device. 
+
+4.3 Output layer 
+
+This layer is used for analysis purposes. It takes as input the 10 IR output values and provides the index of the maximum value. At the end of a spiking trace, this index is compared with CMP VAL 
+
+through the activation of the μ-CMP signal. In case of a mismatch, an error counter is incremented and subsequently used to compute the recognition accuracy. 
+
+4.4 Display unit - HUB75 
+
+A display unit is implemented to visualize the network behavior during the debugging phase. It uses a 32 × 64 LED matrix with a HUB75 interface. The image sequence of a spiking trace is displayed on the right side, while the recognized digit is displayed on the left side as shown Figure 6. 
+
+# 5 Experimental results 
+
+Figure 10 shows the experimental setup used to validate and analyze SRC network performance. All tests were performed on an Alinx board equipped with an AMD Xilinx Artix-7 XC7A200T. All the results presented in this section are obtained using the MNIST dataset, converted into Spiking Traces as described previously. We first validate the behavior of the VHDL implementation by comparing it with the PsV version coded in Julia. The entire SpT test set is processed on both systems. The parameters zhyp s and 
+
+zdeep s are set to 900 and 100, respectively, in both cases. The SRC input weight matrices are encoded using 9 bits (from −256 to +255). The VHDL implementation deployed on the FPGA achieves an accuracy of 96.31%, which is identical to that of the PsV implementation in Julia (96.31%). We then analyze the computation time and the hardware resource utilization of the FPGA. The computation time directly influences the energy consumed to process each digit. A digit corresponds to a spiking trace of 220 images. The SRC layer is the slowest layer of the network: each SRC neuron requires 784 clock cycles to process a single image. At the end of each image processing step, 8 additional clock cycles are required for buffering and for resetting the state machines. This results in a total of 174,240 clock cycles per digit. At a clock frequency of 100 MHz, this corresponds to a processing time of 1.7424 ms per digit. The processing time is then reduced by shortening the spiking trace length, and the resulting degradation in accuracy is evaluated. Table 3 shows a significant degradation for sequences shorter than 44 images. 9Table 3. Spiking trace length vs. accuracy and energy efficiency at 100 MHz. size acc. (%) T /SpT (ms) E/SpT (mJ) 20+200 96.31 1.748 2.24 10+100 95.66 0.871 1.11 5+50 95.25 0.436 0.55 4+40 94.17 0.348 0.45 2+20 91.99 0.174 0.22 
+
+Table 4. FPGA: resource report per SRC neuron. Neuron type LUTs FFs BRAM DSP SRC (W:9 bits) 830 132 0 100 SRC (W:4 bits) 789 123 0 100 IR 33 48 0 0Input 1924 1646 341 0Finally, the energy per digit can be estimated from Vivado power estimation (post-implementation). Vivado reports the power consumption of the implemented logic after compilation. The total re-ported consumption is 1.28 W (including the HUB75 display). The last column of Table 3 provides the energy required to process a single digit, expressed in mJ. To avoid an excessive degradation of accuracy, the following tests are not conducted using sequences shorter than 44 images. Reducing hardware resource utilization can also contribute to lowering energy consumption. Vivado provides a breakdown in terms of LUTs, FFs, BRAMs, and DSPs. This decomposition is reported in Table 4. It is possible to reduce the number of LUTs used per SRC neuron by decreasing the bit-width of the input weight registers. Table 4 highlights a gain of approximately 5 to 6% when moving from 9-bit to 4-bit weights. 
+
+5.1 Binary quantization 
+
+Table 5 presents the results obtained by varying the register size of the SRC weight matrix. The maximum size is 9 bits, and the minimum size is 2 bits (including the sign bit). A significant degradation is observed when the weight register size is less than or equal to 3 bits. In contrast, the use of 4-bit weights represents an attractive trade-off: accuracy remains acceptable while LUT utilization is reduced by approximately 5 to 6% (Table 4), which should lead to a proportional reduction in power consumption due to the released logic resources. The results also show that the spike generation rate can be reduced by increasing zhyp s (Figure 5). The reference value of zhyp s is set to 900 in order to closely match the behavior reported by De Geeter et al. [6]. However, higher values (e.g., 980) significantly reduce spiking activity (by approximately a factor of ∼3 between 880 and 980 in our observations). This suggests that an 
+
+event-based implementation could become advantageous when activity is sufficiently sparse. We then analyze recognition accuracy when weight quantization is combined with a reduction in spiking trace length, for zhyp s values ranging from 880 to 980. The results are reported in Table 6. When spiking trace length becomes smaller and weights are quantized on 4 bits, we start to see a decrease in accuracy for low spiking frequencies (i.e. higher zhyp s values). 10 Table 5. Weight bit-width vs. accuracy for different values of zhyp s .size acc. (%) acc. (%) acc. (%) acc. (%) acc. (%) acc. (%) acc. (%) 
+
+zhyp s =880 zhyp s =900 zhyp s =920 zhyp s =940 zhyp s =960 zhyp s =980 zhyp s =1000 9 96.13 96.31 96.26 96.28 96.02 95.58 93.23 8 96.17 96.25 96.21 96.31 96.07 95.45 92.98 7 96.06 96.27 96.21 96.30 96.07 95.52 92.72 6 96.15 96.26 96.26 96.24 95.88 95.22 92.18 5 96.04 96.14 96.35 96.13 95.73 94.43 90.64 4 95.17 95.35 95.40 95.36 93.75 91.60 86.17 3 90.72 91.01 90.69 89.94 86.00 81.37 73.16 2 55.01 54.82 53.74 51.48 47.61 43.67 37.58 
+
+Table 6. SpT vs Size Reg. vs zhyp s
+
+880 900 920 Size SpT 6 bits 5 bits 4 bits 6 bits 5 bits 4 bits 6 bits 5 bits 4 bits 55 95.13% 95.05% 94.38% 93.81% 93.32% 91.90% 94.26% 93.68% 92.48% 44 94.07% 93.66% 92.39% 94.39% 93.91% 92.89% 94.87% 94.34% 93.44% 940 960 980 Size SpT 6 bits 5 bits 4 bits 6 bits 5 bits 4 bits 6 bits 5 bits 4 bits 55 94.78% 94.17% 92.99% 90.24% 89.02% 85.35% 90.74% 89.97% 86.46% 44 91.10% 89.78% 87.05% 90.71% 89.49% 86.63% 91.40% 90.72% 88.17% 
+
+5.2 Comparison with other SNN FPGA implementations 
+
+Our results are compared with other FPGA-based SNN implementations evaluated on the MNIST dataset. To ensure a fair comparison, the operating frequency is normalized to 100 MHz. Since the neuron model proposed in this work (SRC) differs from conventional approaches, the comparison is conducted with studies employing neurons of comparable complexity (LIF and variants) as well as neural networks of similar size. For comparable weight matrix word widths (4 bits), comparing the accuracy gaps between the training and test datasets across the different works reveals a discrepancy of 3% in the study by Carpegna et al. [4] and more than 70% by Han et al. [9], which is significantly higher than the 1.1% observed in this work. This strong preservation of accuracy after FPGA deployment could be attributed to the robustness of the underlying neuronal model, which implements spiking dynamics without reset through a mixed feedback interconnection. The processing time per digit is below one millisecond for short spiking traces and is comparable to that reported by Carpegna et al. [4], while the energy consumption is particularly low. This performance is primarily due to (i) extensive operator simplifications, (ii) full parallelization within each layer, and (iii) the use of DSP48 units in SRC computations. As a result, SRC neurons are able to compete with LIF neurons in terms of computation time and energy consumption, while preserving continuous dynamics that are closer to those of biological neuron models, as well as analog electronic implementations [12, 15]. 11 Table 7. Comparison of this SRC implementation with FPGA-based SNNs. Design Carpegna et al. [4] Han et al. [9] this work (200 - 20) this work (44 - 4) Year 2024 2020 2025 2025 Model LIF LIF SRC SRC Neurons 784-128-10 784-1024-1024-10 784-100-10 784-100-10 FPGA XC7Z020 C7Z045 SoC XC7A200 XC7A200 
+
+f req. [MHz] 100 100 1 100 100 Cells log. 7,612 12,690 - 93,347 DSP used 0 - 100 100 BRAM used 18 40.5 341 2 341 2
+
+T /img [ms] 0.78 12.42 1 1.748 0.436 E/img [mJ] 0.14 5.92 1 2.24 0.55 Training accur. [%] 96.83 98.48 96.48 96.48 Weight (bits) 4 6 (4) 4 4FPGA accur. [%] 93.85 97.06 ( <20) 95.35 92.89  
+
+> 1
+
+adjust from 150 to 100 MHz  
+
+> 2
+
+BRAM is used for storing the spiking traces. 
+
+# 6 Discussion 
+
+The experiments highlight two main trade-offs. First, reducing the length of the spiking traces linearly decreases the processing time and energy consumption, but the accuracy degrades when the sequence length falls below approximately 44 images (Table 3). Second, weight quantization reduces the usage of logic resources (and thus potentially the power consumption), but the accuracy degrades sharply when the word width is reduced below 4 bits (Table 5). In our configuration, 4 bits therefore appears to be a practical lower bound. Another important control parameter is zhyp s , which directly regulates the spike generation fre-quency (Figure 5). We observe that increasing zhyp s can reduce spiking activity by a factor of approximately three (from 880 to 980) while maintaining an acceptable level of accuracy. This sug-gests that an event-driven scheduling strategy could become advantageous when the spiking activity is sufficiently sparse. A natural extension of this work is therefore to investigate a hybrid approach capable of switching between synchronous processing and event-driven execution depending on the observed spike density. Finally, beyond reporting energy consumption per digit or per image, it may be more informative to normalize energy with respect to the number of emitted spikes. A metric such as E/ spike could facilitate comparisons between implementations of different sizes and operating frequencies. This would require measuring the total number of spikes produced (e.g., at the SRC outputs and/or across the network layers) and reporting E/ spike in addition to E/ digit. 
+
+# 7 Conclusion 
+
+In this work, we implemented an SRC-based spiking neural network (SNN) on an FPGA accelerator and evaluated it on an Artix-7 XC7A200T FPGA using spiking traces derived from the MNIST dataset. The SRC neuron preserves continuous dynamics while remaining compatible with efficient hardware simplifications in VHDL. Our prototype achieves 96.31% accuracy with a 220-image spiking 12 trace and a processing time of 1.7424 ms per digit at 100 MHz. We further show that reducing the spiking trace length and quantizing the synaptic weights can significantly lower energy consumption, achieving 93.32% accuracy at 0.55 mJ per digit (55 images, 5-bit weights) and 92.89% at 0.45 mJ (44 images, 4-bit weights). These results indicate that SRC neurons are strong candidates for energy-efficient SNN accelerators. The Binder–NetWorkLevelxx architecture additionally provides high modularity and simplified reconfiguration. Future work includes completing the combined exploration of spiking trace length and weight quantization, investigating adaptive event-driven 
+
+scheduling enabled by reduced spiking activity, and developing automation tools for code generation and interconnection to support larger and potentially multi-FPGA networks. 13 NetWorkLevel 0
+
+NetWorkLevel 1
+
+NetWorkLevel 2
+
+NetWorkLevel 3
+
+InLine 
+
+784 outputs : buffer 
+
+784 outputs : interface 
+
+> SpikingTrace SpikingTrace
+> WeightMatrix 01 WeightMatrix 01
+
+100 outputs : buffer 
+
+10 intputs : interface 
+
+10 outputs : buffer 
+
+10 inputs : interface 
+
+SRC (0..99) 
+
+LIn (0..9) 
+
+> WeightMatrix 02 WeightMatrix 02
+
+HUB75 -Display 
+
+Binder 
+
+Control unit 
+
+&
+
+MicroMachine 
+
+Clock 
+
+System 
+
+Reset 
+
+System 
+
+L0L1 : signal 
+
+L1L2 : signal 
+
+L2L3 : signal 
+
+1 outputs : buffer 
+
+CMP (0..9) 
+
+> switch
+
+Switch Figure 6. Architecture of the neural network on FPGA. 14 WeightMatrix Zmax 
+
+SpikeO [0..N -1] 
+
+u1 : for i in 0 to (N -1) generate (Neuron_Src_pkg) 
+
+U1(0) Src 
+
+U1(N -2) Src 
+
+U1(N -1) Src 
+
+X ... 
+
+if (Fht<500) then tmpFz := Zmax_Vec; 
+
+else tmpFz := Zmin; 
+
+end if; 
+
+-- calcul Fht T1  - base 
+
+tmpFht := resize(signed(CurrentVec),tmpFht'length) + shift_left(sig... 
+
+tmpFht := shift_right(signed((shift_left(tmpFht,1) + tmpFht)),2); 
+
+...  ... 
+
+if (Fht<500) then tmpFz := Zmax_Vec; 
+
+else tmpFz := Zmin; 
+
+end if; 
+
+-- calcul Fht T1  - base 
+
+tmpFht := resize(signed(CurrentVec),tmpFht'length) + shift_left(sig... 
+
+tmpFht := shift_right(signed((shift_left(tmpFht,1) + tmpFht)),2); 
+
+-- calcul Fhst T1  -
+
+tmpFhst := resize(signed(Fhst),tmpFhst'length)  - resize(signed(Fht),t... 
+
+tmpFhst := shift_right(resize((tmpFhst * resize(signed(tmpFz),tmpFhs... 
+
+-- mise à jour des variable principales 
+
+if (tmpFht > 1023 ) then Fht <= "01111111111"; 
+
+elsif (tmpFht <  -1024) then Fht <= "10000000000"; 
+
+else Fht <= tmpFht(10 downto 0); 
+
+end if; 
+
+... 
+
+Input : interface 
+
+Output : buffer 
+
+U1(0) Src 
+
+Latch 
+
+NetWorkLevel x
+
+NetWorkLevel x-1
+
+NetWorkLevel x+1 
+
+WeightMatrix x
+
+Clock 
+
+Go 
+
+Control unit 
+
+&
+
+MicroMachine  Ready [0..N -1] 
+
+Reset 
+
+Clock 
+
+Ready 
+
+Go 
+
+ResetμR 
+
+Resetok 
+
+Latch 
+
+Reset Figure 7. Internal structure of a neural network layer. 15 Figure 8. Stability results and accuracy (the two true solutions). 
+
+Figure 9. Stability results and accuracy (one true - one false solution). 16 Alink AX7A200 
+
+JTAG  – PRG USB 
+
+Digital input Oscilloscope MS0 4104 
+
+Led Matrix 32x64 (HUB75 standard) Figure 10. Test setup using the Alinx XC7A200 board. 17 References 
+
+[1] Larry F Abbott. Lapicque’s introduction of the integrate-and-fire model neuron (1907). Brain research bulletin , 50(5-6):303–304, 1999. [2] Ilkin Aliyev, Jesus Lopez, and Tosiron Adegbija. Exploring the sparsity-quantization interplay on a novel hybrid snn event-driven architecture. In 2025 Design, Automation & Test in Europe Conference (DATE) , pages 1–7. IEEE, 2025. [3] Alessio Carpegna, Alessandro Savino, and Stefano Di Carlo. Spiker: an fpga-optimized hardware accelerator for spiking neural networks. In 2022 IEEE Computer Society Annual Symposium on VLSI (ISVLSI) , pages 14–19. IEEE, 2022. [4] Alessio Carpegna, Alessandro Savino, and Stefano Di Carlo. Spiker+: a framework for the generation of efficient spiking neural networks fpga accelerators for inference at the edge. IEEE Transactions on Emerging Topics in Computing , 2024. [5] Manon Dampfhoffer, Thomas Mesquida, Alexandre Valentian, and Lorena Anghel. Are snns really more energy-efficient than anns? an in-depth hardware-aware study. IEEE Transactions on Emerging Topics in Computational Intelligence , 7(3):731–741, 2022. [6] Florent De Geeter, Damien Ernst, and Guillaume Drion. Spike-based computation using clas-sical recurrent neural networks. Neuromorphic Computing and Engineering , 4(2):024007, 2024. [7] Jianfeng Feng. Is the integrate-and-fire model good enough?—a review. Neural networks , 14 (6-7):955–975, 2001. [8] Shikhar Gupta, Arpan Vyas, and Gaurav Trivedi. Fpga implementation of simplified spiking neural network. In 2020 27th IEEE International Conference on Electronics, Circuits and Systems (ICECS) , pages 1–4. IEEE, 2020. [9] Jianhui Han, Zhaolin Li, Weimin Zheng, and Youhui Zhang. Hardware implementation of spiking neural networks on fpga. Tsinghua Science and Technology , 25(4):479–486, 2020. [10] Zhen He, Cong Shi, Tengxiao Wang, Ying Wang, Min Tian, Xichuan Zhou, Ping Li, Liyuan Liu, Nanjian Wu, and Gang Luo. A low-cost fpga implementation of spiking extreme learning machine with on-chip reward-modulated stdp learning. IEEE Transactions on Circuits and Systems II: Express Briefs , 69(3):1657–1661, 2021. [11] Alan L Hodgkin and Andrew F Huxley. A quantitative description of membrane current and its application to conduction and excitation in nerve. The Journal of physiology , 117(4):500, 1952. [12] Giacomo Indiveri. Neuromorphic is dead. long live neuromorphic. Neuron , 113(20):3311–3314, 2025. [13] Jindong Li, Guobin Shen, Dongcheng Zhao, Qian Zhang, and Yi Zeng. Firefly: A high-throughput hardware accelerator for spiking neural networks with efficient dsp and memory optimization. IEEE Transactions on Very Large Scale Integration (VLSI) Systems , 31(8):1178– 1191, 2023. [14] Sixu Li, Zhaomin Zhang, Ruixin Mao, Jianbiao Xiao, Liang Chang, and Jun Zhou. A fast and energy-efficient snn processor with adaptive clock/event-driven computation scheme and online learning. IEEE Transactions on Circuits and Systems I: Regular Papers , 68(4):1543–1552, 2021. 18 [15] Loris Mendolia, Chenxi Wen, Elisabetta Chicca, Giacomo Indiveri, Rodolphe Sepulchre, Jean-Michel Redout´ e, and Alessio Franci. A neuromodulable current-mode silicon neuron for robust and adaptive neuromorphic systems. arXiv preprint arXiv:2512.01133 , 2025. [16] Farhad Modaresi, Matthew Guthaus, and Jason K Eshraghian. Openspike: an openram snn accelerator. In 2023 IEEE International Symposium on Circuits and Systems (ISCAS) , pages 1–5. IEEE, 2023. [17] Sathish Panchapakesan, Zhenman Fang, and Jian Li. Syncnn: Evaluating and accelerating spiking neural networks on fpgas. ACM Transactions on Reconfigurable Technology and Systems ,15(4):1–27, 2022. [18] Arnab Roy, Swagath Venkataramani, Neel Gala, Sanchari Sen, Kamakoti Veezhinathan, and Anand Raghunathan. A programmable event-driven architecture for evaluating spiking neural networks. In 2017 IEEE/ACM International Symposium on Low Power Electronics and Design (ISLPED) , pages 1–6. IEEE, 2017. [19] Frances K Skinner. Conductance-based models. Scholarpedia , 1(11):1408, 2006. [20] Emma Strubell, Ananya Ganesh, and Andrew McCallum. Energy and policy considerations for deep learning in nlp. In Proceedings of the 57th annual meeting of the association for computational linguistics , pages 3645–3650, 2019. [21] Qian Wang, Youjie Li, Botang Shao, Siddhartha Dey, and Peng Li. Energy efficient parallel neuromorphic architectures with approximate arithmetic on fpga. Neurocomputing , 221:146– 158, 2017. [22] Jiadong Wu, Lun Lu, Yinan Wang, Zhiwei Li, Changlin Chen, Qingjiang Li, and Kairang Chen. Efficient spiking convolutional neural networks accelerator with multi-structure compatibility. 
+
+Frontiers in Neuroscience , 19:1662886, 2025. [23] Zhanglu Yan, Zhenyu Bai, and Weng-Fai Wong. Reconsidering the energy efficiency of spiking neural networks. arXiv preprint arXiv:2409.08290 , 2024. 19

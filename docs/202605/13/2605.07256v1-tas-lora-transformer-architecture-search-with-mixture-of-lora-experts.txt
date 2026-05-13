@@ -1,0 +1,678 @@
+Title: TAS-LoRA: Transformer Architecture Search with Mixture-of-LoRA Experts
+
+URL Source: https://arxiv.org/pdf/2605.07256v1
+
+Published Time: Mon, 11 May 2026 00:50:55 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# TAS-LoRA: Transformer Architecture Search with Mixture-of-LoRA Experts 
+
+Jeimin Jeon 1,2 Hyunju Lee 1 Bumsub Ham 1,3*
+
+> 1
+
+Yonsei University 2Articron Inc. 3Korea Institute of Science and Technology (KIST) 
+
+https://cvlab.yonsei.ac.kr/projects/TAS-LoRA/ 
+
+Abstract 
+
+Transformer architecture search (TAS) discovers optimal vision transformer (ViT) architectures automatically, reduc-ing human effort to manually design ViTs. However, exist-ing TAS methods suffer from the feature collapse problem, where subnets within a supernet fail to learn subnet-specific features, mainly due to the shared weights in a supernet, limiting the performance of individual subnets. To address this, we propose TAS-LoRA, a novel method that introduces parameter-efficient low-rank adaptation (LoRA) to enable subnet-specific feature learning, while maintaining computa-tional efficiency. TAS-LoRA incorporates a Mixture-of-LoRA-Experts (MoLE) strategy, where a lightweight router dynam-ically assigns LoRA experts based on subnet architectures, and introduces a group-wise router initialization technique to encourage diverse feature learning across experts early in training. Extensive experiments on ImageNet and sev-eral transfer learning benchmarks, including CIFAR-10/100, Flowers, CARS, and INAT-19, demonstrate that TAS-LoRA mitigates feature collapse effectively, improving performance over state-of-the-art TAS methods significantly. 
+
+1. Introduction 
+
+Transformer architectures [ 11 , 32 , 45 , 47 ] have demonstrated remarkable success beyond natural language processing, par-ticularly in computer vision, surpassing convolutional neural networks (CNNs) [ 18 , 20 , 40 , 44 ] in various tasks. Unlike CNNs, Vision transformers (ViTs) [ 11 , 32 , 45 ] leverage self-attention mechanisms to capture long-range dependencies and global context, allowing them to model complex spatial relationships more effectively. Despite these advantages, designing optimal ViT architectures for different hardware constraints remains challenging, as it requires extensive man-ual tuning, making deployment computationally expensive and limiting scalability. To address this, transformer architecture search (TAS) has emerged as a promising solution, automating the dis-
+
+> *Corresponding author.
+
+covery of ViT architectures optimized for specific con-straints, reducing the human effort significantly. Among TAS approaches [ 5, 27 , 30 , 42 , 50 ], one-shot TAS meth-ods [ 5, 30 , 42 ] have gained particular attention due to their efficiency. They train a weight-entangled supernet, where all possible subnets share a common set of weights, and leverage it to estimate the performance of different subnet architectures. The selected subnet can directly be deployed without additional training, significantly reducing compu-tational costs. Despite their efficiency, weight-entangled supernets suffer from the feature collapse problem, where subnets within supernets fail to learn distinct feature rep-resentations (Fig. 1(a-b)). Since the supernet is optimized to minimize an overall loss across all possible subnets, gra-dients from different subnets are aggregated to update the shared weights in the supernet. Accordingly, the shared weights enable learning generic features that work well for diverse subnets [ 10 ], but this prevents individual subnets from fully leveraging their architectural characteristics, lead-ing to suboptimal performance. To overcome the feature collapse problem, we propose a novel TAS approach to learning feature representations tai-lored to each subnet, dubbed TAS-LoRA, using a parameter-efficient low-rank adaptation (LoRA) technique. Unlike conventional methods that rely on shared weights across all subnets, TAS-LoRA introduces trainable low-rank parame-ters to each subnet, allowing subnets to learn subnet-specific feature representations (Fig. 1(c)). Additionally, at inference, the LoRA parameters can be merged into each subnet, in-troducing no additional computational overhead. However, directly assigning a unique LoRA to every subnet would be computationally prohibitive due to the enormous num-ber of possible subnet configurations. To address this, we propose to incorporate Mixture-of-LoRA-Experts (MoLE), which efficiently distributes a limited set of LoRA experts across subnets. Instead of assigning a unique LoRA to each subnet, our approach employs a router that dynamically selects and combines relevant LoRA experts based on the subnet architecture for learning subnet-specific feature rep-resentations. One major challenge is that, during the early stages of training, the router initially treats all LoRA experts 1
+
+> arXiv:2605.07256v1 [cs.CV] 8 May 2026
+
+equally, resulting in similar feature representations and re-dundancy among experts. To address this issue, we use a group-wise router initialization strategy, where transformer blocks within subnets are grouped based on architectural similarities, and the router is initialized such that each LoRA expert is assigned to distinct groups. We validate our method through extensive experiments on ImageNet [ 9 ] and eval-uate its transferability across multiple datasets, including CIFAR-10/100 [ 26 ], Flowers [ 36 ], CARS [ 25 ], and INAT-19 [ 46 ]. Our results demonstrate that TAS-LoRA signifi-cantly outperforms state-of-the-art approaches, confirming its effectiveness in mitigating the feature collapse problem and improving the performance of TAS. We summarize our contributions as follows: • We propose TAS-LoRA, a novel approach that mitigates the feature collapse problem in TAS using LoRA, while learning subnet-specific features. • To enhance efficiency, we propose to incorporate a MoLE for TAS, which dynamically assigns and combines LoRA experts based on each subnet architecture. We also in-troduce group-wise router initialization to encourage that LoRA experts learn distinct feature representations early in training. • Extensive experiments on various datasets demonstrate the superiority of TAS-LoRA over the state-of-the-art meth-ods. 
+
+2. Related work 
+
+2.1. Transformer architecture search 
+
+Early works on neural architecture search (NAS) [ 1 – 3, 29 ,37 ] focus on handling CNN architectures. With the grow-ing interest in ViTs, research on searching for optimal ViT architectures has gained significant attention. TAS can be categorized into zero-shot and one-shot TAS methods. Zero-shot TAS approaches [ 27 , 43 , 56 ] leverage zero-cost proxies to predict the network performance without training. For example, TF-TAS [ 56 ] introduces the DSS-indicator to estimate the characteristics of self-attention and MLP mod-ules. E-GSNR [ 43 ] exploits the gradient signal-to-noise ratio to predict generalization and convergence abilities of the net-work. AZ-NAS [ 27 ] combines multi zero-cost proxies to evaluate networks from various perspectives, such as fea-ture expressivity and network complexity. Zero-shot TAS methods are highly efficient for selecting network architec-tures, but they require to train the chosen architectures from scratch, prior to deployment, which is computationally de-manding, especially when adjusting for different hardware constraints. One-shot TAS approaches [ 5, 22 , 23 , 30 , 42 , 48 ] instead train a supernet encompassing all possible subnets, deploy-ing the subnets without additional training. Specifically, AutoFormer [ 5 ] optimizes the supernet by randomly sam-pling subnets and updating their parameters. VITAS [ 42 ]shows that AutoFormer results in imbalanced updates across channels, leading to suboptimal performance. To address this issue, it proposes a new supernet construction strategy to encourage uniform updates across all channels. Focus-Former [ 30 ] replaces random sampling with learnable subnet samplers, which jointly optimize the sampling process and supernet weights. DYNAS [ 23 ] proposes a dynamic training strategy that adjusts learning rates and momentum buffers based on the sampled subnet. A major limitation of all afore-mentioned methods is that significant numbers of subnets share the same weights, leading to the feature collapse prob-lem, where subnets fail to learn specialized features. For effective supernet training, PreNAS [ 48 ] proposes to reduce the number of subnets considered in a supernet. Specifically, it exploits zero-cost proxies to pre-select a very few subnets for constructing the supernet, e.g ., 6 out of 
+
+2 × 10 8 possible architectures in the Autoformer-T space. However, similar to zero-shot TAS approaches, it struggles to adapt to new hardware constraints, such as FLOPs limit, if they are not accounted for the selected subnets. When new constraints are given, a different set of subnets should be chosen, and the supernet needs to be retrained from scratch. In contrast, our method constructs a supernet containing all possible subnets, similar to conventional one-shot TAS approaches, while allowing each subnet to learn specialized features using LoRA. To the best of our knowledge, this is the first work to exploit MoLE for TAS. Most related to ours, MoS [ 22 ] introduces a mixture-of-supernets strategy to reduce the gradient conflict among subnets, similar to few-shot NAS [ 37 , 55 ]. Our method dif-fers from MoS in the following aspects: (1) while MoS aims to minimize gradient conflicts, our primary goal is to ad-dress the feature collapse problem in TAS; (2) MoS requires training multiple supernets, resulting in high computational costs, whereas our approach trains a lightweight set of MoLE layers efficiently; (3) MoS trains all supernets from scratch, while ours fine-tunes the MoLE layers on a pretrained su-pernet; and (4) unlike MoS, we introduce an LSTM-based router to capture sequential dependencies across transformer blocks, and apply group-wise router initialization to learn diverse feature representations. 
+
+2.2. LoRA 
+
+LoRA [ 21 ] is a technique that fine-tunes pretrained models efficiently with low-rank learnable matrices, while keeping the original weights frozen. This significantly reduces the number of trainable parameters, making fine-tuning com-putationally efficient. Several variants of LoRA have been proposed to enhance its effectiveness. DoRA [ 31 ] decouples pretrained weights into two separate learnable parameters, magnitude and direction, to enhance the learning capacity. PISSA [ 34 ] initializes the LoRA branch using the principal 2components of the pretrained weights for faster convergence. AdaLoRA [ 54 ] adjusts the rank of layers based on their im-portance, i.e ., the layers with higher importance are assigned higher ranks, and vice versa, for better performance. More recently, MoLE [ 13 , 51 , 53 ] has been proposed, where a router dynamically selects LoRA experts based on input feature maps. While effective, the router in the existing MoLE-based methods should recompute expert weights for every input, leading to significant computational overhead. Moreover, selected experts vary w.r.t the input, and thus LoRA parameters could not be integrated into pretrained weights. Our approach addresses this inefficiency by exploit-ing subnet configurations as router inputs, instead of feature maps. Since the selected subnet remains fixed, the router runs only once, independent to the input. This also allows LoRA parameters to be merged into the supernet, further reducing inference overhead. 
+
+2.3. Feature collapse problem 
+
+Feature collapse refers to a phenomenon that different ar-chitectures with shared weights are likely to provide similar feature representations, limiting the ability to exploit their architectural characteristics. UENSA [ 10 ] has shown the feature collapse problem with stochastic networks, where network architectures change randomly during training and inference ( e.g ., varying skip connection paths between lay-ers), while they share the same set of weights. To alleviate this, it introduces architecture-specific parameters enforc-ing slight variations in feature learning, which is however tailored to CNNs, and considers five candidates of network architectures only. As the number of candidate architectures increases, the number of architecture-specific parameters grows linearly, requiring additional memory resources. The total number of training iterations also increase to optimize parameters of each candidate sufficiently, resulting in higher computational costs. To our knowledge, we are the first to identify and address the feature collapse problem in TAS. Our method uses a small set of LoRA experts, combined with a router, that selects appropriate experts dynamically based on the characteristics of subnets. This enables learning specialized features for individual subnets efficiently, even for supernets with an enormous number of subnets. A related but contrasting observation comes from Pi-NAS [ 38 ] that subnets within its supernet show diverse fea-ture representations. This discrepancy arises from the dif-ference in supernet construction. Pi-NAS employs a weight-sharing strategy, where different operations ( e.g ., Conv 3 × 3
+
+and Conv 1 × 1) within the same layer use separate branches with completely independent parameters, which may lead to distinct feature representations for each branch. Note that this strategy requires retraining after subnet selection. Recently, weight-entangled strategies are more popular in TAS [ 5, 30 , 42 , 48 ], due to the efficiency in eliminating the retraining process. In weight-entangled strategies, the weights of operations are sampled from a shared parame-ter set per layer. During training, different subnets update the shared weights of each layer, preventing the parameters from specializing for each architecture. This limits learning subnet-specific features, and leads to the feature collapse problem. 
+
+3. Method 
+
+In this section, we briefly describe the problem of TAS (Sec. 3.1), present our empirical analysis of the feature collapse problem in weight-entangled supernets (Sec. 3.2), and then introduce our TAS-LoRA method (Sec. 3.3). 
+
+3.1. Preliminaries 
+
+In TAS, a supernet S is an over-parameterized model that encompasses a large set of possible subnets. Each subnet is characterized by two types of attributes: (1) block-level attributes, which vary across transformer blocks ( e.g ., the number of attention heads, MLP ratio), and (2) subnet-level attributes, which remain consistent across all blocks ( e.g ., an embedding dimension, subnet depth). Formally, we denote the set of all subnets within the supernet as N , where each subnet Ni is defined as: 
+
+Ni = ( v, e, A ), (1) where v represents the depth of the subnet, i.e ., the number of transformer blocks, and e denotes the embedding dimension. Note that these subnet-level attributes are shared across all blocks. A captures the block-specific attributes, defined as 
+
+A = {(n(b), m (b))}vb=1 , (2) where n(b) and m(b) represent the number of attention heads and MLP ratio in the bth block, respectively. During training, a single subnet Ni is sampled per itera-tion and optimized using a standard loss function: 
+
+θ∗ = arg min  
+
+> θ
+
+ENi∼N [L(Ni; θ)] , (3) where θ represents the shared weights in the supernet, and L
+
+denotes a loss function ( e.g ., the cross-entropy loss). 
+
+3.2. Empirical analysis 
+
+TAS methods typically adopt a weight-entangled supernet for training, where all subnets share a common set of parameters. While the weight-entangled supernet reduces training cost significantly, it suffers from the feature collapse problem that different subnets within the supernet tend to provide highly similar feature representations, regardless of their architectural differences. Since the supernet optimizes for an overall loss across all subnet configurations, the shared weights attempt to capture generic features that work across 30 1 2 3 4 5                              
+
+> Subnet Index
+> 012345
+> Subnet Index
+> 1.00 0.94 0.93 0.92 0.93 0.93
+> 0.94 1.00 0.93 0.92 0.93 0.92
+> 0.93 0.93 1.00 0.97 0.97 0.96
+> 0.92 0.92 0.97 1.00 0.97 0.96
+> 0.93 0.93 0.97 0.97 1.00 0.96
+> 0.93 0.92 0.96 0.96 0.96 1.00
+
+(a) AutoFormer [5] 0 1 2 3 4 5                               
+
+> Subnet Index
+> 012345
+> Subnet Index
+> 1.00 0.93 0.92 0.93 0.92 0.93
+> 0.93 1.00 0.92 0.93 0.92 0.90
+> 0.92 0.92 1.00 0.96 0.94 0.94
+> 0.93 0.93 0.96 1.00 0.95 0.95
+> 0.92 0.92 0.94 0.95 1.00 0.96
+> 0.93 0.90 0.94 0.95 0.96 1.00
+
+(b) DYNAS [23] 0 1 2 3 4 5                               
+
+> Subnet Index
+> 012345
+> Subnet Index
+> 1.00 0.61 0.59 0.61 0.62 0.67
+> 0.61 1.00 0.67 0.69 0.65 0.69
+> 0.59 0.67 1.00 0.73 0.73 0.73
+> 0.61 0.69 0.73 1.00 0.72 0.69
+> 0.62 0.65 0.73 0.72 1.00 0.67
+> 0.67 0.69 0.73 0.69 0.67 1.00
+
+(c) TAS-LoRA (Ours) 0 1 2 3 4 5                               
+
+> Subnet Index
+> 012345
+> Subnet Index
+> 1.00 0.44 0.46 0.52 0.42 0.52
+> 0.44 1.00 0.50 0.53 0.42 0.52
+> 0.46 0.50 1.00 0.56 0.50 0.44
+> 0.52 0.53 0.56 1.00 0.49 0.46
+> 0.42 0.42 0.50 0.49 1.00 0.48
+> 0.52 0.52 0.44 0.46 0.48 1.00
+
+(d) Independent 0.4 
+
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1.0
+
+Figure 1. Feature similarities between subnets trained with different strategies. Six subnets are randomly sampled from each supernet, and average cosine similarity is computed between features from the penultimate-layer: (a) AutoFormer [ 5], (b) DYNAS [ 23 ], (c) TAS-LoRA, (d) Subnets trained independently from scratch. Table 1. Top-1 accuracies (%) of six subnets, randomly sampled and trained with different strategies. ”AutoFormer” and ”DYNAS” rep-resent weight-entangled supernets, where all subnets share weights. ”TAS-LoRA” incorporates subnet-specific LoRA modules, while ”Indep.” trains each subnet independently from scratch. Subnet AutoFormer [5] DYNAS [23] TAS-LoRA Indep. 0 76.1 76.3 76.9 76.9 1 74.9 74.9 75.4 75.5 2 76.6 76.7 77.4 77.5 3 74.9 75.1 76.1 76.3 4 76.2 76.3 77.1 77.4 5 76.7 76.9 77.9 78.1 
+
+subnets, rather than the features tailored to each subnet, resulting in suboptimal performance for individual subnets. We visualize in Fig. 1 (a-b) cosine similarity between feature representations from six subnets, randomly sampled and trained with weight-entangled TAS approaches, Aut-oFormer [ 5] and DYNAS [ 23 ]. We can see that feature representations are nearly identical. Subnets trained inde-pendently from scratch, however, exhibit significantly lower similarity, suggesting that optimal feature representations vary, according to subnet architectures (Fig. 1(d)). This observation is further supported by the top-1 accuracy in Table 1, where subnets trained via AutoFormer and DYNAS perform notably worse than their counterparts trained from scratch independently. To address this limitation, we propose TAS-LoRA, which encourages subnets to learn more specialized and diverse features. Rather than relying on shared weights solely, TAS-LoRA introduces lightweight, subnet-specific adapta-tion modules that reduce feature redundancy across sub-nets (Fig. 1(c)), thereby achieving top-1 accuracies compara-ble to subnets trained independently from scratch (Table 1). 
+
+3.3. TAS-LoRA 
+
+TAS-LoRA exploits LoRA to learn subnet-specific feature representations (Fig. 2). We conjecture that while a super-net captures shared features across subnets, subnet-specific LoRA enables each subnet to refine these features based on its architectural properties. Assigning a unique LoRA to each subnet however would be computationally expensive, due to the huge number of possible subnet configurations. To mitigate this, we propose MoLE assigning a limited set of LoRA experts to different subnets efficiently. Instead of assigning a separate LoRA to each subnet, our approach exploits a router that dynamically selects and integrates rele-vant LoRA experts based on subnet architectures, facilitating learning subnet-specific feature representations. 
+
+3.3.1. MoLE 
+
+TAS-LoRA applies MoLE to the linear layers of the super-net, including QKV projection layers and MLP layers in each transformer block. Given L numbers of linear layers, MoLE is applied independently to each, forming L MoLE layers. Each MoLE layer consists of a set of K LoRA ex-perts, where the kth expert in the lth layer is parameterized as Elk = U lkDlk/r , with U lk and Dlk being learnable low-rank parameters of the LoRA expert Elk, respectively, and r
+
+denotes the rank of the LoRA. For each layer l, the router assigns expert weights over the K experts, denoted as pl = ( pl
+
+1, p l
+
+2, . . . , p lK ), where 
+
+pl ∈ RK and PKk=1 plk = 1 . A final output for the lth linear layer is then computed as: 
+
+yl = W lxl +
+
+KX
+
+k=1 
+
+plkElkxl, (4) where W l represents the weight of an original linear layer, and xl denotes an input to the lth layer. 
+
+3.3.2. Router 
+
+TAS-LoRA employs an LSTM-based router to assign ex-pert weights dynamically for each layer (Fig. 2). Each transformer block consists of four linear layers (two in self-attention, two in MLP), suggesting the total number of layers 
+
+L is 4B, where B is the number of transformer blocks in the supernet. The router takes both block-level and subnet-level at-tributes as input, and provides distributions of expert weights for each layer. A block embedding layer first encodes these attributes into a continuous representation. The encoded block features are then fed into an LSTM [ 19 ], which cap-tures sequential dependencies across blocks. The LSTM 4. . .    
+
+> Transformer layer
+> Image Patches
+> Transformer layer
+> Transformer layer
+> . . .
+> Pretrained
+> Weights
+> ⨀
+> Router
+> : Trainable : Frozen
+> . . .
+> Subnet Architecture
+> MoLE
+> Block/Subnet
+> Attributes
+> LSTM ⋯
+> Embed. Layer
+> Router
+> Head
+> ⋯
+> Hidden Representations 𝐻
+> Softmax (⋅)
+> ⋯
+> ⋯Block/Subnet
+> Attributes
+> LSTM
+> Embed. Layer
+> Block/Subnet
+> Attributes
+> LSTM
+> Embed. Layer
+
+Figure 2. Left: An overview of TAS-LoRA. We exploit a MoLE for TAS to learn subnet-specific feature representations effectively and efficiently. The router dynamically assigns expert weights to each subnet based on its architectural properties. Right: Illustration of our router design. Both block-level and subnet-level attributes are processed by a learnable block embedding layer, and passed through an LSTM [ 19 ], which captures sequential dependencies across blocks. The LSTM outputs hidden representations that are further processed by a fully connected router head to generate distributions of expert weights. For more details, please refer to the text. 
+
+outputs a hidden representation h(b) ∈ Rd for the bth 
+
+block, where d is a hidden dimension of the LSTM, and 
+
+b = 1 , . . . , B 1.The hidden representations from all blocks are concate-nated to form a tensor H ∈ RB×d, which is passed through a fully connected router head. The router head is parame-terized by a learnable weight matrix R ∈ R4×B×d×K and bias term c ∈ R4×B×K , which together generate the distri-butions of expert weights O ∈ R4B×K . The router applies a softmax function to compute logits for selecting experts for all layers: 
+
+P = softmax (O, dim = −1) . (5) The expert weight pl for the lth linear layer is extracted as: 
+
+pl = P [l, :] . (6) This dynamic routing mechanism allows each layer to select LoRA experts adaptively based on its architectural properties, enabling learning specialized features efficiently 2.
+
+Group-wise router initialization. We have observed that, in the early stages of training, the router tends to assign similar weights to all LoRA experts, which limits expert specialization and causing redundancy. In the works of MoE [ 8 , 14 , 28 , 41 ], this issue is typically addressed by in-troducing auxiliary losses, that encourage different instances within a batch to select different experts. This approach is however not applicable to TAS-LoRA, as our router pro-cesses a single subnet only at a time. We instead propose a group-wise router initialization method using architectural attributes of transformer blocks ( e.g ., the number of attention heads). Inspired by the observation that architectures with similar structures tend to learn similar features [ 24 ], we group trans-former blocks at the same position across different subnets,    
+
+> 1Note that if a block is not active in a sampled subnet ( i.e ., the bth block when v < b ), the corresponding computations for that block are skipped.
+> 2In our framework, the MoLE layer is also applied to the classifier. Specifically, the hidden representation of the LSTM for the final block is used to compute the expert weights for the classifier. For clarity and to avoid complexity in notation, we omit a description of the MoLE configuration for the classifier.
+
+with the criteria of the number of attention heads, MLP ratio, and embedding dimension 3. That is, these attributes for the criteria are the same within a group. We set the number of LoRA experts to that of groups, and initialize the router, such that each expert is assigned to a distinct group of the blocks. To this end, we use a separate router head for each group k,parameterized by a weight matrix R′ 
+
+> k
+
+∈ R4×B×d×K and a bias c′ 
+
+> k
+
+∈ R4×B×K . We set all elements of R′ 
+
+> k
+
+and c′
+
+> k
+
+to zero, except for a positive value β for the kth element of the bias, where k is an index of the assigned expert for the group ( i.e ., c′
+
+> k
+
+[: , :, k ] = β). This initialization prevents the hidden representations H from influencing initial expert weights, and thus biases each group toward the designated expert, encouraging exploiting diverse experts early in train-ing (Fig. 3). As training progresses, the router updates expert assignments dynamically, based on the architectural properties of each subnet, allowing the transformer blocks within the same group to select different experts if needed. 
+
+3.3.3. Searching 
+
+After training the MoLE branch and the router, we search for an optimal subnet within a given search space. The performance of each subnet is evaluated with the shared weights in the supernet and the subnet-specific weights from LoRA. Formally, the optimal subnet N ∗ is obtained by: 
+
+N ∗ = arg min  
+
+> Ni∈N
+
+Lval (Ni; θ, ϕ ), (7) where Lval denotes the validation loss, θ represents the super-net weights, and ϕ includes the parameters of the LoRAs and the router. Note that evaluating all possible subnets is com-putationally demanding, due to lots of subnet candidates. To efficiently explore the search space, we adopt an evolutionary search strategy [ 16 ], following prior TAS methods [ 5, 42 ]. This approach selects and evaluates promising subnets itera-
+
+> 3We omit the depth attribute, since it does not affect the shape of in-dividual blocks, and exploiting the depth attribute requires more groups, according to the number of depth candidates, without performance improve-ments.
+
+5Group 
+
+> 0
+> 1
+> 2
+> LoRA Expert
+> 0
+> 1
+> 2
+> Probability
+> 0.0
+> 0.5
+> 1.0
+
+(a) Random init. Group  
+
+> 0
+> 1
+> 2
+> LoRA Expert
+> 0
+> 1
+> 2
+> Probability
+> 0.0
+> 0.5
+> 1.0
+
+(b) Group-wise init. 
+
+Figure 3. Comparison of router initialization strategies. (a) Ran-dom initialization results in nearly uniform assignments of experts, which leads to redundant feature representations. (b) Group-wise initialization biases selecting experts based on architectural at-tributes, promoting diverse feature learning across experts. Table 2. Configurations of three variants of the AutoFormer space [5]. AutoFormer-T AutoFormer-S AutoFormer-B Head Num [3, 4] [5, 6, 7] [9, 10] MLP Ratio [3.5, 4] [3, 3.5, 4] [3, 3.5, 4] Embedding Dim [192, 216, 240] [320, 384, 448] [512, 576, 624] Depth [12, 13, 14] [12, 13, 14] [14, 15, 16] 
+
+tively, identifying optimal architectures efficiently, without testing all configurations exhaustively. 
+
+3.3.4. Inference 
+
+At inference time, the selected subnet exploits a combination of the shared weights in the supernet and the subnet-specific weights from LoRA. For each linear layer, the merged weight is computed as: 
+
+W l 
+
+> merged
+
+= W l +
+
+> K
+
+X
+
+> k=1
+
+plkElk, (8) where W l is the original weight from the supernet, and the LoRA experts Elk are weighted according to their routing probabilities plk. Note that the merged weights are fixed at inference time, suggesting that there are no additional computational costs during inference. 
+
+4. Experiments 
+
+In this section, we describe experimental settings, and present results of TAS-LoRA on various datasets [ 9, 25 , 26 ,36 , 46 ]. We then provide in-depth analyses of TAS-LoRA. Please refer to the supplement for a detailed analysis of the hyperparameter settings. 
+
+4.1. Experimental settings 
+
+4.1.1. Search space and datasets 
+
+We evaluate TAS-LoRA on three variants of AutoFormer search space [ 5] with different scales: AutoFormer-T, 
+
+Table 3. Quantitative results of ViT models on ImageNet [ 9]. For TAS-LoRA, we report the average over 3 runs. †: Results repro-duced with the official code. ∗: Require retraining for changes in hardware constraints. 
+
+Models Top-1 (%) #Params FLOPs ViT-Ti [11] 74.5 5.7M -DeiT-Ti [45] 72.2 5.7M 1.2G ConViT-Ti [12] 73.1 6.0M 1.0G TNT-Ti [17] 73.9 6.1M 1.4G TF-TAS-Ti ∗ [56] 75.3 5.9M 1.4G AutoProx ∗ [50] 75.6 6.4M -GLiT-Ti ∗ [4] 76.3 7.2M 1.4G ViTAS-C [42] 74.7 5.6M 1.3G FocusFormer-Ti ∗ [30] 75.1 6.2M 1.4G PreNAS-Ti ∗ [48] 77.1 5.9M 1.4G AutoFormer-Ti [5] 74.7 5.7M 1.3G AutoFormer-Ti † 74.7 5.9M 1.3G 
+
+TAS-LoRA-Ti 75.7 ± 0.1 5.9M 1.3G DYNAS [23] 74.8 6.0M 1.3G 
+
+TAS-LoRA + DYNAS 75.9 ± 0.0 5.9M 1.3G ViT-S [11] 78.8 22.1M 4.7G DeiT-S [45] 79.9 22.1M 4.7G ConViT-S [12] 81.3 27.0M 5.4G TNT-S [17] 81.5 23.8M 5.2G TF-TAS-S ∗ [56] 81.9 22.8M 5.0G GLiT-S ∗ [4] 80.5 24.6M 4.4G ViTAS-F [42] 80.5 27.6M 6.0G FocusFormer-S ∗ [30] 81.6 23.7M 5.0G PreNAS-S ∗ [48] 81.8 22.9M 5.1G AutoFormer-S [5] 81.7 22.9M 5.1G AutoFormer-S † 81.6 22.9M 5.1G 
+
+TAS-LoRA-S 81.9 ± 0.1 22.9M 5.0G PVT-Large [49] 81.7 61.0M 9.8G DeiT-B [45] 81.8 86.0M 18.0G ViT-B [11] 79.7 86.0M 18.0G ConViT-B [12] 82.4 86.0M 17.0G TF-TAS-B ∗ [56] 82.2 54.0M 12.0G GLiT-B ∗ [4] 82.3 96.0M 17.0G FocusFormer-B ∗ [30] 81.9 52.7M 11.0G PreNAS-B ∗ [48] 82.6 54.0M 11.0G AutoFormer-B [5] 82.4 54.0M 11.0G AutoFormer-B † 82.4 54.0M 11.0G 
+
+TAS-LoRA-B 82.6 ± 0.0 54.0M 11.0G 
+
+AutoFormer-S, and AutoFormer-B. They differ in the num-ber of attention heads, MLP ratio, embedding dimensions, and network depths (Table 2). For training and evaluation, we mainly use the ImageNet dataset [ 9]. We also fine-tune the searched subnets on CIFAR-10/100 [ 26 ], Flowers [ 36 ], CARS [ 25 ], and INAT-19 [ 46 ] to assess the transferability and generalization ability of TAS-LoRA. 
+
+4.1.2. Implementation details Training MoLE. We freeze the pretrained supernet weights from AutoFormer [ 5], and train the MoLE layers and the router for 50 epochs. During a warm-up phase of 5 epochs, we update LoRA experts only with the AdamW op-timizer [ 33 ], while keeping the router frozen, encouraging each expert to learn unique characteristics from the corre-sponding group. Following the standard warm-up strate-gies [ 5, 45 ], the learning rate for LoRA experts starts with 1e-5, and increases linearly to 5e-4. After the warm-up, we 6Table 4. Quantitative results of transfer learning on various datasets, including CIFAR-10/100 [ 26 ], Flowers [ 36 ], CARS [ 25 ], and INAT-19 [46]. All images are resized to 224 × 224 .Model #Params (M) CIFAR-10 CIFAR-100 Flowers Cars INAT-19 ViT-B/16 [11] 86M 98.1 87.1 89.5 - -ViT-L/16 [11] 307M 97.9 86.4 89.7 - -DeiT-B [45] 86M 99.1 90.8 98.4 92.1 77.7 ViTAE-S [52] 24M 98.8 90.8 97.8 91.4 76.0 DearKD-S [6] 22M 98.4 89.3 97.4 91.3 -PreNAS-S [48] 23M 99.1 91.2 97.6 92.2 76.4 AutoFormer-S [5] 23M 98.9 89.6 97.9 92.1 77.4       
+
+> TAS-LoRA-S 23M 99.1 91.0 98.2 92.3 78.0
+
+optimize both the router and LoRA experts jointly for the remaining 45 epochs. The router uses SGD with an ini-tial learning rate of 1e-1. We apply a cosine learning rate scheduler, and use a batch size of 1024. We set the rank of the LoRA r to 8. The number of LoRA experts K is set to that of groups, obtained with the criteria of the number of attention heads, MLP ratio, and embedding dimension from transformer blocks. For example, AutoFormer-T includes 2 candidate values for the number of attention heads, 2 for the MLP ratio, and 3 for the embedding dimension, resulting in 12 groups. That is, we set K = 12 for AutoFormer-T, K = 27 for AutoFormer-S, and K = 18 for AutoFormer-B. 
+
+Router. We implement a lightweight LSTM-based router to compute subnet-specific expert weights. Specifically, we use a single-layer LSTM with a hidden dimension of 128, followed by a fully connected layer as the router head. For block embedding, we adopt an embedding layer [ 35 , 39 ] en-coding discrete architectural attributes into 256-dimensional vectors. We set β to 3 for group-wise router initialization. 
+
+Transfer learning. We follow the protocol in [ 45 ] for trans-fer learning. Specifically, we fine-tune the searched sub-net, except for the classifier, which is trained from scratch. For CIFAR-10/100 [ 26 ], Flowers [ 36 ], and CARS [ 25 ], we fine-tune the network for 1000 epochs using SGD, with an initial learning rate of 1e-2 and a weight decay of 1e-4. For INAT-19 [ 46 ], subnets are fine-tuned for 360 epochs using AdamW [ 33 ] with an initial learning rate of 7.5e-5 and a weight decay of 5e-2. 
+
+4.2. Results 
+
+ImageNet. We compare in Table 3 TAS-LoRA with the state-of-the-art ViT models, in terms of the top-1 accuracy, the number of parameters, and FLOPs. We summarize our findings as follows: (1) TAS-LoRA consistently improves the performance of supernets trained with AutoFormer [ 5]across all search spaces. This suggests that alleviating the feature collapse problem by learning subnet-specific features with TAS-LoRA can enhance the performance. (2) TAS-LoRA enhances the performance of DYNAS [ 23 ], which also exploits a weight-entangled supernet with a different training strategy. This indicates that our method is effective in addressing the feature collapse problem, regardless of the training strategy. Note that TAS-LoRA can be applied to supernets trained with other TAS methods, which is however not feasible, since official implementations of these meth-ods are either unavailable [ 30 ] or incomplete [ 4, 42 ]4. (3) The performance gain of TAS-LoRA is more significant in smaller spaces ( e.g ., AutoFormer-T). Note that a supernet is constructed to cover all possible architecture configura-tions within a search space, and the number of parameters is determined by the largest subnet supported by the search space. The largest subnet in AutoFormer-T is smaller, com-pared to those in larger spaces ( e.g ., AutoFormer-S/B), sug-gesting that the number of parameters for the supernet in AutoFormer-T is relatively small. This reduces the repre-sentational capacity of the supernet, and limits represent-ing diverse features across subnets, worsening the feature collapse problem. TAS-LoRA can effectively mitigate the problem with subnet-specific feature learning, which leads to notable improvements. (4) TAS-LoRA achieves a better trade-off between complexity and accuracy, compared to other methods. For example, the GLiT-B has 96.0M param-eters with a top-1 accuracy of 82.3%, while TAS-LoRA-B achieves a higher accuracy of 82.6% with only 54M parame-ters. This demonstrates the effectiveness of TAS-LoRA in learning subnet-specific features, leading to better overall performance. (5) TAS-LoRA underperforms PreNAS [ 48 ] in the AutoFormer-T space. PreNAS constructs a supernet with nearly the same number of parameters as the original super-net, but reduces the number of subnets significantly ( e.g ., 6 out of 2 × 10 8 for AutoFormer-T). Accordingly, the shared weights in the supernet would be optimized better for the few subnets, partially alleviating the feature collapse problem. However, PreNAS is less flexible under changes in hardware constraints. Specifically, if hardware constraints ( e.g ., la-tency and FLOPs) are altered, and the initially selected sub-nets do not satisfy them, PreNAS should retrain the entire supernet from scratch. In contrast, TAS-LoRA trains a su-pernet including all possible subnets with subnet-specific feature learning, enabling adapting to various constraints without retraining. 
+
+Transfer learning. We show in Table 4 the transfer learning results of TAS-LoRA on various datasets, including CIFAR-
+
+> 4The key components of these approaches not fully disclosed in the official repositories, and related issues are raised in the corresponding issue trackers.
+
+7Table 5. Quantitative comparison of different router initialization methods for the AutoFormer search space [ 5] on ImageNet [ 9], in terms of the top-1 validation accuracy (%). Methods Router Init. Tiny Small Base AutoFormer [5] - 74.9 81.6 82.4 TAS-LoRA Random 75.4 81.8 82.5 TAS-LoRA Group-wise 75.7 81.9 82.6 0 10 20 30 40 50 
+
+> Layer
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> Similarities
+> Random initialization
+> Group-wise initialization
+
+Figure 4. Cosine similarities of features from LoRA experts across layers. We use supernets for the AutoFormer-T space [ 5] on Ima-geNet [ 9], trained using TAS-LoRA with random and group-wise router initialization. For each layer, we calculate the average cosine similarity across all expert combinations. 
+
+10/100 [ 26 ], Flowers [ 36 ], CARS [ 25 ], and INAT-19 [ 46 ]. TAS-LoRA achieves competitive or superior performance on all datasets, which cover a wide range of domains such as natural objects [ 26 ], fine-grained categories [ 25 , 36 ], and large-scale species classification [ 46 ], demonstrating the generalization ability of TAS-LoRA. 
+
+4.3. Analysis 
+
+Group-wise router initialization. We compare in Table 5 the performance for router initialization methods. We can see that TAS-LoRA with a group-wise initialization technique outperforms the random one across all search spaces. This suggests that reducing the redundancy for experts gives bet-ter performance, providing diverse feature representations effectively. To validate this, we measure cosine similari-ties of features, provided by LoRA experts, across layers in Fig. 4. It shows that the group-wise initialization gives lower similarities between experts, compared to the ran-dom one, confirming that our method encourages learning diverse feature representations across experts. We also vi-sualize in Fig. 5 cosine similarities of features from LoRA experts in the QKV projection layer of the 12 th block. With the random initialization, LoRA experts give highly similar features, while the group-wise one leads to more distinct representations. 
+
+Comparison with fine-tuning. TAS-LoRA trains MoLE layers and the router only for 50 epochs, while keeping original weights in the supernet frozen. To validate its ef-fectiveness, we compare TAS-LoRA with a full fine-tuned model, where all supernet weights are updated for the same number of epochs without adopting MoLE. We show in Fig. 6 top-1 accuracies of searched subnets across various parameter limits. We observe that TAS-LoRA consistently outperforms the fully fine-tuned model across various pa-0 1 2 3 4 5 6 7 8 9 10 11                                                                                                                                     
+
+> Expert Index
+> 012345678910 11
+> Expert Index
+> 1.00 0.73 0.51 0.62 0.48 0.51 0.56 0.65 0.61 0.62 0.56 0.57
+> 0.73 1.00 0.49 0.63 0.54 0.56 0.49 0.63 0.61 0.63 0.64 0.62
+> 0.51 0.49 1.00 0.47 0.50 0.51 0.34 0.40 0.58 0.44 0.48 0.52
+> 0.62 0.63 0.47 1.00 0.49 0.45 0.51 0.48 0.59 0.60 0.45 0.56
+> 0.48 0.54 0.50 0.49 1.00 0.41 0.34 0.57 0.67 0.49 0.71 0.57
+> 0.51 0.56 0.51 0.45 0.41 1.00 0.51 0.38 0.47 0.40 0.41 0.50
+> 0.56 0.49 0.34 0.51 0.34 0.51 1.00 0.46 0.46 0.45 0.35 0.49
+> 0.65 0.63 0.40 0.48 0.57 0.38 0.46 1.00 0.60 0.58 0.68 0.57
+> 0.61 0.61 0.58 0.59 0.67 0.47 0.46 0.60 1.00 0.66 0.65 0.62
+> 0.62 0.63 0.44 0.60 0.49 0.40 0.45 0.58 0.66 1.00 0.56 0.58
+> 0.56 0.64 0.48 0.45 0.71 0.41 0.35 0.68 0.65 0.56 1.00 0.59
+> 0.54 0.49 0.42 0.45 0.44 0.59 0.46 0.50 0.45 0.40 0.47 1.00
+
+(a) Random init. 0 1 2 3 4 5 6 7 8 9 10 11                                                                                                                                      
+
+> Expert Index
+> 012345678910 11
+> Expert Index
+> 1.00 0.28 0.15 0.29 0.18 0.22 0.27 0.20 0.21 0.25 0.27 0.00
+> 0.28 1.00 0.13 0.25 0.11 0.22 0.29 0.17 0.23 0.25 0.29 0.22
+> 0.15 0.13 1.00 0.10 0.08 0.15 0.13 0.14 0.18 0.18 0.09 0.15
+> 0.29 0.25 0.10 1.00 0.23 0.18 0.26 0.20 0.20 0.25 0.26 0.22
+> 0.18 0.11 0.08 0.23 1.00 0.15 0.16 0.22 0.18 0.13 0.15 0.17
+> 0.22 0.22 0.15 0.18 0.15 1.00 0.21 0.21 0.20 0.18 0.22 0.20
+> 0.27 0.29 0.13 0.26 0.16 0.21 1.00 0.23 0.21 0.22 0.23 0.22
+> 0.20 0.17 0.14 0.20 0.22 0.21 0.23 1.00 0.20 0.18 0.18 0.20
+> 0.21 0.23 0.18 0.20 0.18 0.20 0.21 0.20 1.00 0.21 0.21 0.21
+> 0.25 0.25 0.18 0.25 0.13 0.18 0.22 0.18 0.21 1.00 0.23 0.21
+> 0.27 0.29 0.09 0.26 0.15 0.22 0.23 0.18 0.21 0.23 1.00 0.22
+> 0.18 0.15 0.13 0.21 0.20 0.17 0.17 0.21 0.22 0.21 0.20 1.00
+
+(b) Group-wise init. 0.0 
+
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+Figure 5. Cosine similarities of features from LoRA experts in the QKV projection layer of the 12 th block. We use supernets for the AutoFormer-T space [ 5] on ImageNet [ 9], trained using TAS-LoRA with random and group-wise initialization methods. 6.0 6.5 7.0 7.5 8.0 8.5 9.0 
+
+> #Params Limit (M)
+> 74.5
+> 75.0
+> 75.5
+> 76.0
+> 76.5
+> 77.0
+> 77.5
+> Top-1 Accuracy (%)
+> TAS-LoRA
+> AutoFormer (Retrained with official source codes)
+> AutoFormer (Provided by authors)
+> AutoFormer (Fully Fine-tuned without MoLE)
+> AutoFormer (Obtained from [5])
+
+Figure 6. Top-1 accuracies on ImageNet [ 9] in the AutoFormer-T space [ 5] under various parameter limits. We compare TAS-LoRA with AutoFormer [ 5]: (1) a retrained model with the official code; (2) a supernet provided by the authors; (3) a full fine-tuned version for the retrained supernet; (4) the result reported in AutoFormer. 
+
+rameter limits, demonstrating that the performance gains come from learning subnet-specific features through MoLE, rather than simply extending training epochs. In contrast, the full fine-tuning model shows almost no improvement over the pretrained supernet, indicating that it is ineffective in addressing the feature collapse problem. We can also see that the supernet provided by the work of [ 5] performs well under small parameter limits, but shows notable per-formance degradation for larger ones, suggesting that the supernet might be optimized for small ones. To avoid this issue, we retrain the supernet using the official source code provided by the authors before applying TAS-LoRA. 
+
+5. Conclusion 
+
+We have identified the feature collapse problem in TAS, where subnets fail to learn distinct feature representations due to the shared weights in a supernet. We have proposed TAS-LoRA, a novel method that leverages LoRA to enable subnet-specific feature learning. By exploiting LoRA experts with a dynamic routing mechanism, TAS-LoRA enables sub-nets within a supernet to learn specialized feature represen-tations efficiently. Furthermore, we present a group-wise router initialization technique to reduce the redundancy in experts, and promote diverse expert training from the early stages. We have shown extensive experimental results to validate the effectiveness of TAS-LoRA. 8Acknowledgements 
+
+This work was partly supported by IITP grant funded by the Korea government (MSIT) (No.RS2022-00143524, Devel-opment of Fundamental Technology and Integrated Solution for NextGeneration Automatic Artificial Intelligence Sys-tem, No.2022-0-00124, RS-2022-II220124, Development of Artificial Intelligence Technology for Self-Improving Competency-Aware Learning Capabilities, AI Semiconduc-tor Innovation Lab (Yonsei University)), and the KIST Insti-tutional Program (Project No.2E33001-24-086). 
+
+References 
+
+[1] Gabriel Bender, Pieter-Jan Kindermans, Barret Zoph, Vijay Vasudevan, and Quoc Le. Understanding and simplifying one-shot architecture search. In ICML , pages 550–559, 2018. 2[2] Han Cai, Ligeng Zhu, and Song Han. ProxylessNAS: Direct neural architecture search on target task and hardware. In 
+
+ICLR , 2019. [3] Han Cai, Chuang Gan, Tianzhe Wang, Zhekai Zhang, and Song Han. Once-for-All: Train one network and specialize it for efficient deployment. In ICLR , 2020. 2 [4] Boyu Chen, Peixia Li, Chuming Li, Baopu Li, Lei Bai, Chen Lin, Ming Sun, Junjie Yan, and Wanli Ouyang. Glit: Neural architecture search for global and local image transformer. In 
+
+ICCV , 2021. 6, 7 [5] Minghao Chen, Houwen Peng, Jianlong Fu, and Haibin Ling. AutoFormer: Searching transformers for visual recognition. In ICCV , pages 12270–12280, 2021. 1, 2, 3, 4, 5, 6, 7, 8, 12, 13 [6] Xianing Chen, Qiong Cao, Yujie Zhong, Jing Zhang, Shenghua Gao, and Dacheng Tao. Dearkd: data-efficient early knowledge distillation for vision transformers. In CVPR ,2022. 7 [7] Junyoung Chung, Caglar Gulcehre, KyungHyun Cho, and Yoshua Bengio. Empirical evaluation of gated recurrent neural networks on sequence modeling. NeurIPSW , 2014. 11 [8] Damai Dai, Chengqi Deng, Chenggang Zhao, R. X. Xu, Huazuo Gao, Deli Chen, Jiashi Li, Wangding Zeng, Xingkai Yu, Y. Wu, Zhenda Xie, Y. K. Li, Panpan Huang, Fuli Luo, Chong Ruan, Zhifang Sui, and Wenfeng Liang. DeepSeek-MoE: Towards ultimate expert specialization in mixture-of-experts language models. CoRR , abs/2401.06066, 2024. 5 [9] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. ImageNet: A large-scale hierarchical image database. In CVPR , pages 248–255, 2009. 2, 6, 8, 12 [10] Zhijie Deng, Yinpeng Dong, Shifeng Zhang, and Jun Zhu. Understanding and exploring the network with stochastic architectures. In NeurIPS , 2020. 1, 3 [11] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai, Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Syl-vain Gelly, et al. An image is worth 16x16 words: Trans-formers for image recognition at scale. In ICLR , 2021. 1, 6, 7[12] St ´ephane d’Ascoli, Hugo Touvron, Matthew L Leavitt, Ari S Morcos, Giulio Biroli, and Levent Sagun. Convit: Improving vision transformers with soft convolutional inductive biases. In ICML , 2021. 6 [13] M.J. Buehler E.L. Buehler. X-lora: Mixture of low-rank adapter experts, a flexible framework for large language mod-els with applications in protein mechanics and design. ArXiv ,2024. 3 [14] William Fedus, Barret Zoph, and Noam Shazeer. Switch transformers: Scaling to trillion parameter models with simple and efficient sparsity. JMLR , 2022. 5 [15] Chongyang Gao, Kezhen Chen, Jinmeng Rao, Baochen Sun, Ruibo Liu, Daiyi Peng, Yawen Zhang, Xiaoyuan Guo, Jie Yang, and VS Subrahmanian. Higher layers need more lora experts. arXiv preprint arXiv:2402.08562 , 2024. 13 [16] David E Goldberg and Kalyanmoy Deb. A comparative anal-ysis of selection schemes used in genetic algorithms. In 
+
+Foundations of genetic algorithms . 1991. 5 [17] Kai Han, An Xiao, Enhua Wu, Jianyuan Guo, Chunjing Xu, and Yunhe Wang. Transformer in transformer. NeurIPS , 2021. 6[18] Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun. Deep residual learning for image recognition. In CVPR , pages 770–778, 2016. 1 [19] Sepp Hochreiter and J ¨urgen Schmidhuber. Long short-term memory. Neural computation , 1997. 4, 5, 11 [20] Andrew G Howard, Menglong Zhu, Bo Chen, Dmitry Kalenichenko, Weijun Wang, Tobias Weyand, Marco An-dreetto, and Hartwig Adam. MobileNets: Efficient convolu-tional neural networks for mobile vision applications. arXiv preprint arXiv:1704.04861 , 2017. 1 [21] Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, Weizhu Chen, et al. Lora: Low-rank adaptation of large language models. ICLR , 2022. 2[22] Ganesh Jawahar, Haichuan Yang, Yunyang Xiong, Zechun Liu, Dilin Wang, Fei Sun, Meng Li, Aasish Pappu, Barlas Oguz, Muhammad Abdul-Mageed, Laks V. S. Lakshmanan, Raghuraman Krishnamoorthi, and Vikas Chandra. Mixture-of-supernets: Improving weight-sharing supernet training with architecture-routed mixture-of-experts. In ACL , 2024. 2 [23] Jeimin Jeon, Youngmin Oh, Junghyup Lee, Donghyeon Baek, Dohyung Kim, Chanho Eom, and Bumsub Ham. Subnet-aware dynamic supernet training for neural architecture search. In CVPR , 2025. 2, 4, 6, 7 [24] Simon Kornblith, Mohammad Norouzi, Honglak Lee, and Geoffrey Hinton. Similarity of neural network representations revisited. In ICML , 2019. 5 [25] Jonathan Krause, Michael Stark, Jia Deng, and Li Fei-Fei. 3d object representations for fine-grained categorization. In 
+
+ICCVW , 2013. 2, 6, 7, 8 [26] Alex Krizhevsky, Geoffrey Hinton, et al. Learning multiple layers of features from tiny images. Technical report, 2009. 2, 6, 7, 8 [27] Junghyup Lee and Bumsub Ham. AZ-NAS: Assembling zero-cost proxies for network architecture search. In CVPR , 2024. 1, 2 
+
+9[28] Dmitry Lepikhin, HyoukJoong Lee, Yuanzhong Xu, Dehao Chen, Orhan Firat, Yanping Huang, Maxim Krikun, Noam Shazeer, and Zhifeng Chen. Gshard: Scaling giant models with conditional computation and automatic sharding, 2020. 5[29] Hanxiao Liu, Karen Simonyan, and Yiming Yang. DARTS: Differentiable architecture search. In ICLR , 2019. 2 [30] Jing Liu, Jianfei Cai, and Bohan Zhuang. Focusformer: Focus-ing on what we need via architecture sampler. arXiv preprint arXiv:2208.10861 , 2022. 1, 2, 3, 6, 7 [31] Shih-Yang Liu, Chien-Yi Wang, Hongxu Yin, Pavlo Molchanov, Yu-Chiang Frank Wang, Kwang-Ting Cheng, and Min-Hung Chen. Dora: Weight-decomposed low-rank adaptation. In ICML , 2024. 2 [32] Ze Liu, Yutong Lin, Yue Cao, Han Hu, Yixuan Wei, Zheng Zhang, Stephen Lin, and Baining Guo. Swin transformer: Hierarchical vision transformer using shifted windows. In 
+
+ICCV , pages 10012–10022, 2021. 1 [33] Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. ICLR , 2019. 6, 7 [34] Fanxu Meng, Zhaohui Wang, and Muhan Zhang. Pissa: Prin-cipal singular values and singular vectors adaptation of large language models. NeurIPS , 2025. 2 [35] Tomas Mikolov, Kai Chen, Greg Corrado, and Jeffrey Dean. Efficient estimation of word representations in vector space. 
+
+arXiv preprint arXiv:1301.3781 , 2013. 7 [36] Maria-Elena Nilsback and Andrew Zisserman. Automated flower classification over a large number of classes. In 2008 Sixth Indian conference on computer vision, graphics & image processing . IEEE. 2, 6, 7, 8 [37] Youngmin Oh, Hyunju Lee, and Bumsub Ham. Efficient few-shot neural architecture search by counting the number of nonlinear functions. In AAAI , 2025. 2 [38] Jiefeng Peng, Jiqi Zhang, Changlin Li, Guangrun Wang, Xi-aodan Liang, and Liang Lin. Pi-nas: Improving neural archi-tecture search by reducing supernet training consistency shift. In ICCV , 2021. 3 [39] Jeffrey Pennington, Richard Socher, and Christopher D Man-ning. Glove: Global vectors for word representation. In 
+
+EMNLP , 2014. 7 [40] Mark Sandler, Andrew Howard, Menglong Zhu, Andrey Zh-moginov, and Liang-Chieh Chen. MobileNetV2: Inverted residuals and linear bottlenecks. In CVPR , pages 4510–4520, 2018. 1 [41] Noam Shazeer, Azalia Mirhoseini, Krzysztof Maziarz, Andy Davis, Quoc Le, Geoffrey Hinton, and Jeff Dean. Outra-geously large neural networks: The sparsely-gated mixture-of-experts layer. In ICLR , 2017. 5 [42] Xiu Su, Shan You, Jiyang Xie, Mingkai Zheng, Fei Wang, Chen Qian, Changshui Zhang, Xiaogang Wang, and Chang Xu. Vitas: Vision transformer architecture search. In ECCV ,2022. 1, 2, 3, 5, 6, 7 [43] Zihao Sun, Yu Sun, Longxing Yang, Shun Lu, Jilin Mei, Wenxiao Zhao, and Yu Hu. Unleashing the power of gradient signal-to-noise ratio for zero-shot NAS. In CVPR , pages 5763–5773, 2023. 2 [44] Mingxing Tan and Quoc Le. EfficientNet: Rethinking model scaling for convolutional neural networks. In ICML , pages 6105–6114, 2019. 1 [45] Hugo Touvron, Matthieu Cord, Matthijs Douze, Francisco Massa, Alexandre Sablayrolles, and Herv ´e J ´egou. Training data-efficient image transformers & distillation through atten-tion. In ICML , 2021. 1, 6, 7 [46] Grant Van Horn, Oisin Mac Aodha, Yang Song, Yin Cui, Chen Sun, Alex Shepard, Hartwig Adam, Pietro Perona, and Serge Belongie. The inaturalist species classification and detection dataset. In CVPR , 2018. 2, 6, 7, 8 [47] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszko-reit, Llion Jones, Aidan N Gomez, Ł ukasz Kaiser, and Illia Polosukhin. Attention is all you need. In NeurIPS , 2017. 1 [48] Haibin Wang, Ce Ge, Hesen Chen, and Xiuyu Sun. Prenas: Preferred one-shot learning towards efficient neural architec-ture search. In ICML , 2023. 2, 3, 6, 7 [49] Wenhai Wang, Enze Xie, Xiang Li, Deng-Ping Fan, Kaitao Song, Ding Liang, Tong Lu, Ping Luo, and Ling Shao. Pyra-mid vision transformer: A versatile backbone for dense pre-diction without convolutions. In ICCV , pages 568–578, 2021. 6[50] Zimian Wei, Peijie Dong, Zheng Hui, Anggeng Li, Lujun Li, Menglong Lu, Hengyue Pan, and Dongsheng Li. Auto-prox: Training-free vision transformer architecture search via automatic proxy discovery. In AAAI , 2024. 1, 6 [51] Xun Wu, Shaohan Huang, and Furu Wei. Mixture of loRA experts. In ICLR , 2024. 3 [52] Yufei Xu, Qiming Zhang, Jing Zhang, and Dacheng Tao. Vitae: Vision transformer advanced by exploring intrinsic inductive bias. NeurIPS , 2021. 7 [53] Yuqi Yang, Peng-Tao Jiang, Qibin Hou, Hao Zhang, Jinwei Chen, and Bo Li. Multi-task dense prediction via mixture of low-rank experts. In CVPR , 2024. 3 [54] Qingru Zhang, Minshuo Chen, Alexander Bukharin, Nikos Karampatziakis, Pengcheng He, Yu Cheng, Weizhu Chen, and Tuo Zhao. Adalora: Adaptive budget allocation for parameter-efficient fine-tuning. ICLR , 2023. 3, 13 [55] Yiyang Zhao, Linnan Wang, Yuandong Tian, Rodrigo Fon-seca, and Tian Guo. Few-shot neural architecture search. In 
+
+ICML , pages 12707–12718, 2021. 2 [56] Qinqin Zhou, Kekai Sheng, Xiawu Zheng, Ke Li, Xing Sun, Yonghong Tian, Jie Chen, and Rongrong Ji. Training-free transformer architecture search. In CVPR , pages 10894– 10903, 2022. 2, 6 
+
+10 TAS-LoRA: Transformer Architecture Search with Mixture-of-LoRA Experts 
+
+# Supplementary Material 
+
+In this supplementary material, we provide more detailed analyses on the design of TAS-LoRA (Sec. A), additional experiments for searching hyperparameters (Sec. B), and limitations of our work and future directions (Sec. C). We then summarize the training, and search procedures of TAS-LoRA (Sec. D). Finally, we provide the computational re-sources used in our experiments (Sec. E). 
+
+A. Analyses on design of TAS-LoRA 
+
+In this section, we provide a more detailed analysis of the design choices in TAS-LoRA. 
+
+A.1. Router architecture 
+
+We show in Table A the results of different router architec-tures in the AutoFormer-T search space. In all cases, the router takes as input the sequence of architectural attributes of the sampled subnet ( e.g ., MLP ratio, number of attention heads, and embedding dimension). The router then predicts routing weights for the MoLE experts for each block. We compare recurrent routers, which can capture sequential de-pendencies across blocks, with a non-recurrent MLP baseline that treats each block independently. We can see that recur-rent routers, i.e ., LSTM [ 19 ] and GRU [ 7], perform similarly, while the block-wise MLP performs worse. This indicates that modeling dependencies across transformer blocks is beneficial for expert routing. 
+
+A.2. MoLE 
+
+We show in Table B the comparison between using a sin-gle shared LoRA module for all subnets and the proposed MoLE. For a fair comparison, both variants are inserted into the same target layers, and are trained under the same search and optimization setting. We can see that replacing MoLE with a single shared LoRA degrades the performance from 75.7 to 75.0. This is because, since a single LoRA is shared across all subnets, which still results in the feature collapse problem. Our MoLE mitigates this issue by maintaining mul-tiple experts and using the router to assign different experts to different subnets based on their architectural attributes, allowing for more specialized adaptation. 
+
+A.3. Group-wise initialization strategy 
+
+We show in Table C the results of different grouping strate-gies used in router initialization. In TAS-LoRA, we group blocks by architecture similarities, and assign each group to a different expert during the early stage of training. We compare this strategy with random grouping and grouping by the number of parameters. We can see that grouping             
+
+> Table A. Comparison of different router architectures in the AutoFormer-T search space. All routers use the same routing input and are trained with the same optimization setting. Router Top-1 (%) LSTM 75.7 GRU 75.6 Block-wise MLP 75.4 Table B. Comparison between a single shared LoRA and the pro-posed mixture-of-LoRA experts in the AutoFormer-T search space. Method Top-1 (%) Single LoRA 75.0 TAS-LoRA (MoLE) 75.7 Table C. Comparison of different grouping strategies for router initialization in the AutoFormer-T search space. Grouping strategy Top-1 (%) Architectural similarity 75.7 Random grouping 75.5 Number of parameters 75.6
+
+by architectural similarity achieves the best performance. This is because grouping by architectural similarity reduces redundancy among experts and encourages diverse feature learning across experts early in training. 
+
+A.4. Architectural attributes for routing 
+
+We show in Table D the ablation results for choosing the architectural attributes used by the router. In TAS-LoRA, the router predicts expert weights for each block based on the architectural properties of the sampled subnet. To this end, we provide the router with block-level and subnet-level attributes, including the MLP ratio, the number of attention heads, the embedding dimension, and the depth index. Using a richer set of attributes allows the router to distinguish candidate subnets more precisely, but it also increases the number of distinct groups considered in the initialization stage and may require a larger number of experts. In this ablation, we incrementally vary the set of routing attributes while keeping the rest of the framework unchanged. We first consider the full set of attributes, and then remove some of them to study whether a more compact routing input can still preserve the effectiveness of subnet-specific expert assignment. 11 Table D. Ablation on the architectural attributes used for routing in the AutoFormer-T search space. MLP ratio #Head Embed. dim. Depth Top-1 (%)           
+
+> ✓✓✓✓75.8
+> ✓✓✓75.7
+> ✓✓75.5
+> ✓75.2
+
+We can see that using richer architectural attributes gen-erally improves performance, while using only a limited subset leads to degraded results. In particular, using only the number of heads, or the number of heads together with the embedding dimension, does not provide sufficient infor-mation for the router to distinguish subnets effectively. We also observe that adding depth gives only a marginal gain over using the MLP ratio, number of heads, and embedding dimension. Since including depth increases the number of distinct groups in the initialization stage and thus enlarges the expert space, we exclude depth in the main experiments and use the remaining attributes as the default routing input. 
+
+B. Hyperparameters 
+
+In this section, we investigate the effect of several hyper-parameters: (1) LoRA rank, (2) the β value in router ini-tialization, (3) learning rates for MoLE and the router, and (4) the number of warm-up epochs. Notably, TAS-LoRA consistently outperforms AutoFormer [ 5 ] across all settings, demonstrating its effectiveness. 
+
+LoRA rank. We present in Table E the results of TAS-LoRA with varying LoRA rank r. We observe that TAS-LoRA achieves the best performance when the rank is set to 8 across all search spaces. We attribute this to the following: (1) a small rank may not provide sufficient capacity for capturing subnet-specific features, while (2) a large rank increases the number of trainable parameters, which can lead to overfitting. We also compare in Table E the number of trainable parameters of TAS-LoRA to that of full fine-tuning. We can see that when r is set to 2, 4, or 8, TAS-LoRA requires fewer parameters than full fine-tuning, while with r = 16 , the parameter count exceeds that of full fine-tuning. Considering this trade-off between performance and parameter efficiency, we set the rank to 8 in all experiments. 
+
+β in router initialization. We present in Table F the results of TAS-LoRA with different β values in router initialization. We can see that TAS-LoRA achieves the best performance when β is set to 3. If β is too small, the router may fail to promote sufficient specialization among experts. Conversely, if β is too large, it may reduce the flexibility of expert se-
+
+Table E. Top-1 accuracy and parameter ratio across LoRA ranks in AutoFormer-T/S/B on ImageNet [9].                                 
+
+> Rank AutoFormer-T AutoFormer-S AutoFormer-B Acc. (%) Params. (%) Acc. (%) Params. (%) Acc. (%) Params. (%) 275.5 23 81.7 32 82.4 11 475.6 35 81.8 48 82.5 18 875.7 59 81.9 79 82.6 33 16 75.6 107 81.7 142 82.5 63
+
+Table F. Top-1 accuracy of TAS-LoRA in AutoFormer-T with varying β values for router initialization. 
+
+β 1 3 10 Top-1 acc. (%) 75.5 75.7 75.2 
+
+Table G. Top-1 accuracy across learning rate combinations for MoLE ( ηL) and router ( ηR) in AutoFormer-T. 
+
+ηL
+
+ηR 2e-1 1e-1 5e-2 1e-3 75.7 75.6 75.7 5e-4 75.5 75.7 75.5 1e-4 75.3 75.3 75.2 
+
+Table H. Top-1 accuracy of TAS-LoRA in AutoFormer-T with varying numbers of warm-up epochs. 
+
+Warm-up epochs 0 3 5 10 Top-1 acc. (%) 75.5 75.6 75.7 75.6 lection, limiting the diversity of experts assigned to subnets. Based on this, we set β = 3 in all experiments. 
+
+Learning rates We show in Table G the results of TAS-LoRA with different learning rates for the MoLE and router. We observe that the best performance is obtained when the learning rate is set to 5e-4 for the MoLE and 1e-1 for the router, and use them in all experiments. 
+
+Warm-up epochs We present in Table H the results of TAS-LoRA with different numbers of warm-up epochs. TAS-LoRA achieves the best performance when the number of warm-up epochs is set to 5. A shorter warm-up limits the time for the experts to specialize in their assigned groups, while a longer warm-up may hinder the joint optimization of the router and MoLE. Based on the results, we set the number of warm-up epochs to 5 in all experiments. 12 C. Limitations and future work 
+
+The number of LoRA experts in TAS-LoRA is directly tied to the number of groups, which corresponds to the number of candidate values for each architectural attribute in the search space. For example, if the number of attention heads varies across 4 candidate values, this results in 4 groups for that attribute. In large-scale search spaces with many attributes and extensive candidate sets, the total number of groups, and thus the number of experts can increase significantly, which may raise computational overhead. To address this, we plan to explore clustering techniques that merge similar candidates within each attribute ( e.g ., clustering attention head sizes with comparable capacities), thereby reducing the number of groups while ensuring subnet-specific feature learning. In the current implementation, the number of experts and the rank of the LoRA modules are uniformly set across all layers. Recent studies on LoRA [ 15 , 54 ] suggest that adaptively assigning ranks and expert counts based on the importance of each layer can further enhance performance. As such, future work will explore dynamic expert allocation and rank adaptation tailored to individual layers to improve both efficiency and accuracy. 
+
+D. Algorithms 
+
+We summarize in Algorithms 1 and 2 the training and search procedures of TAS-LoRA, respectively. For searching pro-cedure, we use the evolutionary search algorithm, following the same procedure as in [ 5 ]. Specifically, we sample 10,000 training examples as the validation set. We set the population size P to 50, and number of iterations T to 20. For each iteration, we pick top-10 subnets based on the validation loss, and generate the child networks by mutating and crossing over the top-10 subnets, with probabilities of 0.2, and 0.4, respectively. 
+
+E. Computational resources 
+
+We conduct all experiments on NVIDIA A5000 and A6000 GPUs. For the AutoFormer-T space, we use 4 A5000 GPUs, while for AutoFormer-S and AutoFormer-B, we utilize 8 A5000 and 8 A6000 GPUs, respectively. During the search-ing process, we employ a single A5000 GPU. For transfer learning experiments, we use 4 A5000 GPUs. 13 Algorithm 1 Training of TAS-LoRA  
+
+> 1:
+
+Input : Pretrained supernet weights W , LoRA experts E, Router U , training dataset Dtrain , max iteration T , number of transformer blocks B, number of layers L 
+
+> 2:
+
+Initialize LoRA experts E and router U 
+
+> 3:
+
+Load pretrained supernet weights W 
+
+> 4:
+
+for t = 1 to T do  
+
+> 5:
+
+Sample a mini-batch from Dtrain and a subnet architecture Ni from the supernet  
+
+> 6:
+
+Extract subnet-level attributes (e, v ) and block-level attributes {(n(b), m (b))}vb=1  
+
+> 7:
+
+Compute expert weights P with router U 
+
+> 8:
+
+for each layer l = 1 to L do  
+
+> 9:
+
+Merge weights: W l 
+
+> merged
+
+= W l + PKk=1 plkElk 
+
+> 10:
+
+Compute output: yl = W l
+
+> merged
+
+xl 
+
+> 11:
+
+end for  
+
+> 12:
+
+Compute loss Ltrain  
+
+> 13:
+
+Update E and U using gradient descent on Ltrain  
+
+> 14:
+
+end for  
+
+> 15:
+
+Return: Trained LoRA experts and router 
+
+Algorithm 2 Searching of TAS-LoRA  
+
+> 1:
+
+Input : Pretrained supernet weights θ, LoRA and router parameters ϕ, population size P , architecture constraints C,number of iterations T , validation dataset Dval , search space N 
+
+> 2:
+
+Initialize population P0 with P random subnets satisfying C 
+
+> 3:
+
+for i = 1 to T do  
+
+> 4:
+
+Lval ← ∅  
+
+> 5:
+
+for each subnet Ns in population Pi−1 do  
+
+> 6:
+
+if Ns satisfies constraints C then  
+
+> 7:
+
+Evaluate validation loss Lval (Ns; θ, ϕ ) on Dval  
+
+> 8:
+
+Store Lval [Ns] = Lval (Ns; θ, ϕ ) 
+
+> 9:
+
+end if  
+
+> 10:
+
+end for  
+
+> 11:
+
+Select top-k subnets: T op k = Select Topk (Pi−1, Lval , k ) 
+
+> 12:
+
+Generate mutated subnets: Pmutation = Mutation (T op k, C ) 
+
+> 13:
+
+Generate crossover subnets: Pcrossover = Crossover (T op k, C ) 
+
+> 14:
+
+Create next population Pi = Pmutation ∪ Pcrossover  
+
+> 15:
+
+Fill remaining slots with random subnets: Pi = Pi ∪ Random Candidates (P − | Pi|, N , C ) 
+
+> 16:
+
+end for  
+
+> 17:
+
+N ∗ = Select Topk (PT , Lval , 1)  
+
+> 18:
+
+Return: Optimal subnet N ∗
+
+14
