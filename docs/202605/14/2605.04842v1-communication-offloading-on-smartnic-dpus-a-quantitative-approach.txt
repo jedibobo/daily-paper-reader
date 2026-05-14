@@ -1,0 +1,354 @@
+Title: Communication Offloading on SmartNIC DPUs: A Quantitative Approach
+
+URL Source: https://arxiv.org/pdf/2605.04842v1
+
+Published Time: Thu, 07 May 2026 00:55:43 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# Communication Offloading on SmartNIC DPUs: A Quantitative Approach 
+
+Jacob Wahlgren 1, Andong Hu 1, Roger Pearce 2, Maya Gokhale 2, and Ivy Peng 1 
+
+> 1
+
+KTH Royal Institute of Technology, Stockholm, Sweden 
+
+{jacobwah,andonghu,ivybopeng}@kth.se  
+
+> 2
+
+Lawrence Livermore National Laboratory, Livermore, USA 
+
+{pearce7,gokhale2}@llnl.gov 
+
+Abstract. SmartNIC Data Processing Units (DPUs) offer a promising solution for saving high-end CPU resources by offloading tasks to pro-grammable cores near the network interface. In this work, we explore the feasibility of SmartNIC DPUs in supporting an asynchronous communi-cation model called “fire-and-forget”, particularly its core message routing service. We design a communication offloading engine called Buddy that decouples communication tasks from the application process. Buddy runs flexibly on SmartNIC DPUs such as the Nvidia BlueField-3 DPU and generic x86 CPUs. Our evaluation results in five applications identify the memory-to-communication ratio as a key predictor of the offloading performance. Host-dominated workloads, such as Quicksilver and Sparse Matrix Transpose, achieved up to 1.55x speedup with communication offloaded to the DPU. We further identify a 625x increase in DRAM traffic due to the absence of Direct Cache Access support on the DPU, highlighting a critical need in future SmartNIC designs. 
+
+Keywords: DPU · BlueField · Communication Offloading 
+
+## 1 Introduction 
+
+Data center networking is undergoing a transformation in the increasing adop-tion of SmartNICs to reduce resource cost and improve energy efficiency [14]. Unlike traditional passive Network Interface Cards (NICs), these emerging de-vices integrate fully-featured programmable CPUs, such as ARM and RISC-V cores, directly into the network interface, known as a Data Processing Unit (DPU). On-path SmartNICs feature embedded processors integrated directly in the network data path. In contrast, off-path SmartNICs offer decoupled, general purpose processing, enabling offload for diverse use cases. Off-path SmartNICs enable infrastructure tasks to be offloaded from the host CPU, freeing high-performance CPU cores to focus on application-level computation. SmartNICs have been used to offload infrastructure tasks such as MPI communication [2, 13], and in workloads such as weather simulation [16] and molecular dynamics [7]. While previous works have presented applications in several domains, this work explore the feasibility of SmartNIC DPUs in supporting a asynchronous  
+
+> arXiv:2605.04842v1 [cs.DC] 6 May 2026 2J. Wahlgren et al.
+
+communication model called “fire-and-forget” [12, 10, 5, 3]. The “fire-and-forget” model aims to maximize parallelism in communication by relaxing message or-dering, improved asynchronicity in the program by avoiding a binding contract between senders and receivers, i.e., the receiver does not needs to know the mes-sage size to receive a-apriori. Different methods can be used to implement this communication model. For instance, MPI can be used as a portable implemen-tation while lower-level libfabric and ibverbs may provide trade off portability for higher performance. A common component in all implementation options is a routing service that performs software aggregation and routing to bundle application-level messages into network-efficient packets. Before the emergence of SmartNIC DPU, this routing service needs to co-run with application pro-cesses, and thus share the compute and memory resources that could otherwise be used by the application. In this work, we explore offloading the communica-tion routing service to SmartNIC DPU, identify key application metrics useful for configuring offloading, and also draw design insights for future SmartNIC designs to support communication offloading efficiently. To quantitatively study offloading the routing service needed in the “fire-and-forget” communication model, we design Buddy , a communication library that supports the sender to send messages of arbitrary sizes asynchronously without involving the receiver. Buddy can either co-run on the host or be offloaded to the Bluefield DPUs. When offloading message routing to the DPU, Buddy decou-ples communication management from application logic to reduce the resource usage on the host CPU. We use Buddy to quantitatively study key factors of communication offloading performance, such as task partitioning between DPU and CPU, aggregation of fine-grained messages to network-efficient packets, and SmartNIC architectural aspects. In summary, the main contributions of this work are: 
+
+– Design, implement, and optimize Buddy, a communication routing offloading library for “fire-and-forget” model suitable for SmartNIC DPUs and generic hosts. 
+
+– Evaluate performance in five applications: Single Source Shortest Path (SSSP), Triangle Counting, Histogram, Sparse Matrix Transpose, and Quicksilver. Quicksilver, Sparse Matrix Transpose, and Histogram achieve speedup from 1.13 × to 1.55 ×, with the memory-to-communication ratio as an effective indicator. 
+
+– Identify key optimization factors: transfer granularity, pipelining, and multi-threading, contributing to 9.5 ×, 12.4 ×, and 6.2 × improvement. 
+
+– Compare the BlueField-3 DPU against an x86 CPU for an offloading target and find the lack of DCA support as the main performance limitation for communication offloading. 
+
+## 2 Background 
+
+SmartNICs & DPUs. SmartNICs and DPUs have emerged to address chal-lenges in performance and efficiency. A SmartNIC extends the capability of a Communication Offloading on SmartNIC DPUs: A Quantitative Approach 3Host 
+
+> PCIe 5.0
+> Switch
+> eSwitch
+> DPA
+> RDMA Engine
+> ARM A78 Cluster
+> ARM LLC
+> DMA Engine
+> On-Path Accelerator
+> Ethernet / IB PHY
+> Up to 400 Gbps
+
+BlueField 3 DPU  
+
+> Connect-X 7
+> ARM
+> Mem
+> DPA
+> Mem
+> Fig. 1. An overview of Nvidia BlueField-3 DPU architecture.
+
+NIC by integrating programmable logic (e.g. ASIC/FPGA) on the data path, enabling host-side workloads to be offloaded to the NIC. Data Processing Units (DPUs) go one step further, featuring general-purpose CPUs and a standalone Linux software stack. Several vendors provide commercial DPU solutions with ARM cores, including AMD Pensando, Intel IPU, and Nvidia BlueField. In this work, we focus on the BlueField-3. Fig. 1 illustrates the overall architecture. BlueField-3 combines a Connect-X 7 NIC with an ARM A78 CPU that consists of 8 to 16 cores. Compared to its predecessor BlueField-2, its memory system is upgraded to dual-channel 32 GiB LPDDR5 memory. The programming environ-ment for BlueField is provided by Nvidia’s Data-Center-on-a-Chip Architecture (DOCA) framework, which offers a set of libraries, drivers, and APIs that ab-stract low-level hardware resources such as DMA and RDMA engines. 
+
+High-Performance Networking. High-performance I/O devices generally use Direct Memory Access (DMA) to read and write directly to the main mem-ory without involving CPU. In networking, this concept is extended to Remote Direct Memory Access (RDMA). With RDMA, nodes in a cluster can exchange data without CPU involvement. With one-sided RDMA, the initiator can READ or WRITE to specific memory addresses, while two-sided RDMA enables the specific addresses to be determined by the recipient with the SEND operation. As each operation incurs an overhead both in the NIC and the network switches, larger messages generally improve the throughput. Direct Cache Access (DCA), also known as cache injection, is a technique to improve I/O performance beyond DMA [8]. DCA enables network devices to directly inject data into the CPU’s caches, bypassing the main memory [18, 4]. 
+
+## 3 Buddy Design 4 J. Wahlgren et al. Routing agent                   
+
+> Process 0 Node
+> 0
+> Process 0 Node
+> 1
+> Node
+> 2
+> Node
+> 3
+> Local send
+> buffers
+> To: proc 0
+> To: proc 1
+> To: proc 2
+> Remote send
+> buffers
+> To: node 1
+> To: node 2
+> To: node 3
+> Receive
+> buffer pool
+> From: pro c0
+> From: node 1
+> <empty>
+> Inter -node network
+> Aggregated buffer layout
+> Process 0
+> Runtime library
+> Routing
+> header: size,  dst
+> data
+> header: size,  dst
+> data
+> header: size,  dst
+> data
+> Send bufs
+> curren t
+> <empty>
+> Recv bufs
+> recv 1
+> recv 2Application
+> code
+
+Fig. 2. An overview of the Buddy design, where the routing agent interfaces between local processes and remote nodes to aggregate individual messages. 
+
+Overview. Frequent irregular communication is a challenge in HPC systems since it leads to many small inefficient messages across the network. Message aggregation combined with multi-hop routing, a core component for enabling the “fire-and-forget” model, provides higher throughput by a trade-off with la-tency [12]. The design goal of Buddy is to decouple message routing from the application, and reduce the burden on the host processor by offloading it to the DPU. Message routing services are memory-bound, and thus may pollute cache and stall CPU cores for the core application work. Offloading routing ser-vices to DPUs frees the host processor to focus on the core application work instead of communication. Buddy targets distributed applications that exhibit the following characteristics: 
+
+– Small and arbitrary messages. Processes communicate with messages signif-icantly smaller than the link MTU. 
+
+– Fire-and-forget. Messages can be delivered asynchronously without requiring explicit confirmation from the receiver to the sender. 
+
+– Throughput-oriented. Application performance is limited by throughput rather than the latency of individual messages. 
+
+– Relaxed message ordering. Messages may be delivered out of order, enabling optimized routing and avoiding head-of-line blocking. Our design is illustrated by Fig. 2 and consists of two major components: the runtime library and the routing agent . The runtime library offers an API for applications to interact with Buddy to send and receive messages, while the routing agent is a separate service handling the routing of incoming and out-going messages between local application processes and remote cluster nodes. The routing agent can either co-run on the same CPU as the application, or be offloaded to another processor, e.g., a DPU. Fig. 2 shows the different communi-cation buffers and operations involved in sending and receiving messages. On the Communication Offloading on SmartNIC DPUs: A Quantitative Approach 5
+
+Algorithm 1 Routing kernel.        
+
+> function route (array of aggregated messages)
+> for message m do
+> total_size = sizeof(header) + m.payload_size next = routing_table[m.dst] send_buf = get_buf(next, total_size)
+> if send_buf then
+> memcpy(send_buf.tail, m) send_buf.tail += total_size
+> else return false
+> return true
+
+routing agent, three groups of communication buffers are used: receive buffers, remote send buffers, and local send buffers. These components make extensive use of zero-copy RDMA to avoid overheads. Message aggregation happens at each hop in the design. First, the runtime library aggregates all outgoing messages, which could be of arbitrary sizes, from the application to ensure efficient transfer to the routing agent. Next, the local routing agent on the sending side aggregates all messages destined to the same remote node. Similarly, the routing agent on the receiving side aggregates incom-ing messages to the same local rank (i.e., Local send buffers in Fig. 2). Finally, it delivers a set of aggregated messages from different sources to the destination process. 
+
+Routing Agent. The routing agent receives messages from local processes on the node and from remote nodes. As messages are received, the routing agent parses the message headers and routes them to their destination. The aggregated send buffers are flushed once they are full or a timeout is reached to avoid stale communication. To ensure that all messages are eventually delivered, the routing agent employs an idle timeout. If no messages are received for a certain time, the routing agent flushes all outstanding send buffers, even if they are not full. The routing kernel is the key performance-critical operation in the agent. A simplified version is shown in Algorithm 1. The kernel is applied to all incoming message bundles, both from local processes and from remote nodes. The time complexity of the routing algorithm is O(n+m) for n messages and m total bytes, which is independent of the number of endpoints. We precompute the next-hop routing table at initialization. During routing, if no send buffer is available, the kernel exits prematurely, and the remaining messages are put on a blocklist. Once an outstanding send is completed, the kernel is applied to the entries of the blocklist. Multiple threads are used in message routing to leverage the full hardware performance. Locks or atomics would lead to significant contention in each loop iteration. Instead, separate send buffers are allocated per thread. 
+
+Runtime Library. The runtime library offers support for applications to send and receive arbitrary sized messages with Buddy. It provides the necessary interfaces to bootstrap Buddy communications and manage aggregated send 6 J. Wahlgren et al. 
+
+and receive buffers. All runtime library functions are non-blocking, enabling applications to maximize the time for useful computation. Furthermore, the runtime library leverages multiple send and receive buffers to enable pipelining of application compute with communication in a similar fashion to the routing agent. The low-level API consists of functions for sending or receiving aggregated message buffers and a call to poll for completions. 
+
+Communication Protocol. Buddy communication travels two different data paths: intra-node between the runtime library and the routing agent, and inter-node between routing agents on different nodes. For inter-node communi-cation, based on our characterization results on the testbed, RDMA is used for low-latency and high-bandwidth data movement for simplicity, portability, and flexibility. This enables the routing agent to be able to run both on a DPU or on any generic host cores. The RDMA protocol is based on SEND/RECV op-erations for its high performance since it avoids the need for distributed book-keeping. Note that we also considered the DPU’s DMA API, but benchmarking revealed no performance advantage over standard RDMA on the testbed. Mes-sage aggregation is implemented by concatenating multiple small messages in each RDMA request. Each message is encoded as an 8-byte header containing the payload size and destination rank, followed by the payload data. This format enables flexibility in the application as arbitrary-sized messages can be mixed freely. 
+
+Implementation. We implement the Buddy routing agent and runtime library in C++. Communication is bootstrapped using MPI, where we use MPI ranks as addresses of application processes. RDMA communication is implemented with the ibverbs library. All communication buffers are pre-allocated at initialization time to avoid the overhead of memory registration during runtime. In the routing agent, multi-threading is implemented by using OpenMP threads and a shared receive queue. 
+
+## 4 Experimental Setup 
+
+Our first testbed has two nodes equipped with BlueField-3 DPUs. The hosts have dual-socket Intel Xeon Gold 6326 CPUs, 16 cores each, and 512 GiB DDR4 memory. The DPUs have 8 ARM cores and 16 GiB LPDDR5 memory. The NIC is capable of 100 Gbps InfiniBand or RoCE link. The connection between hosts and DPUs is PCIe 4 x16, which has a maximum unidirectional bandwidth of 31.5 GB/s. Both of the hosts and DPUs are running Linux 5.15 with DOCA version 2.7.0085. On this testbed, we used up to 8 threads for routing in all scenarios, which is the number of DPU cores. For scalability demonstration, we employ another testbed with 8 BlueField-3 nodes. The hosts have an AMD EPYC 9454 CPU with 48 cores and 770 GiB DDR5 memory. The DPUs have 16 ARM cores and 32 GiB LPDDR5 memory. This system also runs Linux 5.15 but has DOCA version 3.2.1. Communication Offloading on SmartNIC DPUs: A Quantitative Approach 7
+
+Table 1. Tested benchmarks and applications. Application Domain Comm. pattern Histogram Data Analysis Data-dependent Sparse Transpose Linear Algebra All-to-all Triangle Counting Graph Analysis Topology-dependent SSSP Graph Analysis Topology-dependent QuickSilver Physics 3D neighborhood Host CPU 
+
+> Socket 0
+> Socket 1
+> DPU
+> Network
+> App Process
+> Route Agent
+
+(a) None Host CPU  
+
+> Socket 0
+> Socket 1
+> DPU
+> Network
+> App Process
+> Route Agent
+
+(b) x86 Host CPU   
+
+> Socket 0
+> Socket 1
+> DPU
+> Network
+> App Process Route Agent
+
+(c) Dpu 
+
+Fig. 3. Three offloading scenarios with arrows representing RDMA data transfer. 
+
+We use a set of five applications to evaluate communication offloading. They come from a variety of domains and feature different communication patterns as shown in Table 1. Each of the applications features irregular communication patterns as they send fine-grained asynchronous messages in an unstructured fashion. The Histogram, Sparse Transpose, Triangle Counting, and SSSP (Single Source Shortest Path) benchmarks are based on [10] for which we developed a compatability layer. For these applications, we use randomized inputs and set the problem size to 100x the host’s last-level cache. Quicksilver [15] is a proxy application that solves a dynamic Monte Carlo particle transport problem. We ported it to the low-level API with around 200 inserted and 400 deleted lines. For the experiments, we use the CTS2 benchmark problem with a reduced number of steps. We compare three offloading scenarios in this work, as illustrated by Fig. 3. Since Buddy enables communication offloading using a generic infrastructure that is portable to different environments, this enables us to compare the routing offloading performance with the routing agent deployed on different hardware. The first non-offloading scenario does not decouple the routing component from application. The second and third scenarios decouple the routing agent either to a separate socket or the SmartNIC DPU. 
+
+– None : The application process and routing agent both run on the same host cores (with simultaneous multi-threading) as a performance baseline. 
+
+– x86 : The routing agent is offloaded to a separate socket with a powerful host CPU, as an upper bound on communication offloading performance. 
+
+– Dpu : The routing agent is offloaded to low-power cores on the SmartNIC. 8 J. Wahlgren et al. Histogram 
+
+> Quicksilver
+> SSSP
+> Transpose
+> Tri. Count.
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> Speedup over None
+> DPU
+> x86
+
+Fig. 4. Speedup compared to no offloading. Histogram   
+
+> Quicksilver
+> SSSP
+> Transpose
+> Tri. Count.
+> 0
+> 25
+> 50
+> 75
+> Network util. (%)
+> DPU x86 None
+
+Fig. 5. Network utilization in different scenarios. Histogram 
+
+> Quicksilver
+> SSSP
+> Transpose
+> Tri. Count.
+> 10 0
+> 10 1
+> M:C ratio
+> DPU
+> None
+> x86
+
+Fig. 6. M:C ratio in differ-ent scenarios (log scale). 
+
+## 5 Application Performance 
+
+Offloading Performance. A comparison of the application-level performance in the different offloading scenarios is shown in Fig. 4. The plot shows the mean performance of five runs. In all applications, x86 offloading improved perfor-mance compared to the non-offloading baseline, from a mean of 1.35 × speedup in Triangle Counting to 1.77 × in Histogram. Dpu offloading improved perfor-mance in three applications, with 1.13 × speedup in Histogram, 1.40 × in Sparse Transpose, and 1.55 × in Quicksilver. The performance was not improved in SSSP and Triangle Counting, with 0.99 × and 0.83 × speedup, respectively. To explain the performance difference between the applications, we employed additional profiling metrics. First, we measured the network utilization, shown in Fig. 5. We calculate it as the inter-node communication throughput of Buddy over the theoretical link speed. In the x86 scenario, Histogram reached a high network utilization of 77%. SSSP and Triangle Counting also achieved high uti-lizations with 60% and 64%, respectively. These applications also had the largest difference between the x86 and Dpu performance. Evidently, they can benefit from communication offloading, but Dpu offloading is limited by bottlenecks in the DPU hardware, i.e., weaker cores and memory. Two applications had a lower network utilization, with 30% for Sparse Transpose and only 0.1% for Quicksil-ver. They have more local work relative to the amount of communication, and therefore benefit from offloading as it frees up resources for local computation work. Offloading to x86 cores is more beneficial because it suffers less from the weaker DPU system compared to x86 .While tasks such as Sparse Transpose contain no floating-point computations, traversing the sparse structure incurs many cache misses and constitutes the major local work in the benchmark. We measured the ratio of memory accesses to communication (M:C ratio) in the applications to characterize the balance of local work to communication. The total amount of memory accessed is measured as the number of LLC cache misses times the cache line size (with HPCToolkit), while the amount of communication is measured as the number of bytes routed by the routing agent. For instance, a ratio of 2 means that the application loads 2 bytes from memory for each 1 byte it communicates with Buddy. The M:C ratios are shown in Fig. 6. They are largely consistent across the offloading Communication Offloading on SmartNIC DPUs: A Quantitative Approach 9
+
+Table 2. Summary of application offloading results. Application Speedup x86 Speedup Dpu Net. util. M:C ratio Category Histogram ✓ (1.77) ✓ (1.13) 77% 1.5 Balanced Quicksilver ✓ (1.55) ✓ (1.55) 0.1% 72 Host-dominated SSSP ✓ (1.68) ✗ (0.99) 60% 0.56 Comm-dominated Transpose ✓ (1.51) ✓ (1.40) 30% 2.3 Host-dominated Tri. Count ✓ (1.35) ✗ (0.83) 64% 0.53 Comm-dominated 8 32 128      
+
+> Remote comm. size (KiB)
+> 0
+> 5
+> Speedup
+> 2832
+> Runtime buffer count
+> 0
+> 5
+> 10
+> Speedup
+> 2468
+> Routing threads
+> 0.0
+> 2.5
+> 5.0
+> Speedup  Histogram
+> Quicksilver
+> SSSP
+> Transpose
+> Tri. Count.
+
+Fig. 7. Impact of tuning and optimizations on application performance. 
+
+scenarios, although it deviates slightly for None in Histogram. Quicksilver has by far the highest ratio around 72, explaining the low network utilization we observed, followed by Sparse Transpose with 2.3 and Histogram with 1.5. SSSP and Triangle Counting have more communication than memory traffic with ratios of 0.56 and 0.53, respectively. We summarize the results in Table 2. Based on the M:C ratio, we categorize the applications into three groups. Quicksilver and Sparse Transpose have a high degree of local work (M:C ratio > 2) and are therefore host-dominated . SSSP and Triangle Counting have a high degree of communication (M:C ratio < 1) and are therefore communication-dominated . Histogram lies in between, we consider it 
+
+balanced . The host-dominated applications see a significant speedup (1.40-1.55) from Dpu offloading, while the communication-dominated applications see no benefit. The balanced Histogram has a modest speedup of 1.13. 
+
+Optimizations. We studied the impact of tuning and optimizations on com-munication offloading performance by measuring application performance with varied Buddy configurations in Dpu mode. Remote communication size is the size of buffers for routing-agent to routing-agent traffic over the network, with 4 KiB (i.e. the link MTU) as the baseline. Runtime buffer count is the number of send and receive buffers in the runtime library. Routing threads is the number of OpenMP threads in the routing agent. The speedup is shown in Fig. 7. In most cases, increasing the communication size to 8 KiB results in a 2-3x speedup, reaching a plateau around 16-32 KiB, with up to 9.5x in Triangle Counting, due to increased communication efficiency. The performance impact on Quicksilver is negligible, as it is strongly host-dominated. Increasing the run-time buffers enables communication pipelining and better overlap. The perfor-mance of SSSP and Transpose was significantly improved, reaching a plateau 10 J. Wahlgren et al. 2 4 6 8      
+
+> Nodes
+> 0
+> 20
+> 40
+> Time (s)
+> 2468
+> Nodes
+> 0
+> 25
+> 50
+> Avg. size (KB)  Histogram
+> Quicksilver
+> Agent to App
+> Agent to Agent
+> Fig. 8. Performance of scaling Histogram and Quicksilver with Dpu offloading up to 8 nodes and the average transfer sizes.
+
+around 8 buffers with 8.0x and 12.4x, respectively, while other applications were not significantly affected.Utilizing multiple threads in the routing agent improves performance for most applications, with up to 6.2x speedup at 7 or 8 threads in Histogram. Triangle Counting peaks at 5 threads with 3.7x speedup, while SSSP and Tranpose peak at 7 threads with 4.2x and 4.3x, respectively. These re-sults show that communication granularity, pipelining, and multi-threaded DPU services are key optimizations for communication offloading. 
+
+Scalability. We evaluated the scalability of Buddy communication offloading on the 8-node cluster by performing a weak scaling test of Histogram and Quicksil-ver with Dpu offloading. In Histogram, we scale both the size of the distributed table and the total number of updates, and in Quicksilver, we scale both the number of mesh elements and the number of particles. The routing agent uses 16 threads. The execution time and average transfer size per run across 5 runs are shown in Fig. 8. Quicksilver achieves close to ideal weak scaling with almost constant execu-tion time regardless of the number of nodes. This is in line with our finding that Quicksilver is host-dominated. In Histogram, the execution time is fastest with 1 node, as there is no cost for inter-node data transfer. With 2 and 3 nodes, the time is similar. From 3 to 5 nodes, the time scales linearly, after which the growth rate decreases slightly. The average transfer size highlights a factor limiting the scalability of His-togram. While the average agent-to-agent (i.e. cross-node) transfer size remains in the range 26-30 KB (for nodes > 1), the average agent-to-application (i.e. intra-node) transfer size decreases from 26 KB at 3 nodes to 8 KB at 8 nodes. On the other hand, the transfer size in Quicksilver remains in the range 14-19 KB for all distributed cases. These findings indicate that Buddy’s scalability on balanced or communication-dominated workloads could be improved by fur-ther tuning buffer sizes and idle timeouts for agent-to-application transfers on multiple nodes. Communication Offloading on SmartNIC DPUs: A Quantitative Approach 11 Baseline 
+
+> DPU Memory
+> Host/DPU Link
+> 0
+> 5
+> 10
+> 15
+> Interference
+> slowdown (%)
+
+Fig. 9. Performance of 
+
+Dpu offloading with differ-ent kinds of interference. DPU Offload x86 Offload 
+
+> 10 3
+> 10 4
+> 10 5
+> Mem loads (MB)
+> Communication buffers
+> Total communication
+
+Fig. 10. Amount of data loaded from DRAM in the routing agent (log scale). Intel Gold 
+
+> BlueField-3
+> Grace
+> 0
+> 20
+> 40
+> Memory loads
+> (% of comm.)
+
+Fig. 11. LLC misses frac-tion of total network traffic in micro-benchmark. 
+
+## 6 DPU Bottleneck Analysis 
+
+BlueField-3. To understand how DPU design can be enhanced to support communication offloading, we analyze the system bottlenecks. In the previous section, we observed that Dpu offloading is weaker than x86 offloading, which could be explained by weaker cores, memory subsystem, or higher data transfer costs in the DPU scenario. However, we cannot tell from these experiments which system component is the bottleneck. We investigate two potential bottlenecks by injecting interference and mea-suring the relative performance of Buddy. As a baseline case, we use Dpu of-floading with 7 threads. To inject DPU memory interference, we concurrently execute a memory-intensive workload on the 8th core. To inject interference into the link between the host and DPU, we concurrently execute a communication-intensive workload on the 8th core and a free core on the host. The memory-intensive workload is a vector addition with a working set of 32 MB (more than 2x the last-level cache capacity). The communication-intensive workload is the 
+
+ib_send_bw RDMA benchmark in bidirectional mode with 64 KB message size. For these experiments, we use the Histogram application, which has a large dis-parity between x86 and Dpu performance, and repeat experiments five times. Fig. 9 presents the slowdown of the application with different sources of interference. Communication interference does not significantly impact the per-formance of Dpu offloading. However, DPU memory interference decreases the performance by 17%, indicating that the DPU’s main memory is the performance bottleneck for Dpu offloading. Furthermore, we profile LLC misses in the routing agent using perf to compare the frequency of DRAM accesses in Dpu and x86 
+
+offloading, as shown in Fig. 10. The total L3 cache misses correspond to 249 MiB and 153 GiB of data loaded from memory in x86 and Dpu , respectively. The value for x86 roughly corresponds to reading all of the communication buffers a single time (272 MiB), while the value for Dpu is 1.6x the total communicated data volume (95 GiB). The ratio of cache misses corresponds to a 625x increase in main memory demand loads with Dpu offloading compared to x86 offload-ing. The low memory traffic in x86 can be explained by the fact that the CPU supports Intel DDIO, and thus utilizes DCA to place arriving data directly into 12 J. Wahlgren et al. 
+
+the cache without going through main memory. While ARM has a DCA feature called Cache Stashing, the larger memory traffic in Dpu indicates that it is not supported or not enabled on the BlueField-3 ARM cores. In conclusion, the DPU memory is the bottleneck in Buddy applications with 
+
+Dpu offloading. Memory traffic is significantly higher in Dpu than x86 because the DPU does not leverage DCA. 
+
+Future SmartNICs. Addressing the identified bottleneck in future SmartNICs would enable DPU-based communication processing, such as the software rout-ing, closer to the underlying network speed, benefiting high-throughput DPU ap-plications. At the time of writing, Nvidia recently announced its next-generation SmartNIC BlueField-4. We note that the BlueField-4 will leverage the Nvidia Grace CPU for the ARM cores of the DPU and a more powerful memory system, which cold address the identified limitations of weak CPU and memory in the previous generations of BlueField DPUs for enabling efficient routing offloading needed for the “fire-and-forget” model. To inform expectations for the future SmartNIC DPU on the DCA capa-bilities, we designed an experiment to test on the Grace CPU. We utilized the 
+
+ib_send_bw benchmark from perftest, with a small modification to read each byte of received data on the main CPU thread instead of just discarding it. To test the DCA capabilities of a system, we execute the benchmark and measure the total number of LLC misses using perf stat , and calculate the total cache misses as a fraction of the total amount of data received. Specifically, we set the message size to 64 KiB and the number of iterations to 10,000, giving a total of 625 MiB data, and scale the cache misses by the cache line size (64 B). We execute the benchmark in loopback mode. We execute the benchmark on a system with an Nvidia Grace CPU and an Nvidia ConnectX-7 NIC. Our Grace system features 72 ARM Neoverse V2 cores and 480 GiB of LPDDR5X memory. For comparison, we also execute the benchmark on Intel Gold and BlueField-3, corresponding to the x86 and Dpu 
+
+offloading scenarios. The results from three runs are shown in Fig. 11. As ex-pected, the Intel system has essentially no cache misses, while the BlueField-3 system has a significant amount with 30%. Interestingly, the Grace system has an even larger amount of misses at 48%. This indicates that the Grace system, like the BlueField-3, is not utilizing DCA. We hypothesize that CPU prefetching is the reason total cache misses on BlueField-3 and Grace remain below 100%. These results show that DCA does not come “for free” by upgrading the CPU. To enable high-throughput communication offloading, future SmartNIC architects should consider DCA as a critical feature. 
+
+## 7 Related Works 
+
+In HPC, SmartNICs have been used both for communication and as general-purpose coprocessors. In [2, 13], the MPI progress engine is offloaded to enable Communication Offloading on SmartNIC DPUs: A Quantitative Approach 13 
+
+computation overlap, while PEDAL [9] offloads in-flight compression and decom-pression in MPICH. Works such as [7] offload specific application kernels, while ODOS [17, 16] enables general-purpose offloading with OpenMP. Outside the SmartNIC area, SDT [11] enhances CPU architecture with specialized Simulta-neous Data-delivery Threads to co-run application threads and communication threads with performance isolation. Previous works have shown the benefits of software aggregation and routing in irregular communication without leveraging SmartNIC offloading. Garg and Sabharwal [5] studied the HPCC RandomAccess benchmark and demonstrated how message aggregation and software routing improved the performance by 2x on the Blue Gene/L supercomputer. Subsequent works have proposed libraries and multiple routing and aggregation schemes, including BCL [3], Conveyors [10], and YGM [12]. One previous work claimed that DCA is already supported in BlueField-2 DPU [6]. The authors draw this conclusion from the fact that the ib_write_bw 
+
+benchmark can achieve a bandwidth higher than the STREAM benchmark on the DPU. However, we believe that the conclusion is incorrect. Without mod-ifying the benchmark, as we did in Section 6, the CPU does not access the data at all, and the benchmark’s throughput is limited only by the NIC’s DMA capabilities rather than the CPU’s memory bottleneck. Other recent works on DCA only focus on Intel DDIO. Farshin et al. [4] dis-sected the implementation of DDIO, proposed a set of optimization guidelines for performance isolation, and demonstrated DDIO fine-tuning. Alian et al. [1] presented a gem5 simulator model for DDIO and characterized its impact on memory utilization and performance on storage and network processing bench-marks. Wang et al. [18] further studied the architectural details of DDIO to develop analytical models to diagnose performance issues, tune configurations, and inspire future hardware designs. 
+
+## 8 Conclusion 
+
+In this work, we explored the prospects of offloading communication routing with SmartNICs, a key component for enabling the “fire-and-forget” model. To this end, we developed a prototype offloading engine called Buddy and evalu-ated it on Nvidia BlueField-3. We found that DPU offloading efficiency depends on the amount of local work in the application. Specifically, the memory-to-communication ratio is a key indicator of DPU offloading performance, with host-dominated workloads gaining the most from offloading. Secondly, we iden-tified the absence of Direct Cache Access (DCA) for network packets as an architectural bottleneck in the DPU, causing a 625x increase in memory traffic compared to an x86-based scenario with DCA, which highlights an important consideration for future SmartNIC designs. 14 J. Wahlgren et al. 
+
+## References 
+
+1. Alian, M., Yuan, Y., Zhang, J., Wang, R., Jung, M., Kim, N.S.: Data direct I/O characterization for future I/O system exploration. In: 2020 IEEE International Symposium on Performance Analysis of Systems and Software (ISPASS) (2020) 2. Bayatpour, M., Sarkauskas, N., Subramoni, H., Maqbool Hashmi, J., Panda, D.K.: BluesMPI: Efficient MPI non-blocking Alltoall offloading designs on modern Blue-Field smart NICs. In: International Conference on High Performance Computing (2021) 3. Brock, B., Buluç, A., Yelick, K.: BCL: A cross-platform distributed data structures library. In: Proceedings of the 48th International Conference on Parallel Processing (2019) 4. Farshin, A., Roozbeh, A., Maguire Jr, G.Q., Kostić, D.: Reexamining direct cache access to optimize I/O intensive applications for multi-hundred-gigabit networks. In: 2020 USENIX Annual Technical Conference (USENIX ATC 20) (2020) 5. Garg, R., Sabharwal, Y.: Software routing and aggregation of messages to optimize the performance of HPCC Randomaccess benchmark. In: Proceedings of the 2006 ACM/IEEE conference on Supercomputing (2006) 6. Gu, T., Fei, J., Canini, M.: OmNICCL: Zero-cost sparse AllReduce with direct cache access and SmartNICs. In: Proceedings of the 2024 SIGCOMM Workshop on Networks for AI Computing (2024) 7. Karamati, S., Hughes, C., Hemmert, K.S., Grant, R.E., Schonbein, W.W., Levy, S., Conte, T.M., Young, J., Vuduc, R.W.: “Smarter” NICs for faster molecular dynam-ics: a case study. In: 2022 IEEE International Parallel and Distributed Processing Symposium (IPDPS) (2022) 8. León, E.A., Ferreira, K.B., Maccabe, A.B.: Reducing the impact of the memory wall for I/O using cache injection. In: 15th Annual IEEE Symposium on High-Performance Interconnects (HOTI 2007) (2007) 9. Li, Y., Kashyap, A., Chen, W., Guo, Y., Lu, X.: Accelerating lossy and lossless compression on emerging bluefield dpu architectures. In: 2024 IEEE International Parallel and Distributed Processing Symposium (IPDPS). pp. 373–385 (2024) 10. Maley, F.M., DeVinney, J.G.: Conveyors for streaming many-to-many communica-tion. In: 2019 IEEE/ACM 9th Workshop on Irregular Applications: Architectures and Algorithms (IA3) (2019) 11. Mamandipoor, A., Tran, H.D., Alian, M.: SDT: Cutting datacenter tax through simultaneous data-delivery threads. IEEE Computer Architecture Letters (2025) 12. Steil, T., Reza, T., Priest, B., Pearce, R.: Embracing irregular parallelism in HPC with YGM. In: Proceedings of the International Conference for High Performance Computing, Networking, Storage and Analysis (2023) 13. Suresh, K.K., Michalowicz, B., Ramesh, B., Contini, N., Yao, J., Xu, S., Shafi, A., Subramoni, H., Panda, D.: A novel framework for efficient offloading of commu-nication operations to BlueField SmartNICs. In: 2023 IEEE International Parallel and Distributed Processing Symposium (IPDPS) (2023) 14. Tibbetts, N., Ibtisum, S., Puri, S.: A survey on heterogeneous computing using SmartNICs and emerging data processing units. Future Generation Computer Sys-tems (2025) 15. Tithi, J.J., Petrini, F., Richards, D.F.: Lessons learned from accelerating Quicksil-ver on programmable integrated unified memory architecture (PIUMA) and how that’s different from CPU. In: International Conference on High Performance Com-puting (2021) Communication Offloading on SmartNIC DPUs: A Quantitative Approach 15 16. Usman, M., Benito, M., Iserte, S., Peña, A.J.: ODOS-MPI: HPC-friendly Smart-NIC offloading of computation/communication kernels. In: Proceedings of the In-ternational Conference for High Performance Computing, Networking, Storage and Analysis (2025) 17. Usman, M., Iserte, S., Ferrer, R., Peña, A.J.: DPU offloading programming with the OpenMP API. In: Proceedings of the SC’23 Workshops of The International Con-ference on High Performance Computing, Network, Storage, and Analysis (2023) 18. Wang, M., Xu, M., Wu, J.: Understanding I/O direct cache access performance for end host networking. Proceedings of the ACM on Measurement and Analysis of Computing Systems 6(1) (2022)
