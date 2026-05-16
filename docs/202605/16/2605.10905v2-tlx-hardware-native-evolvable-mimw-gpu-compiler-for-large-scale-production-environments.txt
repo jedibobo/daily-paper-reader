@@ -1,0 +1,1673 @@
+Title: TLX: Hardware-Native, Evolvable MIMW GPU Compiler for Large-scale Production Environments
+
+URL Source: https://arxiv.org/pdf/2605.10905v2
+
+Published Time: Fri, 15 May 2026 01:38:50 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# TLX: Hardware-Native, Evolvable MIMW GPU Compiler for Large-scale Production Environments 
+
+Yue Guan 
+
+UC San Diego 
+
+y9guan@ucsd.edu 
+
+Hongtao Yu 
+
+Meta 
+
+hoy@meta.com 
+
+Peng Chen 
+
+Meta 
+
+pchen7e4@meta.com 
+
+Daohang Shi 
+
+Meta 
+
+daohang@meta.com 
+
+Karthik Manivannan 
+
+Meta 
+
+kmanivannan@meta.com 
+
+Nicholas J Riasanovsky 
+
+Meta 
+
+njriasan@meta.com 
+
+Manman Ren 
+
+Meta 
+
+mren@meta.com 
+
+Lei Wang 
+
+Meta 
+
+wlei@meta.com 
+
+Shane Nay 
+
+Meta 
+
+snay@meta.com 
+
+Partha Kanuparthy 
+
+Meta 
+
+pka@meta.com 
+
+Zhijing Li 
+
+Meta 
+
+tissue030@meta.com 
+
+Ying Liu 
+
+Meta 
+
+liuying@meta.com 
+
+Zaifeng Pan 
+
+UC San Diego 
+
+zapan@ucsd.edu 
+
+Zhengding Hu 
+
+UC San Diego 
+
+zhh068@ucsd.edu 
+
+Yufei Ding 
+
+UC San Diego, Meta 
+
+yufeiding@ucsd.edu 
+
+Abstract 
+
+Modern GPUs increasingly rely on specialized hardware units and asynchronous coordination mechanisms, so per-formance depends on orchestrating data movement, tensor-core computation, and synchronization rather than exposing more thread-level parallelism. This creates a programming-model tension: if too much execution structure is hidden, the compiler must catch up to new hardware mechanisms; if too much is exposed, the burden of orchestration falls back onto the programmer. We present TLX (Triton Low-level Lan-guage Extensions), built around MIMW (Multi-Instruction, Multi-Warp ), which expresses orchestration at warp-group granularity while preserving Triton’s productive blocked programming model for regular computation. TLX realizes this idea as an embedded extension to Triton, exposing ex-plicit interfaces for multi-warp execution, local-memory orchestration, asynchronous operations, and cluster-aware control. Our evaluation shows that TLX supports substantial customization with limited development effort while remain-ing competitive with state-of-the-art implementations. TLX-authored kernels have been deployed in large-scale training and inference production systems. Our code is open sourced at https://github.com/facebookexperimental/triton .
+
+1 Introduction 
+
+Modern GPU performance is increasingly determined by how quickly programming systems evolve with hard-ware [ 15 , 27 ]. Across recent GPU generations, two trends have become especially important: increasing specialization 
+
+and increasing asynchrony . GPUs now contain more com-ponents that serve distinct roles, including data-movement engines [ 20 ], tensor-memory pathways [ 17 ], and special-ized matrix units [ 16 ]. To keep these components fully utilized, hardware increasingly provides asynchronous mechanisms that let them run and communicate without forcing the whole processor into one lockstep execution pattern. The programming challenge therefore shifts from simply exposing more thread-level parallelism to coordi-nating specialized components, their data movement, and dependences efficiently. The first widely adopted answer was the single-instruction, multi-thread (SIMT ) programming model [ 10 ], exemplified by CUDA [ 18 ]. In this model, programmers directly manage threads, synchronization, memory movement, and hardware-specific execution structure. Because control is exposed at a very fine granularity, SIMT can map closely to the ma-chine and deliver excellent performance without waiting for a compiler to infer every orchestration decision. But it does so by pushing the full burden of orchestration onto the pro-grammer and by giving up much of the leverage provided by higher-level blocked abstractions and compiler automation. The next major step was to raise the abstraction level from threads to blocked programs through a single-instruction, multi-block (SIMB ) style [ 28 ]. Systems such as Triton were developed to address the productivity limitations of CUDA by hiding intra-block orchestration behind a blocked abstrac-tion while preserving high performance on regular kernels. More recently, NVIDIA has also pushed this direction within the CUDA ecosystem through CuTeDSL [ 19 ]. This design is 
+
+> 1
+> arXiv:2605.10905v2 [cs.AR] 14 May 2026
+
+Y. Guan et al. CUDA Ecosystem Triton Ecosystem                
+
+> Triton
+> (2019)
+> “SIMB”
+> TTIR
+> TTGIR
+> LLVM
+> Gluon
+> (2025)
+> “SIMT”
+> TTGIR
+> LLVM
+> Triton
+> (2019)
+> “SIMB”
+> TTIR
+> TTGIR
+> LLVM
+> TLX
+> (This Work)
+> “MIMW”
+> TTGIR
+> Extension
+> CuteDSL
+> (2025)
+> “SIMB”
+> Cute IR
+> PTX
+> ❶Prioritize Performance
+> Map high-level semantics to
+> hardware-specific IR directly for
+> near-metal optimizations.
+> ❷Prioritize Productivity
+> Build multi-level abstraction for
+> high-level portability and
+> compiler infrastructure reuse.
+> ❸TLX (This Work)
+> Novel MIMW programming
+> model extending SIMB for
+> productivity, performance and
+> extensibility trade-o ff .
+> High-level DSL
+> Hardware-Agnostic IR
+> Hardware-Specific IR
+> Low-Level IR
+> ❶❶
+> (a) GPU Programming Models (b) Comparison of Prior DSLs and TLX
+> ❷
+> Host Device
+> Grid
+> Block (0,0) Block (0,1)
+> Block (1,0) Block (1,1)
+> Kernel
+> Block (1,1) Block (1,1)
+> Range(1)
+> Range(0)
+> Single-Instruction
+> Multi-Thread
+> (SIMT)
+> Single-Instruction
+> Multi-Block
+> (SIMB)
+> Multi-Instruction
+> Multi-Warp
+> (MIMW)
+> Range(0)
+> Warp 0 Warp 1
+> Extend
+> Fallback
+> Block (1,1)
+> Range(1)
+> Range(0)
+> Warp 0 Warp 1
+> Block (1,0)
+> Range(1)
+> ❸Cluster Control
+> Cluster
+> Tile Instructions Tile Instructions
+> ❶Warp Control
+> Thread
+> (3,0)
+> Thread
+> (3,1)
+> Thread
+> (3,2)
+> Thread
+> (2,0)
+> Thread
+> (2,1)
+> Thread
+> (2,2)
+> Thread
+> (1,0)
+> Thread
+> (1,1)
+> Thread
+> (1,2)
+> Thread
+> (0,0)
+> Thread
+> (0,1)
+> Thread
+> (0,2)
+> ❷Local Memory
+> (Barrier) Control
+> ❸
+> CUDA
+> (2006)
+> “SIMT”
+> PTX
+
+Figure 1. MIMW as the missing middle between SIMT and SIMB, and TLX’s two-layer realization within the Triton ecosystem. effective when a compiler can recover the required low-level schedule, but that same abstraction boundary also means that when hardware introduces new intra-SM execution patterns, asynchronous mechanisms, or coordination scopes, the com-piler must discover and implement all of them on the user’s behalf. In practice, many of these orchestration decisions are not statically inferable within reasonable compilation cost. As a result, reaching state-of-the-art performance can require a long compiler catch-up cycle even when the neces-sary hardware optimizations are conceptually clear[6, 25]. As GPU hardware has continued to evolve, this SIMB di-rection has exposed a new bottleneck: compiler catch-up. If a programming model hides too much, then every new orches-tration pattern must be rediscovered by compiler analysis and lowering; if it exposes too much, then the full burden of scheduling and synchronization falls back onto the pro-grammer. The recurring Renaissance of lower-level systems such as Gluon[ 29 ] reflects this pressure: when Triton-style abstractions cannot expose enough control quickly enough, developers seek more explicit interfaces to recover perfor-mance. The central programming-model question is therefore how to divide responsibility between the programmer and the compiler in a way that can keep pace with hardware evolution. 
+
+TLX is our answer to this next stage of DSL development. It is built around MIMW (Multi-Instruction, Multi-Warp ), a middle position in which orchestration is expressed at warp-group granularity rather than purely at block or thread granularity. We observe that modern GPU kernels are nei-ther naturally block-uniform nor naturally thread-by-thread. The critical control point is the warp group : coarse enough that each group can own a specialized hardware role, but fine enough to express asynchronous producer–consumer pipelines inside a streaming multiprocessor (SM) [ 13 ]. In MIMW, different warp groups execute distinct instruction streams while cooperatively orchestrating data movement and synchronization. As illustrated in Figure 1, MIMW sits between SIMB and SIMT: it keeps blocked computation in a form that compilers handle well, while exposing the orches-tration decisions that programmers most need to control. TLX realizes this idea as an extension to Triton rather than a replacement for it. Programmers can keep Triton’s blocked programming style for the regular parts of a kernel and in-troduce explicit multi-warp orchestration only where the hardware requires it. This design preserves the existing com-piler stack where it is already effective, provides a natural fallback to plain Triton when explicit control is unneces-sary, and offers a path we believe is more sustainable for future GPU DSLs than either returning fully to CUDA-style programming or relying on compiler catch-up alone. This combination of blocked computation and explicit or-chestration is what lets TLX target both productivity and performance. The upper layer preserves Triton’s productive blocked model, while the extension layer makes asynchro-nous pipelines, local-memory orchestration, and hardware-specific execution structure natural, first-class extensions of that same programming model. In this way, TLX gives programmers a unified path from regular blocked kernels to hardware-tailored execution, reducing development effort without forcing performance-critical kernels to wait for a full compiler rediscovery of each new optimization opportunity. We evaluate TLX in large-scale ML production envi-ronments that motivate its design. The evaluation goes beyond canonical operator benchmarks [ 11 , 24 , 32 ] to include production-oriented kernels with heterogeneous orchestration patterns [ 5, 23 ], where fast development and production-level performance are both required. The results show that TLX can support substantial customization with limited development effort while remaining competitive with state-of-the-art implementations. The rest of the paper develops the MIMW model and its primitives, describes TLX’s integration into the Triton ecosystem, and presents this evaluation in detail. To summarize, the paper contributes in three main ways: 
+
+• We propose MIMW , a programming model that iden-tifies warp-group execution with explicit inter-group dependences as the missing middle ground between productivity-oriented SIMB abstractions and control-oriented SIMT programming. 
+
+2TLX: Hardware-Native, Evolvable MIMW GPU Compiler for Large-scale Production Environments SM                         
+
+> 1st Gen
+> TC
+> SIMT
+> Core
+> Shared
+> Memory
+> Register
+> File
+> Global Memory
+> Volta
+> SM
+> 3rd Gen
+> TC
+> SIMT
+> Core
+> Shared
+> Memory
+> Register
+> File
+> Global Memory
+> Ampere
+> SM
+> 4th Gen
+> TC
+> SIMT
+> Core
+> Shared
+> Memory
+> Register
+> File
+> Global Memory
+> Hopper
+> SM
+> 4th Gen
+> TC
+> SIMT
+> Core
+> Shared
+> Memory
+> Register
+> File DSM
+> TMA
+> Async Copy
+> Async TC
+> SM
+> 5th Gen
+> TC
+> SIMT
+> Core
+> SMEM Register
+> File
+> Global Memory
+> Blackwell
+> SM
+> 5th Gen
+> TC
+> SIMT
+> Core
+> SMEM Register
+> File TMEM
+> Paired TC MMA
+> TMEM
+> Register
+> Reallocation TMA TMA TMA TMA
+> Load MMA SIMD
+> Load MMA SIMD
+> Load
+> MMA SIMD
+> Load
+> MMA
+> Load Load
+> MMA
+> Load
+> Load
+> SIMD
+> Load
+> MMA
+> SIMD
+> Load
+> SIMD SIMD
+> Warp 0
+> Warp 1 Warp 1
+> Warp 0
+> Warp 2
+> Warp 0
+> Warp 2
+> CTA 0
+> CTA 1
+> Load
+> (a) Evolve of recent GPU architectures.
+> (b) Programming model for each architecture.
+> CTA 0
+> CTA 1
+> Load Load Load
+> MMA
+> SIMD
+> MMA
+> SIMD
+> Warp 0
+> Warp 1
+> Warp 2
+> Load MMA SIMD
+> Load MMA SIMD
+> Warp 0
+> Warp 1
+> CTA 0
+> CTA 1
+> CTA 0
+> CTA 1
+> Load
+> MMA SIMD
+> Load
+> MMA SIMD
+> Load
+> Load
+> MMA
+> MMA
+> Warp 0
+> Warp 1
+> Load
+> Load
+> Load
+> MMA SIMD
+> Load
+> MMA
+> Warp 0 Load
+> Async Copy
+> Load Load Load
+> MMA
+> SIMD
+> MMA
+> SIMD
+> Warp 0
+> Warp 1
+> Warp 2
+> Register
+> Reallocation
+> TMA
+> Async TC
+> MMA
+> MMA
+> Paired TC MMA
+> Warp 1
+> Warp 1
+> Synchronous
+> Asynchronous
+
+Figure 2. GPU architecture and execution model. 
+
+Table 1. Summary of GPU programming terminology Nvidia AMD Description Streaming Multiprocessor (SM) Compute Unit (CU) Parallel vector processors in GPUs. Thread Work Item Individual lanes in a kernel. Warp Wavefront A vector of threads run the same instructions. Warp Group - A group of collaborative warps. - XCD Group A group of waves in the same chiplet. Thread Block Workgroup A group of warps executed at the same time. 
+
+• We design and implement TLX as a two-layer embedded extension to Triton that realizes MIMW in practice, ex-posing warp-group specialization, asynchronous opera-tions, local-memory orchestration, and fine-grained syn-chronization while preserving Triton’s productive blocked programming style when explicit control is unnecessary. 
+
+• We benchmark TLX on canonical and production kernels, showing CUDA-competitive performance with a more productive and extensible programming model. 
+
+2 Background and Related Work 
+
+This section summarizes the GPU architecture and program-ming model background. 
+
+2.1 GPU Architecture 
+
+Although the proposed methodologies support both Nvidia and AMD GPUs, we use Nvidia terminology unless AMD-specific features [ 1] matter. Modern GPUs are throughput-oriented accelerators with many parallel execution units and a deep memory hierarchy. Kernels launch as grids of thread blocks, or cooperative thread arrays (CTAs), on Nvidia and workgroups on AMD, scheduled onto streaming multipro-cessors (SMs) or compute units (CUs). Within each block, threads execute in lockstep groups—warps on Nvidia and wavefronts on AMD—under the classic SIMT model (Tbl. 1). Each SM/CU contains SIMT cores, a large register file, and software-managed on-chip memory (shared memory / LDS) for data reuse and inter-thread cooperation. Fig. 2 shows that recent GPU generations are moving be-yond simple SIMT toward more specialized , asynchronous ,and collaborative execution. Architectures add dedicated units beyond general SIMT cores, including tensor cores, asynchronous copy engines, and tensor memory accelera-tors (TMA); these units let data movement, tensor compu-tation, and SIMT execution overlap as pipeline stages; and execution is shifting from mostly independent warps to co-ordinated warp groups that specialize in different tasks and synchronize explicitly. This shift also appears in tensor-core instructions. As sum-marized in Tbl. 2, the programming granularity expands from Volta’s quad-level MMA to Ampere’s warp-level WMMA, Hopper’s warp-group WGMMA, and Blackwell’s CTA-pair tcgen05.mma [ 14 ]. Newer tensor-core pipelines require co-operation from increasingly larger thread groups. Together, these changes make the original SIMT mental model increasingly insufficient for performance reasoning. High performance now depends not only on parallelizing work, but also on orchestrating specialized units, overlap-ping asynchronous stages, and coordinating execution across warps or warp groups. This trend motivates programming models and compiler support that expose structured control over asynchronous execution and cross-warp cooperation. 
+
+2.2 GPU Programming Models and DSLs 
+
+This subsection focuses on one dimension of GPU DSL de-sign: the granularity at which execution structure is repre-sented. Recent hardware trends make this choice increas-ingly important, because high-performance kernels must 
+
+Table 2. Evolution of Nvidia Tensor Core Instructions Architecture Instruction Size(MNK) Granularity Volta MMA 8-8-4 Quapair (8 threads) Ampere WMMA 16-8-16 Warp (32 threads) Hopper WGMMA 64-8-16 Warp Group (128 threads) Blackwell tcgen05.mma 256-256-128 CTA Pair (256 threads) 
+
+3Y. Guan et al. TLX   
+
+> ThunderKitten
+> TileLang
+> 0
+> 2
+> 4
+> Average value Thread Binding and Memory Layout
+> TLX
+> ThunderKitten
+> TileLang
+> Warp Specialization
+> TLX
+> ThunderKitten
+> TileLang Unsupported
+> Local Memory Management
+> TLX
+> ThunderKitten
+> TileLang Unsupported
+> Cluster Launch Control
+> TLX
+> ThunderKitten
+> TileLang
+
+Figure 3. Productivity survey results. now coordinate specialized units, asynchronous stages, and cooperative groups that are larger than a single warp but more structured than an entire block. At one end of the spectrum is the traditional SIMT model, represented on the SIMT side of Fig. 1. CUDA[ 18 ] exposes this model directly: programmers write threads organized into blocks, and warps execute a largely uniform instruction stream over different data elements. Its main strength is explicit control over the execution hierarchy, memory spaces, and synchronization primitives. That control makes SIMT fully expressive for modern kernels, but it also means that asynchronous copies, tensor-core pipelines, staging buffers, and cross-warp coordination must be orchestrated explicitly by the programmer. At the other end is Triton’s SIMB style, represented on the SIMB side of Fig. 1. Triton[ 28 ] raises abstraction from threads to blocked tensor programs: the programmer writes one tile-centric program, and the compiler replicates and optimizes it across blocks. This improves productivity substantially and works well for many dense ML operators. It establishes a different contract between user and compiler: the user specifies what a block computes, while the compiler decides how that computation maps to the machine. As execution becomes more asynchronous and role-specialized, however, this abstraction makes it harder to represent kernels whose performance depends on distinct roles within a block, explicit asynchronous dependencies, or coordination patterns that don’t fit one uniform block-level instruction stream. Recent concurrent systems such as ThunderKitten[ 26 ] and TileLang[ 30 ] push in a related direction by extending the SIMB-style interface with more low-level control over kernel structure and scheduling. They show that the community is converging on the need for more explicit orchestration within tile-based DSLs. Their design point is nevertheless different from TLX’s: they are not extensions of the Triton ecosystem itself, and they do not expose the same set of low-level features that we study in our productivity sur-vey, especially around cluster launch control and other ex-plicit orchestration mechanisms. In that survey, 127 graduate-level students in a GPU programming course compared TLX against other GPU programming systems along four dimen-sions that directly reflect the controls discussed here: thread binding and memory layout, warp specialization, local mem-ory management, and cluster launch control; the detailed survey setup is provided in Sec. B. As shown in Fig. 3, TLX remains competitive on the common low-level tasks and stands out most clearly on cluster launch control, suggesting that the additional orchestration controls exposed by TLX remain usable in practice rather than forcing programmers back to fully manual SIMT-style coding. 
+
+3 TLX Overview 
+
+This section presents TLX’s design at a high level. The goal is not to reintroduce every mechanism in detail, but to make the organizing idea clear: TLX keeps Triton’s productive blocked model for tile computation while exposing the execution and memory structure that modern kernels increasingly need to control explicitly. A small end-to-end example then shows how these abstractions compose at the source level. 
+
+3.1 Embedded Language Design 
+
+Fig. 1 summarizes TLX as an additive extension to Triton rather than a replacement language. The Triton layer keeps Triton’s tile-based frontend and optimization pipeline. The TLX extension layer exposes execution and memory structure that Triton’s default SIMB abstraction intentionally hides: warp specialization, asynchronous dependencies, local-memory orchestration, and cluster-aware coordination. The key idea is simple. Triton gives programmers a pro-ductive way to describe what tile of work a kernel computes; TLX adds a way to describe how cooperating warp groups and CTAs stage, synchronize, and coordinate that work when performance depends on explicit orchestration. The impor-tant point is that this interface is a realization of MIMW, not the definition of MIMW itself. MIMW is the abstraction boundary that makes warp-group roles, cross-role depen-dences, and local-state orchestration first-class; TLX is the embedded language and compiler path that carries those con-structs through Triton’s stack. In practice, this means that concurrency becomes a source-level concept, dependencies become explicit rather than implicit in lockstep execution, and on-chip storage becomes a compiler-visible object with well-defined lifetime and layout. This organization lets TLX pursue the three goals from the introduction without falling back to opaque backend intrinsics. Productivity comes from leaving tile computation in Triton’s existing model. Performance comes from making 
+
+> 4
+
+TLX: Hardware-Native, Evolvable MIMW GPU Compiler for Large-scale Production Environments Load a                              
+
+> Load b
+> WMMA
+> Epilogue
+> Sync
+> Loop
+> Load a
+> Load b
+> WMMA
+> Epilogue
+> Loop
+> Load a
+> Load b
+> WMMA
+> Epilogue
+> Loop
+> Load a
+> Load b
+> WMMA
+> Epilogue
+> Loop
+> Load a
+> Load b
+> MMA
+> Epilogue
+> Loop
+> Wait MMA
+> Load a
+> Load b
+> Loop
+> Wait Load
+> Loop
+> WGMMA
+> Wait MMA
+> Loop
+> Epilogue
+> Wait MMA
+> Loop
+> Epilogue
+> Wait MMA
+> Loop
+> Epilogue
+> Wait MMA
+> Loop
+> Epilogue
+> Warp 0 Warp 1 Warp 2 Warp 3
+> Warp 0
+> Warp 1 Warp 2 Warp 3 Warp 4 Warp 5
+> (a) Triton DSL
+> Block CTA
+> (b) SIMB with TTIR on Ampere
+> (d) MIMW with TLX on Hopper
+> Tile-Level Transformation Passes on TTIR
+> Lowering
+> Lowering
+> Lowering
+> Single-Instruction Multi-Block
+> Multi-Instruction Multi-Warp
+> Load a Load b
+> Sync
+> WMMA Load a Load b
+> Sync
+> WMMA
+> Load a Load b WMMA Load a Load b WMMA
+> Load a Load b WMMA Load a Load b WMMA
+> Load a Load b WMMA Load a Load b WMMA
+> Warp 0
+> Warp 1
+> Warp 2
+> Warp 3
+> Load a Load b Load a Load b
+> WGMMA WGMMA
+> Epilogue
+> Epilogue
+> Epilogue
+> Epilogue
+> Epilogue
+> Epilogue
+> Warp 0
+> Warp 1
+> Warp 2
+> Warp 3
+> (c) Execution Timeline Trace on Ampere
+> (e) Execution Timeline Trace on Hopper
+> Code
+> Generation
+> Code
+> Generation
+
+Figure 4. Warp specialization and its integration with the MIMW programming model. 
+
+Listing 1: TLX overview example. 
+
+1 @triton.jit 
+
+2 def tlx_kernel(x_ptr, y_ptr, n_elements, BLOCK: tl. constexpr): 
+
+3 tile_id = tl.program_id(0) 
+
+4 full = tlx.alloc_barrier(1, arrive_count=1) 
+
+5 empty = tlx.alloc_barrier(1, arrive_count=1) 
+
+67 # Sec.4.2 Local Memory Management 
+
+8 smem = tlx.local_alloc((BLOCK,), tl.float32, 1) 
+
+910 # Sec.4.3 Cluster Control 
+
+11 clc = tlx.clc_create_context(num_consumers=4) 
+
+12 cta_rank = tlx.cluster_cta_rank() 
+
+13 14 # Sec.4.1 Warp Specialization 
+
+15 with tlx.async_tasks(): 
+
+16 with tlx.async_task("default"): 
+
+17 while tile_id != -1: 
+
+18 tlx.barrier_wait(empty[0], prod_phase) 
+
+19 x = tl.load(x_ptr+...) 
+
+20 tlx.local_store(smem[0], x) 
+
+21 tlx.barrier_arrive(full[0]) 
+
+22 tlx.clc_producer(...) 
+
+23 tile_id = tlx.clc_consumer(...) 
+
+24 with tlx.async_task(num_warps=1): 
+
+25 while tile_id != -1: 
+
+26 tlx.barrier_wait(full[0], cons_phase) 
+
+27 x_local = tlx.local_load(smem[0]) 
+
+28 y = x_local * 2.0 + cta_rank 
+
+29 tl.store(y_ptr+..., y) 
+
+30 tlx.barrier_arrive(empty[0]) 
+
+31 tile_id = tlx.clc_consumer(...) 
+
+32 33 # Kernel Launch 
+
+34 tlx_kernel[grid](x, y, n, 
+
+35 BLOCK=256, num_warps=4, ctas_per_cga=(2, 1, 1),) 
+
+coordination and staging explicit where needed. Extensibil-ity comes from representing those decisions in the frontend and IR, so new hardware mechanisms can be lowered sys-tematically instead of through ad hoc escape hatches. That systems story is separate from the conceptual claim: the pa-per argues that MIMW is the right abstraction boundary, and TLX demonstrates that the boundary can be embedded cleanly into an existing blocked DSL rather than requiring a separate low-level language. 
+
+3.2 Embedded Language Interface 
+
+Listing 1 shows a minimal TLX kernel that exercises this design. One task stages data into local memory, another consumes it, the two tasks synchronize through mbarriers, and cluster control provides work assignment. The example is intentionally small; its purpose is not to model one full application kernel, but to show the shape of the source-level interface when execution structure must be made explicit. This example is best read as one small pipeline rather than a checklist of features. The tlx.async_tasks() region says that a CTA contains multiple concurrent roles. The producer role stages data into an explicit local buffer, the consumer role waits only on the dependency it needs, and the cluster intrinsics show that the same interface can express dynamic work assignment beyond a single CTA. In other words, the listing illustrates TLX’s main claim: tile computation stays in Triton’s familiar style, while scheduling, synchronization, and staging become explicit where needed. The point of the example is therefore not to define every primitive exhaustively; Section 4 does that. Its job here is to make the language boundary visible. Programmers still write a high-level kernel, but they can now surface warp roles, synchronization edges, local staging, and cluster co-ordination directly in the program when the hardware and algorithm require it. 
+
+4 MIMW with TLX 
+
+This section describes how TLX realizes MIMW during low-ering. The three mechanisms form a layered control contract: warp-level control makes execution roles explicit within a CTA, cluster-level control lifts role-specialized tasks across CTAs, and local-memory control makes intermediate state, layout constraints, and synchronization edges explicit to the compiler. Because each layer is represented directly in the source model and IR rather than buried in backend code patterns, the same structure can be retargeted as future 
+
+5Y. Guan et al. CTA 0 CTA 1 
+
+> Cluster 0
+
+Warp 0 
+
+Warp 1 
+
+Warp 2 
+
+Load A0 Load B0 
+
+MMA C8 
+
+Accumulate D0 
+
+Load A4 Load B2 
+
+Warp 0 
+
+Warp 1 
+
+Warp 2 
+
+Load A0 Load B1 
+
+MMA C9 
+
+Accumulate D0 
+
+Load A4 Load B3 
+
+MMA C7 
+
+MMA C5 
+
+> CTA 2 CTA 3
+> Cluster 1
+
+Warp 0 
+
+Warp 1 
+
+Warp 2 
+
+Load A1 Load B0 
+
+MMA C2 
+
+Accumulate D1 
+
+Load A10 Load B2 
+
+Warp 0 
+
+Warp 1 
+
+Warp 2 
+
+Load A1 Load B1 
+
+MMA C3 
+
+Accumulate D1 
+
+Load A10 Load B3 
+
+MMA C10 
+
+MMA C11 
+
+> Barrier
+> Barrier
+
+Load A7 
+
+Load A7 
+
+❷ Distributed Shared 
+
+Memory 
+
+❸ Multi-CTA Instruction: 
+
+CTA-Paired MMA 
+
+> Barrier
+> Barrier
+
+Load A6 
+
+Load A6                                                                                                                                                                                                                                                                  
+
+> #Producer: Load Aand Busing CLC for work distribution
+> with tlx.async_task( num_warps =1,num_regs =232 ):
+> tile_id =tl.program_id( axis =0)#Initial tile ID
+> while tile_id != -1:
+> #Use CLC producer to request work
+> clc_buf =clc_buf %NUM_STAGES
+> tlx.clc_producer(clc_context, clc_buf, clc_producer)
+> clc_producer=clc_producer^(clc_buf==(NUM_STAGES-1))
+> #Calculate tile offsets from tile_id
+> pid_m =tile_id // tl.cdiv(N, BLOCK_N)
+> pid_n =tile_id %tl.cdiv(N, BLOCK_N)
+> offs_am =pid_m *BLOCK_M
+> offs_ak =0
+> offs_bk =0
+> offs_bn =pid_n *BLOCK_N
+> #Load A(different per CTA based on tile_id)
+> tlx.barrier_expect_bytes( …)
+> tlx.async_descriptor_load(
+> a_ptr, a_smem, [offs_am, offs_ak], smem_full_bars[ 0]
+> )
+> #Load B(different per CTA based on tile_id)
+> tlx.async_descriptor_load(
+> b_ptr, b_smem, [offs_bk, offs_bn], smem_full_bars[ 0]
+> )
+> #Signal data is ready
+> tlx.barrier_arrive(smem_full_bars[ 0], 1)
+> #Get next tile using CLC consumer
+> tile_id =tlx.clc_consumer(
+> clc_context, clc_buf, clc_consumer
+> )
+> clc_consumer=clc_consumer^(clc_buf==(NUM_STAGES -1))
+> clc_buf += 1
+> #Consumer: CLC synchronized Multi-CTA MMA
+> with tlx.async_task( num_warps =1,num_regs =232 ):
+> #Initial tile ID
+> tile_id =tl.program_id( axis =0)
+> while tile_id != -1:
+> #Use CLC producer to request work
+> clc_buf =clc_buf %NUM_CLC_STAGES
+> tlx.clc_producer(
+> clc_context, clc_buf, clc_producer
+> )
+> clc_producer =
+> clc_producer^(clc_buf==(NUM_STAGES-1))
+> #Wait for data to be loaded
+> tlx.barrier_wait(smem_full_bars[ 0], phase =0)
+> #Perform multi-CTA matrix multiplication
+> #Result goes to Cin TMEM
+> tlx.async_dot(
+> a_smem, b_smem,
+> c_tmem,
+> use_acc =False ,
+> two_ctas =True ,#Enable multi-CTA MMA
+> mBarriers =[tmem_full_bars[ 0]]
+> )
+> #Signal computation complete
+> tlx.barrier_arrive(tmem_full_bars[ 0], 1)
+> #Get next tile using CLC consumer
+> tile_id =tlx.clc_consumer(
+> clc_context, clc_buf, clc_consumer
+> )
+> clc_consumer
+> =clc_consumer^(clc_buf==(NUM_STAGES-1))
+> clc_buf += 1
+> #Epilogue: accumulate per-CTA Cwith DSM
+> with tlx.async_task( num_warps =2,num_regs =232 ):
+> tile_id =tl.program_id( axis =0)#Initial tile ID
+> while tile_id != -1:
+> #Use CLC producer to request work
+> clc_buf =clc_buf %NUM_CLC_STAGES
+> tlx.clc_producer(clc_context, clc_buf, clc_producer)
+> clc_producer=clc_producer^(clc_buf==(NUM_STAGES-1))
+> #Wait for computation to complete
+> tlx.barrier_wait(tmem_full_bars[ 0], phase =0)
+> c_result =tlx.local_load(c_tmem)
+> tlx.local_store(d_local_smem, c_result)
+> if cluster_cta_rank == 0:
+> tlx.barrier_wait(d_remote_full_bars[ 0], phase =0)
+> #Accumulate local +remote partials in CTA0.
+> d_local =tlx.local_load(d_local_smem)
+> d_remote =tlx.local_load(d_remote_smem)
+> d_final =d_local +d_remote
+> tlx.local_store(d_local_smem, d_final)
+> #…
+> #Store accumulated result to global memory
+> d_ptrs =d_ptr +offs_m *N+offs_n
+> tl.store(d_ptrs, d_final)
+> else :
+> tlx.remote_shmem_store(d_remote_smem,c_result)
+> tlx.barrier_arrive(d_remote_full_bars[ 0], 1)
+> #Get next tile using CLC consumer
+> tile_id =tlx.clc_consumer(
+> clc_context, clc_buf, clc_epilogue
+> )
+> clc_epilogue=clc_epilogue^(clc_buf==(NUM_STAGES-1))
+> clc_buf += 1
+
+(a) Specialized Warps with Cluster Control Abstraction (b) Demonstration of Cluster Controls 
+
+Warp 1: Consumer Warp 2: Epilogue 
+
+❶ Cluster Launch Control 
+
+❶ Cluster Launch Control 
+
+❷ Distributed Shared Memory 
+
+❸ CTA-Paired MMA ❶ Cluster Launch 
+
+Control 
+
+Warp 0: Producer 
+
+Figure 5. Cluster-level control in TLX. The left illustrates source-level interfaces, while the right shows how these mechanisms are driven by specialized warp roles within the MIMW execution model. hardware introduces new scheduling scopes, communication primitives, or local-memory behaviors. 
+
+4.1 Warp-Level Control 
+
+Warp specialization [ 3 , 4 , 8 ] maps async tasks onto disjoint warp groups within one CTA. It is the base control layer in TLX: once warp groups and their dependencies are explicit, later mechanisms can extend the same structure outward to CTA clusters and downward to the local state those tasks exchange. Instead of cloning one block program across all warps, TLX lets the programmer define role-specialized re-gions such as producer, consumer, MMA, and epilogue paths and connect them with explicit dependencies. 
+
+Integration with MIMW. Fig. 4 shows why this execution style needs a representation beyond Triton’s default lower-ing. In standard Triton, the programmer writes one tile-level program, and the compiler effectively replicates it across warps within the CTA. This single-instruction multi-warp 
+
+organization is highly productive when all warps should exe-cute the same sequence. It does not directly express the case where different warp groups intentionally follow different instruction streams so that data movement, compute, and epilogue can overlap in time. TLX adds warp specialization as an extension to Triton rather than a replacement. At the Python level, a TLX ker-nel remains a standard @triton.jit function, but the pro-grammer can partition the CTA’s warps into warp groups 
+
+and attach different regions to them. Conceptually, the ker-nel becomes a collection of cooperating warp-level tasks: a producer region issues asynchronous loads and signals readiness, a consumer region waits on those signals and performs MMA, and other regions may wait on compute completion and execute the epilogue. As the bottom row of Fig. 4 shows, warps are no longer symmetric replicas; they are role-specialized participants connected by explicit 
+
+wait /arrive dependencies. Crucially, TLX keeps Triton’s tile-centric compiler model. Each MIMW region is still written with Triton’s tensor and pointer abstractions for the tile computations it performs, so most of Triton’s TTIR/TTGIR optimization pipeline remains applicable within each region. During lowering, TLX gener-alizes Triton’s original warp-partitioning passes: instead of cloning one instruction stream to all warps, it materializes multiple per-warp-group instruction streams, preserves the explicit cross-warp dependencies, and then passes the result-ing TTGIR to the same downstream tile-level optimizations. 
+
+4.2 Cluster-Level Control 
+
+Warp specialization defines how roles are organized within 
+
+a CTA. Cluster-level control extends that structure across CTAs. CUDA thread-block clustering provides the execution domain, and TLX exposes scheduling, communication, and collective mechanisms needed to program it explicitly. In this way, cluster control is not a separate programming model layered beside warp specialization; it is the cluster-scoped continuation of the same role-specialized execution model. 
+
+Cluster abstraction in MIMW. Fig. 5 summarizes how TLX lifts MIMW execution from one CTA to a cooperating CTA cluster. Each CTA is treated as an independent tile, and clustered behavior is introduced through explicit inter-CTA communication and synchronization rather than inferred from layout metadata. Data sharing, work redistribution, and ordering constraints are therefore visible in the program structure. This formulation also supports CTA specialization: not all CTAs are required to participate in the same tile computation, and different CTAs within a cluster can assume distinct roles, each of which can in turn be implemented by specialized warp groups. Cluster Launch Control (CLC), distributed shared mem-ory (DSM), and multicast are all asynchronous control and communication mechanisms. Queue request and response in CLC proceed independently of computation; multicast 
+
+6TLX: Hardware-Native, Evolvable MIMW GPU Compiler for Large-scale Production Environments 
+
+TMA transfers and their barrier signaling can overlap with MMA; and DSM producers and consumers must coordinate ordering without forcing CTA-wide stalls. Expressing these overlaps is difficult in a single-instruction multi-warp model in which all warps execute the same loop body and synchro-nize CTA-wide at phase boundaries. TLX’s MIMW model makes cluster control compositional by allowing one warp group to specialize in cluster progression —advancing the CLC pipeline, issuing multicast TMA, or performing remote DSM stores and arrivals—while other warp groups continue exe-cuting data movement and compute for the current tile. De-pendencies are expressed with explicit wait /arrive edges between warp-specialized regions, so only the warps that truly depend on a given event stall. 
+
+Cluster Launch Control. Clustering changes how work should be scheduled. When a cluster becomes resident, repeatedly launching short-lived kernels, or statically assigning each CTA a fixed tile, can leave resources under-utilized because of irregular tile runtimes, tail effects, or data-dependent control flow. CLC addresses this problem by enabling dynamic persistent execution: CTAs or clusters repeatedly acquire new tile identifiers from a hardware-managed work queue, providing implicit work stealing and load balancing without a software queue or global coordination. TLX exposes CLC as intrinsics that wrap the underlying PTX primitive in a structured producer/con-sumer protocol. A kernel allocates a CLC pipeline context via 
+
+tlx.clc_create_context , which materializes per-stage mbarriers tracking empty and full slots and per-stage 16-byte response buffers in shared memory that the hardware writes asynchronously. The producer side ( tlx.clc_producer )waits for an empty slot, publishes the expected response size via barrier_expect_bytes , and issues the request; the consumer side ( tlx.clc_consumer ) waits for the full-slot barrier, decodes the returned tile id, and arrives on the empty-slot barrier to release the stage. The tile id returned by clc_consumer is -1 when no work remains, providing a natural termination condition for persistent loops. 
+
+Distributed Shared Memory. Within a cluster, recent NVIDIA architectures expose DSM: a CTA can directly access the shared memory of another CTA through a dedicated shared-cluster address space. TLX adopts DSM as a first-class abstraction because clustered kernels are often producer–consumer across CTAs, not just within a CTA, and because paired-CTA collectives often require exchanging tiles or synchronization state without round-tripping to global memory. TLX exposes DSM through explicit storage kinds and remote-access intrinsics. A buffer allocated with tlx.storage_kind.smemCluster denotes a shared-memory region addressable within the cluster, while standard smem allocations remain CTA-private. Given a local buffer, a CTA can form a remote view into another CTA’s shared memory via tlx.remote_view() ; TLX also provides direct shared-memory store primitives, with mbarrier completion, to move data to a peer CTA. 
+
+Multi-CTA Instructions. Recent NVIDIA architectures also expose multi-CTA instructions, where a small fixed group of CTAs in a cluster participates in a single collective opera-tion. A representative example is Blackwell’s generation-5 tensor cores, which support paired-CTA MMA : two CTAs jointly issue one tensor-core instruction, contribute different operand fragments, and cooperatively produce the output tile. Unlike two independent CTAs that later reduce partial results, this is a hardware-level collective, so correctness requires matched issue order, compatible operand layouts, and explicit inter-CTA synchronization. TLX treats paired-CTA MMA as a first-class cluster in-struction, but does not infer grouping or data movement from layout metadata. Instead, grouping is expressed explic-itly: the user specifies which CTAs participate in the col-lective and how operands are partitioned across them. TLX provides primitives to exchange operand fragments through DSM when needed and to synchronize participating CTAs so they reach the collective instruction in a consistent state. This design makes multi-CTA execution a programmable composition of cooperating CTAs, rather than a behavior derived implicitly from data layout. Another important class is TMA multicast , which makes data movement itself a cluster-level collective. A single Tensor Memory Accelerator transfer can populate shared-memory tiles for multiple CTAs in a cluster, reducing redundant global-memory traffic. In GEMM mainloops, this aligns with common reuse patterns, where CTAs may share input tiles across rows or columns. In TLX, multicast behavior is not inferred from layout metadata or compiler analysis. Instead, TLX exposes explicit APIs that allow users to specify the set of target CTAs for each transfer. This design enables flexible communication patterns beyond fixed row- or column-wise reuse, allowing multicast groups to be tailored to the computation. As a result, data movement becomes a programmable primitive, and users can directly control when and how tiles are shared across CTAs, along with necessary synchronization to ensure correctness. 
+
+Summary. Cluster programming imposes a rule: a CTA may 
+
+arrive at a remote mbarrier but must not wait on one. TLX respects this by keeping producer/consumer slot protocols local to each CTA while expressing inter-CTA coordination using an “arrive remote, wait local” pattern when necessary. The compiler inserts cluster-wide synchronization after bar-rier initialization to prevent races where one CTA signals a remote barrier before the owning CTA initializes it, and it preserves memory ordering by pairing remote stores and arrivals with local waits at the receiving CTA. The three cluster techniques reinforce each other under TLX’s abstraction. CLC provides the dynamic persistent loop that keeps a cluster resident and balanced across irregular 
+
+> 7
+
+Y. Guan et al. Triton Frontend                       
+
+> Storage
+> ●SMEM
+> ●TMEM
+> ●…
+> TTGIR
+> Bu ff er
+> ●RequireLayoutOp
+> ●ReleaseLayoutOp
+> ●LocalAliasOp
+> TLX::Layout Propagation
+> Passes
+> InsertRequireLayout
+> LayoutBackwardPropagate
+> LayoutForwardPropagate
+> PriorityOptimization
+> LayoutEncoding
+> ●SwizzleShared
+> ●NVMMAShared
+> ●AMDRotateShared
+> ●BlackwellTMEM
+> ●DotOperand
+> ●Blocked
+> ●…
+> Triton::Layout Propagation
+> Analysis
+> Rewrite
+> Lowering
+> Allocation
+> ●local_alloc
+> ●barrier_alloc
+> ●…
+> Lowering
+> LLVM::ConvertLinearLayout Backend Specific Binary
+> Code
+> Generation
+> Producer
+> Consumer
+> ttg.local_alloc
+> #shared layout
+> ttg.memdesc_index
+> ttg.local_load
+> ttg.convert_layout
+> tt.dot
+> tt.load
+> ttg.local_store
+> ttg.local_alloc
+> ttg.memdesc_index tt.load
+> ttg.local_store
+> ttg.local_load
+> ttg.convert_layout
+> tt.dot
+> tlx.require_layout
+> #[[shared:2]]
+> ttg.local_alloc
+> #[[shared:2]]
+> ttg.memdesc_index
+> #[[shared:2]]
+> tt.load
+> ttg.local_store
+> ttg.local_load
+> ttg.convert_layout
+> tt.dot
+> ttg.convert_layout
+> Store Load
+> Allocate
+> Convert
+> ttg.local_alloc
+> #[[shared:2]]
+> ttg.memdesc_index
+> #[[shared:2]]
+> tt.load
+> ttg.local_store
+> ttg.local_load
+> ttg.convert_layout
+> tt.dot
+> tlx.require_layout
+> #[[shared:2]]
+> (b) Layout Transformation Compilation Pipeline (a) Round-Trip Layout Transformation Example
+> Initial IR Anchored IR Propagated IR Finalized IR
+> IR Example
+> Compilation
+> Pipline
+
+❶ ❷ ❸ ❹ ❺
+
+> Pass
+> IR
+
+❶
+
+❷
+
+❸
+
+❹
+
+❺
+
+Figure 6. Local-memory control and layout propagation in TLX. The left side shows how explicit buffer, alias, and layout operations represent shared local state in the program, while the right side summarizes the compiler flow that propagates, resolves, and lowers those layout constraints. tiles; DSM provides the on-chip communication substrate needed for explicit inter-CTA data exchange and producer– consumer coordination; and multicast reduces global traf-fic by cooperatively staging reused operand tiles into the shared memories of selected CTAs. In TLX, multicast is not inferred from layout but explicitly specified by the user, en-abling flexible communication patterns beyond fixed row-or column-wise reuse. These control mechanisms are based on an explicit shared state. That is the role of TLX’s local-memory control: it is the layer that makes warp- and cluster-level coordination precise enough to optimize today and extensible enough to retarget when future hardware changes the available local-memory spaces, layouts, or synchronization rules. 
+
+4.3 Local Memory Control 
+
+Local memory makes the shared state of warp- and cluster-level control explicit. Producer warps allocate and fill staging buffers, consumer warps read them under tight latency con-straints, cluster-scoped communication stages reuse those same buffers or their aliases, and later regions may recycle the storage for epilogues or reductions once earlier phases complete. In a uniform single-instruction multi-warp lower-ing, the compiler can often infer one shared-memory layout because all warps execute the same instructions in the same order. In the MIMW setting, by contrast, different regions and even different CTAs may observe the same logical buffer through different access patterns, and buffers may be inten-tionally aliased or reused across phases to stay within on-chip capacity. Making these relationships explicit is what ties the first two control layers together in a form that remains analyzable as hardware introduces new memory layouts, new asynchronous transfers, or new collective instructions. 
+
+Integration with MIMW. local_alloc names the allo-cation through which tasks communicate, while alias op-erations describe intentional storage reuse across different logical views of that allocation. Once producers and con-sumers are decoupled in time, and once cluster-level col-lectives may read or publish related state asynchronously, the program must make buffer ownership, reuse, and lay-out requirements explicit to avoid accidental overwrites or mismatched views. At the same time, modern GPUs expose multiple local-memory spaces and hardware operations, each imposing specific layout constraints on the same logical tile. Without compiler-visible abstractions for these behaviors, a MIMW kernel either over-allocates local storage, hurting occupancy, or relies on fragile backend-specific assumptions. 
+
+Local memory layout propagation. Fig. 6 summarizes this local-memory layer, while Fig. 7 and Fig. 4 show how it fits into the compiler and execution model. TLX intro-duces explicit buffer and layout constructs while remaining compatible with Triton’s native layout machinery. At the Python level, a manually managed buffer is represented as a 
+
+buffered_tensor carrying shape , dtype , storage kind , and an optional layout encoding . At the IR level, TLX materializes three key TTGIR operations: RequireLayoutOp to enforce a layout constraint, ReleaseLayoutOp to drop a constraint, and LocalAliasOp to represent aliasing between memory descriptors. These operations make layout requirements and reuse decisions explicit where MIMW regions interact. The propagation algorithm mirrors the pass pipeline shown in the figure. TLX first runs an insertion pass that places RequireLayoutOp around values requiring a particu-lar layout, either because the user requested it or because an operation requires it. It then performs backward propagation 
+
+from consumers to producers to infer the layouts that allocations and stores must satisfy, followed by forward propagation from producers to consumers to refine how those inferred layouts flow through views, transposes, and warp-specialized region boundaries. Both analyses operate over a dedicated lattice of layout-encoding facts and are aware of TLX control flow, so constraints can traverse region arguments rather than stopping at a syntactic boundary. 
+
+8TLX: Hardware-Native, Evolvable MIMW GPU Compiler for Large-scale Production Environments Triton Interface   
+
+> @triton.jit
+> tl.load
+> TLX Intrinsic
+> tlx.local_alloc
+> tlx.async_dot
+> Semantic Analysis
+> Triton AST
+> tl.tensor
+> Type Extension
+> tlx.bu ff er_tensor
+> IR Generation TLX Builder
+> TTIR
+> tt.func
+> tt.load
+> TLX OPs
+> tlx.RequireLayoutOp
+> Lowering
+> TTGIR
+> ttg.op, ttg.local_load, …
+> Machine Code
+> TLX Passes
+> tlx_fixup
+> TLX Passes
+> propogate_layout
+> rewrite_local_alias
+> Triton Frontend
+> Triton JIT
+> Register
+> Optimize
+> Optimize
+> TLX Lowering
+> TritonNvidiaGPUIR TritonAMDGPUIR
+> TTGIR Passes
+> lower_barrier_op
+> accelerate_matmul
+> TTIR Passes
+> reorder_broadcast
+> loop_unroll
+> Benchmark
+> AutoTuner
+> TLX Extension Triton DSL
+> Register
+> Register
+> IR
+> Transformation Pass
+
+Figure 7. TLX’s implementation and lowering strategy. After propagation, TLX resolves conflicts and aliasing with a priority-based optimization . When multiple constraints meet at a buffer—for example, when a producer prefers a bank-friendly shared-memory swizzle while a consumer re-quires an MMA-specific encoding—TLX selects a consistent encoding according to a priority policy and rewrites the program accordingly, for example by inserting minimal lay-out conversions or choosing one canonical encoding for the allocation. When alias groups are present, the optimizer ensures all aliases share a compatible concrete layout and that reuse does not violate constraints across lifetimes. If the constraint system is unsatisfiable, TLX raises a compila-tion error with explicit diagnostics pointing to conflicting 
+
+RequireLayoutOp or operation sites. Finally, TLX converts the resolved encodings into Tri-tonGPU’s canonical representation and hands the result to Triton’s existing layout propagation and code-generation passes. The result is a single compiler-visible structure in which warp roles, cluster coordination, and local state are all explicit, allowing TLX to absorb new hardware mech-anisms by extending these representations rather than by rediscovering whole kernel patterns from scratch. 
+
+5 Implementation 
+
+This section briefly explains how TLX is realized inside Tri-ton’s compiler stack. The main implementation goal is to preserve the extra execution and memory structure intro-duced by TLX—warp-specialized tasks, explicit local state, and cluster-aware control—through Triton’s existing multi-level lowering pipeline, rather than flattening them too early. The key implementation idea is additive integration . TLX is implemented as an extension to Triton’s frontend, IR builder, and lowering passes rather than as a separate compiler. This lets TLX reuse Triton’s programming model and optimiza-tion pipeline, while introducing new compiler-visible con-structs only where Triton’s original SIMB abstraction is too coarse for MIMW execution. In that sense, this section is about the systems contribution of the paper: it shows that MIMW can be integrated into an existing blocked DSL and compiler stack without discarding the parts that already work well. Fig. 7 summarizes this design. The implemen-tation has four components. The frontend introduces TLX objects and intrinsics at the source level. IR generation low-ers them into explicit TTIR operations. Multi-level lowering preserves those semantics at TTGIR, where target-aware decisions become necessary. Finally, TLX-specific passes re-solve layout, synchronization, and cluster-control before backend code generation. 
+
+Frontend integration. A TLX kernel remains a standard 
+
+@triton.jit function, with TLX intrinsics used alongside Triton primitives. During semantic analysis, TLX extends Tri-ton’s frontend with the additional entities needed by MIMW programming, especially explicitly allocated local buffers and synchronization objects such as mbarriers. Represent-ing these as first-class frontend objects, rather than opaque intrinsics, makes TLX’s execution and memory structure visible to the compiler from the start. 
+
+IR generation with TLX builder. After typing, Triton low-ers the kernel to TTIR through its standard IR-generation path. TLX augments this step with a builder that maps TLX intrinsics to TLX-specific TTIR operations. Triton’s exist-ing TTIR operations continue to represent tile-level tensor computation, while TLX operations represent the additional orchestration semantics, such as task structure, local alloca-tion and views, barrier manipulation, and layout-constrained local loads and stores. This separation is a key systems result: it keeps Triton’s tensor computation intact while making MIMW-specific control and memory semantics explicit. 
+
+Multi-level lowering. Triton next lowers TTIR to TTGIR, where GPU-specific operations and layout encodings become explicit. TLX extends this conversion so that TLX TTIR op-erations become TLX TTGIR operations instead of being erased prematurely. This preserves warp-specialized con-trol, local-memory layout requirements, and cluster-scoped communication until the compiler has enough architectural information to lower them correctly. The central implemen-tation requirement is semantic preservation across IR levels. 
+
+TLX-specific passes and code generation. TLX adds a small number of passes at TTIR and TTGIR. These passes validate task structure, propagate and resolve local-memory layout constraints, rewrite aliasing and reuse into concrete storage plans, and legalize asynchronous and cluster-aware operations for the target backend. After that, backend low-ering maps the resulting TTGIR operations to target instruc-tions such as mbarrier operations, async copy or TMA se-quences, and asynchronous tensor-core instructions. The implementation insight here is that TLX does not require a 
+
+9Y. Guan et al. GB1   
+
+> GB2
+> GB3
+> GB4
+> GB5
+> GB6
+> GB7
+> GB8
+> GB9
+> GB10
+> GB11
+> GB12
+> GB13
+> GB14
+> GB15
+> GB16
+> 0
+> 500
+> 1000
+> 1500
+> TFLOPs
+> Triton ATen TLX
+
+Figure 8. GEMM performance on NVIDIA GB200. Detailed settings for each operator are demonstrated in Sec. A. large new backend; it requires preserving high-level orches-tration semantics long enough that backend code generation becomes straightforward. 
+
+6 Evaluation 
+
+We evaluate TLX along three dimensions that mirror the logical flow of the paper. The section is organized around two questions: can TLX match mature implementations on well-studied operators while keeping the code easier to write, and can the same abstractions accelerate deployment to new use cases and optimizations? 
+
+• Major operators: GEMM and attention[ 32 ] show that TLX can reach equivalent performance regimes on the well-studied kernels that dominate frontier-scale ML workloads while using a much more concise programming interface. We benchmark against ATen[ 22 ], PyTorch’s[ 21 ] operator library, because it integrates the strongest practical CUDA and Triton implementations for these operators. 
+
+• Production use cases: LayerNorm[ 2] and multi-GPU GEMM[ 12 , 31 ] show that TLX accelerates development of production-oriented kernels whose optimization depends on orchestration beyond a parallel mainloop, making it easier to deploy new schedules and optimizations. 
+
+• Backend extensibility: retargeting kernels across NVIDIA and AMD GPUs shows that TLX remains easy to extend across backends as hardware mechanisms evolve. Due to the page limit, we summarize only the key work-load regimes here: the appendix covers both canonical and production-skewed GEMM shapes, attention variants across a wide range of sequence lengths, large-𝑁 LayerNorm cases that stress reuse and coordination, and multi-GPU GEMM settings that vary both aspect ratio and GPU count. Full per-figure experimental settings are provided in Sec. A. 
+
+6.1 Major Operators 
+
+We begin with the operator families that dominate produc-tion ML workloads. Our primary baseline in this subsection is ATen, PyTorch’s operator library, because it includes state-of-the-art CUDA and Triton implementations and is therefore the strongest practical comparison point. The goal here is simple: show that TLX remains competitive on mature oper-ators while keeping the source code much closer to Triton than to hand-tuned CUDA. Production GEMM is not just a tensor-core microbench-mark. Real deployments must handle both balanced matrices AFN1   
+
+> AFN2
+> AFN3
+> AFN4
+> AFN5
+> No-Causal FWD
+> 0 500  1000
+> TFLOPS
+> AFC1
+> AFC2
+> AFC3
+> AFC4
+> AFC5
+> Causal FWD
+> ABC1
+> ABC2
+> ABC3
+> ABC4
+> ABC5
+> No-Causal BWD
+> Triton ATen TLX
+
+Figure 9. Attention performance on B200. and highly asymmetric shapes from projection and feed-forward layers, and they often require backend-specific cus-tomization in staging, synchronization, and execution struc-ture. A high-performance GEMM 1 mainloop in TLX exer-cises all three technical contributions at once: warp special-ization decouples data-staging producers from tensor-core consumers so that TMA loads overlap with MMA compute; local memory management and layout propagation select shared-memory swizzle patterns that avoid bank conflicts across those specialized roles; and cluster launch control keeps the kernel persistent and load-balanced across irreg-ular tile runtimes. Fig. 8 reports normalized GB200 results on representative production shapes. On these well-studied cases, TLX stays in the same overall performance regime as ATen across both balanced and irregular aspect ratios rather than collapsing on the non-square cases. Importantly, the TLX kernels that achieve this are written in roughly 200 lines of Python-level Triton code, far less than the thousands of lines of CUDA required by a hand-tuned equivalent. The takeaway is that TLX does not trade away performance to recover programmability on a mature operator family. Attention is a stronger test of TLX’s customization story because high-performance implementations depend on more than a dense matrix mainloop. A production attention ker-nel 2 must coordinate tile staging, score computation, mask-ing, normalization, and output accumulation across multiple phases, and the required schedule changes across forward and backward passes as well as causal and non-causal vari-ants. TLX’s warp specialization is especially valuable here: different warp groups can own the score-compute, softmax-reduction, and output-accumulation stages, with explicit barrier synchronization connecting each phase rather than forcing all warps through a single uniform loop body. Local memory management then ensures that intermediate tiles such as the attention scores and running softmax statistics are staged on-chip with correct layouts across these phases. Fig. 9 compares TLX against on B200 for no-causal forward, causal forward, and no-causal backward configurations. The results are variant-dependent: TLX trails SOTA results more clearly on the smallest causal-forward cases, but the gap 
+
+> 1https://github.com/facebookexperimental/triton/blob/main/third_party/ tlx/tutorials/blackwell_gemm_ws.py
+> 2https://github.com/facebookexperimental/triton/blob/main/third_party/ tlx/tutorials/blackwell_fa_ws_pipelined_persistent.py
+> 10
+
+TLX: Hardware-Native, Evolvable MIMW GPU Compiler for Large-scale Production Environments On Chip Storage                       
+
+> Global Memory
+> mean = avg(x)
+> var = avg((x-mean) 2)
+> y = (x-mean)*rsqrt(var+e)*w+b
+> CTA 0 xmean xmean xvar xvar wbxyxy
+> CTA 0 xwby
+> yxCTA 1 wballreduce
+> mean
+> allreduce
+> mean allreduce
+> var
+> allreduce
+> var
+> (a) LayerNorm Definition (b) Multi-CTA LayerNorm with TLX
+> (c) Current LayerNorm with Triton
+> Data Loading
+> Computation
+> Dataflow
+> Global Memory
+> Global Memory
+> On Chip
+
+Figure 10. Multi-CTA LayerNorm with TLX. 2500  
+
+> 3000
+> 3500 PyTorch
+> Quack
+> TLX
+> LN1
+> LN2
+> LN3
+> LN4
+> LN5
+> LN6
+> LN7
+> 0
+> 250
+> TFLOPs
+
+Figure 11. LayerNorm performance on B200. narrows as sequence length grows, and TLX remains close to SOTA results on the no-causal forward and backward configurations over much of the tested range. That is the key point for this subsection: even on another mature and heavily optimized operator family, TLX remains competi-tive while giving the programmer a cleaner way to express schedule variation than a bespoke CUDA rewrite. Taken together, the GEMM and attention results establish the first half of the evaluation story: TLX remains in the same performance regime as mature operator implementations while keeping kernels materially easier to write and evolve. 
+
+6.2 Production Use Cases 
+
+Production systems also contain kernels whose bottlenecks are orchestration rather than raw dense-math throughput. Having established competitiveness on mature operators, we next ask a question: how quickly can the same abstrac-tions be deployed to kernels whose performance depends on new coordination patterns or newly exposed hardware opti-mizations? Sec.C and the tutorials in our repository contain additional examples, but we focus here on two representative use cases that most clearly expose TLX’s strengths beyond dense-kernel code generation: one centered on cluster-local reuse and coordination, and one centered on explicit overlap between communication and compute. 
+
+6.2.1 Multi-CTA LayerNorm. Large-𝑁 LayerNorm is fundamentally a data-movement problem: the same input tile is revisited to compute the mean, the variance, and the final normalized output. Fig. 10 shows how TLX turns that repeated traffic into an explicit cluster-cooperative schedule 3.CTAs partition the 𝑁 dimension, cache their local x tiles on chip, exchange partial sums through DSM, and let one CTA publish the final statistics back to the cluster. The point of the example is not just parallel reduction; it is that TLX makes 
+
+> 3
+
+https://github.com/facebookexperimental/triton/blob/main/third_party/ tlx/tutorials/blackwell-multi-cta-layernorm_test.py … 
+
+> GEMM Kernel
+> SM
+> 0
+> SM
+> 32
+> SM
+> 99
+> SM
+> 131
+> Barrier 0  Main Loop
+> k×S
+> Barrier 1
+> Remote Symmetric Memory Load k
+> Epilogue 0
+> Main Loop
+> k×S+1
+> Epilogue
+> k×S+1
+> Remote Load k+1
+> Main Loop
+> (k+1) ×S
+> Epilogue
+> k×S
+> …
+> …
+> …
+> …
+> SMs for Computation
+> SMs for Communication
+> Spatial Partition
+> Temporal Partition
+> Number of main loops for communication
+> SM
+> 66
+> SM
+> 98 …
+> ……
+> S 132-S
+> Epilogue
+> (k-1) ×S
+
+Figure 12. Multi-GPU GEMM with TLX. GD1 GD2 GD3 GD4 GD5 
+
+0
+
+500 
+
+> TFLOPs
+
+PyTorch 
+
+TLX 
+
+Figure 13. Performance of multi-GPU GEMM with TLX. the reuse path and the synchronization path explicit at the same level as the tile computation. This is why the example is representative. The same pat-tern applies whenever large intermediate tiles must survive across phases without paying repeated global-memory traf-fic, including fused attention and fused GEMM-style kernels. The appendix sketch in Sec. C.1 shows the concrete mecha-nism, but the figure already captures the idea: cluster-level coordination and local reuse are first-class parts of the pro-gram. In Fig. 11, Quack [ 9] denotes a customized implemen-tation built with CuTeDSL. The figure shows that exposing those controls yields practical gains on a bandwidth-bound kernel. More importantly for the argument of this section, the optimization is expressed by extending the same TLX abstractions rather than dropping to a separate low-level implementation path. 
+
+6.2.2 Multi-GPU GEMM. Multi-GPU GEMM exposes a different orchestration problem: the key question is not how to reuse one tile locally, but how to keep communication and tensor-core compute in flight at the same time. Fig. 12 shows TLX’s answer. Some CTAs advance the communi-cation stream, others continue the GEMM mainloop, and cluster-visible buffers plus fine-grained barriers connect the two into one pipeline. The important point is that overlap is expressed directly in the kernel structure rather than re-covered indirectly from separate launches or coarse global phase boundaries. This pattern is broader than distributed GEMM. The same role-specialized pipeline appears in fused kernels and megak-ernel settings, where communication, data staging, and mul-tiple compute stages must coexist inside one larger execution graph. The appendix sketch in Sec. C.2 gives the concrete code shape, while Fig. 13 shows that the resulting schedule is not only expressible but effective in practice. This is the second half of the evaluation story in concrete form: TLX is useful not only for reproducing known fast kernels, but also for deploying new optimizations quickly when the execution structure itself changes. 
+
+11 Y. Guan et al. GH1 
+
+> GH2
+> GH3
+> GH4
+> GH5
+> GH6
+> GH7
+> 0
+> 250
+> 500
+> TFLOPS
+> H100
+> Triton
+> ATen
+> TLX
+> GM1
+> GM2
+> GM3
+> GM4
+> 0
+> 200
+> 400
+> MI350
+
+Figure 14. GEMM results on NVIDIA H100 and AMD MI350. Taken together, these two use cases show why TLX is effective for fast deployment of new kernel ideas. Its task structure, buffer ownership, and synchronization edges are explicit enough that programmers and agents can reason about them compositionally instead of inferring hidden exe-cution conventions. That clarity matters not only for code generation, but also for adapting a kernel to a new use case, a new overlap pattern, or a new hardware optimization. 
+
+6.3 Backend Extensibility 
+
+Just as importantly, the kernel family must be retargeted as hardware changes. Fig. 14 reports GEMM results on NVIDIA H100 and AMD MI350. On H100, TLX closely tracks ATen across all tested shapes and is nearly indistinguishable from the baseline on several of them. On MI350, TLX matches or slightly exceeds ATen across the problems. This is evidence in the section for backend extensibility: TLX’s two-layer de-sign localizes hardware-specific lowering to the extension layer while preserving the same source-level kernel across vendors. The developer writes one warp-specialized, layout-annotated kernel; backend-specific details such as shared-memory swizzle patterns, barrier encodings, and tensor-core instruction selection are resolved during compilation. This completes the evaluation narrative: TLX is competitive on mature kernels, easier to program, and practical to retar-get when new hardware or new optimizations appear. In production settings, this matters as much as raw through-put, because hardware evolves faster than any fixed library interface and kernel developers need a path to retarget im-plementations without rewriting them from scratch. 
+
+7 Conclusion 
+
+TLX introduces a practical MIMW extension to Triton that better matches modern GPU execution. Across major opera-tors, production use cases, and backend retargeting, it shows that explicit orchestration can remain both performant and programmable in a production compiler stack. More broadly, we view TLX as a path toward preserving the productivity of high-level GPU DSLs while exposing the control needed to keep pace with rapidly evolving hardware. 
+
+References 
+
+[1] Advanced Micro Devices. 2025. Introducing AMD CDNA ™ 4 Archi-tecture. https://www.amd.com/content/dam/amd/en/documents/ instinct-tech-docs/white-papers/amd-cdna-4-architecture-whitepaper.pdf . White paper, accessed 2026-04-14. [2] Jimmy Lei Ba, Jamie Ryan Kiros, and Geoffrey E. Hinton. 2016. Layer Normalization. arXiv preprint arXiv:1607.06450 (2016). [3] Michael Bauer, Henry Cook, and Brucek Khailany. 2011. CudaDMA: optimizing GPU memory bandwidth via warp specialization. In Pro-ceedings of 2011 International Conference for High Performance Comput-ing, Networking, Storage and Analysis (Seattle, Washington) (SC ’11) .Association for Computing Machinery, New York, NY, USA, Article 12, 11 pages. doi: 10.1145/2063384.2063400 
+
+[4] Michael Bauer, Sean Treichler, and Alex Aiken. 2014. Singe: leveraging warp specialization for high performance on GPUs. In Proceedings of the 19th ACM SIGPLAN symposium on Principles and practice of parallel programming . ACM, Orlando Florida USA, 119–130. doi: 10. 1145/2555243.2555258 
+
+[5] Li-Wen Chang, Wenlei Bao, Qi Hou, Chengquan Jiang, Ningxin Zheng, Yinmin Zhong, Xuanrun Zhang, Zuquan Song, Chengji Yao, Ziheng Jiang, et al . 2024. Flux: Fast software-based communication overlap on gpus through kernel fusion. arXiv preprint arXiv:2406.06858 (2024). [6] Hongzheng Chen, Bin Fan, Alexander Collins, Bastian Hagedorn, Evghenii Gaburov, Masahiro Masuda, Matthew Brookhart, Chris Sul-livan, Jason Knight, Zhiru Zhang, et al . 2026. Tawa: Automatic warp specialization for modern gpus with asynchronous references. In 2026 IEEE/ACM International Symposium on Code Generation and Optimiza-tion (CGO) . IEEE, 255–267. [7] James Clift, Dmitry Doryn, Daniel Murfet, and James Wallbridge. 2019. Logic and the 2-Simplicial Transformer. arXiv preprint arXiv:1909.00668 (2019). [8] Neal C. Crago, Sana Damani, Karthikeyan Sankaralingam, and Stephen W. Keckler. 2024. WASP: Exploiting GPU Pipeline Paral-lelism with Hardware-Accelerated Automatic Warp Specialization. In 2024 IEEE International Symposium on High-Performance Com-puter Architecture (HPCA) . IEEE, Edinburgh, United Kingdom, 1–16. doi: 10.1109/HPCA57654.2024.00086 
+
+[9] Dao-AILab. 2026. QuACK: A Quirky Assortment of CuTe Kernels. 
+
+https://github.com/Dao-AILab/quack . GitHub repository, accessed 2026-04-15. [10] Frederica Darema. 2001. The SPMD model: past, present and future. 1. doi: 10.1007/3-540-45417-9_1 
+
+[11] Kazushige Goto and Robert A. van de Geijn. 2008. Anatomy of High-Performance Matrix Multiplication. ACM Trans. Math. Software 34, 3, Article 12 (2008). doi: 10.1145/1356052.1356053 
+
+[12] Abhinav Jangda, Jun Huang, Guodong Liu, Amir Hossein Nodehi Sa-bet, Saeed Maleki, Youshan Miao, Madanlal Musuvathi, Todd Mytkow-icz, and Olli Saarikivi. 2022. Breaking the computation and communica-tion abstraction barrier in distributed machine learning workloads. In 
+
+Proceedings of the 27th ACM International Conference on Architectural Support for Programming Languages and Operating Systems . 402–416. [13] Erik Lindholm, John Nickolls, Stuart Oberman, and John Montrym. 2008. NVIDIA Tesla: A Unified Graphics and Computing Architecture. 
+
+IEEE Micro 28, 2 (2008), 39–55. doi: 10.1109/MM.2008.31 
+
+[14] Weile Luo, Ruibo Fan, Zeyu Li, Dayou Du, Hongyuan Liu, Qiang Wang, and Xiaowen Chu. 2025. Dissecting the nvidia hopper architec-ture through microbenchmarking and multiple level analysis. arXiv preprint arXiv:2501.12084 (2025). [15] NVIDIA. 2023. CUTLASS . https://github.com/NVIDIA/cutlass/tree/ v3.0.0 CUDA Templates for Linear Algebra Subroutines. [16] NVIDIA Corporation. 2020. NVIDIA A100 Tensor Core GPU Architecture . Technical Report. NVIDIA Corporation. 
+
+https://images.nvidia.com/aem-dam/en-zz/Solutions/data-center/nvidia-ampere-architecture-whitepaper.pdf White pa-per on the NVIDIA Ampere GPU architecture. [17] NVIDIA Corporation. 2024. NVIDIA Blackwell Architecture. 
+
+https://www.nvidia.com/en-us/data-center/technologies/blackwell-architecture/ . Official NVIDIA Blackwell architecture overview. 12 TLX: Hardware-Native, Evolvable MIMW GPU Compiler for Large-scale Production Environments 
+
+[18] NVIDIA Corporation. 2026. CUDA C++ Programming Guide . NVIDIA Corporation. https://docs.nvidia.com/cuda/cuda-c-programming-guide/ Version 13.2. [19] NVIDIA Corporation. 2026. CuTe DSL . NVIDIA Corpora-tion. https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/ cute_dsl.html NVIDIA CUTLASS documentation for the CuTe domain-specific language. [20] NVIDIA Developer Blog. 2022. NVIDIA Hopper Architecture In-Depth. https://developer.nvidia.com/blog/nvidia-hopper-architecture-in-depth/ . Overview of the NVIDIA Hopper GPU architecture. [21] Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory Chanan, Trevor Killeen, Zeming Lin, Natalia Gimelshein, Luca Antiga, Alban Desmaison, Andreas Köpf, Edward Yang, Zachary DeVito, Martin Raison, Alykhan Tejani, Sasank Chil-amkurthy, Benoit Steiner, Lu Fang, Junjie Bai, and Soumith Chintala. 2019. PyTorch: An Imperative Style, High-Performance Deep Learn-ing Library. In Advances in Neural Information Processing Systems 32 .8024–8035. [22] PyTorch Contributors. 2026. PyTorch C++ API: ATen. https://docs. pytorch.org/cppdocs/ . Accessed: 2026-04-14. [23] Aurko Roy, Timothy Chou, Sai Surya Duvvuri, Sijia Chen, Jiecao Yu, Xiaodong Wang, Manzil Zaheer, and Rohan Anil. 2025. Fast and sim-plex: 2-simplicial attention in triton. arXiv preprint arXiv:2507.02754 
+
+(2025). [24] Jay Shah, Ganesh Bikshandi, Ying Zhang, Vijay Thakkar, Pradeep Ra-mani, and Tri Dao. 2024. Flashattention-3: Fast and accurate attention with asynchrony and low-precision. Advances in Neural Information Processing Systems 37 (2024), 68658–68685. [25] Rupanshu Soi, Rohan Yadav, Fredrik Kjolstad, Alex Aiken, Maryam Mehri Dehnavi, Michael Garland, and Michael Bauer. 2025. Optimal Software Pipelining and Warp Specialization for Tensor Core GPUs. arXiv preprint arXiv:2512.18134 (2025). [26] Benjamin F Spector, Simran Arora, Aaryan Singhal, Daniel Y Fu, and Christopher Ré. 2024. Thunderkittens: Simple, fast, and adorable ai kernels. arXiv preprint arXiv:2410.20399 (2024). [27] Philippe Tillet, Hsiang-Tsung Kung, and David Cox. 2019. Triton: an intermediate language and compiler for tiled neural network computa-tions. In Proceedings of the 3rd ACM SIGPLAN International Workshop on Machine Learning and Programming Languages . 10–19. [28] Philippe Tillet, H. T. Kung, and David Cox. 2019. Triton: an interme-diate language and compiler for tiled neural network computations. In Proceedings of the 3rd ACM SIGPLAN International Workshop on Machine Learning and Programming Languages (Phoenix, AZ, USA) 
+
+(MAPL 2019) . Association for Computing Machinery, New York, NY, USA, 10–19. doi: 10.1145/3315508.3329973 
+
+[29] Triton Team. 2025. Gluon: A Lower-Level GPU Programming Lan-guage in Triton. https://github.com/triton-lang/triton/blob/main/ python/tutorials/gluon/01-intro.py . Official Triton Gluon tutorial. [30] Lei Wang, Yu Cheng, Yining Shi, Zhengju Tang, Zhiwen Mo, Wenhao Xie, Lingxiao Ma, Yuqing Xia, Jilong Xue, Fan Yang, et al . 2025. Tile-lang: A composable tiled programming model for ai systems. arXiv preprint arXiv:2504.17577 (2025). [31] Shibo Wang, Jinliang Wei, Amit Sabne, Andy Davis, Berkin Ilbeyi, Blake Hechtman, Dehao Chen, Karthik Srinivasa Murthy, Marcello Maggioni, Qiao Zhang, Sameer Kumar, Tongfei Guo, Yuanzhong Xu, and Zongwei Zhou. 2022. Overlap Communication with Dependent Computation via Decomposition in Large Deep Learning Models. In 
+
+Proceedings of the 28th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 1 
+
+(Vancouver, BC, Canada) (ASPLOS 2023) . Association for Computing Machinery, New York, NY, USA, 93–106. doi: 10.1145/3567955.3567959 
+
+[32] Ted Zadouri, Markus Hoehnerbach, Jay Shah, Timmy Liu, Vijay Thakkar, and Tri Dao. 2026. FlashAttention-4: Algorithm and Ker-nel Pipelining Co-Design for Asymmetric Hardware Scaling. arXiv preprint arXiv:2603.05451 (2026). 13 Y. Guan et al. 
+
+A Evaluation Settings 
+
+This section summarizes the exact workload settings used by the evaluation figures in the main text. Each table is linked directly to the figure it supports so the reported performance can be interpreted against the corresponding problem family. The goal of these settings is not to exhaustively sweep all possible workloads, but to cover the representative regimes emphasized in the paper: regular dense kernels, production-skewed operator shapes, bandwidth-bound normalization, and communication-overlapped distributed execution. Table 3 provides the B200 GEMM settings used for Figure 8. The first five cases are canonical square GEMMs, which es-tablish a stable reference point for dense tensor-core through-put. The remaining cases intentionally stress asymmetric regimes with large 𝑀 , large 𝑁 , or large 𝐾 , reflecting projec-tion, feed-forward, and expert-style workloads that appear in production training and inference. This mix is important because TLX is meant to remain effective not only on bal-anced benchmark shapes but also on the irregular aspect ratios that often expose scheduling and staging weaknesses. Table 4 gives the NVIDIA H100 settings used in Figure 14. These cases retain the same general workload character as the B200 study while using a smaller set of shapes, since the purpose of the figure is backend retargeting rather than an exhaustive platform comparison. The square problems check that TLX preserves strong dense-kernel performance on an earlier NVIDIA architecture, while the irregular cases verify that the same source-level kernel remains competitive when the underlying hardware and lowering strategy change. Table 5 lists the AMD MI350 settings used in Figure 14. These shapes are intentionally compact and regular because the figure is meant to isolate cross-backend portability rather than reproduce the full NVIDIA-specific workload mix. Using 
+
+Table 3. GEMM shapes on B200 ID Category M N KGB1 Canonical 8192 8192 1024 GB2 Canonical 8192 8192 2048 GB3 Canonical 8192 8192 4096 GB4 Canonical 8192 8192 8192 GB5 Canonical 8192 8192 16384 GB6 Large M 442368 448 192 GB7 Large M 589824 256 128 GB8 Large M 589824 448 192 GB9 Large M 589824 512 2048 GB10 Large N 1152 32768 9216 GB11 Large N 1152 32768 12800 GB12 Large N 2048 64512 256 GB13 Large K 512 4096 64512 GB14 Large K 2304 1024 32768 GB15 Large K 2304 1024 63488 GB16 Large K 2304 1024 65536 
+
+Table 4. GEMM shapes on H100 ID M N KGH1 8192 8192 1024 GH2 8192 8192 2048 GH3 8192 8192 4096 GH4 8192 8192 8192 GH5 8192 8192 16384 GH6 2304 12800 32768 GH7 2285568 256 256 
+
+Table 5. GEMM shapes on MI350 ID M N KGM1 256 256 256 GM2 512 512 512 GM3 1024 1024 1024 GM4 2048 2048 2048 
+
+Table 6. Attention shapes on B200 ID Phase Causal M N K P Q RAFC1 FWD Causal 4 48 48 1024 1024 128 AFC2 FWD Causal 4 48 48 2048 2048 128 AFC3 FWD Causal 4 48 48 4096 4096 128 AFC4 FWD Causal 4 48 48 8192 8192 128 AFC5 FWD Causal 4 48 48 16384 16384 128 AFN1 FWD Non-Causal 4 48 48 1024 1024 128 AFN2 FWD Non-Causal 4 48 48 2048 2048 128 AFN3 FWD Non-Causal 4 48 48 4096 4096 128 AFN4 FWD Non-Causal 4 48 48 8192 8192 128 AFN5 FWD Non-Causal 4 48 48 16384 16384 128 ABC1 BWD Non-Causal 4 48 48 1024 1024 128 ABC2 BWD Non-Causal 4 48 48 2048 2048 128 ABC3 BWD Non-Causal 4 48 48 4096 4096 128 ABC4 BWD Non-Causal 4 48 48 8192 8192 128 ABC5 BWD Non-Causal 4 48 48 16384 16384 128 a progression from 256 3 through 2048 3 demonstrates that TLX’s source-level structure survives backend translation across multiple problem sizes and continues to map well onto a substantially different GPU stack. Table 6 contains the B200 attention settings used for Fig-ure 9. We include causal forward, non-causal forward, and backward configurations because these variants exercise dif-ferent synchronization and dataflow patterns even when the tensor shapes are similar. The sequence lengths scale from 1024 to 16384 , which covers the regime where attention kernels transition from latency-sensitive short contexts to bandwidth- and staging-sensitive long contexts. This makes the comparison meaningful for production workloads rather than for a single favorable attention variant. Table 7 gives the LayerNorm settings used for Figure 11. The chosen cases emphasize large-𝑁 normalization, which is exactly the regime discussed around Figure 10: repeated 
+
+> 14 TLX: Hardware-Native, Evolvable MIMW GPU Compiler for Large-scale Production Environments
+
+Table 7. LayerNorm evaluation shapes ID B M NLN1 4 1 16384 LN2 4 1 32768 LN3 4 1 65536 LN4 1152 1 16384 LN5 1152 1 32768 LN6 1152 1 65536 LN7 1152 1 131072 
+
+Table 8. Multi-GPU GEMM evaluation shapes ID #GPU M N KGD1 2 8192 2048 16384 GD2 4 8192 2048 16384 GD3 4 8192 8192 16384 GD4 4 4096 8192 16384 GD5 4 16384 4096 8192 global-memory traffic and reduction coordination become dominant, so cluster-level parallelism and on-chip reuse mat-ter. The small-batch and large-batch settings together show that the optimization is sensible both for latency-oriented shapes and for throughput-oriented shapes that arise in large model execution. Table 8 reports the multi-GPU GEMM settings used for Figure 13. These workloads vary both GPU count and matrix aspect ratio so that the evaluation captures the two pressures highlighted by Figure 12: communication volume changes with the distributed partitioning, and overlap opportunities change with the GEMM shape. Including both 2-GPU and 4-GPU cases shows that the pipeline remains meaningful as communication fan-out increases, while the non-square cases demonstrate that the overlap strategy is not restricted to one balanced matrix family. 
+
+B Productivity Survey Details 
+
+This appendix summarizes the survey instrument used for the productivity results reported in Fig. 3. The survey was conducted with graduate-level students in a GPU program-ming course, with 127 students involved in total. We use this population because the survey focuses on low-level GPU pro-gramming concepts such as thread binding, local-memory control, warp specialization, and cluster-scoped execution, all of which require participants to reason about concrete kernel structure rather than only high-level model APIs. The questionnaire asked participants to compare four GPU DSLs: Gluon, TLX, TileLang, and ThunderKitten. The intro-duction shown to students explained that the survey was about GPU programming productivity, that responses would be analyzed only in aggregate, and that the questionnaire should take roughly 10–15 minutes to complete. Rather than asking for abstract impressions alone, the survey presented short code examples for each DSL and asked students to judge how clearly each system exposed the relevant control mechanism. The instrument was organized into five parts. The first four parts asked students to rate productivity on a 1–5 Likert scale, where 1 meant very low productivity and 5 meant very high productivity. These parts covered: (1) thread binding and memory layout, (2) shared/local memory management, (3) warp specialization, and (4) cluster launch control. The fifth part asked for an overall ranking of the DSLs from 1 to 4. The wording for each section emphasized a specific control surface: for example, the warp-specialization section asked students to consider how directly a DSL lets them assign different warps to producer, consumer, communication, or synchronization roles; the cluster launch control section asked about expressing Blackwell-style cluster coordination and explicitly noted that only TLX and ThunderKitten expose that mechanism directly. To keep comparisons concrete, each question used short, aligned code excerpts rather than full kernels. The survey therefore measured perceived productivity for expressing representative low-level mechanisms, not only familiarity with one syntax. This design is especially important for TLX, because its contribution is not merely another blocked-kernel DSL interface, but an extension that exposes execution struc-ture usually hidden behind higher-level abstractions. The survey was intended to test whether these additional controls remain understandable and usable in practice for students with graduate-level GPU programming training. 
+
+Representative warp-specialization prompt. The warp-specialization portion of the survey asked students to com-pare how the DSLs express producer/consumer partitioning and warp-role assignment. Listing 2 reproduces the repre-sentative snippets shown in that part of the questionnaire. 
+
+Listing 2: Warp-specialization examples used in the survey.                                                   
+
+> 1##### Gluon #####
+> 2@gluon.jit
+> 3def matmul_load_partition(p, SchedulerImpl: gl.constexpr):
+> 4# Load code here
+> 5@gluon.jit
+> 6def matmul_mma_partition(p, SchedulerImpl: gl.constexpr):
+> 7# MMA code here
+> 8@gluon.jit
+> 9def matmul_epilogue_partition(p, SchedulerImpl: gl. constexpr):
+> 10 # Epilogue code here
+> 11 p = PartitionArgs(..., num_warps)
+> 12 gl.warp_specialize([
+> 13 (matmul_epilogue_partition, (p, SchedulerImpl)),
+> 14 (matmul_load_partition, (p, SchedulerImpl)),
+> 15 (matmul_mma_partition, (p, SchedulerImpl)),
+> 16 ], [1, 1], [24, 24])
+> 17
+> 15 Y. Guan et al.
+> 18 ##### TLX #####
+> 19 with tlx.async_tasks():
+> 20 with tlx.async_task("default"):
+> 21 # Producer (async load)
+> 22 with tlx.async_task(num_warps=4, replicate=2, registers=232):
+> 23 # Consumers (wgmma + async store)
+> 24 25 ##### TileLang #####
+> 26 for ko in T.Pipelined(T.ceildiv(K, block_K), num_stages=2):
+> 27 with T.ws(1):
+> 28 # Producer
+> 29 with T.ws(0):
+> 30 # Consumer
+> 31 32 ##### ThunderKitten #####
+> 33 if (warpgroup::groupid() < C::NUM_CONSUMERS) {
+> 34 // Consumer
+> 35 warpgroup::increase_registers<232>();
+> 36 }else {
+> 37 // Producer
+> 38 warpgroup::decrease_registers<40>();
+> 39 }
+
+The remaining sections of the questionnaire followed the same pattern: each presented short code excerpts for the same conceptual mechanism, then asked students to score how easy the DSL was to understand, adapt, and tune. For thread binding and memory layout, the focus was how ker-nels map work onto threads, warps, and blocks, and how tensor layouts are expressed. For local-memory manage-ment, the focus was allocation, data movement, reuse, and layout control in shared memory or specialized local storage. For cluster launch control, the survey used only TLX and ThunderKitten examples because the other DSLs did not di-rectly expose that feature at the time of the study. Finally, the overall ranking question asked students to aggregate these impressions across all categories. 
+
+C Use Cases 
+
+This appendix collects compact implementation sketches for the representative use cases discussed in the evaluation. The goal is not to reproduce each kernel in full, but to make the orchestration structure behind the main-text examples concrete enough to inspect. Each subsection therefore fo-cuses on the key TLX mechanism that differentiates the use case from a conventional blocked kernel, while the summary table below provides a quick map of the appendix contents. 
+
+C.1 Multi-CTA LayerNorm 
+
+This appendix provides the code corresponding to the multi-CTA LayerNorm use case discussed in Fig. 10 of the main paper. As noted there, Fig. 10 is a demonstrative example intended to highlight the key optimization ideas, rather than to reproduce the implementation line by line. The listings in this appendix give the concrete Triton baseline and the corresponding TLX implementation sketch used to realize that design. 
+
+Table 9. Summary of appendix use cases Use Case Key TLX Mechanism Multi-CTA Lay-erNorm Cluster all-reduce, local buffering, DSM-based reuse Multi-GPU GEMM Communication–computation overlap with warp-specialized CTA roles Simplicial Atten-tion Warp-specialized producer/con-sumer pipeline for fused attention The contrast between the two versions is centered on data movement and reuse. In the Triton baseline, LayerNorm over a large 𝑁 dimension requires three logical passes over the input: one to compute the mean, one to compute the variance, and one to normalize and apply the affine transform. Because a single CTA cannot retain all intermediate data across these phases, values such as x are loaded repeatedly from global memory. This leads to redundant memory traffic and makes it difficult to overlap communication with computation. The TLX implementation addresses this issue by dis-tributing the work across a CTA cluster. Each CTA is assigned a slice of the 𝑁 dimension according to 
+
+tlx.cluster_cta_rank() , computes local partial reduc-tions, and exchanges these partials through distributed shared memory. The helper routine cluster_allreduce 
+
+illustrates the main mechanism: each CTA stores its local partial result in cluster-accessible on-chip storage, uses 
+
+tlx.async_remote_shmem_store to make the value visible to peer CTAs, and then participates in a barrier-coordinated aggregation. In addition, the local tile x is buffered using 
+
+tlx.local_alloc and tlx.local_store , allowing the final normalization step to reuse on-chip data instead of fetching x again from global memory. This organization captures the three main ideas illustrated in Fig. 10: multi-CTA parallelism, local on-chip caching, and asynchronous remote communication. A designated aggrega-tor CTA waits locally on the barrier, gathers the cluster-wide partial sums, computes mean and rstd , and publishes the results back to the cluster. The resulting synchronization pat-tern follows the “arrive remote, wait local” style described in the main text: remote arrivals are asynchronous, and only the CTA responsible for aggregation must block. Overall, the TLX version reduces redundant global-memory traffic, improves reuse of loaded tiles, and spreads the reduction work across multiple CTAs. 
+
+C.2 Multi-GPU GEMM Overlap 
+
+This appendix gives a TLX-style sketch for the communication– computation overlap pattern used in the multi-GPU GEMM case study discussed in Fig. 12 of the main paper. As in the LayerNorm appendix, the purpose is to make the orchestra-tion structure concrete rather than to present a complete 
+
+> 16
+
+TLX: Hardware-Native, Evolvable MIMW GPU Compiler for Large-scale Production Environments 
+
+Listing 3: Triton LayerNorm. 
+
+1 mean = 0.0 
+
+2 for offset in range (0, N, BN): 
+
+3 x = tl.load(X+offset+tl. range (0, BN), ...) 
+
+4 mean += tl. sum (x, axis=0)/N 
+
+5 var = 0.0 
+
+6 for offset in range (0, N, BN): 
+
+7 x = tl.load(X+offset+tl. range (0, BN), ...) 
+
+8 var += tl. sum ((x-mean)^2, axis=0)/N 
+
+9 rstd = 1.0/tl.sqrt(var + eps) 
+
+10 w = tl.load(W, ...) 
+
+11 b = tl.load(B, ...) 
+
+12 for offset in range (0, N, BN): 
+
+13 x = tl.load(X+offset+tl. range (0, BN), ...) 
+
+14 y = (x-mean) * rstd * w + b 
+
+15 tl.store(Y+offset+tl. range (0, BN), y) 
+
+Listing 4: TLX LayerNorm. 
+
+1 rank = tlx.cluster_cta_rank() 
+
+2 bars = tlx.alloc_barriers(2) 
+
+3 tlx.barrier_expect_bytes(...) 
+
+4 tlx.cluster_barrier() 
+
+56 # AllReduce over CTAs in cluster using DSM + barrier 
+
+7 def cluster_allreduce(tile, bar): 
+
+8 local_buff = tlx.local_alloc([BM,1], dtype, num_ctas) 
+
+9 tlx.local_store(local_buff[rank], tl. sum (tile, axis=1)) 
+
+10 for peer in tl.static_range(num_ctas): 
+
+11 if peer != rank: 
+
+12 tlx.async_remote_shmem_store(...) 
+
+13 tlx.barrier_wait(bar) 
+
+14 sum = tl.zeros([BM, 1], dtype) 
+
+15 for peer in tl.static_range(num_ctas): 
+
+16 sum += tlx.local_load(local_buff[peer]) 
+
+17 return sum 
+
+18 19 x = tl.load(X, ...) 
+
+20 x_buff = tlx.local_alloc((BM, BN), dtype, 1) 
+
+21 tlx.local_store(x_buff[0], x) 
+
+22 mean = cluster_allreduce(x, bars[0]) / N 
+
+23 rstd = rsqrt(cluster_allreduce((x-mean)^2, bars[1]) / N + eps) 
+
+24 x = tlx.local_load(x_buff[0]) 
+
+25 w = tl.load(W, ...) 
+
+26 b = tl.load(B, ...) 
+
+27 y = (x-mean) * rstd * w + b 
+
+runnable kernel. The listing therefore emphasizes CTA roles, staged buffers, and synchronization edges, while eliding transport-specific pointer arithmetic and tile-indexing details. The key idea is to partition CTAs inside a cluster into two roles. Communication CTAs advance the all-gather stream, place each arrived operand split into cluster-addressable shared memory, and notify the corresponding compute CTAs by remotely arriving on their local barriers. Compute CTAs wait only on their own data_ready barriers, consume the staged tiles with tlx.async_dot , and release ring-buffer slots through empty barriers once the split has been con-sumed. This follows TLX’s “arrive remote, wait local” disci-pline and matches the timeline shown in the main text. The organization mirrors the three ideas highlighted by Fig. 12. CTA specialization separates communication from tensor-core compute, cluster-visible local buffers make gath-ered splits reusable by the compute CTAs without an extra global-memory round trip, and the ring-buffer barrier proto-col makes overlap explicit. The communication path can be implemented with symmetric-memory gathers, NVSHMEM-style transport, or another backend-specific mechanism; the point of the sketch is that TLX factors this transport from the local orchestration structure. 
+
+Listing 5: TLX multi-GPU GEMM overlap sketch. 
+
+1 comm_rank = tlx.cluster_cta_rank() 
+
+2 is_comm = comm_rank < NUM_COMM_CTAS 
+
+34 # Ring-buffered cluster storage for gathered operand splits. 
+
+5 a_stage = tlx.local_alloc((BM, BK), dtype, NUM_STAGES, 
+
+6 tlx.storage_kind.smemCluster) 
+
+7 b_stage = tlx.local_alloc((BK, BN), dtype, NUM_STAGES, 
+
+8 tlx.storage_kind.smemCluster) 
+
+9 empty = tlx.alloc_barriers(NUM_STAGES) 
+
+10 data_ready = tlx.alloc_barriers(NUM_STAGES) 
+
+11 12 if not is_comm: 
+
+13 for stage in tl.static_range(NUM_STAGES): 
+
+14 tlx.barrier_arrive(tlx.local_view(empty, stage)) 
+
+15 tlx.barrier_expect_bytes( 
+
+16 tlx.local_view(data_ready, stage), 
+
+17 ... 
+
+18 )
+
+19 20 tlx.cluster_barrier() 
+
+21 22 def gather_split_to_stage(stage, split_id, remote_rank): 
+
+23 remote_a = tlx.remote_view( 
+
+24 tlx.local_view(a_stage, stage), 
+
+25 remote_rank 
+
+26 )
+
+27 remote_b = tlx.remote_view( 
+
+28 tlx.local_view(b_stage, stage), 
+
+29 remote_rank 
+
+30 )
+
+31 gather_remote_a(remote_a, split_id) 
+
+32 gather_remote_b(remote_b, split_id) 
+
+33 34 if is_comm: 
+
+35 for split_id in range (NUM_K_SPLITS): 
+
+36 stage = split_id % NUM_STAGES 
+
+37 phase = (split_id // NUM_STAGES) % 2 
+
+38 tlx.barrier_wait(tlx.local_view(empty, stage), phase= phase) 
+
+39 for peer in tl.static_range(NUM_COMP_CTAS): 
+
+40 remote_rank = NUM_COMM_CTAS + peer 
+
+41 gather_split_to_stage(stage, split_id, remote_rank) 
+
+42 tlx.barrier_arrive(tlx.local_view(data_ready, stage), 
+
+43 1, 
+
+44 remote_cta_rank=remote_rank) 
+
+45 else :
+
+46 acc = tl.zeros((BM, BN), dtype=tl.float32) 
+
+47 for split_id in range (NUM_K_SPLITS): 
+
+17 Y. Guan et al. 
+
+48 stage = split_id % NUM_STAGES 
+
+49 phase = (split_id // NUM_STAGES) % 2 
+
+50 tlx.barrier_wait(tlx.local_view(data_ready, stage)) 
+
+51 a_tile = tlx.local_load(tlx.local_view(a_stage, stage)) 
+
+52 b_tile = tlx.local_load(tlx.local_view(b_stage, stage)) 
+
+53 acc = tlx.async_dot(a_tile, b_tile, acc) 
+
+54 acc = tlx.async_dot_wait(0, acc) 
+
+55 tlx.barrier_arrive(tlx.local_view(empty, stage)) 
+
+56 57 c_desc.store(..., acc) 
+
+C.3 Simplicial Attention 
+
+This appendix gives a paper-level TLX sketch for the forward simplicial attention kernel described by Roy et al. [ 7, 23 ] and implemented in the FBGEMM TLX codebase 4. The goal is the same as in the preceding appendices: make the orchestration structure concrete without reproducing the full implementa-tion line by line. The listing therefore keeps the core execu-tion pattern—warp specialization, staged local buffers, and pipelined overlap between tensor-core GEMMs and softmax updates—while eliding descriptor setup, pointer arithmetic, and edge-case indexing. The main algorithmic challenge is that 2-simplicial atten-tion is naturally trilinear: each query interacts with one 𝐾 1
+
+tile and one 𝐾 2 tile, and the output similarly depends on both 
+
+𝑉 1 and 𝑉 2. The TLX kernel adopts the tensor-core-friendly reformulation highlighted in the accompanying blog post. Instead of materializing a full three-input primitive, it first forms 𝑄 ⊙ 𝐾 1 in registers, uses tensor cores for the result-ing QK– 𝐾 2 GEMM, performs the online softmax update, and then applies 𝑉 1 after the PV– 𝑉 2 GEMM. This keeps the expen-sive inner loops in a form that maps naturally to WGMMA while avoiding the prohibitive memory cost of storing fully precomputed intermediate tensors. The execution structure follows three hardware-aligned ideas. First, the asymmetric sliding window uses a small 𝑊 1
+
+and a large 𝑊 2, so all 𝐾 1/𝑉 1 tiles for one query can be loaded once into shared memory while 𝐾 2/𝑉 2 tiles are streamed through a ring buffer. Second, CTA-local warp specialization separates one producer task from one or more consumer tasks: the producer issues asynchronous descriptor loads for 
+
+𝑄 , 𝐾 1, 𝑉 1, 𝐾 2, and 𝑉 2, while the consumer groups perform the tensor-core math and online normalization. Third, the consumer loop is pipelined so that the current QK GEMM overlaps with the previous PV GEMM, reducing tensor-core bubbles in the steady state. The result is a fused attention ker-nel in which TLX exposes the same modern GPU techniques used by high-performance FlashAttention-style kernels, but adapted to the more complex 2-simplicial dataflow. 
+
+> 4
+
+https://github.com/pytorch/FBGEMM/tree/main/fbgemm_gpu/ experimental/simplicial_attention 
+
+Listing 6: TLX 2-simplicial attention forward sketch. 
+
+1 # Shared-memory staging and producer/consumer barriers. 
+
+2 q_tiles = tlx.local_alloc((BLOCK_M_SPLIT, HEAD_DIM), dtype, NUM_MMA_GROUPS) 
+
+3 k1_tiles = tlx.local_alloc((1, HEAD_DIM), dtype, W1) 
+
+4 v1_tiles = tlx.local_alloc((1, HEAD_DIM), dtype, W1) 
+
+5 k2_tiles = tlx.local_alloc((BLOCK_SIZE_KV, HEAD_DIM), dtype, NUM_BUFFERS) 
+
+6 v2_tiles = tlx.local_alloc((BLOCK_SIZE_KV, HEAD_DIM), dtype, NUM_BUFFERS) 
+
+7 q_fulls = tlx.alloc_barriers(NUM_MMA_GROUPS) 
+
+8 k1_full = tlx.alloc_barriers(1) 
+
+9 v1_full = tlx.alloc_barriers(1) 
+
+10 k2_empty, k2_full = alloc_stage_barriers(NUM_BUFFERS) 
+
+11 v2_empty, v2_full = alloc_stage_barriers(NUM_BUFFERS) 
+
+12 13 def producer_stream_kv(): 
+
+14 load_q_tiles(q_tiles, q_fulls) 
+
+15 load_all_k1_v1_tiles(k1_tiles, v1_tiles, k1_full, v1_full) 
+
+16 for kv2_idx in range (kv2_start, kv2_end, BLOCK_SIZE_KV): 
+
+17 stage = stage_id(kv2_idx) 
+
+18 wait_until_empty(k2_empty, v2_empty, stage) 
+
+19 async_load_k2_v2(k2_tiles, v2_tiles, stage, kv2_idx) 
+
+20 21 with tlx.async_tasks(): 
+
+22 with tlx.async_task("producer"): 
+
+23 producer_stream_kv() 
+
+24 25 with tlx.async_task(replicate=NUM_MMA_GROUPS): 
+
+26 cid = tlx.async_task_replica_id() 
+
+27 wait_for_q_k1_v1(q_fulls, k1_full, v1_full, cid) 
+
+28 29 q_rmem = tlx.local_load(tlx.local_view(q_tiles, cid)) * softmax_scale 
+
+30 acc = tl.zeros([BLOCK_M_SPLIT, HEAD_DIM], dtype=tl. float32) 
+
+31 l_i = tl.zeros([BLOCK_M_SPLIT], dtype=tl.float32) + 1.0 
+
+32 m_i = tl.zeros([BLOCK_M_SPLIT], dtype=tl.float32) -
+
+float ("inf") 
+
+33 34 for kv1_idx in range (num_kv1_trips): 
+
+35 qk1_rmem = q_rmem * tlx.local_load(tlx.local_view( k1_tiles, kv1_idx)) 
+
+36 v1_rmem = tlx.local_load(tlx.local_view(v1_tiles, kv1_idx)).to(tl.float32) 
+
+37 38 for kv2_idx in range (num_kv2_trips): 
+
+39 stage = stage_id(kv2_idx) 
+
+40 probs, m_i, l_i, acc = fused_qk_softmax_pv_step( 
+
+41 qk1_rmem, v1_rmem, acc, m_i, l_i, 
+
+42 k2_full, k2_empty, k2_tiles, 
+
+43 v2_full, v2_empty, v2_tiles, 
+
+44 stage, kv2_idx, ... 
+
+45 )
+
+46 47 acc = finish_last_pv(probs, v1_rmem, acc, v2_full, v2_empty, v2_tiles) 
+
+48 desc_o.store(..., (acc / l_i[:, None]).to(tlx.dtype_of( desc_o))) 
+
+49 tl.store(M_ptr + ..., m_i + tl.log(l_i)) 
+
+18

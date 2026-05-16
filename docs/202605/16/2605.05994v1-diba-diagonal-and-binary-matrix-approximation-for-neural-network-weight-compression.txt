@@ -1,0 +1,618 @@
+Title: DiBA: Diagonal and Binary Matrix Approximation for Neural Network Weight Compression
+
+URL Source: https://arxiv.org/pdf/2605.05994v1
+
+Published Time: Fri, 08 May 2026 00:57:57 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# DiBA: Diagonal and Binary Matrix Approximation for Neural Network Weight Compression 
+
+Nobutaka Ono ∗
+
+## Abstract 
+
+In this paper, we propose DiBA (Diagonal and Binary Matrix Approximation), a compact matrix factorization for neural network weight compression. Many components of modern networks, including linear layers, 1 × 1 convolutions, attention projections, and embedding layers, have dense matrix weights. DiBA approximates A ∈ Rm×n by bA = D1B1D2B2D3, where D1, D 2, D 3 are diagonal matrices and B1, B 2 are 0/1 binary matrices. The intermediate dimension k
+
+controls the trade-off between theoretical storage and approximation accuracy. For matrix-vector products, DiBA decomposes dense multiplication into three element-wise scaling operations and two binary mixing operations, reducing the floating-point multiplication count from mn to m + k + n. For optimization, we introduce DiBA-Greedy, an alternating solver that combines closed-form least-squares updates for the diagonal factors with exact one-bit improvement tests for the binary factors. We also introduce DiBARD (DiBA with Retuning only Diagonal factors), which replaces dense-matrix layers by DiBA factors, freezes the binary matrices, and retunes only the diagonal entries on downstream data. This preserves compact binary mixing without discrete search during adaptation. On 40 dense weight matrices extracted from public pretrained models, DiBA-Greedy yields consistent SNR improvements as the theoretical storage ratio increases. After DiBA replacement in two component-replacement studies, DiBARD improves DistilBERT/WikiText masked-token accuracy from 0.4447 to 0.5210 and Speech Commands test accuracy for an Audio Spectrogram Transformer from 0.7684 to 0.9781 without reoptimizing the binary factors. 
+
+## 1 Introduction 
+
+Dense matrices remain one of the dominant storage and computation units in modern neural networks. Linear layers, token embeddings, attention projections, and 1 × 1 convolutions all store learned transformations as dense weight matrices. These matrices often account for a large fraction of model size, memory traffic, and matrix-vector or matrix-matrix arithmetic at inference time. Compress-ing pretrained dense weights while preserving downstream accuracy is therefore central to model distribution, on-device inference, low-memory deployment, and task-specific adaptation. A broad literature has studied compact neural representations. Pruning removes unimportant connec-tions, filters, or channels, starting from classical second-order criteria such as Optimal Brain Damage and Optimal Brain Surgeon and extending to modern fine-tuning and one-shot pruning methods for pretrained models [1–9]. Quantization replaces real-valued weights by a small set of discrete codes, including vector quantization and weight sharing, binary and ternary networks, integer-arithmetic inference, post-training quantization, and weight-only quantization for large language models [ 10 –20 , 22 – 27 ]. Low-rank and tensor decompositions exploit linear structure in matrices and convolution kernels [ 28 – 30 ], while knowledge distillation transfers the behavior of a larger teacher model to a compact student [ 31 , 32 ]. Together, these approaches show that pretrained dense weights contain  
+
+> ∗Tokyo Metropolitan University, 6–6 Asahigaoka, Hino-shi, Tokyo 191–0065, Japan. onono@tmu.ac.jp
+> Preprint.
+> arXiv:2605.05994v1 [cs.LG] 7 May 2026
+
+# A  
+
+> dense
+> (m£n)
+
+# D1  
+
+> diagonal
+> (m£m)
+
+# B1  
+
+> binary
+> (m£k)
+
+# D2  
+
+> diagonal
+> (k£k)
+
+# B2  
+
+> binary
+> (k£n)
+
+# D3  
+
+> diagonal
+> (n£n)
+
+# ¼ £ £ £ £Figure 1: DiBA provides a structured approximation to a dense matrix using three real diagonal factors and two 0/1 binary factors; k controls the storage–accuracy trade-off. substantial redundancy, but they expose different trade-offs between storage, arithmetic structure, optimization difficulty, and downstream recovery. Among these families, quantization is especially practical on existing hardware, but its optimization problem is intrinsically discrete. In the simplest case, each scalar weight is rounded to the nearest quantization level. In realistic low-bit settings, however, one must simultaneously choose discrete assignments, scales and zero points, layer-, channel-, or block-wise bitwidths, and the reconstruction or task loss to optimize after quantization. As a result, low-bit quantization is often treated as a nonconvex problem with discrete constraints, mixed-integer structure, or binary assignment variables [34 , 22 ]. Existing methods use straight-through estimators [ 33 , 13 , 14 ], learned step sizes or clipping parameters [ 20 , 21 ], ADMM or proximal formulations [ 34 , 35 ], loss-aware objectives [ 36 ], Hessian-or second-order approximations for rounding and mixed precision [ 37 , 38 , 22 , 23 , 26 ], and scale transformations that handle activation outliers or salient channels [ 25 , 27 ]. These techniques are powerful, but the underlying optimization remains hard in the very low-bit regime because it combines discrete search, continuous relaxation, local reconstruction, and calibration-data dependence. We take a different route. Rather than assign each individual weight to one of a few quantization levels, we approximate an entire dense matrix by interleaving diagonal scaling with shared 0/1 binary mixing. For a target matrix A ∈ Rm×n, DiBA represents 
+
+bA = D1B1D2B2D3, (1) where D1, D 2, D 3 are real diagonal matrices, B1 ∈ { 0, 1}m×k and B2 ∈ { 0, 1}k×n are binary matrices, and the intermediate dimension k controls the storage-accuracy trade-off. The binary factors can be stored, in the theoretical accounting used in this paper, at one bit per entry, while the real-valued degrees of freedom are concentrated in the three diagonal factors. This representation is useful for three reasons. First, the 0/1 factors define shared selection-and-summation patterns rather than element-wise codebook entries; signs and magnitudes are carried by the diagonal scales. Second, although bA has rank at most k, DiBA is not an unconstrained real-valued low-rank factorization: its large factors are one-bit mixing patterns, and its real-valued degrees of freedom are diagonal. Third, the continuous and discrete parts admit a natural alternating optimization strategy: the diagonal factors can be refit by closed-form least-squares updates, while the binary factors can be improved by exact one-bit objective-difference tests in the corresponding binary subproblems. We instantiate this idea with DiBA-Greedy, an alternating solver for matrix reconstruction. Given fixed binary factors, DiBA-Greedy updates D1, D2, and D3 by least squares. Given fixed diagonal factors and the other binary factor, it evaluates whether flipping an entry of B1 or B2 decreases the squared Frobenius reconstruction error, accepting only flips whose exact objective change satisfies 
+
+∆ < −τ for a fixed flip tolerance τ . The method is not claimed to find a global optimum, but each accepted flip is an exact improvement for its local binary subproblem, and the continuous factors are repeatedly refit to the current binary structure. We further introduce DiBARD, a diagonal-only retuning procedure for DiBA-replaced neural-network components. After replacing a dense neural-network weight matrix by DiBA factors, DiBARD freezes the binary matrices B1 and B2 and updates only the diagonal entries of D1, D2, and D3
+
+on downstream data. This design avoids discrete search during task adaptation: the binary mixing 2structure remains fixed, and the recovery stage is a small continuous optimization over element-wise scales. We do not claim measured speedups from bit-packed kernels in this work. Our evaluation focuses on matrix approximation quality, theoretical storage ratio, and the extent to which diagonal-only retuning can recover downstream task performance. Our contributions are as follows. First, we formulate DiBA, a diagonal-and-binary factorization for approximating dense neural-network weight matrices, and derive its theoretical storage accounting. Second, we propose DiBA-Greedy, which combines closed-form diagonal least-squares updates with exact one-bit greedy updates for binary factors. Third, using 40 dense weight matrices ex-tracted from public pretrained models, we evaluate the storage–SNR behavior of DiBA on real model weights. Fourth, we propose DiBARD and show, in two component-replacement settings, DistilBERT/WikiText masked language modeling and AST/Speech Commands classification, that retuning only diagonal factors can recover downstream performance after DiBA replacement without reoptimizing the binary factors. 
+
+## 2 Formulation 
+
+2.1 Basic DiBA representation 
+
+Let A ∈ Rm×n be a dense target matrix. DiBA approximates A by a product of three real diagonal factors and two 0/1 binary factors, 
+
+bA = D1B1D2B2D3. (2) The factor sizes are 
+
+D1 ∈ D m, B1 ∈ { 0, 1}m×k, D2 ∈ D k, B2 ∈ { 0, 1}k×n, D3 ∈ D n, (3) where Dp denotes the set of real p × p diagonal matrices. We write the diagonal degrees of freedom as vectors d1 ∈ Rm, d2 ∈ Rk, and d3 ∈ Rn, defined by 
+
+(d1)i = ( D1)ii , (d2)ℓ = ( D2)ℓℓ , (d3)j = ( D3)jj . (4) For a fixed intermediate dimension k, fitting DiBA amounts to solving 
+
+min 
+
+> D1,D 2,D 3,B 1,B 2
+
+∥A − D1B1D2B2D3∥2 
+
+> F
+
+, (5) subject to the constraints in (3) . We refer to the product in (2) as a DiBA approximation of A, and to 
+
+D1, B 1, D 2, B 2, D 3 as its DiBA factors. We note the following. 
+
+Remark 1 (Binary rank-one superposition) Let (B1):,ℓ denote the ℓth column of B1 and (B2)ℓ, :
+
+the ℓth row of B2. The central factor expands as 
+
+B1D2B2 =
+
+> k
+
+X
+
+> ℓ=1
+
+(d2)ℓ(B1):,ℓ (B2)ℓ, :. (6) Consequently, 
+
+bAij = ( d1)i(d3)jkX
+
+> ℓ=1
+
+(d2)ℓ(B1)iℓ (B2)ℓj . (7) Thus bA is a superposition of k scaled rank-one binary patterns with row- and column-wise diagonal corrections; in particular, rank( bA) ≤ k. We therefore view DiBA as a structured low-rank family whose distinction from conventional low-rank factorization lies in its 0/1 shared mixing factors and bit-level storage accounting; unlike scalar quantization, entries are not rounded independently. 
+
+Remark 2 (Expressivity and non-identifiability) With a sufficiently large intermediate dimension, DiBA can represent any matrix A ∈ Rm×n exactly. One explicit construction sets k = mn 
+
+and associates each intermediate index ℓ with a single entry (i, j ). Taking D1 = Im, D3 = In,
+
+(B1):,ℓ = ei, (B2)ℓ, : = e⊤ 
+
+> j
+
+, and (d2)ℓ = Aij represents every entry of A by one binary rank-one pattern. 2 The factors are also not identifiable: rescalings among the diagonal factors and permutations of the intermediate channels can leave the product unchanged. 
+
+> 2This construction is an expressivity argument only; it is not a compression regime.
+
+32.2 Theoretical storage 
+
+Let Q be the number of bits used to store one floating-point scalar in the dense matrix and in the diagonal entries. A dense Q-bit representation of A requires Sdense (Q) = Qmn bits . For DiBA, we count the entries of B1 and B2 at one bit per entry and the diagonal entries of D1, D 2, D 3 at Q
+
+bits per scalar. Ignoring small metadata such as shapes, the theoretical storage is SDiBA (k; Q) = 
+
+k(m + n) + Q(m + k + n) bits . The theoretical storage ratio relative to a Q-bit dense matrix is therefore 
+
+ρDiBA (k; Q) = SDiBA (k; Q)
+
+Sdense (Q) = k(m + n) + Q(m + k + n)
+
+Qmn . (8) A central motivation for DiBA is that k directly tunes this storage-accuracy trade-off and can make the theoretical storage smaller than that of the dense representation. 
+
+2.3 Matrix-vector product structure 
+
+A standard dense matrix-vector product y = Ax contains mn floating-point multiplications per input vector when implemented as inner products. With DiBA, the product can be evaluated from right to left as y = D1B1D2B2D3x. If multiplication by the 0/1 matrices B1 and B2 is implemented as selection and summation rather than floating-point multiplication, then the floating-point multiplications come only from the three diagonal scalings. This gives m + k + n floating-point multiplications per input vector. The remaining cost consists of additions, bit operations, and memory access for binary mixing, all of which depend on the implementation. We therefore do not claim measured speedups or end-to-end runtime reductions in this paper; our experiments focus on approximation quality, theoretical storage, and downstream recovery by diagonal-only retuning. 
+
+## 3 Optimization 
+
+3.1 DiBA-Greedy 
+
+The fitting problem in (5) is nonconvex and includes binary variables. We optimize it with DiBA-Greedy , an alternating solver that separates the continuous diagonal refits from the discrete binary updates. Given B1 and B2, the diagonal factors are updated by least-squares subproblems with closed-form solutions. Given the current diagonal factors and the other binary factor, each binary update evaluates the exact change in squared Frobenius error caused by a one-bit flip and accepts only flips whose improvement is larger than a fixed tolerance. At a high level, DiBA-Greedy initializes D1, D 2, D 3 and random binary matrices B1, B 2, refits the diagonal factors, and then alternates between updating B1, refitting D1, updating B2, refitting D3,and refitting D2. A flip is accepted only when its exact objective change satisfies ∆ < −τ , where 
+
+τ denotes a flip tolerance. The solver is greedy and does not claim global optimality; for the ideal unregularized subproblems, each primitive update is an exact improvement or a least-squares refit. 
+
+3.2 Closed-form diagonal updates 
+
+Fix the binary factors B1 and B2. The diagonal factors can then be updated as least-squares variables. For the left diagonal factor, let G = B1D2B2D3. The subproblem 
+
+min 
+
+> D1∈D m
+
+∥A − D1G∥2 
+
+> F
+
+(9) decomposes over rows, giving 
+
+(d1)i = ⟨Ai, :, G i, :⟩∥Gi, :∥22
+
+. (10) When the denominator is zero, the corresponding entry of d1 does not affect the objective; in our implementation it is set to zero. Similarly, with G = D1B1D2B2, the right diagonal factor is updated by 
+
+(d3)j = ⟨A:,j , G :,j ⟩∥G:,j ∥22
+
+. (11) 4For the middle diagonal factor, let GL = D1B1 and GR = B2D3. The subproblem is 
+
+min 
+
+> D2∈D k
+
+∥A − GLD2GR∥2 
+
+> F
+
+. (12) This is a least-squares problem over a linear combination of k rank-one matrices. The normal equations for d2 are 
+
+F d 2 = b, F = ( G⊤ 
+
+> L
+
+GL) ⊙ (GRG⊤ 
+
+> R
+
+), br = ( GL)⊤ 
+
+> :,r
+
+A(GR)⊤
+
+> r, :
+
+, (13) where ⊙ denotes the Hadamard product. Equation (13) gives the unregularized least-squares update; for numerical stability, the implementation solves (F + λI )d2 = b with a small λ.
+
+3.3 Exact objective change for one-bit flips 
+
+To handle updates of B1 and B⊤ 
+
+> 2
+
+with the same formula, consider the left-diagonal binary subproblem 
+
+min 
+
+> B∈{ 0,1}p×q
+
+eA − DLBG R
+
+> 2
+> F
+
+. (14) Here eA ∈ Rp×t, DL ∈ D p, B ∈ { 0, 1}p×q , and GR ∈ Rq×t. We write the diagonal entries of DL as 
+
+d ∈ Rp. Updating B1 corresponds to eA = A, B = B1, DL = D1, and GR = D2B2D3. Updating 
+
+B2 is handled by applying the same subproblem to B⊤ 
+
+> 2
+
+:
+
+eA − DLBG R
+
+> 2
+> F
+
+= A⊤ − D3B⊤ 
+
+> 2
+
+D2B⊤ 
+
+> 1
+
+D1 
+
+> 2
+> F
+
+, (15) with eA = A⊤, B = B⊤ 
+
+> 2
+
+, DL = D3, and GR = ( D1B1D2)⊤.Now consider flipping a single entry Bij . Let δij = 1 − 2Bij ∈ {− 1, +1 }, so the flipped binary matrix is B(ij ) = B + δij eie⊤ 
+
+> j
+
+. For fixed DL and GR, the exact change in squared error is 
+
+∆ij := eA − DLB(ij )GR
+
+> 2
+> F
+
+− eA − DLBG R
+
+> 2
+> F
+
+= 2(1 − 2Bij )( Yij − Zij ) + hirj .
+
+(16) The quantities in (16) are 
+
+H = GRG⊤ 
+
+> R
+
+∈ Rq×q , h = d ⊙ d ∈ Rp, r = diag( H) ∈ Rq ,Y = ( h ⊙row B)H ∈ Rp×q , Z = d ⊙row ( eAG ⊤ 
+
+> R
+
+) ∈ Rp×q . (17) Here ⊙ is element-wise multiplication, and u ⊙row M denotes row-wise scaling of a matrix, i.e., the 
+
+ith row of M is multiplied by ui. DiBA-Greedy accepts only flips satisfying ∆ij < −τ .The subproblem in (14) decomposes by rows as 
+
+> p
+
+X
+
+> i=1
+
+eAi, : − diBi, :GR
+
+> 22
+
+. (18) Therefore, flips chosen from distinct rows, with at most one flip per row, do not change each other’s objective differences and can be applied simultaneously. The objective change of such a batch is the sum of the selected ∆ij values; since each accepted flip satisfies ∆ij < −τ , the batch update also decreases the objective for fixed DL and GR.
+
+## 4 Downstream Retuning 
+
+DiBA-Greedy fits DiBA factors by minimizing the squared reconstruction error of a pretrained dense weight matrix. This objective is useful for obtaining a compact matrix approximation, but it is not the downstream loss of the full neural network. Consequently, replacing a dense weight by its DiBA approximation can still leave a gap between theoretical storage reduction and task performance. One possible remedy would be to reoptimize all DiBA factors on downstream data, but doing so would again introduce a difficult mixed continuous-discrete optimization problem because the binary factors 
+
+B1 and B2 would have to be adapted inside a nonlinear network loss. The exact one-bit improvement 5tests used by DiBA-Greedy rely on the quadratic structure of the reconstruction subproblem for B1
+
+or B⊤ 
+
+> 2
+
+, which is not generally preserved for arbitrary downstream losses. We therefore propose DiBARD (DiBA with Retuning only Diagonal factors), a diagonal-only adapta-tion procedure for DiBA-replaced neural-network components. For each dense weight matrix selected for replacement, we first compute DiBA factors with DiBA-Greedy. We then freeze the binary factors and optimize only the diagonal entries of D1, D2, and D3 on downstream training data. The diagonal factors are treated as trainable element-wise scaling layers, while the binary factors remain fixed binary mixing layers, and gradients are backpropagated only to the diagonal entries. This design has two advantages. First, because the binary factors are not searched again on down-stream data, the recovery stage becomes a small continuous optimization problem that can be handled by standard gradient methods. Second, while DiBA-Greedy is tied to reconstruction of the original dense weight, DiBARD directly adjusts row scales, intermediate-channel scales, and column scales for the downstream task loss. This allows task-specific compensation using only m + k + n trainable scalars per replaced m × n matrix; because retuning changes only diagonal values, the theoretical DiBA storage ratio is unchanged. More general adaptation protocols are possible. For example, one could fine-tune the diagonal factors together with biases, normalization parameters, or layers that were not replaced by DiBA. In the experiments reported in this paper, however, we use the stricter diagonal-only protocol: for each DiBA-replaced component, we retune only the diagonal factors, while keeping the binary factors, associated bias terms, and all layers not replaced by DiBA fixed. 
+
+## 5 Experiments 
+
+5.1 Experiment 1: intermediate-dimension sweep on real-model dense matrices 
+
+Experiment 1 evaluates how DiBA-Greedy trades theoretical storage for matrix reconstruction quality on dense weight matrices extracted from public pretrained models. We consider weights that can be represented as two-dimensional matrices, including embedding-module matrices, linear projections, and 1 × 1 convolutions. 
+
+Matrix collection and selection. We collected candidate matrices from Hugging Face NLP models and TorchVision vision models. Each weight tensor was converted to a matrix whose rows correspond to output dimensions and whose columns correspond to input dimensions. We canonicalized internally transposed projection weights, such as GPT-style projections, to the usual linear-layer orientation, and treated each 1 × 1 convolution as a (Cout , C in ) matrix. Shared or tied weights were counted only once. We excluded matrices with either dimension at most 100, and matrices with more than 
+
+3,000 ,000 entries. This produced a pool of 885 unique matrices: 850 from Hugging Face/NLP models and 35 from TorchVision/vision models. Across the pool, both row and column dimensions range from 112 to 3072, with median 512 for each dimension; the number of entries ranges from 
+
+16 ,384 to 2,359 ,296 .We grouped the pool into four functional categories, attention_related , ffn_or_projection ,
+
+embedding , and conv1x1 , using layer names and model structure. Here, embedding denotes matri-ces from embedding modules, including position-embedding tables and embedding-side projection or transformation weights; it is not restricted to token-embedding tables. From each category we selected 10 matrices, for a total of 40 matrices. Within each category, the selection was deterministic: candidates were ordered by matrix size, and representatives were chosen to cover a broad size range while avoiding excessive concentration on a single shape or model. The selected set contains 26 Hugging Face/NLP matrices and 14 TorchVision/vision matrices. Table 1 summarizes the candidate pool and the selected matrices. 
+
+Protocol and metric. For each selected matrix A ∈ Rm×n, we ran DiBA-Greedy at intermediate dimensions k ∈ { 8, 16 , 32 , 64 , 128 , 256 , 512 , 1024 }. We used Q = 16 only for storage accounting, corresponding to FP16 storage for the dense matrix and for the DiBA diagonal entries; the DiBA-Greedy solver itself used float32 arithmetic. We counted the binary factors at one bit per entry. The flip tolerance was τ = 10 −6 and the random seed was 0. We fixed a storage-ratio cap ρDiBA (k; 16) ≤
+
+0.75 before running the sweep and skipped configurations above this cap. Of the planned 40 ×8 = 320 
+
+6Table 1: Candidate and selected matrices in Experiment 1. Categories are functional labels; the 
+
+embedding category is defined in the text. 
+
+Category Candidates Selected Selected numel range Source/modality attention-related 424 10 16 ,384 –1,769 ,472 hf/nlp:10 FFN/projection 419 10 65 ,536 –2,359 ,296 hf/nlp:6, tv/vision:4 embedding 13 10 32 ,768 –1,574 ,400 hf/nlp:10 
+
+1 × 1 conv 29 10 32 ,768 –512 ,000 tv/vision:10 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7     
+
+> Realized storage ratio DiBA (k; 16)
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> SNR [dB]
+> Embedding 1x1 conv Attention-related FFN/projection
+
+Figure 2: SNR versus realized DiBA storage ratio for the 40 selected matrices in Experiment 1. Each curve corresponds to one selected matrix, and markers correspond to the swept intermediate dimensions k. Colors indicate functional categories. The horizontal axis is the realized ρDiBA (k; 16) 
+
+computed from each matrix shape, not k itself. runs, 317 were completed; the only skipped runs were three small matrices at k = 1024 , and there were no failed runs. We measure reconstruction quality by SNR dB = 10 log 10 (∥A∥2 
+
+> F
+
+/∥A − bA∥2 
+
+> F
+
+).
+
+Results. Figure 2 plots the storage–SNR curve for each selected matrix. We use the realized storage ratio ρDiBA (k; 16) on the horizontal axis rather than k itself, because the same intermediate dimension corresponds to different storage ratios for different matrix shapes. Over the completed points, SNR is monotone nondecreasing in k for all 40 matrix curves. Averaged over matrices at each completed value of k, the mean SNR increases from 0.70 dB at k = 8 to 16.35 dB at k = 1024 ; the latter average is over the 37 matrices not removed by the storage-ratio cap. The curves also suggest category-dependent behavior. Several matrices in the embedding category achieve higher SNR than other categories at comparable storage ratios, while many non-embedding curves from different model families and shapes occupy a similar storage–SNR band. At k = 1024 ,the mean SNRs over completed runs are 21.3 dB for the embedding category, 19.6 dB for 1 × 1
+
+convolutions, 13.6 dB for attention-related matrices, and 11.5 dB for FFN/projection matrices. Since this experiment does not control for singular-value spectra or other matrix statistics, we treat these category differences as empirical tendencies rather than universal conclusions. Overall, Experiment 1 shows that DiBA-Greedy consistently improves reconstruction quality as the theoretical storage budget increases on a diverse collection of real pretrained-model weight matrices, and that ρDiBA (k; Q) is a natural axis for comparing approximation quality across matrix shapes. 75.2 Experiment 2-1: DiBARD on DistilBERT / WikiText MLM Setup. Experiment 2-1 evaluates whether diagonal-only retuning can recover masked language modeling (MLM) performance after replacing the tied token embedding / MLM output projection weight of distilbert-base-uncased by DiBA factors. The replaced component is the tied vocabulary matrix with vocabulary size V = 30 ,522 and hidden dimension H = 768 . We first fit DiBA factors to the pretrained embedding matrix with DiBA-Greedy, using squared Frobenius reconstruction loss. The intermediate dimension is k = 2048 and the flip tolerance is τ = 10 −6.During DiBARD retuning, we freeze B1, B2, the DistilBERT backbone, the MLM-head transform, and the output bias, and update only d1, d2, and d3 using masked-token cross-entropy on the WikiText-103 train split. We use AdamW with learning rate 3.0 × 10 −6, batch size 16, five epochs, and no explicit regularization. We tokenize wikitext-103-raw-v1 , concatenate the token stream, and split it into contiguous blocks of length 128, yielding 917,209 train blocks, 1,920 validation blocks, and 2,201 test blocks. The train split is used for retuning, the validation split for checkpoint selection, and the test split for the final held-out evaluation. We use MLM probability 0.15 with the standard BERT 80/10/10 masking rule. Validation and test masks are fixed so that all methods are compared on the same examples and masked positions. We compare against the original model, row-wise symmetric Int2 and Int4 post-training quantization (PTQ), Int4-scale-RT, DiBA before retuning, and DiBARD after retuning. Int4-scale-RT keeps the Int4 integer codes fixed and retunes only a row-scale multiplier with the same masked-token cross-entropy objective. Factor shapes, checkpoint selection, baseline details, and byte-level storage accounting are given in Appendix B. 
+
+Results. Table 2 reports fixed-mask MLM results on 40,850 masked tokens. Before retuning, DiBA uses a smaller target storage ratio than Int4-PTQ and is 2.68 percentage points higher in accuracy. Retuning only d1, d 2, d 3 raises DiBARD to 0.5210 accuracy, 7.63 points above DiBA before retuning and 1.00 point above Int4-scale-RT. Because retuning uses WikiText training data, DiBARD exceeding the original model should be interpreted as target-domain retuning, not zero-shot replacement. Table 2: Fixed-mask MLM results for Experiment 2-1. Target ρ is for the replaced tied embed-ding/output weight only, excluding the output bias, and is not a full-model ratio.                                     
+
+> Method Target ρ# retuned Loss PPL Acc. Original 1.0000 02.7651 15.88 0.4906 Int2-PTQ 0.0638 013.1310 504,318.34 0.0023 Int4-PTQ 0.1263 03.1223 22.70 0.4179 Int4-scale-RT 0.1263 30,522 2.6739 14.50 0.5110 DiBA 0.0869 03.0738 21.62 0.4447 DiBARD 0.0869 33,338 2.5869 13.29 0.5210
+
+5.3 Experiment 2-2: DiBARD on AST / Speech Commands Setup. Experiment 2-2 evaluates DiBARD on an Audio Spectrogram Transformer (AST) fine-tuned for Speech Commands classification. The base model is MIT/ast-finetuned-speech-commands-v2 , and the dataset is the v0.02 split of google/speech_commands . The model is a 35-class classifier, while the dataset split additionally contains _silence_ . We remove only the _silence_ 
+
+examples and map the remaining 35 labels to the model label IDs. The resulting split sizes are 84,843 train examples, 9,981 validation examples, and 4,482 test examples. We replace the query, key, value, and attention-output dense projections in all 12 AST encoder layers, for a total of 48 Linear weights of size 768 × 768 . We do not replace the feed-forward layers, LayerNorm parameters, or classifier. Each selected weight is factorized independently by DiBA-Greedy with squared Frobenius reconstruction loss and intermediate dimension k = 128 . In DiBARD, all binary factors and all other pretrained model parameters are frozen; only d1, d2, and d3
+
+for the replaced layers are updated for one epoch on the train split with multiclass cross-entropy. This gives 79,872 trainable scalar parameters. We use Adam with learning rate 3.0 × 10 −6. Baselines are the original model, row-wise symmetric Int2 and Int4 PTQ applied to the same 48 weights, DiBA 80.0 0.2 0.4 0.6 0.8 1.0 
+
+> Theoretical storage ratio on tied embedding
+> (FP32 dense = 1)
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> Masked-token accuracy
+> Original accuracy
+> Exp 2-1: DistilBERT / WikiText MLM
+> Original
+> Int2-PTQ
+> Int4-PTQ
+> Int4-scale-RT
+> DiBA
+> DiBARD
+
+(a) DistilBERT / WikiText fixed-mask MLM. 0.0 0.2 0.4 0.6 0.8 1.0   
+
+> Theoretical storage ratio on replaced projections
+> (FP32 dense = 1)
+> 0.65
+> 0.70
+> 0.75
+> 0.80
+> 0.85
+> 0.90
+> 0.95
+> 1.00
+> Test accuracy
+> Original accuracy Original
+> Int2-PTQ
+> Int4-PTQ
+> DiBA
+> DiBARD
+> Exp 2-2: AST / Speech Commands
+
+(b) AST / Speech Commands classification. 
+
+Figure 3: Held-out accuracy versus target-component theoretical storage ratio for Experiments 2-1 and 2-2. The horizontal axes are not full-model compression ratios; arrows denote scale-only retuning with fixed binary factors or fixed integer codes. before retuning, and DiBARD after retuning. Storage accounting and the reconstruction-SNR profile of the replaced matrices are given in Appendix C. 
+
+Results. Table 3 reports the final run. Int4-PTQ preserves the original accuracy on the same 48 projections, whereas DiBA before retuning reaches 0.7684 at target ρ = 0 .0145 . DiBARD recovers to 0.9781 test accuracy, improving by 20.97 percentage points and recovering 97.4% of the DiBA-induced gap. Figure 3 summarizes the same fixed-discrete-structure recovery pattern across the two downstream experiments. Table 3: Speech Commands results for Experiment 2-2. Target ρ and compression are theoretical values for the 48 replaced attention-projection weight+bias components only, with the corresponding FP32 dense components counted as 1; they are not full-model compression ratios. 
+
+Method Target ρ Comp. Val. loss Val. acc. Test loss Test acc. Original 1.0000 1.00 × 0.0889 0.9802 0.0712 0.9837 Int2-PTQ 0.0650 15 .38 × 1.3632 0.6787 1.1903 0.7066 Int4-PTQ 0.1274 7.85 × 0.0900 0.9800 0.0692 0.9837 DiBA 0.0145 68 .87 × 1.2394 0.7282 1.0535 0.7684 DiBARD 0.0145 68 .87 × 0.1230 0.9726 0.0946 0.9781 
+
+## 6 Conclusion 
+
+DiBA approximates dense neural-network weights by interleaving diagonal scaling and shared 0/1
+
+binary mixing. Experiment 1 showed monotone nondecreasing SNR in the intermediate dimension 
+
+k over completed points as the theoretical storage budget increased on 40 real pretrained-model matrices, while Experiments 2-1 and 2-2 showed that DiBARD can recover downstream accuracy by retuning only diagonal entries with fixed binary factors. The main limitations are as follows: storage ratios are theoretical and assume bit-packed B1, B 2; no measured memory, bit-packed-kernel, or inference-speed benchmark is provided; the storage ratios reported for Experiments 2-1 and 2-2 are computed with respect to the replaced target components only, not with respect to the full model; DiBA-Greedy is a local greedy solver; and downstream evaluations use fixed splits with limited seeds and tasks. Future work includes packed implementations, broader layer/model coverage, and repeated-seed evaluation. Overall, DiBA offers a compact weight representation that combines fixed binary mixing with lightweight diagonal retuning. 9References 
+
+[1] LeCun, Y., Denker, J. S., and Solla, S. A. Optimal brain damage. In Advances in Neural Information Processing Systems 2 , 1990. [2] Hassibi, B., Stork, D. G., and Wolff, G. J. Optimal Brain Surgeon and general network pruning. In IEEE International Conference on Neural Networks , 1993. [3] Han, S., Pool, J., Tran, J., and Dally, W. J. Learning both weights and connections for efficient neural networks. In Advances in Neural Information Processing Systems , 2015. [4] Li, H., Kadav, A., Durdanovic, I., Samet, H., and Graf, H. P. Pruning filters for efficient ConvNets. In 
+
+International Conference on Learning Representations , 2017. [5] Liu, Z., Li, J., Shen, Z., Huang, G., Yan, S., and Zhang, C. Learning efficient convolutional networks through network slimming. In IEEE International Conference on Computer Vision , 2017. [6] Frankle, J. and Carbin, M. The lottery ticket hypothesis: Finding sparse, trainable neural networks. In 
+
+International Conference on Learning Representations , 2019. [7] Sanh, V., Wolf, T., and Rush, A. M. Movement pruning: Adaptive sparsity by fine-tuning. In Advances in Neural Information Processing Systems , 2020. [8] Frantar, E. and Alistarh, D. SparseGPT: Massive language models can be accurately pruned in one-shot. In 
+
+International Conference on Machine Learning , 2023. [9] Sun, M., Liu, Z., Bair, A., and Kolter, J. Z. A simple and effective pruning approach for large language models. In International Conference on Learning Representations , 2024. [10] Gong, Y., Liu, L., Yang, M., and Bourdev, L. Compressing deep convolutional networks using vector quantization. arXiv:1412.6115, 2014. [11] Chen, W., Wilson, J. T., Tyree, S., Weinberger, K. Q., and Chen, Y. Compressing neural networks with the hashing trick. In International Conference on Machine Learning , 2015. [12] Han, S., Mao, H., and Dally, W. J. Deep compression: Compressing deep neural networks with pruning, trained quantization and Huffman coding. In International Conference on Learning Representations , 2016. [13] Courbariaux, M., Bengio, Y., and David, J.-P. BinaryConnect: Training deep neural networks with binary weights during propagations. In Advances in Neural Information Processing Systems , 2015. [14] Hubara, I., Courbariaux, M., Soudry, D., El-Yaniv, R., and Bengio, Y. Binarized neural networks. In 
+
+Advances in Neural Information Processing Systems , 2016. [15] Rastegari, M., Ordonez, V., Redmon, J., and Farhadi, A. XNOR-Net: ImageNet classification using binary convolutional neural networks. In European Conference on Computer Vision , 2016. [16] Zhou, S., Wu, Y., Ni, Z., Zhou, X., Wen, H., and Zou, Y. DoReFa-Net: Training low bitwidth convolutional neural networks with low bitwidth gradients. arXiv:1606.06160, 2016. [17] Zhu, C., Han, S., Mao, H., and Dally, W. J. Trained ternary quantization. In International Conference on Learning Representations , 2017. [18] Zhou, A., Yao, A., Guo, Y., Xu, L., and Chen, Y. Incremental network quantization: Towards lossless CNNs with low-precision weights. In International Conference on Learning Representations , 2017. [19] Jacob, B., Kligys, S., Chen, B., Zhu, M., Tang, M., Howard, A., Adam, H., and Kalenichenko, D. Quantization and training of neural networks for efficient integer-arithmetic-only inference. In IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2018. [20] Esser, S. K., McKinstry, J. L., Bablani, D., Appuswamy, R., and Modha, D. S. Learned step size quantiza-tion. In International Conference on Learning Representations , 2020. [21] Li, Y., Dong, X., and Wang, W. Additive powers-of-two quantization: An efficient non-uniform discretiza-tion for neural networks. In International Conference on Learning Representations , 2020. [22] Nagel, M., Amjad, R. A., van Baalen, M., Louizos, C., and Blankevoort, T. Up or down? Adaptive rounding for post-training quantization. In International Conference on Machine Learning , 2020. 
+
+10 [23] Li, Y., Gong, R., Tan, X., Yang, Y., Hu, P., Zhang, Q., Yu, F., Wang, W., and Gu, S. BRECQ: Pushing the limit of post-training quantization by block reconstruction. In International Conference on Learning Representations , 2021. [24] Dettmers, T., Lewis, M., Belkada, Y., and Zettlemoyer, L. LLM.int8(): 8-bit matrix multiplication for transformers at scale. In Advances in Neural Information Processing Systems , 2022. [25] Xiao, G., Lin, J., Seznec, M., Wu, H., Demouth, J., and Han, S. SmoothQuant: Accurate and efficient post-training quantization for large language models. In International Conference on Machine Learning ,2023. [26] Frantar, E., Ashkboos, S., Hoefler, T., and Alistarh, D. GPTQ: Accurate post-training quantization for generative pre-trained transformers. In International Conference on Learning Representations , 2023. [27] Lin, J., Tang, J., Tang, H., Yang, S., Chen, W.-M., Wang, W.-C., Xiao, G., Dang, X., Gan, C., and Han, S. AWQ: Activation-aware weight quantization for LLM compression and acceleration. In Conference on Machine Learning and Systems , 2024. [28] Denton, E. L., Zaremba, W., Bruna, J., LeCun, Y., and Fergus, R. Exploiting linear structure within convolutional networks for efficient evaluation. In Advances in Neural Information Processing Systems ,2014. [29] Jaderberg, M., Vedaldi, A., and Zisserman, A. Speeding up convolutional neural networks with low rank expansions. In British Machine Vision Conference , 2014. [30] Novikov, A., Podoprikhin, D., Osokin, A., and Vetrov, D. Tensorizing neural networks. In Advances in Neural Information Processing Systems , 2015. [31] Hinton, G., Vinyals, O., and Dean, J. Distilling the knowledge in a neural network. arXiv:1503.02531, 2015. [32] Romero, A., Ballas, N., Kahou, S. E., Chassang, A., Gatta, C., and Bengio, Y. FitNets: Hints for thin deep nets. In International Conference on Learning Representations , 2015. [33] Bengio, Y., Leonard, N., and Courville, A. Estimating or propagating gradients through stochastic neurons for conditional computation. arXiv:1308.3432, 2013. [34] Leng, C., Dou, Z., Li, H., Zhu, S., and Jin, R. Extremely low bit neural network: Squeeze the last bit out with ADMM. In AAAI Conference on Artificial Intelligence , 2018. [35] Bai, Y., Wang, Y.-X., and Liberty, E. ProxQuant: Quantized neural networks via proximal operators. In 
+
+International Conference on Learning Representations , 2019. [36] Hou, L. and Kwok, J. T. Loss-aware weight quantization of deep networks. In International Conference on Learning Representations , 2018. [37] Dong, Z., Yao, Z., Gholami, A., Mahoney, M. W., and Keutzer, K. HAWQ: Hessian AWare quantization of neural networks with mixed-precision. In IEEE/CVF International Conference on Computer Vision , 2019. [38] Dong, Z., Yao, Z., Arfeen, D., Gholami, A., Mahoney, M. W., and Keutzer, K. HAWQ-V2: Hessian aware trace-weighted quantization of neural networks. In Advances in Neural Information Processing Systems ,2020. [39] Devlin, J., Chang, M.-W., Lee, K., and Toutanova, K. BERT: Pre-training of deep bidirectional trans-formers for language understanding. In Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies , 2019. [40] Sanh, V., Debut, L., Chaumond, J., and Wolf, T. DistilBERT, a distilled version of BERT: Smaller, faster, cheaper and lighter. arXiv:1910.01108, 2019. [41] Liu, Y., Ott, M., Goyal, N., Du, J., Joshi, M., Chen, D., Levy, O., Lewis, M., Zettlemoyer, L., and Stoyanov, V. RoBERTa: A robustly optimized BERT pretraining approach. arXiv:1907.11692, 2019. [42] Radford, A., Wu, J., Child, R., Luan, D., Amodei, D., and Sutskever, I. Language models are unsupervised multitask learners. OpenAI technical report, 2019. [43] Hugging Face. DistilGPT2 model card. https://huggingface.co/distilgpt2 .
+
+11 [44] Zhang, S., Roller, S., Goyal, N., Artetxe, M., Chen, M., Chen, S., Dewan, C., Diab, M., Li, X., Lin, X. V., Mihaylov, T., Ott, M., Shleifer, S., Shuster, K., Simig, D., Koura, P. S., Sridhar, A., Wang, T., and Zettlemoyer, L. OPT: Open pre-trained transformer language models. arXiv:2205.01068, 2022. [45] Lan, Z., Chen, M., Goodman, S., Gimpel, K., Sharma, P., and Soricut, R. ALBERT: A lite BERT for self-supervised learning of language representations. In International Conference on Learning Representations ,2020. [46] Clark, K., Luong, M.-T., Le, Q. V., and Manning, C. D. ELECTRA: Pre-training text encoders as discriminators rather than generators. In International Conference on Learning Representations , 2020. [47] Sun, Z., Yu, H., Song, X., Liu, R., Yang, Y., and Zhou, D. MobileBERT: A compact task-agnostic BERT for resource-limited devices. In Annual Meeting of the Association for Computational Linguistics , 2020. [48] Wang, W., Wei, F., Dong, L., Bao, H., Yang, N., and Zhou, M. MiniLM: Deep self-attention distillation for task-agnostic compression of pre-trained transformers. In Advances in Neural Information Processing Systems , 2020. [49] He, K., Zhang, X., Ren, S., and Sun, J. Deep residual learning for image recognition. In IEEE Conference on Computer Vision and Pattern Recognition , 2016. [50] Howard, A., Sandler, M., Chen, B., Wang, W., Chen, L.-C., Tan, M., Chu, G., Vasudevan, V., Zhu, Y., Pang, R., Adam, H., and Le, Q. V. Searching for MobileNetV3. In IEEE/CVF International Conference on Computer Vision , 2019. [51] Iandola, F. N., Han, S., Moskewicz, M. W., Ashraf, K., Dally, W. J., and Keutzer, K. SqueezeNet: AlexNet-level accuracy with 50x fewer parameters and < 0.5MB model size. arXiv:1602.07360, 2016. 
+
+## A DiBA-Greedy algorithm details 
+
+Algorithm 1 gives the outer alternating scheme used by DiBA-Greedy, and Algorithm 2 gives the batch-row greedy step for the left-diagonal binary subproblem. Here b is a row-batch size: each inner iteration of Algorithm 2 flips at most one bit in each of up to b selected rows, while one call to ROW GREEDY may contain multiple such inner iterations. At each inner iteration, the current best candidate difference vi is computed for every row; among rows satisfying vi < −τ , the method selects the rows with the largest improvements. Assuming exact least-squares refits and exact flip-difference evaluations, every primitive update in DiBA-Greedy is monotone non-increasing for the reconstruction objective in Equation (5) . In the implementation, this monotonicity should be understood as a property of the idealized updates, because numerical roundoff and the regularization term used in Equation (13) can slightly perturb the exact least-squares solution. For the reported Experiment 1 matrix sweep, we used float32 arithmetic and row-batch size b = 1024 .
+
+Algorithm 1 DiBA-Greedy 
+
+Require: Matrix A ∈ Rm×n, intermediate dimension k, flip tolerance τ ≥ 0, row-batch size b ≥ 1.
+
+Ensure: DiBA factors D1, B 1, D 2, B 2, D 3. 
+
+> 1:
+
+Initialize D1, D 2, D 3 and random binary matrices B1, B 2. 
+
+> 2:
+
+Refit D1, D 2, D 3 by Equations (10), (13), and (11).  
+
+> 3:
+
+repeat  
+
+> 4:
+
+(B1, c 1) ← ROW GREEDY (A, d 1, D 2B2D3, B 1, τ, b ). 
+
+> 5:
+
+Refit D1 by Equation (10).  
+
+> 6:
+
+(B⊤ 
+
+> 2
+
+, c 2) ← ROW GREEDY (A⊤, d 3, (D1B1D2)⊤, B ⊤ 
+
+> 2
+
+, τ, b ). 
+
+> 7:
+
+Refit D3 by Equation (11).  
+
+> 8:
+
+Refit D2 by Equation (13).  
+
+> 9:
+
+until c1 + c2 = 0  
+
+> 10:
+
+return D1, B 1, D 2, B 2, D 3.12 Algorithm 2 ROW GREEDY : batch-row greedy update for the left-diagonal binary subproblem in Equation (14) 
+
+Require: Target matrix eA ∈ Rp×t, left scale d ∈ Rp, right factor GR ∈ Rq×t, binary matrix 
+
+B ∈ { 0, 1}p×q , flip tolerance τ ≥ 0, row-batch size b ≥ 1.
+
+Ensure: Updated binary matrix B and accepted flip count c. 
+
+> 1:
+
+H ← GRG⊤ 
+
+> R
+
+, h ← d ⊙ d, r ← diag( H). 
+
+> 2:
+
+Y ← (h ⊙row B)H. 
+
+> 3:
+
+Z ← d ⊙row ( eAG ⊤ 
+
+> R
+
+). 
+
+> 4:
+
+for all rows i do  
+
+> 5:
+
+ji ← arg min 1≤j≤q ∆ij , vi ← ∆ij i using Equation (16).  
+
+> 6:
+
+end for  
+
+> 7:
+
+c ← 0. 
+
+> 8:
+
+while min i vi < −τ do  
+
+> 9:
+
+E ← { i ∈ { 1, . . . , p } : vi < −τ }. 
+
+> 10:
+
+ℓ ← min {b, |E|} . 
+
+> 11:
+
+I ← the ℓ indices in E with the smallest vi. 
+
+> 12:
+
+for all i ∈ I do  
+
+> 13:
+
+j ← ji, s ← 1 − 2Bij . 
+
+> 14:
+
+Bij ← 1 − Bij . 
+
+> 15:
+
+Yi, : ← Yi, : + sh iHj, :. 
+
+> 16:
+
+Recompute ji and vi for row i using Equation (16).  
+
+> 17:
+
+end for  
+
+> 18:
+
+c ← c + |I| . 
+
+> 19:
+
+end while  
+
+> 20:
+
+return (B, c ).
+
+## B Additional implementation details for Experiment 2-1 
+
+This appendix gives only implementation details supplementing the protocol described in Exper-iment 2-1. The same DiBA embedding module is used for both the input-side row lookup and the tied MLM vocabulary projection. The resulting factor shapes are B1 ∈ { 0, 1}30522 ×2048 ,
+
+B2 ∈ { 0, 1}2048 ×768 , d1 ∈ R30522 , d2 ∈ R2048 , and d3 ∈ R768 .For DiBARD, we select the diagonal state with the lowest validation loss as the reporting checkpoint. No parameter update or checkpoint selection is performed on the test split. The frozen backbone is run in evaluation mode with dropout disabled, and gradient norms are clipped to 1.0. Training masks are also generated deterministically by example index, while the validation and test masks are fixed as described in the main text to ensure identical examples and masked positions across methods. The Int4-scale-RT baseline fixes the integer codes obtained by row-wise symmetric Int4 PTQ and learns only a scale multiplier for each vocabulary row. Its trainable parameters are V = 30 ,522 log row-scale multipliers, and its loss is the same masked-token cross-entropy used by DiBARD. We match the number of epochs and batch size to DiBARD and use learning rate 1.0 × 10 −4.The Target ρ values in Table 2 are theoretical values for the tied weight matrix only, excluding the output bias; they are not full-model compression ratios. The FP32 dense storage is counted as 
+
+30522 × 768 FP32 scalars, or 93,763,584 bytes. Int2-PTQ uses 2-bit codes plus FP32 row scales, for 5,982,312 bytes. Int4-PTQ and Int4-scale-RT use 4-bit codes plus FP32 row scales, for 11,842,536 bytes. DiBA and DiBARD count B1 and B2 at one bit per entry and d1, d 2, d 3 as FP32 scalars, for 8,143,592 bytes. These counts correspond to target storage ratios 0.0638 for Int2, 0.1263 for Int4 and Int4-scale-RT, and 0.0869 for DiBA and DiBARD. 
+
+## C Additional implementation details for Experiment 2-2 
+
+This appendix gives only implementation details supplementing the protocol described in Experi-ment 2-2. The Speech Commands v0.02 dataset labels consist of 35 words plus _silence_ . The AST classifier does not contain a _silence_ class, so we remove only the _silence_ examples. The remaining 35 labels are mapped to model-side class IDs using the model’s id2label metadata. 13 0 1 2 3 4 5 6 7 8 9 10 11 
+
+> AST encoder layer
+> 2
+> 3
+> 4
+> 5
+> SNR [dB]
+> query
+> key
+> value
+> output.dense
+
+Figure 4: Per-layer reconstruction SNR for AST attention projections. We therefore do not assume the dataset-side label-ID order, and all methods are evaluated with the same 35-class label-ID mapping. For DiBA replacement, the original bias of each selected Linear layer is copied into the corresponding DiBALinear module and kept fixed during retuning. Feed-forward layers, LayerNorm parameters, patch embedding, the classifier, and the biases of the selected Linear layers are not updated. For runtime compatibility with dense matrix multiplication, an implementation may store the binary factors as floating-point buffers; however, the theoretical storage accounting in Table 3 counts B1 and 
+
+B2 at one bit per entry. During DiBARD retuning, the frozen AST backbone is run in evaluation mode, and gradients are allowed to flow only to the diagonal parameters of the 48 DiBA replacements. Weight decay and explicit diagonal regularization are set to zero, and gradient norms are clipped to 1.0. Validation accuracy is evaluated after each epoch, and the state with the best validation accuracy is used for the final test evaluation. Although the DiBA-before state is retained as a fallback checkpoint by the implementation, the one-epoch retuned state improves validation accuracy in the run reported here. The storage ratios in Table 3 are theoretical values for the 48 replaced attention-projection Linear weight+bias components only; they are not full-model compression ratios. Bias terms are included in both the dense and compressed counts. The FP32 dense storage of these components is 113,393,664 bytes. Row-wise Int2-PTQ uses 7,372,800 bytes and row-wise Int4-PTQ uses 14,450,688 bytes, corresponding to 15 .38 × and 7.85 × compression, respectively. DiBA and DiBARD count B1 and 
+
+B2 at one bit per entry and D1, D 2, D 3 and the bias as FP32, for 1,646,592 bytes, corresponding to 
+
+68 .87 × theoretical compression. Across the 48 DiBA-factorized matrices, the factorization SNR has mean 2.13 dB, median 1.86 dB, minimum 1.20 dB, and maximum 5.24 dB. By projection type, query and key are relatively higher at 2.59 dB and 2.58 dB on average, whereas value and attention-output dense projections average 1.73 dB and 1.60 dB. Figure 4 shows that the factorization quality varies across projection types even at the same 768 × 768 shape and k = 128 : query/key projections, especially in early layers, are reconstructed more accurately than value and attention-output projections. 14

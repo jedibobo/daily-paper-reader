@@ -6,73 +6,85 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-15
-- 运行时间：2026-05-15 20:26:25 UTC
+- 最新运行日期：2026-05-16
+- 运行时间：2026-05-16 20:07:30 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
+- 本次总论文数：21
+- 精读区：10
 - 速读区：11
 
 ### 今日简报（AI）
-今日深挖 LLM 底层性能极限，重点解析了超越硬件峰值的矩阵乘法与专家级 CUDA 优化基准。
-核心结论指出 FalconGEMM 可通过降低复杂度突破算力天花板，且 Apple 芯片上的 int4 KV 缓存已能跑赢 fp16。
-建议开发者关注低比特量化与 MoE 硬件加速通信，这是提升端侧及多卡推理效率的关键。
-- 详情：[/202605/15/README](/202605/15/README)
+今日精选 21 篇前沿成果，深度攻克神经网络零样本评估与大模型长文本推理效率难题。
+核心突破在于利用样本激活模式实现模型性能预判，并针对 MoE 架构与紧急通信场景提出了极速切换与显存优化方案。
+建议优先研读两篇 9.0 分论文，掌握在资源受限环境下提升模型评估与部署效率的关键路径。
+- 详情：[/202605/16/README](/202605/16/README)
 
 ### 精读区论文标签
-1. [FalconGEMM: Surpassing Hardware Peaks with Lower-Complexity Matrix Multiplication](/202605/15/2605.06057v2-falcongemm-surpassing-hardware-peaks-with-lower-complexity-matrix-multiplication)  
+1. [Zero-Shot Neural Network Evaluation with Sample-Wise Activation Patterns](/202605/16/2605.07378v1-zero-shot-neural-network-evaluation-with-sample-wise-activation-patterns)  
    标签：评分：9.0/10、query:hwnas
-   evidence：通过性能模型最大化片上数据复用并选择最优算法
-2. [CUDAHercules: Benchmarking Hardware-Aware Expert-level CUDA Optimization for LLMs](/202605/15/2605.08467v1-cudahercules-benchmarking-hardware-aware-expert-level-cuda-optimization-for-llms)  
+   evidence：用于神经网络架构搜索评估的零样本代理指标
+2. [In-Network Artificial Computing Enhanced Light Model-Switching for Emergency Communications Networks](/202605/16/2605.10070v1-in-network-artificial-computing-enhanced-light-model-switching-for-emergency-communications-networks)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对大模型的架构感知CUDA优化基准测试
-3. [Evolving Layer-Specific Scalar Functions for Hardware-Aware Transformer Adaptation](/202605/15/2605.14047v1-evolving-layer-specific-scalar-functions-for-hardware-aware-transformer-adaptation)  
+   evidence：边缘网络轻量级模型切换的软硬件协同设计
+3. [LoKA: Low-precision Kernel Applications for Recommendation Models At Scale](/202605/16/2605.10886v2-loka-low-precision-kernel-applications-for-recommendation-models-at-scale)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对边缘部署演化层特定标量函数的硬件感知框架
-4. [A Hardware-Aware, Per-Layer Methodology for Post-Training Quantization of Large Language Models](/202605/15/2605.14929v1-a-hardware-aware-per-layer-methodology-for-post-training-quantization-of-large-language-models)  
+   evidence：针对低精度算子的系统-模型协同设计
+4. [TLX: Hardware-Native, Evolvable MIMW GPU Compiler for Large-scale Production Environments](/202605/16/2605.10905v2-tlx-hardware-native-evolvable-mimw-gpu-compiler-for-large-scale-production-environments)  
    标签：评分：9.0/10、query:hwnas
-   evidence：硬件感知的逐层量化和硬件高效的查找表格式
-5. [Piper: Efficient Large-Scale MoE Training via Resource Modeling and Pipelined Hybrid Parallelism](/202605/15/2605.05049v1-piper-efficient-large-scale-moe-training-via-resource-modeling-and-pipelined-hybrid-parallelism)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：针对计算和通信需求的资源建模
-6. [EdgeServing: Deadline-Aware Multi-DNN Serving at the Edge](/202605/15/2605.05527v1-edgeserving-deadline-aware-multi-dnn-serving-at-the-edge)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：边缘端多DNN服务及早退机制
+   evidence：用于编排数据移动和计算的硬件原生GPU编译器
+5. [Sieve: Dynamic Expert-Aware PIM Acceleration for Evolving Mixture-of-Experts Models](/202605/16/2605.11277v1-sieve-dynamic-expert-aware-pim-acceleration-for-evolving-mixture-of-experts-models)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对MoE模型的PIM加速硬件软件协同设计
+6. [Ada-MK: Adaptive MegaKernel Optimization via Automated DAG-based Search for LLM Inference](/202605/16/2605.11581v1-ada-mk-adaptive-megakernel-optimization-via-automated-dag-based-search-for-llm-inference)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：基于自动化DAG搜索的算子融合与映射
+7. [TurboGR: An Accelerated Training System for Large-Scale Generative Recommendation](/202605/16/2605.13433v1-turbogr-an-accelerated-training-system-for-large-scale-generative-recommendation)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对NPU亲和性的训练系统，解决架构不匹配和算子映射问题
+8. [Efficient Implementation of an Adaptive Transformer Accelerator for Massive MIMO Outdoor Localization](/202605/16/2605.13507v1-efficient-implementation-of-an-adaptive-transformer-accelerator-for-massive-mimo-outdoor-localization)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：使用混合数据流架构和向量处理的硬件实现
+9. [Memristor Technologies for Dynamic Vision Sensors: A Critical Assessment and Research Roadmap](/202605/16/2605.13699v1-memristor-technologies-for-dynamic-vision-sensors-a-critical-assessment-and-research-roadmap)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：基于忆阻器的边缘视觉传感器存内计算综述
+10. [Time Domain Near Memory Computing Engine](/202605/16/2605.14162v1-time-domain-near-memory-computing-engine)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：用于AI的高能效近内存计算
 
 ### 速读区论文标签
-1. [When Quantization Is Free: An int4 KV Cache That Outruns fp16 on Apple Silicon](/202605/15/2605.05699v1-when-quantization-is-free-an-int4-kv-cache-that-outruns-fp16-on-apple-silicon)  
+1. [DiBA: Diagonal and Binary Matrix Approximation for Neural Network Weight Compression](/202605/16/2605.05994v1-diba-diagonal-and-binary-matrix-approximation-for-neural-network-weight-compression)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过Apple Silicon上的int4 KV缓存进行内存带宽优化
-2. [HCInfer: An Efficient Inference System via Error Compensation for Resource-Constrained Devices](/202605/15/2605.05819v1-hcinfer-an-efficient-inference-system-via-error-compensation-for-resource-constrained-devices)  
+   evidence：通过矩阵近似进行权重压缩，减少存储和计算
+2. [Relay Buffer Independent Communication over Pooled HBM for Efficient MoE Inference on Ascend](/202605/16/2605.06055v2-relay-buffer-independent-communication-over-pooled-hbm-for-efficient-moe-inference-on-ascend)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限设备的异构推理系统
-3. [MoE-Hub: Taming Software Complexity for Seamless MoE Overlap with Hardware-Accelerated Communication on Multi-GPU Systems](/202605/15/2605.05888v1-moe-hub-taming-software-complexity-for-seamless-moe-overlap-with-hardware-accelerated-communication-on-multi-gpu-systems)  
+   evidence：针对硬件MoE推理加速的通信设计
+3. [Shallow Prefill, Deep Decoding: Efficient Long-Context Inference via Layer-Asymmetric KV Visibility](/202605/16/2605.06105v1-shallow-prefill-deep-decoding-efficient-long-context-inference-via-layer-asymmetric-kv-visibility)  
    标签：评分：8.0/10、query:hwnas
-   evidence：多GPU系统上的硬件加速通信
-4. [VisMMOE: Exploiting Visual-Expert Affinity for Efficient Visual-Language MoE Offloading](/202605/15/2605.05899v1-vismmoe-exploiting-visual-expert-affinity-for-efficient-visual-language-moe-offloading)  
+   evidence：通过减少KV缓存实现内存感知的推理优化
+4. [Direct-to-Event Spiking Neural Network Transfer](/202605/16/2605.07207v1-direct-to-event-spiking-neural-network-transfer)  
    标签：评分：8.0/10、query:hwnas
-   evidence：内存受限的卸载与专家需求重塑
-5. [Efficient event-driven retrieval in high-capacity kernel Hopfield networks](/202605/15/2605.05978v1-efficient-event-driven-retrieval-in-high-capacity-kernel-hopfield-networks)  
+   evidence：神经形态硬件上的低功耗计算
+5. [FastOmniTMAE: Parallel Clause Learning for Scalable and Hardware-Efficient Tsetlin Embeddings](/202605/16/2605.06982v1-fastomnitmae-parallel-clause-learning-for-scalable-and-hardware-efficient-tsetlin-embeddings)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对神经形态硬件部署的能效检索优化
-6. [Efficient event-driven retrieval in high-capacity kernel Hopfield networks](/202605/15/2605.05978v2-efficient-event-driven-retrieval-in-high-capacity-kernel-hopfield-networks)  
+   evidence：针对并行执行的硬件高效 Tsetlin 机重构
+6. [Echo: KV-Cache-Free Associative Recall with Spectral Koopman Operators](/202605/16/2605.06997v1-echo-kv-cache-free-associative-recall-with-spectral-koopman-operators)  
    标签：评分：7.0/10、query:hwnas
-   evidence：神经形态硬件上的能效部署
-7. [FluxShard: Motion-Aware Feature Cache Reuse for Collaborative Video Analytics in Mobile Edge Computing](/202605/15/2605.06027v1-fluxshard-motion-aware-feature-cache-reuse-for-collaborative-video-analytics-in-mobile-edge-computing)  
+   evidence：针对通用硬件内存瓶颈的无KV缓存架构
+7. [TENNOR: Trustworthy Execution for Neural Networks through Obliviousness and Retrievals](/202605/16/2605.07160v1-tennor-trustworthy-execution-for-neural-networks-through-obliviousness-and-retrievals)  
    标签：评分：7.0/10、query:hwnas
-   evidence：移动边缘计算与视频分析中的特征缓存复用
-8. [Normalized Architectures are Natively 4-Bit](/202605/15/2605.06067v1-normalized-architectures-are-natively-4-bit)  
+   evidence：协同设计神经网络训练与不经意原语以提高效率
+8. [HexiSeq: Accommodating Long Context Training of LLMs over Heterogeneous Hardware](/202605/16/2605.07569v1-hexiseq-accommodating-long-context-training-of-llms-over-heterogeneous-hardware)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对大模型4比特精度效率的架构设计
-9. [Adding Thermal Awareness to Visual Systems in Real-Time via Distilled Diffusion Models](/202605/15/2605.06010v1-adding-thermal-awareness-to-visual-systems-in-real-time-via-distilled-diffusion-models)  
+   evidence：针对异构硬件的计算与内存优化分区
+9. [On Similarity of Computational Kernels in our Codes and Proxies](/202605/16/2605.06968v1-on-similarity-of-computational-kernels-in-our-codes-and-proxies)  
    标签：评分：6.0/10、query:hwnas
-   evidence：专为低延迟边缘部署设计的实时图像融合模块
-10. [Light-FMP: Lightweight Feature and Model Pruning for Enhanced Deep Recommender Systems](/202605/15/2605.06441v1-light-fmp-lightweight-feature-and-model-pruning-for-enhanced-deep-recommender-systems)  
+   evidence：将代码映射到硬件以获得最佳性能
+10. [Task-Oriented Communication for Human Action Understanding via Edge-Cloud Co-Inference](/202605/16/2605.07354v1-task-oriented-communication-for-human-action-understanding-via-edge-cloud-co-inference)  
    标签：评分：6.0/10、query:hwnas
-   evidence：推荐系统中提高计算效率的轻量级模型剪枝
-11. [CCL-Bench 1.0: A Trace-Based Benchmark for LLM Infrastructure](/202605/15/2605.06544v1-ccl-bench-10-a-trace-based-benchmark-for-llm-infrastructure)  
+   evidence：针对资源受限设备的边缘-云协同推理
+11. [MISA: Mixture of Indexer Sparse Attention for Long-Context LLM Inference](/202605/16/2605.07363v1-misa-mixture-of-indexer-sparse-attention-for-long-context-llm-inference)  
    标签：评分：6.0/10、query:hwnas
-   evidence：针对硬件加速器和软件框架的计算性能基准测试
+   evidence：长上下文推理时的稀疏注意力机制以提高效率
 
 
 <div class="dpr-home-promo-card">

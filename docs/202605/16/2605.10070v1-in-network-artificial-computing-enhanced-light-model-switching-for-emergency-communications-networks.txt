@@ -1,0 +1,310 @@
+Title: In-Network Artificial Computing Enhanced Light Model-Switching for Emergency Communications Networks
+
+URL Source: https://arxiv.org/pdf/2605.10070v1
+
+Published Time: Tue, 12 May 2026 02:12:41 GMT
+
+Number of Pages: 6
+
+Markdown Content:
+# In-Network Artificial Computing Enhanced Light Model-Switching for Emergency Communications Networks 
+
+Yuehan Li, Zhiyuan Ren, Tao Zhang, Wenchi Cheng 
+
+School of Telecommunications Engineering, Xidian University, Xi’an 710071, China E-mail: yhli225@stu.xidian.edu.cn, zyren@xidian.edu.cn, zhangtao02@xidian.edu.cn, wccheng@xidian.edu.cn 
+
+Abstract —Emergency communications networks require in-network intelligence for timely traffic handling under dynamic demands and runtime constraints. In these environments, packets may need different inference behaviors, and conventional model replacement via control-plane updates is too slow for responsive operation. We propose an in-network artificial computing frame-work with lightweight model-switching, where multiple Binary Neural Network (BNN) models are kept resident within a shared execution framework. Packet metadata selects the active model at packet granularity with O(1) selection cost. A fixed 1024-byte payload is aligned with x86 AVX-512, enabling efficient memory access. The framework is realized on an eBPF/XDP + AF_XDP stack. Experimental results show that the system sustains 1.894 Mpps with a 0.528 μs inference latency, while model selection adds only 0.005 μs. Our results demonstrate that different resident models induce distinct packet-processing behaviors, that scaling to 16 slots preserves low switching over-head, and that online model switching completes without wrong-verdict packets. These results show the practicality of lightweight in-network artificial computing on commodity hardware. 
+
+Index Terms —In-network computing, Lightweight model switching, Edge computing, Packet-path inference, Binary neural networks. 
+
+I. I NTRODUCTION 
+
+Emergency communications networks need both connec-tivity and timely in-network intelligent processing under dy-namic demands and runtime constraints. In such environments, packets associated with different tasks may require different processing on the same forwarding path, making static in-network computing infeasible. Instead, inference behavior must adapt online in a lightweight and responsive manner. This requirement exposes a systems challenge that is not well addressed by conventional model management ap-proaches. In existing practice, a change in model behavior is often realized through control-plane-driven replacement, such as reloading weights, restarting services, or redirecting traffic to another execution instance. While such operations may be acceptable in relatively stable environments, they are too heavyweight for responsive online adaptation in emergency communications networks, where semantic requirements may shift at packet boundaries or over short service intervals. As a result, the key challenge is no longer only how to execute one model efficiently on the packet path, but how to sup-port lightweight model-switching among multiple inference behaviors within a shared forwarding framework, without path mutation, service interruption, or online model delivery. To address this challenge, we present an in-network ar-tificial computing framework with enhanced light model-switching on the online packet path. The core idea is to keep multiple lightweight model behaviors continuously available within a shared execution framework and to resolve the active model through packet-carried metadata at packet granularity. In the current design, multiple Binary Neural Network (BNN) weight sets are preloaded into a resident model bank, while the parser, the executor, and the forwarding logic remain unchanged across packets. In this way, semantic adaptation is reduced to lightweight model resolution within one forwarding path, rather than being elevated into a heavyweight control-plane reconfiguration event. This design enables the same packet-processing pipeline to expose differentiated inference behaviors for different traffic or service states while preserving online responsiveness. This challenge is not well addressed in existing litera-ture. Prior work on anomaly detection, intrusion detection, and lightweight security inference mainly improves model accuracy, detection quality, or execution efficiency for spe-cific packet-processing tasks [1]–[4]. Research on Smart-NICs, FPGAs, and programmable switches focuses on accel-erating in-path inference or reducing the execution cost of network-resident processing [5]–[9]. Runtime-programmable data-plane systems further improve deployment flexibility and functional expressiveness [10], [11]. However, these works do not explicitly study lightweight online model-switching within a shared forwarding framework for in-network artificial computing in emergency communications networks. The key issue addressed in this paper is not only whether a single model can run efficiently on the packet path, but whether multiple lightweight inference behaviors can be sup-ported and switched online at low cost. Binary Neural Net-works (BNNs) are adopted because their compact parameter state and efficient SIMD mapping make them suitable for lightweight in-network execution and low-overhead model residency on commodity CPUs [12], [13]. In light of these observations, the primary contributions of this paper are as follows:  
+
+> •
+
+We formulate enhanced light model-switching for in-network artificial computing as a systems problem in 
+
+> arXiv:2605.10070v1 [cs.NI] 11 May 2026
+
+emergency communications networks.  
+
+> •
+
+We propose a shared execution framework that combines lightweight resident models, packet-granular metadata-driven model selection, and a unified forwarding path to realize responsive online semantic adaptation with low switching overhead.  
+
+> •
+
+We implement the proposed design on a non-intrusive eBPF/XDP + AF_XDP stack and show that it achieves lightweight online inference, preserves low switching overhead under resident-bank scaling, and supports packet-boundary model switching without wrong-verdict packets in the evaluated runs. The remainder of this paper is organized as follows. Sec-tion II details the proposed system design. Section III reports the comprehensive evaluation results. Finally, Sections IV provide the conclusion, respectively. II. S YSTEM DESIGN 
+
+BoundSwitch supports enhanced light model-switching for in-network artificial computing, allowing multiple model be-haviors within the same forwarding path. The active model is selected online through packet metadata, enabling differenti-ated inference without modifying the path. This design is built on three elements, namely a fixed packet representation, a resident model bank, and a shared inline executor. Throughout packet processing, the parser, the executor, and the forwarding logic remain unchanged, while only the selected model is updated through metadata resolution. The rest of this section describes these components in turn and then presents the prototype implementation on the eBPF/XDP + AF_XDP stack. 
+
+A. Architecture Overview 
+
+Fig. 1 illustrates the packet path architecture of BoundSwitch. After ingress, each packet is separated into a metadata path and a payload path. Control information is extracted from reg0 to drive model slot selection, while the payload region from reg1 to reg16 is assembled as the fixed input of the shared executor. The selected resident model is then applied to the payload, and the final forwarding action is determined jointly by the metadata and the inference result. A defining property of this design is that light model-switching is achieved without modifying the forwarding pipeline itself. Across packets, the parser, the executor, and the forwarding logic remain unchanged, while only the referenced model slot is resolved differently through packet metadata. As a result, differentiated inference behaviors are realized as an online packet-path operation within a shared execution framework, rather than as a conventional reconfiguration event imposed on the path. 
+
+B. Packet Formulation and Embedded BNN Execution 
+
+To support lightweight online model switching at packet boundaries, a fixed packet representation is adopted in BoundSwitch. Each packet is represented as a 1088 byte sample composed of seventeen 64 byte register blocks. The first block, reg0 , carries control metadata and configuration fields. The organization of these metadata fields is summarized in Table I. In particular, the 4 byte Model Slot ID is extracted to determine the active model index kp for each packet. Through this arrangement, model selection is kept strictly outside the payload region consumed by the BNN executor.               
+
+> TABLE I
+> R E G 0METADATA ORGANIZATION IN THE PROTOTYPE
+> Field Size Function Model slot ID 4 B Selects kp
+> Format / version 4 B Guards parser compatibility Control / reserved 8 B Future packet actions Padding / spare metadata 48 B Kept outside BNN input
+
+The remaining sixteen blocks, from reg1 to reg16 , carry the 1024 byte payload presented to the inline executor. This layout is chosen in accordance with the x86 AVX 512 execu-tion width. As shown in Fig. 2, each 64 byte block matches the 512 bit width of one ZMM register. As a result, the payload can be loaded through a regular register aligned mapping, and additional memory alignment penalties are avoided. The packet is therefore written in the form p = ( mp, x p), where 
+
+mp denotes the metadata and xp denotes the payload. Binary inference is performed by the executor according to 
+
+hp = sign( W (1)  
+
+> k
+
+xp + b(1)  
+
+> k
+
+), yp = W (2)  
+
+> k
+
+hp + b(2)  
+
+> k
+
+. (1) Because binary activations are used, the execution path can be expressed through bitwise operations together with pop-count style accumulation. A regular memory access pattern is thereby preserved, and the compute cost per packet remains bounded and predictable. 
+
+C. Weight Memory Organization and Lightweight Online Model Switching 
+
+Multiple BNN weight sets are preloaded into a resident model bank M, where each slot fk stores a complete param-eter set: 
+
+M = {f0, f 1, . . . , f K−1}, (2) 
+
+fk =
+
+
+
+W (1)  
+
+> k
+
+, b (1)  
+
+> k
+
+, W (2)  
+
+> k
+
+, b (2) 
+
+> k
+
+
+
+. (3) In the current prototype, each slot stores the complete parameter set together with the executor-side metadata re-quired at runtime. All resident models share the same input representation and the same execution interface in the present design, while their weights and biases differ across slots. All slots are loaded during initialization and remain resident at fixed memory locations throughout runtime. Consequently, model switching is reduced to slot selection over already resident model objects, rather than being implemented through online weight delivery or forwarding-path reconfiguration. For an incoming packet p = ( mp, x p), the model selection field is extracted from mp to compute the slot index kp, the inference result yp, and the final forwarding action ap as follows: 
+
+kp = σ(mp), (4) Ingress Packet parser 
+
+Metadata path 
+
+mp from reg0 
+
+Payload path 
+
+xp from reg1–16 
+
+Model selector 
+
+kp = σ(mp)
+
+Model bank 
+
+M = {f0, . . . , f K−1}
+
+BNN executor 
+
+yp = fkp (xp)
+
+Action logic 
+
+ap = Π( mp, y p)
+
+Egress                
+
+> Fig. 1. Embedded BNN switch architecture. reg0 carries metadata for model selection, reg1 –reg16 carry the payload blocks for inference, and the model bank enables lightweight online model switching across preloaded weight sets.
+> reg0 reg1 reg2 . . . reg15 reg16
+> Meta BNN Payload (1024B)
+> Slot Selection
+> Direct Register Mapping
+> ZMM0 ZMM1 . . . ZMM14 ZMM15
+> x86 AVX-512 Registers (512-bit each)
+> Fig. 2. The hardware aligned mapping between packet registers and AVX 512 ZMM units. By partitioning the payload into 64 byte blocks, BoundSwitch achieves direct vector loading for sub microsecond inference.
+
+yp = fkp (xp), (5) 
+
+ap = Π( mp, y p). (6) In this process, the selected resident model is applied to the payload, and the final forwarding action is derived accordingly. This organization captures the central design property of BoundSwitch. Model switching is realized through slot selection rather than forwarding-path mutation. Across packets, the parser, the executor, and the forwarding logic remain unchanged, while only the referenced resident model differs according to the resolved slot index. In this sense, lightweight online model switching is realized as an in-path runtime operation within the shared execution framework, without being elevated into a reconfiguration event. Because all model slots share the same input format and the same execution interface, runtime switching does not alter the parser, the executor pipeline, or the forwarding logic. Only the slot index kp is updated for each packet. As a result, lightweight online model switching can be performed at packet granularity while traffic continues to traverse the same forwarding path. Fig. 3 illustrates the resident model bank used in the pro-totype. Each slot corresponds to a fixed in memory parameter object with the same structural layout. As a result, data path switching is reduced to resolving the referenced resident slot, rather than rebuilding model state or reconfiguring the forwarding path. 
+
+D. Prototype Realization and Memory Footprint 
+
+The proposed architecture is realized on a Linux native packet path built from eBPF/XDP and AF_XDP. At ingress,    
+
+> reg0
+> slot field
+> slot selector
+> kp
+> slot 0 resident weights
+> slot 1 resident weights
+> slot K−1
+> resident weights
+> shared BNN executor
+> Fig. 3. Resident model bank layout. Multiple weight sets are kept resident in memory behind a shared executor, and lightweight online model switching is realized by resolving the referenced slot.
+
+Algorithm 1 Packet-Path Processing with Lightweight Online Model Selection 
+
+Require: packet p = ( mp, x p), model bank M 
+
+> 1:
+
+parse slot metadata from reg0  
+
+> 2:
+
+compute slot index kp ← σ(mp) 
+
+> 3:
+
+resolve resident slot kp and fetch model fkp from M 
+
+> 4:
+
+compute score yp ← fkp (xp) 
+
+> 5:
+
+derive action ap ← Π( mp, y p) 
+
+> 6:
+
+emit packet according to ap
+
+packets are steered by XDP into a user space forwarding path backed by AF_XDP. Within this path, both the resident model bank and the shared AVX 512 BNN executor are hosted by the same forwarder. For each packet, the slot field is read from reg0 , the corresponding resident slot is resolved, and the same executor is applied to the fixed 1024 byte payload representation. In this way, the single pipeline property of BoundSwitch is preserved. Switching neither creates a new execution path nor instantiates another executor. Only the referenced resident slot is changed at runtime. Under this implementation, lightweight online model switching remains strictly below the level of forwarding-path reconfiguration. Traffic is neither redirected to another service nor coupled to online weight loading. In the current prototype, the post inference action stage is intentionally kept simple, so that the evaluation can isolate whether different resident models produce distinct and observable packet behaviors on the same forwarding path. The resident footprint of the prototype remains modest on commodity CPUs. In the current implementation, each h32 
+
+weight file used in the experiments occupies 32932 bytes on TABLE II RESIDENT WEIGHT FOOTPRINT IN THE PROTOTYPE       
+
+> Resident bank Slots Weight footprint Online continuity prototype 265864 B Scaling microbenchmark 16 526912 B
+
+disk. Accordingly, the two slot online prototype keeps about 64.3 KB of resident weights, whereas the 16 slot scaling microbenchmark keeps about 514.6 KB. The corresponding footprint is summarized in Table II. The execution cost of the hot switching path can also be described structurally. Let d denote the input dimension in bits, and let h denote the hidden layer width. Under the fixed format packet path used in this prototype, one packet requires one slot lookup, one binary hidden layer pass over d × h,and one output layer pass over h. Parsing and slot selection therefore remain constant cost operations in the evaluated design, while the model dependent computation scales only with the selected resident BNN. This characterization keeps the per packet switching cost regular and predictable in the evaluated regime. At the same time, it should be noted that the present analysis does not yet characterize larger resident banks that may impose stronger pressure on the cache hierarchy. III. E VALUATION 
+
+BoundSwitch is evaluated here as an in-network artificial computing framework with enhanced light model-switching, rather than as a detector design study. Accordingly, this section focuses on three questions. First, whether inline BNN execution is sufficiently lightweight for online deployment. Second, whether metadata-driven model selection can induce distinct packet-processing behaviors while the forwarding path remains shared. Third, whether lightweight online model switching preserves low overhead and forwarding continuity as the resident model bank is extended beyond the two-slot setting. Unless otherwise stated, the fixed single-model path is used as the baseline operating mode. 
+
+A. Experimental Setup 
+
+BoundSwitch is instantiated with malicious traffic recog-nition as a concrete packet processing workload, while the evaluation remains focused on switching behavior rather than detector quality. Packet samples are derived from IoT-23 [14] and are mapped into the fixed 1088 byte representation used by BoundSwitch. The same h32 BNN structure is used throughout all experiments. Different model slots share the same input format, the same executor, and the same forward-ing path, while differing only in their resident weight sets. Under this setup, the two-slot experiment is used to test whether resident model selection can produce distinguishable packet-processing behaviors and lightweight boundary switch-ing on a shared forwarding path. The 16-slot experiment is used only to evaluate whether model-selection cost remains stable as resident-bank cardinality increases, rather than to represent 16 distinct application behaviors. Online switching is                                          
+
+> TABLE III EXPERIMENTAL SETUP SUMMARY
+> Item Configuration Workload Malicious traffic recognition Dataset IoT-23 [14] Packet format Fixed 1088 byte representation, with reg0
+> for metadata and reg1 –reg16 for 1024 byte payload Model structure Shared h32 BNN structure in all experiments Two slot setup One shared executor and two resident slots with different weight sets only Training split Training groups: 20-1 ,21-1 ,33-1 ,36-1 ,
+> 43-1 ,48-1 ;validation groups: 35-1 ,
+> 42-1
+> Slot 0 Recall oriented model, trained with
+> pos_weight=4.0 , selected by recall Slot 1 Precision oriented model, trained with
+> pos_weight=0.5 , selected by precision Slot loading Both weight sets are preloaded before runtime 16 slot setup The same two weight sets are alternated across 16 resident slots Scaling traces Fixed, round robin, random, and hotspot slot access traces
+
+evaluated with a deterministic 64 packet stream for boundary correctness and with a longer 8192 packet stream under the same slot transition at larger scale. 
+
+B. Runtime Cost 
+
+The runtime overhead of BoundSwitch is first evaluated to determine whether lightweight online model switching can remain on the packet path without violating the forwarding budget. As shown in Fig. 4, the h32 executor completes one inference in 0.528 μs and sustains 1.894 Mpps on one pinned core. For reference, this corresponds to 15.52 Gbps under a 1024 byte payload interpretation and 22.73 Gbps under a 1500 byte packet length interpretation. Fig. 4 further breaks the runtime cost into slot selection, inference, and end to end packet path latency. Pure slot selection costs 0.005 μs, whereas pure BNN inference costs 0.528 μs. The total packet path latency, including AF_XDP I/O, packet parsing, slot selection, inference, and forwarding logic, is 0.894 μs. These results show that the runtime overhead introduced by resident slot selection is negligible relative to inference and remains compatible with deployment on commodity CPUs. A dedicated microbenchmark is then used to examine whether this property is preserved as resident bank cardinality increases from 2 to 16 slots. The same two h32 weight sets are alternated across resident slots so that slot selection cost can be isolated from parser and executor changes. Correct slot selection is preserved for all 16 slot IDs. As shown in Fig. 5, across fixed, round robin, random, and hotspot access traces, the measured slot selection cost remains tightly clustered around 0.0037 μs for both 2 slot and 16 slot banks. The combined selection plus inference latency remains within 0.67 μs to 0.92 μs across the same regimes, where the larger variation is attributable to access pattern dependent runtime behavior rather than to slot selection itself. These results Select    
+
+> Infer
+> End-to-end
+> 0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1
+> Latency ( μs)
+> Fig. 4. Runtime breakdown of slot selection, inline h32 inference, and end to end packet path latency.
+
+indicate that resident bank cardinality can be increased to 16 without materially changing the cost of the slot selection path. 
+
+C. Slot-Conditioned Behavior 
+
+Metadata driven slot selection is next examined for its ability to induce distinct packet processing behaviors on the same forwarding path. The two resident slots are intentionally configured to exhibit different decision tendencies under the same workload. Slot 0 is recall oriented, whereas Slot 1 is precision oriented. As shown in Fig. 6, this difference is clearly reflected in the resulting precision, recall, and F1 scores. Slot 0 produces high recall, while Slot 1 produces substantially higher precision. These results are sufficient to show that different resident slots can expose distinguishable packet handling behaviors on the same shared forwarding path. This effect is also directly observable at the single sample level. With the payload held fixed, changing only the slot selection field in reg0 changes the output score from 1.98715 under Slot 0 to -0.0181384 under Slot 1. This result confirms that packet behavior can be altered solely through slot choice, while the forwarding path itself remains unchanged. 
+
+D. Switching Continuity 
+
+Lightweight online model switching is first tested in terms of forwarding continuity. A deterministic 64-packet trace is used to examine whether model switching can be completed correctly at a packet boundary on the shared forwarding path. The first half of the stream carries reg0=0 and consistently selects Slot 0, while the second half carries reg0=1 and consistently selects Slot 1. The transition occurs exactly at the packet boundary, from source port 47031 to 47032. An 8192 packet run is then used to examine continuity at larger scale. This run uses a user space replay harness that spaces packet emissions by 10 μs. The pacing is intentional, so that per packet switching continuity can be examined without being dominated by PCIe or driver side batching artifacts. In this run, the forwarder processes 8131 of 8192 packets online, or 99.26%. Trace inspection attributes the missing 61 packets to the initial warm up prefix of the replay rather than to the switching boundary. Across all observed packets, zero wrong slot hits and zero wrong forwarding verdicts are recorded, and all 4096 Slot 1 packets in the sink phase are delivered successfully.              
+
+> TABLE IV SWITCHING CONTINUITY STATISTICS ON THE 8192-PACKET RUN
+> Metric Before / Median After / Boundary Packet gap ( μs) 93.03 95.58 Forwarding rate (kpps) 10.49 10.85 TABLE V COMPARISON BETWEEN LIGHTWEIGHT RESIDENT SWITCHING AND ONLINE CONTROL -PLANE REPLACEMENT
+> Method Switch latency ( μs) Wrong packets Lightweight resident switching 0.005 0Online control-plane replacement 484.896 99
+
+From the timing perspective, Table IV summarizes the continuity statistics on the 8192-packet run. The measured boundary gap of 95.58 μs remains close to the overall median gap of 93.03 μs, while the forwarding rate within a 512-packet window is 10.49 kpps before the switch and 10.85 kpps after it. These results support the conclusion that, in the evaluated run, lightweight online model switching remains correct at the packet boundary and does not create a visible continuity break on the forwarding path. 
+
+E. Comparison with Online Control-Plane Replacement 
+
+To compare lightweight online model switching with on-line control-plane replacement, a real control-plane update experiment is executed on the same 8192-packet workload. In that run, the forwarder starts with only Slot 0 active, and the control plane sends the Slot 1 weight file over a Unix control socket only after the packet stream crosses the switching boundary. Under the same operation-level notion of switching cost used in Fig. 4, the control-plane switch latency from update send start to effective is 484.90 μs. Because triggering starts only after boundary detection, the boundary-to-effective window expands to 8479.45 μs, during which 99 post-boundary packets are still processed under Slot 0 and therefore produce 99 wrong-model and 99 wrong-verdict events. This contrast highlights the role of resident preload-ing in BoundSwitch. Under a unified switching definition, lightweight resident switching costs 0.005 μs, while online control-plane switching costs 484.90 μs. The control update result should therefore not be interpreted as a second im-plementation of the same mechanism. Instead, it serves as a comparison point showing both the higher switching cost and the resulting post-boundary error window when the new model is not already resident on the forwarding path. Table V summarizes the direct comparison between lightweight resident switching and online control-plane re-placement in terms of switch latency and wrong-packet count. IV. C ONCLUSION 
+
+We present an in-network artificial computing framework with lightweight model-switching for emergency communica-Fixed 
+
+> RR
+> Rand
+> Hot
+
+0
+
+2
+
+4
+
+·10 −3
+
+> Slot selection latency ( μs)
+
+2-slot 16-slot 
+
+> Fixed
+> RR
+> Rand
+> Hot
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+> Select + Inference Latency( μs)
+
+Fig. 5. Resident-bank scaling from 2 to 16 slots under different slot-access patterns. Left: Slot selection latency remains nearly unchanged. Right: Select plus inference latency is dominated by access-pattern-dependent runtime behavior. Precision Recall F1 
+
+0
+
+0.5
+
+1
+
+> Metric Value
+
+Slot 0 (recall) Slot 1 (precision) Fig. 6. Slot conditioned behavior on the same forwarding path, shown in terms of precision, recall, and F1 score. 
+
+tions networks, using packet metadata to select models with-out modifying the forwarding path. This enables lightweight online switching as an in-path operation, rather than a control-plane replacement. The evaluation shows that this design is practical on com-modity x86 hardware. The h32 executor sustains 1.894 Mpps with 0.528 μs inference latency, while model switching adds only 0.005 μs of extra cost. Different resident models produce distinguishable packet-processing behaviors on the same for-warding path, and lightweight online switching is completed without visible continuity break in the evaluated runs. The control-plane update experiment further shows why resident preloading is important for this design. Under the same switching metric, lightweight resident switching costs 0.005 μs, whereas online control-plane switching costs 484.90 μs and produces a non-zero post-boundary wrong-packet window. These results indicate that the proposed design provides a practical basis for lightweight in-network artificial computing and responsive online semantic adaptation in emer-gency communications networks. ACKNOWLEDGMENT 
+
+This work was supported by the National Key Research and Development Program of China (No. 2024YFE0200302). REFERENCES [1] Y. Mirsky, T. Doitshman, Y. Elovici, and A. Shabtai, “Kitsune: An ensemble of autoencoders for online network intrusion detection,” in 
+
+Network and Distributed System Security Symposium , 2018. [2] S. Wang, J. F. Balarezo, S. Kandeepan, A. Al-Hourani, K. Gomez Chavez, and B. Rubinstein, “Machine learning in network anomaly detection: A survey,” IEEE Access , vol. 9, pp. 152 379–152 396, 2021. [3] H. M. R. U. Rehman, S. Liaquat, M. J. Gul, M. Z. Jhandir, and D. Gavilanes, “A systematic literature study of machine learning tech-niques based intrusion detection: Datasets, models, challenges, and future directions,” Journal of Big Data , vol. 12, p. 264, 2025. [4] H. Azzaoui, A. Z. E. Boukhamla, P. Perazzo, M. Alazab, and V. Ravi, “A lightweight cooperative intrusion detection system for rpl-based iot,” 
+
+Wireless Personal Communications , vol. 134, pp. 2235–2258, 2024. [5] Z. Zhao, H. Sadok, N. Atre, J. C. Hoe, V. Sekar, and J. Sherry, “Achieving 100Gbps intrusion prevention on a single server,” in USENIX Symposium on Operating Systems Design and Implementation , 2020. [6] T. Swamy, A. Rucker, M. Shahbaz, I. Gaur, and K. Olukotun, “Taurus: A data plane architecture for per-packet ml,” in International Conference on Architectural Support for Programming Languages and Operating Systems , 2022. [7] T. Jepsen, D. Firestone, A. Putnam et al. , “Azure accelerated net-working: Smartnics in the public cloud,” in USENIX Symposium on Networked Systems Design and Implementation , 2018. [8] J. Yan, H. Xu, Z. Liu, Q. Li, K. Xu, M. Xu, and J. Wu, “Brain-on-switch: Towards advanced intelligent network data plane via nn-driven traffic analysis at line-speed,” in 21st USENIX Symposium on Networked Systems Design and Implementation . USENIX Association, 2024, pp. 419–440. [9] X. Gao, T. Li, Y. Zhang, Z. Wang, X. Zeng, S. Yao, and K. Xu, “Fenix: Enabling in-network dnn inference with fpga-enhanced programmable switches,” in 23rd USENIX Symposium on Networked Systems Design and Implementation . USENIX Association, 2026. [10] J. Xing, K.-F. Hsu, M. Kadosh, A. Lo, Y. Piasetzky, A. Krishnamurthy, and A. Chen, “Runtime programmable switches,” in 19th USENIX Sym-posium on Networked Systems Design and Implementation . USENIX Association, 2022, pp. 651–667. [11] Y. Feng, Z. Chen, H. Song, W. Xu, J. Li, Z. Zhang, T. Yun, Y. Wan, and B. Liu, “Enabling in-situ programmability in network data plane: From architecture to language,” in 19th USENIX Symposium on Networked Systems Design and Implementation . USENIX Association, 2022, pp. 635–649. [12] M. Courbariaux, Y. Bengio, and J.-P. David, “Binaryconnect: Training deep neural networks with binary weights during propagations,” in 
+
+Advances in Neural Information Processing Systems , 2015. [13] M. Rastegari, V. Ordonez, J. Redmon, and A. Farhadi, “Xnor-net: Imagenet classification using binary convolutional neural networks,” in 
+
+European Conference on Computer Vision , 2016. [14] S. Garcia, A. Parmisano, and M. J. Erquiaga, “IoT-23: A Labeled Dataset with Malicious and Benign IoT Network Traffic,” Stratosphere Laboratory, CTU, Tech. Rep., 2020.
