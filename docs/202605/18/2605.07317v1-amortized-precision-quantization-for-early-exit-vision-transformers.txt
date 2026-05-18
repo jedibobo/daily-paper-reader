@@ -1,0 +1,907 @@
+Title: Amortized-Precision Quantization for Early-Exit Vision Transformers
+
+URL Source: https://arxiv.org/pdf/2605.07317v1
+
+Published Time: Mon, 11 May 2026 00:55:07 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# Amortized-Precision Quantization for Early-Exit Vision Transformers 
+
+Rui Fang 
+
+National Taiwan University 
+
+rfang@arbor.ee.ntu.edu.tw 
+
+Hsi-Wen Chen 
+
+National Taiwan University 
+
+hwchen@arbor.ee.ntu.edu.tw 
+
+Ming-Syan Chen 
+
+National Taiwan University 
+
+mschen@ntu.edu.tw 
+
+## Abstract 
+
+Vision Transformers (ViTs) achieve strong performance across vision tasks, yet their deployment with low-precision early exiting remains fragile. Existing quan-tization methods assume static full-depth execution, making them unstable when exit decisions are perturbed by quantization noise, which can amplify errors along dynamic inference paths. In this paper, we introduce Amortized-Precision Quantization (APQ) , a utilization-aware formulation that accounts for layer-wise stochastic exposure to quantization noise and reveals depth–precision trade-offs. Building on APQ, we propose Mutual Adaptive Quantization with Early Ex-iting (MAQEE) , a bi-level framework that jointly optimizes exit thresholds and bit-widths under explicit risk control to improve inference stability. MAQEE es-tablishes a superior Pareto frontier in the accuracy–efficiency trade-off, reducing BOPs by up to 95% while maintaining accuracy and outperforming strong base-lines by up to 20% across classification, detection, and segmentation tasks. 
+
+## 1 Introduction 
+
+Vision Transformers (ViTs) [7] achieve strong performance across classification [3], detection [2], and segmentation [10], but their high computational cost limits deployment on edge devices [33, 46]. Quantization [4] improves efficiency by reducing weight and activation precision. Early approaches adopt Fixed-Precision Quantization (FPQ) [14, 17, 45], but uniform bit-width assignment ignores the heterogeneous sensitivity of ViT layers to quantization noise [23, 36]. Mixed-Precision Quan-tization (MPQ) [16, 41] partially addresses this issue by assigning layer-wise bit-widths based on sensitivity, yet remains designed for static, full-depth inference. However, modern ViT architectures increasingly rely on dynamic inference , such as Early Exiting (EE) [19, 37, 44], where lightweight exit heads enable input-dependent termination to reduce la-tency. This creates a mismatch with conventional quantization: MPQ calibrates precision under a fixed execution path, whereas EE induces stochastic, input-dependent depths [28]. As shown in the left panel of Fig. 1, quantization noise can perturb confidence estimates for early exiting, leading to either premature or delayed exits. Our preliminary results show this effect: quantizing EE-trained models causes up to a 50% accuracy drop, while applying EE to already quantized models makes it difficult to properly train exit heads, resulting in limited efficiency gains. Moreover, training exit heads directly on a quantized model is infeasible, since low-precision weights provide insufficient flexibility to learn reliable exit decisions. 1                                  
+
+> 1Mixture of Experts (MoE) [13, 30] is another dynamic inference paradigm, but unlike EE, it selects a fixed sub-network per input rather than changing the executed depth. Thus, EE is more sensitive to quantization error. Preprint.
+> arXiv:2605.07317v1 [cs.CV] 8 May 2026 00.5 1Layer 0 Layer 1 Layer 2 Layer 3 Con fi dence Score Update thresholds 𝜙
+> Update bits alloca �on 𝑏
+> Outer-Loop: Threshold Op �miza �on
+> min
+> 𝜙 𝑅 ℓ+ BOPs 𝑏 ℓ;𝜙 ℓℓ(Eq. 12) Inner-Loop: Bit-widths Alloca �on
+> (Eq. 13) Quan �zed Early-Exit ViT Model: 𝜃 ,𝝓 ,𝒃
+> L1 L2 L3 L4 ...
+> 𝜙 0
+> 𝑏 0
+> 𝜙 1
+> 𝑏 1𝑏 2𝑏 3
+> 𝑢 ℓ,𝑅 ℓ
+> Self-Dis �lla �on Recovery
+> min
+> 𝜃 ℒ𝜃 ,𝑥 ,𝑦
+> (Eq. 15) Update Params
+> 𝜃 𝑅 𝑙
+> Bi-Level Op �miza �on with APQ ... Layer 1 Layer 2 Final Result PGR Full-Precision
+> Q-Layer 1 Q-Layer 2 Exit Gate ... Exit Result
+> Quan �zed
+> Modeling Risk for Early Exi �ng and Quan �za �on
+> QID
+> Layer 0 Q-Layer 0
+> BSR
+> 00.5 1Layer 0 Layer 1 Layer 2 Layer 3 Con fi dence Score Threshold Threshold
+> Correct Exit Wrong Premature Exit Wrong Delay Exit
+> Full-Precision Quan �zed
+> Unstable Exit Decisions
+
+Figure 1: Overview of MAQEE. Left : Quantization error perturbs early-exit decisions, causing either prema-ture or delayed exits. Middle : Risk modeling for early exiting and quantization, including performance gap risk (PGR), boundary sensitivity risk (BSR), inverse SQNR, and quantization-induced drift (QID). Right : MAQEE solves Amortized-Precision Quantization (APQ) via bi-level optimization, where exit thresholds and layer-wise bit-widths are jointly optimized, with self-distillation for accuracy recovery. 
+
+Motivated by these observations, we propose Amortized-Precision Quantization (APQ) , a quanti-zation paradigm tailored to early-exit inference. Unlike conventional approaches that assume a fixed execution path, APQ treats precision as a resource whose impact depends on dynamic layer utiliza-tion. This induces a utilization-aware depth–precision trade-off: precision allocation should account for how often each layer is reached, how its quantization error affects subsequent inference paths, and how it may mislead exit decisions. Our theoretical analysis shows that static precision allocation fails to capture these effects, explaining the robustness degradation observed when quantization is naively combined with early exiting. To effectively optimize APQ, we introduce Mutual Adaptive Quantization with Early Exiting (MAQEE) , a bi-level optimization framework that jointly optimizes exit thresholds and layer-wise bit-widths, as illustrated in the middle and right panels of Figure 1. MAQEE models instability from both exit-decision uncertainty and representation distortion, using four risk terms to capture performance degradation, boundary sensitivity, quantization noise, and distributional drift. These risks are aggregated into a unified risk score that guides the alternating optimization of thresholds and bit-widths within a bi-level iterative procedure. With lightweight self-distillation and efficient warm-starting, MAQEE improves low-precision recovery and accelerates convergence. 
+
+Our contributions are summarized as follows. First, we formalize the incompatibility between quantization and early exiting, and propose Amortized-Precision Quantization (APQ) to characterize inference complexity under dynamic execution. Second, we propose Mutual Adaptive Quantization with Early Exiting (MAQEE), a bi-level framework that jointly optimizes exit thresholds and bit-width allocation through risk-aware control. Third, we theoretically explain why static FPQ and MPQ are mismatched with early exiting and show that MAQEE enables more stable utilization-aware optimization. Finally, experiments across three computer vision tasks show that MAQEE forms a superior Pareto frontier in the accuracy–efficiency trade-off, reducing BOPs by up to 95% while preserving full-precision accuracy and outperforming state-of-the-art methods by up to 20%. 
+
+## 2 Problem Formulation 
+
+This section introduces Amortized-Precision Quantization (APQ) and formulates its correspond-ing optimization problem. A detailed notation table is provided in Appendix D. 
+
+Quantization. Quantization replaces floating-point operations with low-bit integer arithmetic to reduce memory footprint and inference cost [14]. Given bit-width b, a scale factor s, and a zero-point t, values are mapped to a b-bit integer range, e.g., [−2b−1, 2b−1 − 1] for signed quantiza-tion, and dequantization approximates the original value by s(xq − t). Existing strategies include 
+
+Fixed-Precision Quantization (FPQ) [14, 45], which uses a uniform bit-width, and Mixed-Precision Quantization (MPQ) [16, 41], which assigns sensitivity-aware layer-wise bit-widths. Consider a network with L layers and a set of available bit-widths B, e.g., {2, 4, 8}. Each layer ℓ is assigned a bit-width bℓ ∈ B , giving an allocation b = {bℓ}Lℓ=1 . Let cℓ(bℓ) denote the computational cost of layer ℓ under bit-width bℓ. We measure cost by bit operations (BOPs) , commonly defined as FLOPs × Bw × Ba, where Bw and Ba are the weight and activation bit-widths [12, 33]. Since 2conventional FPQ and MPQ assume that all inputs traverse all L layers, their expected complexity depends only on the static allocation b, following a deterministic full-depth path. 
+
+Early Exiting. Early exiting shortens inference by attaching auxiliary classifiers, or exit heads, to intermediate layers, allowing samples to terminate once predictions become sufficiently confi-dent [32]. This induces stochastic, input-dependent inference depths : easy samples exit early, while harder ones propagate deeper. Formally, let zℓ(x) denote the logits at layer ℓ, and define the exit con-fidence as ρℓ(x) := max j softmax( zℓ(x)) j . An input exits at the first layer ℓ such that ρℓ(x) ≥ ϕℓ,where ϕℓ ∈ [0 , 1] is the exit threshold; otherwise, it continues until layer L, which serves as the fallback exit. The exit policy is parameterized by ϕ = {ϕℓ}Lℓ=1 .To quantify stochastic execution under early exiting, we define the utilization indicator uℓ(x, ϕ) = 
+
+1{x reaches layer ℓ | ϕ}, and its expectation over the data distribution D, uℓ(ϕ) = Ex∼D [uℓ(x, ϕ)] ,which measures the probability that layer ℓ is activated. The objective of early exiting is to reduce computation cost while preserving accuracy; however, its exit behavior fundamentally alters how quantization noise accumulates and propagates across layers. 
+
+Amortized-Precision Quantization (APQ). Conventional quantization assumes a fixed full-depth inference path, where all layers are executed for every input. Under early exiting, however, execution depth becomes stochastic and input-dependent, so quantization noise is exposed and propagated only along realized inference paths. This creates a mismatch for static bit allocation: layers with different execution frequencies may have different effective precision requirements. To address this, we propose Amortized-Precision Quantization (APQ) , which accounts for layer-wise execution frequency when allocating precision under early exiting. 
+
+Definition 1 (Amortized-Precision Quantization (APQ)) . Consider a network with L layers, where each layer ℓ is assigned a bit-width bℓ ∈ B from the available bit-width set B. The amortized computational complexity of a bit allocation b under an early-exit policy ϕ is defined as         
+
+> CAPQ (b,ϕ) =
+> LX
+> ℓ=1
+> Ex∼D [uℓ(x, ϕ)·cℓ(bℓ)] =
+> LX
+> ℓ=1
+> uℓ(ϕ)·cℓ(bℓ),(1)
+
+where cℓ(bℓ) is the cost of layer ℓ under bit-width bℓ, uℓ(x, ϕ) ∈ { 0, 1} indicates whether layer ℓ is executed for input x, and uℓ(ϕ) = Ex∼D [uℓ(x, ϕ)] is its utilization under the exit policy. 
+
+Since uℓ(ϕ) depends on exit thresholds, APQ naturally leads to a joint optimization of bit-widths b
+
+and exit policy ϕ to balance accuracy and amortized low-bit cost:        
+
+> (b∗,ϕ∗) = arg min
+> b,ϕE(x,y )∼D
+> L fθ, b,ϕ(x), y  +λC APQ (b,ϕ),(2)
+
+where L denotes the task-specific loss, fθ, b,ϕ denotes the quantized early-exit network, and λ con-trols the accuracy–efficiency trade-off. More broadly, APQ provides a utilization-aware view for dynamic inference paradigms such as recursive Transformers [34], MoE routing [49], and layer skipping [8], where input-dependent computation induces non-uniform exposure of layers or mod-ules to quantization noise. 
+
+## 3 Why Static Precision Allocation Fails under Dynamic Inference 
+
+This section analyzes the mutual interference between quantization and early exiting under stochas-tic low-bit execution. Because early exiting induces input-dependent stopping depths, quantization affects not only predictions but also executed-depth distributions, while early exiting in turn changes each layer’s exposure to quantization noise. This random-stopping view explains why static preci-sion allocation is mismatched with dynamic inference. 
+
+Quantization Perturbs the Exit Policy. For each layer ℓ, let ∆ℓ(x) = ρℓ(x) − ϕℓ denote the full-precision confidence margin relative to the exit threshold ϕℓ. Let ˜ρℓ, b(x) denote the confidence after quantization under bit allocation b, and define the induced confidence perturbation as    
+
+> ξℓ, b(x) = ˜ ρℓ, b(x)−ρℓ(x).(3)
+
+We define the full-precision and quantized exit decisions as eℓ(x) = 1{ρℓ(x) ≥ ϕℓ} and 
+
+˜eℓ(x) = 1{˜ρℓ, b(x) ≥ ϕℓ}, respectively. The two decisions can differ only when the perturba-tion crosses the confidence boundary: if ˜eℓ(x)̸ = eℓ(x), then |∆ℓ(x)| ≤ | ξℓ, b(x)|. Thus, exit instability depends jointly on the margin distribution around the threshold and the magnitude of the quantization-induced confidence perturbation. 3Theorem 1. Assume that the confidence perturbation ξℓ, b(x) satisfies the tail bound    
+
+> Pr( |ξℓ, b(x)|> τ ℓ)≤qℓ(τℓ, b ℓ),
+
+where qℓ(τℓ, b ℓ) is non-increasing in τℓ and non-decreasing as bℓ decreases. Then, for any tolerance 
+
+τℓ > 0, the mis-exit probability satisfies       
+
+> Pr(˜ eℓ(x)̸=eℓ(x)) ≤Pr( |∆ℓ(x)| ≤ τℓ) + qℓ(τℓ, b ℓ).
+
+Theorem 1 decomposes exit instability into a boundary-mass term and a quantization-perturbation tail term. The term Pr( |∆ℓ(x)| ≤ τℓ) captures samples near the confidence boundary, where small perturbations may flip the exit decision. The term qℓ(τℓ, b ℓ) captures the probability that the quantization-induced perturbation exceeds the tolerated margin. As bℓ decreases, this tail term increases, yielding a larger upper bound on the exit-decision mismatch probability. Since early exiting stops at the first confident layer, such layer-wise mismatches can shift the real-ized stopping-depth distribution, leading to premature exits that harm accuracy or delayed exits that reduce efficiency (see Corollary 1 in Appendix A.2). 
+
+Random-depth Amplifies Quantization Error. We next show that early exiting turns quantization from a fixed-depth approximation problem into a random-depth distortion problem. Let hℓ(x) and 
+
+˜hℓ, b(x) denote the full-precision and quantized hidden states at layer ℓ. Suppose that, for ℓ =1, . . . , L , the layer-wise distortion satisfies        
+
+> ∥˜hℓ, b(x)−hℓ(x)∥ ≤ γℓ−1∥˜hℓ−1,b(x)−hℓ−1(x)∥+εℓ(bℓ),
+
+where εℓ(bℓ) denotes the local distortion introduced at layer ℓ, γℓ−1 captures sensitivity from layer 
+
+ℓ − 1 to layer ℓ, and the input distortion is initialized as ∥˜h0,b(x) − h0(x)∥ = 0 .
+
+Theorem 2. For any realized stopping depth k, the accumulated representation error satisfies    
+
+> ∥˜hk, b(x)−hk(x)∥ ≤
+> kX
+> ℓ=1
+> εℓ(bℓ)
+> kY
+> r=ℓ+1
+> γr−1,
+
+where the empty product is defined as 1. Under early exiting with random stopping depth Kϕ(x),the expected distortion satisfies     
+
+> Ex∼D
+> h
+> ∥˜hKϕ(x),b(x)−hKϕ(x)(x)∥
+> i
+> ≤Ex∼D
+> 
+> Kϕ(x)
+> X
+> ℓ=1
+> εℓ(bℓ)
+> Kϕ(x)
+> Y
+> r=ℓ+1
+> γr−1
+> .
+
+This theorem shows that quantization error under early exiting is path-dependent: its impact depends on local representation distortion, downstream propagation, and the probability that each layer is reached. Errors in frequently executed or shallow layers can have a larger amortized impact, while rarely executed layers may contribute less. 
+
+Static Precision Allocation Is Mismatched. Conventional FPQ and MPQ allocate bit-widths according to static layer sensitivity, implicitly assuming that every layer is executed for every input. Under early exiting, however, the contribution of layer ℓ is weighted by its utilization probability     
+
+> uℓ(ϕ) = Pr
+> x∼D (Kϕ(x)≥ℓ).
+
+Let Sℓ denote the static quantization sensitivity of layer ℓ. Under APQ, the relevant marginal impor-tance becomes the utilization-weighted quantity uℓ(ϕ)Sℓ, rather than Sℓ alone. 
+
+Theorem 3. Assume that static MPQ ranks layers by their static sensitivities Sℓ, while APQ ranks layers by their utilization-weighted sensitivities uℓ(ϕ)Sℓ. If there exist two layers i and j such that       
+
+> Si> S jbut ui(ϕ)Si< u j(ϕ)Sj,
+
+then the static MPQ ranking is inconsistent with the APQ ranking. Moreover, under equal marginal bit-cost increments and marginal APQ benefit proportional to uℓ(ϕ)Sℓ, the static MPQ allocation can be suboptimal for the APQ objective. 
+
+Theorem 3 shows that static quantization can be suboptimal even with accurate full-depth sensitivity estimates, because it ignores layer utilization under early exiting. In contrast, APQ prioritizes layers that are both sensitive and frequently exposed to quantization noise. 4Takeaway. The above results yield two main observations. First, Theorem 1 shows that quantization can flip exit decisions near the boundary, motivating the decision-level bound-ary sensitivity risk (BSR). Second, Theorem 2 shows that quantization error is path-dependent under early exiting, motivating the representation-level quantization-induced drift (QID) and utilization-aware bit-width allocation. Together, these results explain the objective mismatch in Theorem 3: static MPQ ignores utilization, whereas APQ calls for a framework that jointly optimizes bit-width allocation and exit-threshold adaptation. 
+
+## 4 MAQEE 
+
+To optimize APQ effectively, we need to balance dynamic execution depth and layer-wise precision under quantization. Exit thresholds determine which layers are executed, while bit-width allocation controls how quantization error affects exit decisions and downstream representations. This coupling naturally gives rise to Mutual Adaptive Quantization with Early Exiting (MAQEE) , a bi-level optimization framework that jointly optimizes exit thresholds and layer-wise bit-width allocation. Detailed pseudocode is given in Appendix C. 
+
+4.1 Bi-Level Optimization with APQ 
+
+Since APQ aims to reduce expected amortized complexity while preserving prediction accuracy, the problem is naturally formulated as a bi-level optimization over (b, ϕ). Recall that uℓ(ϕ) denotes the probability that inference reaches layer ℓ. We denote the expected task loss under APQ as follows.    
+
+> L(b,ϕ) := E(x,y )∼D
+> h
+> L fθ, b,ϕ(x), y i
+> .(4)
+
+Outer-loop (Exit-threshold optimization). Let ϕ = {ϕℓ}Lℓ=1 denote the confidence thresholds of the exit heads. The outer problem optimizes these thresholds to balance prediction accuracy and inference latency:         
+
+> ϕ∗= arg min
+> ϕL b∗(ϕ),ϕ+λouter CAPQ (b∗(ϕ),ϕ),(5)
+
+where λouter controls the trade-off between accuracy and latency, and b∗(ϕ) denotes the optimal bit-width allocation induced by the exit policy ϕ through the inner loop. 
+
+Inner-loop (Bit-width allocation). For fixed exit thresholds ϕ, the bit-width allocation b =
+
+{bℓ}Lℓ=1 is optimized to minimize amortized complexity while preserving accuracy:       
+
+> b∗(ϕ) = arg min
+> bL(b,ϕ) + λinner CAPQ (b,ϕ),(6)
+
+where λinner controls the strength of compression. This bi-level formulation explicitly couples quantization with early exiting. The exit policy ϕ deter-mines layer utilization uℓ(ϕ), while the bit allocation b affects confidence estimates and may alter realized exits. This coupling reflects the objective mismatch in Theorem 3: static FPQ and MPQ ignore stochastic utilization and cannot fully capture the APQ objective. By jointly optimizing ϕ
+
+and b, APQ balances accuracy and efficiency under dynamic inference. Since directly solving this bi-level problem is difficult due to discrete exit decisions and quantization-induced representation shifts, we introduce risk measures to guide exit-threshold adaptation and bit-width reallocation. 2 We then present the iterative optimization procedure with lightweight self-distillation for accuracy recovery. 
+
+4.2 Modeling Risk for Early Exiting and Quantization 
+
+As shown in Section 3, APQ instability arises from both decision uncertainty and representation distortion. We therefore introduce four complementary risk scores to capture these effects. 
+
+Boundary Sensitivity Risk (BSR). To characterize the instability of exit decisions under quantiza-tion noise, we introduce Boundary Sensitivity Risk:       
+
+> BSR ℓ=Ex∼D
+> h
+> 1|ρℓ(x)−ϕℓ| ≤ τℓ
+> i
+> ,(7)
+> 2The NP-hardness of APQ is proved in Theorem 5, with details in Appendix A.5.
+
+5where τℓ is a tolerance margin estimated from the unquantized model. BSR measures the fraction of samples near the exit boundary, corresponding to the boundary-mass term in Theorem 1. A high BSR indicates that small quantization perturbations can easily flip exit outcomes. 
+
+Quantization-Induced Drift (QID). Let hℓ(x) and ˜hℓ(x) denote the full-precision and quantized activations at layer ℓ, respectively. To capture distributional distortion beyond pointwise quantization noise, we introduce Quantization-Induced Drift:              
+
+> QID ℓ=Ex∼D
+> "max i˜hℓ(x)i−min i˜hℓ(x)i
+> max ihℓ(x)i−min ihℓ(x)i
+> −1
+> 2#
+> ,(8)
+
+which approximates the drift between quantized and full-precision activations via value-range de-viation. Larger QID indicates stronger quantization-induced shifts in hidden representations, which can propagate along realized inference paths as characterized by Theorem 2. Beyond the two APQ-specific risks above, we further incorporate two standard scores from early exiting and quantization to capture task-level degradation and hidden-state distortion. 
+
+Performance Gap Risk (PGR). We quantify early-exit degradation via Performance Gap Risk [15]. For each exit head ℓ, it is defined as       
+
+> PGR ℓ=E(x,y )∼D [L(ˆ yℓ(x), y )− L (ˆ yL(x), y )] ,(9)
+
+where L is the task-specific objective, ˆyℓ(x) is the prediction from the exit head at layer ℓ, and ˆyL(x)
+
+is the full-depth prediction. PGR measures the excess loss incurred when exiting at layer ℓ instead of using the full-depth output. 
+
+Inverse Signal-to-Quantization-Noise Ratio (SQNR −1). As a supporting representation-level risk, we also use the inverse signal-to-quantization-noise ratio [36], defined as       
+
+> SQNR −1
+> ℓ=Ex∼D
+> ∥hℓ(x)−˜hℓ(x)∥2
+> ∥hℓ(x)∥2
+> 
+> .(10)
+
+It quantifies the relative power of quantization noise and complements QID by measuring pointwise representation distortion. 
+
+Overall Risk Metric. We combine the above risks into a per-layer instability score:         
+
+> Rℓ=α PGR ℓ+ BSR ℓ
+> + (1 −α) QID ℓ+ SQNR −1
+> ℓ
+> ,(11)
+
+where α balances decision-level uncertainty and representation-level distortion. All terms are nor-malized before aggregation. The first group measures decision-level risk: PGR captures the loss caused by early exiting, while BSR captures the sensitivity of exit decisions to quantization pertur-bations. The second group measures representation-level risk: QID captures distributional drift in hidden representations, while SQNR −1 captures pointwise quantization noise. 
+
+4.3 Iterative Optimization for APQ 
+
+Building on the proposed risk formulation, we develop a unified iterative optimization framework for APQ. Each iteration alternates among three stages: (i) optimizing the exit thresholds ϕ under a fixed bit allocation b; (ii) reallocating layer-wise bit-widths according to the APQ-normalized risk– cost ratios Ψℓ; and (iii) applying a lightweight recovery step to the model parameters θ to mitigate accuracy degradation caused by low-bit quantization and stochastic early exiting. 
+
+Exit-Threshold Optimization (Outer-loop). Under a fixed bit allocation b, the exit thresholds ϕ
+
+are optimized by minimizing the accumulated instability risks together with the amortized execution cost:        
+
+> ϕ⋆∈arg min
+> ϕ
+> LX
+> ℓ=1
+> Rℓ+λouter BOPs( b;ϕ).(12)
+
+This problem is solved via coordinate search. Confidence scores ρℓ(x) are obtained using a sin-gle feedforward pass, after which candidate thresholds can be efficiently evaluated without retrain-ing [15]. All quantities are estimated on a held-out calibration set. 
+
+Bit-width Allocation (Inner-loop). Given optimized early-exit thresholds ϕ, we allocate per-layer bit-widths b under a total-bit budget B by ranking the marginal utility of assigning additional precision to each layer. Specifically, we define the priority score          
+
+> Ψℓ(b;ϕ) = uℓ(ϕ) ∆ Rℓ(b;ϕ)−λinner
+> ∆BOPs ℓ(b;ϕ)BOPs( b;ϕ),(13)
+
+6where uℓ(ϕ) = Ex∼D [uℓ(x, ϕ)] is the probability that layer ℓ is executed under the current exit policy. The terms ∆Rℓ(b; ϕ) and ∆BOPs ℓ(b; ϕ) denote, respectively, the marginal reduction in normalized instability risk and the corresponding increase in amortized computational cost:              
+
+> ∆Rℓ(b;ϕ) = Rℓ(b;ϕ)−Rℓ(b+ℓ;ϕ),∆BOPs ℓ(b;ϕ) = BOPs( b+ℓ;ϕ)−BOPs( b;ϕ).(14)
+
+where b+ℓ denotes the allocation obtained by increasing only bℓ. MAQEE then reallocates bits from layers with smaller Ψℓ to those with larger Ψℓ under the budget B, prioritizing frequently executed and quantization-sensitive layers while discouraging costly BOPs increases. 
+
+Self-distillation Recovery. We use self-distillation to recover performance under low precision and dynamic execution. For input x, the full-precision teacher outputs logits z, while the quantized early-exit student outputs logits ˜z. We define the softened output probabilities with temperature T
+
+as p(x; fθ , T ) = softmax( z/T ) and p(x; fθ, b,ϕ, T ) = softmax(˜ z/T ).The recovery objective jointly enforces task supervision and distributional alignment:             
+
+> Lrec (θ;x, y ) = L fθ, b,ϕ(x), y +T2LKL
+> 
+> p(x;fθ, T )p(x;fθ, b,ϕ, T )
+> 
+> ,(15)
+
+where L denotes the task-specific objective and T > 1 controls the softness of the probability distributions. By aligning the quantized early-exit student with its full-precision teacher, this step compensates for quantization-induced representation drift and stabilizes exit decisions. 
+
+Warm-Started Iteration. To accelerate iterative optimization, we adopt warm-start strategies for both loops. In the outer loop, exit-threshold optimization is initialized from the previous solution. Since successive bit allocations usually differ only slightly, we reuse previous thresholds and cached calibration confidences to evaluate candidates without extra forward passes. When bit-width changes are localized, we restrict the search to a small neighborhood around the previous thresholds. In the inner loop, we cache model and quantizer states after each update, warm-start each new allocation 
+
+b(t) from the cached checkpoint with the largest layer-wise overlap, re-quantize only layers whose 
+
+bℓ changes, and apply a brief self-distillation recovery using Eq. (15). This reduces optimization cost while maintaining stable convergence. 
+
+Monotonic Improvement. Finally, we show that MAQEE monotonically improves the bi-level objective and outperforms static FPQ and MPQ with early exiting. 
+
+Theorem 4. MAQEE alternates between threshold updates ϕ and bit-allocation updates b. If each coordinate update is solved exactly over a finite or discretized candidate set, the APQ objective in Eq. (2) is non-increasing and eventually reaches a coordinate-wise optimum. In contrast, static FPQ and MPQ ignore stochastic layer utilization and can therefore be suboptimal under early exiting. 
+
+## 5 Experiments 
+
+In the following, we evaluate MAQEE on three vision tasks and three backbones, comparing it with two early-exit methods and three quantization baselines. 
+
+5.1 Experimental Setup Datasets. We evaluate MAQEE on image classification (CIFAR-100 [18], ImageNet [5]), semantic segmentation (SceneParse150 [48]), and object detection (MS COCO [22]), reporting classifica-tion accuracy, mean IoU, and mAP, respectively. Experiments are conducted on three backbones: DeiT [38], ViT [7], and Swin [24]. For classification and segmentation, we use standard cross-entropy loss; for object detection, we use the bipartite matching loss [2]. 
+
+Baselines. We compare MAQEE against representative early-exiting baselines, including ViT-EE [1] and LGViT [44], as well as state-of-the-art quantization methods for ViTs. Specifically, we include fixed-precision quantization (FPQ) methods: RepQ [21] and ERQ [47], and a mixed-precision quantization (MPQ) method: MPTQ [36]. All quantization experiments are conducted under the W4A4 setting, with 4-bit weights and activations. Here, FP4/4 applies a uniform 4-bit quantization scheme to all layers, whereas MP4/4 permits layer-wise variation in weight bit-widths while preserving an average precision of 4 bits; all activations are quantized to 4 bits. 
+
+Evaluation Protocol. For a fair comparison [33], we evaluate the accuracy–efficiency trade-off under two complementary settings. (i) Controlled Performance. We measure the exit layer ˆL and 7Table 1: Performance on Image Classification. Bits (W/A) Quant EE CIFAR-100 ImageNet Controlled Perf. Std. Config Controlled Perf. Std. Config                                                                                                                                                                                                                                    
+
+> ˆL↓ˆBOPs ↓¯L↓¯BOPs ↓Acc. ↑ˆL↓ˆBOPs ↓¯L↓¯BOPs ↓Acc. ↑
+> Swin
+> FP32 -
+> -//24 1.39E13 94.16 //24 1.39E13 83.50
+> ViT-EE 13.59 9.30E12 16.47 1.09E13 90.80 16.62 1.23E13 18.23 1.35E13 83.68 LGViT 9.88 1.02E13 13.80 9.41E12 89.38 11.13 8.83E12 14.20 1.10E13 82.70 FP4/4 RepQ ViT-EE N/A N/A 18.72 2.12E11 82.23 N/A N/A 20.16 2.27E11 74.75 LGViT N/A N/A 13.69 1.65E11 74.38 N/A N/A 18.97 2.19E11 69.85 ERQ ViT-EE 23.72 2.69E11 21.26 2.29E11 83.58 23.46 2.65E11 20.96 2.31E11 75.45 LGViT N/A N/A 19.76 1.96E11 76.74 N/A N/A 20.80 2.38E11 73.97 MP4/4 MPTQ ViT-EE N/A N/A 21.01 2.36E11 81.62 N/A N/A 20.99 2.39E11 71.55 LGViT N/A N/A 16.56 1.90E11 75.07 N/A N/A 21.23 2.42E11 74.35
+> MAQEE 12.58 1.53E11 13.79 1.65E11 89.13 17.60 2.09E11 18.75 2.12E11 80.78
+> ViT-B
+> FP32 -
+> -//12 1.80E13 90.47 //12 1.80E13 83.10
+> ViT-EE 7.09 1.81E13 7.27 1.89E13 87.51 7.65 1.90E13 8.68 2.05E13 79.60 LGViT 5.90 1.68E13 6.33 1.76E13 88.51 6.69 1.80E13 7.08 1.86E13 80.30 FP4/4 RepQ ViT-EE 11.78 3.94E11 9.90 3.51E11 85.71 N/A N/A 10.83 3.71E11 74.67 LGViT N/A N/A 8.08 3.13E11 73.52 N/A N/A 8.74 3.31E11 72.30 ERQ ViT-EE 8.77 3.23E11 9.28 3.35E11 87.82 N/A N/A 9.88 3.49E11 77.35 LGViT N/A N/A 9.00 3.34E11 77.64 N/A N/A 9.12 3.40E11 73.06 MP4/4 MPTQ ViT-EE 8.93 3.27E11 8.71 3.22E11 85.41 N/A N/A 10.26 3.58E11 76.56 LGViT 10.80 3.74E11 8.05 3.14E11 84.44 10.25 3.68E11 9.33 3.45E11 77.53
+> MAQEE 5.86 2.61E11 5.98 2.64E11 87.86 7.04 2.85E11 7.26 2.93E11 79.41
+
+Table 2: Performance on Semantic Segmentation and Object Detection. Method Segmentation (SceneParse150) Detection (MS COCO) Controlled Perf. Std. Config Controlled Perf. Std. Config 
+
+ˆL ↓ ˆBOPs ↓ ¯L ↓ ¯BOPs ↓ IoU ↑ ˆL ↓ ˆBOPs ↓ ¯L ↓ ¯BOPs ↓ mAP@0.5 ↑
+
+> ViT-B
+
+FP32 / / 12 1.89E13 34.14 / / 12 1.95E13 68.23 ViT-EE+ERQ N/A N/A 8.10 3.17E11 27.34 N/A N/A 8.72 3.34E11 40.42 ViT-EE+MPQ 11.46 3.94E11 8.08 3.16E11 26.52 N/A N/A 8.59 3.30E11 41.04 
+
+MAQEE 5.74 2.60E11 6.79 2.86E11 31.20 10.40 3.77E11 8.68 3.32E11 50.83 
+
+bit operations ˆBOPs required to reach a predefined target performance, set to the quantization-only baseline without early exiting: 87% for CIFAR-100, 79% for ImageNet, 30% for SceneParse150, and 55% for MS COCO. Models that fail to meet the target are reported with ˆL and ˆBOPs as N/A. (ii) Standard Configuration. Baseline models are evaluated using their default thresholds and quantization settings. For both settings, we report the average exit layer ¯L, the average bit operations 
+
+¯BOPs , and the task performance. All results are averaged over 10 runs, with standard deviations less than 3%. Additional details and hyperparameter settings are provided in Appendix B.1. 
+
+5.2 Quantitative Results Accuracy and Efficiency. As shown in Table 1, MAQEE achieves the best accuracy–efficiency trade-off on ImageNet under both Controlled Performance and Standard Configuration settings. Across all backbones, MAQEE reduces BOPs by over 95% while maintaining accuracy close to the full-precision model, with consistent trends on ViT-L and DeiT reported in Appendix B.2. In contrast, fixed-precision baselines such as RepQ and ERQ are less stable. RepQ can suffer severe accuracy degradation because uniform quantization amplifies representation-level errors caused by layer sensitivity and quantization noise (Theorem 2). Although MPTQ uses mixed precision, it as-sumes a static inference path and ignores input-dependent layer utility under early exiting, which can lead to unnecessarily deep exits or suppressed early-exit behavior (Theorem 1). 
+
+Pareto Frontier. Figure 2 shows that MAQEE forms the Pareto frontier, achieving higher ac-curacy at comparable cost or lower cost at comparable accuracy under both throughput and BOPs comparisons. This advantage comes from jointly optimizing bit-width allocation and exit thresholds under the APQ objective, rather than treating quantization and early exiting separately. By coupling decision-level risks (PGR and BSR) with representation-level risks (SQNR −1 and QID), MAQEE 8Method Controlled Perf. Std. Config                                  
+
+> ˆL↓ˆBOPs ↓¯L↓¯BOPs ↓Acc. ↑
+> MAQEE 7.04 2.85E11 7.26 2.93E11 79.41
+> w/o PGR N/A N/A 4.23 2.12E11 61.18 w/o BSR 7.59 3.12E11 7.01 2.74E11 76.53 w/o SQNR −17.35 2.98E11 7.28 2.95E11 78.35 w/o QID 7.26 3.01E11 7.18 2.95E11 79.06
+
+Table 3: Ablation Study of MAQEE. 0.8 0.85 0.9 40 60 80 Accuracy Throughputs         
+
+> 2E+11 3E+11 BOPs MAQEE ViT-EE+ERQ ViT-EE+MPTQ LGViT+ERQ ViT-EE+ERQ ViT-EE+MPTQ LGViT+ERQ LGViT+MPTQ
+
+Figure 2: Accuracy–throughput/BOPs results. 
+
+stabilizes exit behavior and reduces exit depth and BOPs by up to 50% relative to strong baselines, consistent with the utilization-aware principle in Theorem 3. 
+
+Segmentation and Detection. To assess cross-task generalization, Table 2 evaluates MAQEE on semantic segmentation and object detection using a ViT-B backbone with ViT-EE as the exiting head. Overall, MAQEE improves efficiency by at least 15% under standard settings while delivering up to 2× speedup under the target-performance setting. In object detection, however, early exiting with quantization still causes a noticeable accuracy drop, as detection requires multi-scale features that can be truncated by early exits and distorted by quantization. 
+
+Ablation Studies. Table 3 shows that the full model achieves the best controlled-performance trade-off, with stable early exits and reduced cost. Removing PGR weakens outer-loop control over premature-exit accuracy gaps, leading to overly aggressive thresholds that fail to meet the target accuracy. Removing BSR impairs exit stability, as quantization perturbations more easily flip exit decisions; satisfying the same accuracy constraint therefore requires more conservative execution, increasing effective depth and BOPs. Without QID, bit-width allocation becomes less responsive to quantization-induced distribution drift, especially in deeper layers, shifting precision toward shal-lower layers and increasing BOPs even when average depth changes only marginally. Finally, re-moving SQNR −1 eliminates relative noise-energy guidance, making mixed-precision allocation less reliable and degrading the efficiency–accuracy trade-off. 
+
+## 6 Related Work 
+
+Vision Transformers (ViTs) [7] capture long-range dependencies through self-attention [27, 39], but their high computation and memory costs limit deployment in real-time or resource-constrained settings [33, 46]. Quantization reduces this burden with low-bit weights and activations [4, 17]. Fixed-Precision Quantization (FPQ) [14, 45] applies uniform bit-widths but ignores heterogeneous layer sensitivity in ViTs [23, 36], leading to weak robustness and suboptimal accuracy–efficiency trade-offs [11]. Mixed-Precision Quantization (MPQ) [16, 41], along with PTQ [6, 21, 25, 35] and QAT [20, 26, 40], improves layer-wise precision allocation, but still assumes a static full-depth infer-ence path. In parallel, dynamic inference adapts computation to input complexity by activating only part of the network [12, 13, 30]. Early Exiting (EE) [32, 43] attaches auxiliary classifiers to inter-mediate layers so confident samples terminate early, with ViT-based extensions showing promising efficiency gains [1, 28, 44]. However, quantization noise can disrupt confidence estimation and cause premature or delayed exits. Existing quantization-EE methods such as McQueen [31] and QuEE [29] remain limited by scalability, memory cost, or low-bit support. In contrast, we analyze the mutual interference between quantization and early exiting, and introduce Amortized-Precision Quantization to jointly stabilize bit allocation and exit thresholds under dynamic inference. 
+
+## 7 Conclusion 
+
+In this work, we propose MAQEE , a bi-level optimization framework for efficient ViT inference under the APQ paradigm. Our theoretical analysis establishes its stability and shows that no static FPQ or MPQ scheme can match MAQEE under early exiting. Extensive experiments across clas-sification, segmentation, and detection show that MAQEE achieves superior accuracy–efficiency trade-offs, reducing BOPs by over 95% while preserving near full-precision accuracy. These results highlight the need to jointly optimize precision and dynamic execution for low-latency ViT deploy-ment in resource-constrained settings. Future work will extend APQ to broader dynamic inference schemes, such as recursive Transformers, MoE routing, and layer skipping, where input-dependent computation creates non-uniform exposure to quantization noise. 9References 
+
+[1] A. Bakhtiarnia, Q. Zhang, and A. Iosifidis. Multi-exit vision transformer for dynamic infer-ence. arXiv preprint arXiv:2106.15183 , 2021. [2] N. Carion, F. Massa, G. Synnaeve, N. Usunier, A. Kirillov, and S. Zagoruyko. End-to-end object detection with transformers. In European conference on computer vision , pages 213– 229. Springer, 2020. [3] C.-F. R. Chen, Q. Fan, and R. Panda. Crossvit: Cross-attention multi-scale vision transformer for image classification. In Proceedings of the IEEE/CVF international conference on com-puter vision , pages 357–366, 2021. [4] M. Courbariaux, Y. Bengio, and J.-P. David. Binaryconnect: Training deep neural networks with binary weights during propagations. Advances in neural information processing systems ,28, 2015. [5] J. Deng, W. Dong, R. Socher, L.-J. Li, K. Li, and L. Fei-Fei. Imagenet: A large-scale hierar-chical image database. In 2009 IEEE conference on computer vision and pattern recognition ,pages 248–255. Ieee, 2009. [6] Y. Ding, H. Qin, Q. Yan, Z. Chai, J. Liu, X. Wei, and X. Liu. Towards accurate post-training quantization for vision transformer. In Proceedings of the 30th ACM international conference on multimedia , pages 5380–5388, 2022. [7] A. Dosovitskiy, L. Beyer, A. Kolesnikov, D. Weissenborn, X. Zhai, T. Unterthiner, M. De-hghani, M. Minderer, G. Heigold, S. Gelly, et al. An image is worth 16x16 words: Transform-ers for image recognition at scale. arXiv preprint arXiv:2010.11929 , 2020. [8] M. Elhoushi, A. Shrivastava, D. Liskovich, B. Hosmer, B. Wasti, L. Lai, A. Mahmoud, B. Acun, S. Agarwal, A. Roman, et al. Layerskip: Enabling early exit inference and self-speculative decoding. In Proceedings of the 62nd Annual Meeting of the Association for Com-putational Linguistics (Volume 1: Long Papers) , pages 12622–12642, 2024. [9] Y. Fang, B. Liao, X. Wang, J. Fang, J. Qi, R. Wu, J. Niu, and W. Liu. You only look at one sequence: Rethinking transformer in vision through object detection. Advances in Neural Information Processing Systems , 34:26183–26197, 2021. [10] Y. Gao, M. Zhou, and D. N. Metaxas. Utnet: a hybrid transformer architecture for medical image segmentation. In International conference on medical image computing and computer-assisted intervention , pages 61–71. Springer, 2021. [11] A. Gholami, S. Kim, Z. Dong, Z. Yao, M. W. Mahoney, and K. Keutzer. A survey of quanti-zation methods for efficient neural network inference. In Low-power computer vision , pages 291–326. Chapman and Hall/CRC, 2022. [12] X. Hu, Z. Chen, D. Yang, Z. Xu, C. Xu, Z. Yuan, S. Zhou, and J. Yu. Moequant: Enhancing quantization for mixture-of-experts large language models via expert-balanced sampling and affinity guidance. arXiv preprint arXiv:2505.03804 , 2025. [13] C. Hwang, W. Cui, Y. Xiong, Z. Yang, Z. Liu, H. Hu, Z. Wang, R. Salas, J. Jose, P. Ram, et al. Tutel: Adaptive mixture-of-experts at scale. Proceedings of Machine Learning and Systems ,5:269–287, 2023. [14] B. Jacob, S. Kligys, B. Chen, M. Zhu, M. Tang, A. Howard, H. Adam, and D. Kalenichenko. Quantization and training of neural networks for efficient integer-arithmetic-only inference. In 
+
+Proceedings of the IEEE conference on computer vision and pattern recognition , pages 2704– 2713, 2018. [15] M. Jazbec, A. Timans, T. H. Veljkovi´ c, K. Sakmann, D. Zhang, C. A. Naesseth, and E. Nalis-nick. Fast yet safe: Early-exiting with risk control. Advances in Neural Information Processing Systems , 37:129825–129854, 2024. 10 [16] J.-Y. Jeon, X. T. Nguyen, S. Ryu, and H.-J. Lee. Usdn: A unified sample-wise dynamic network with mixed-precision and early-exit. In Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision , pages 646–654, 2024. [17] R. Krishnamoorthi. Quantizing deep convolutional networks for efficient inference: Awhitepaper. arXiv preprint arXiv:1806.08342 , 2018. [18] A. Krizhevsky et al. Learning multiple layers of features from tiny images. 2009. [19] S. Laskaridis, A. Kouris, and N. D. Lane. Adaptive inference through early-exit networks: Design, challenges and directions. In Proceedings of the 5th International Workshop on Em-bedded and Mobile Deep Learning , pages 1–6, 2021. [20] Y. Li, S. Xu, B. Zhang, X. Cao, P. Gao, and G. Guo. Q-vit: Accurate and fully quantized low-bit vision transformer. Advances in neural information processing systems , 35:34451–34463, 2022. [21] Z. Li, J. Xiao, L. Yang, and Q. Gu. Repq-vit: Scale reparameterization for post-training quantization of vision transformers. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 17227–17236, 2023. [22] T.-Y. Lin, M. Maire, S. Belongie, J. Hays, P. Perona, D. Ramanan, P. Doll´ ar, and C. L. Zitnick. Microsoft coco: Common objects in context. In European conference on computer vision ,pages 740–755. Springer, 2014. [23] H. Liu, S. Elkerdawy, N. Ray, and M. Elhoushi. Layer importance estimation with imprinting for neural network quantization. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 2408–2417, 2021. [24] Z. Liu, Y. Lin, Y. Cao, H. Hu, Y. Wei, Z. Zhang, S. Lin, and B. Guo. Swin transformer: Hierarchical vision transformer using shifted windows. In Proceedings of the IEEE/CVF in-ternational conference on computer vision , pages 10012–10022, 2021. [25] Z. Liu, Y. Wang, K. Han, W. Zhang, S. Ma, and W. Gao. Post-training quantization for vision transformer. Advances in Neural Information Processing Systems , 34:28092–28103, 2021. [26] M. Nagel, M. Fournarakis, Y. Bondarenko, and T. Blankevoort. Overcoming oscillations in quantization-aware training. In International Conference on Machine Learning , pages 16318– 16330. PMLR, 2022. [27] M. Raghu, T. Unterthiner, S. Kornblith, C. Zhang, and A. Dosovitskiy. Do vision transformers see like convolutional neural networks? Advances in neural information processing systems ,34:12116–12128, 2021. [28] H. Rahmath P, V. Srivastava, K. Chaurasia, R. G. Pacheco, and R. S. Couto. Early-exit deep neural network-a comprehensive survey. ACM Computing Surveys , 57(3):1–37, 2024. [29] F. Regol, J. Chataoui, B. Charpentier, M. Coates, P. Piantanida, and S. Gunnemann. Predict-ing probabilities of error to combine quantization and early exiting: Quee. arXiv preprint arXiv:2406.14404 , 2024. [30] C. Riquelme, J. Puigcerver, B. Mustafa, M. Neumann, R. Jenatton, A. Susano Pinto, D. Key-sers, and N. Houlsby. Scaling vision with sparse mixture of experts. Advances in Neural Information Processing Systems , 34:8583–8595, 2021. [31] U. Saxena and K. Roy. Mcqueen: Mixed precision quantization of early exit networks. In 
+
+BMVC , pages 511–513, 2023. [32] T. Schuster, A. Fisch, J. Gupta, M. Dehghani, D. Bahri, V. Tran, Y. Tay, and D. Metzler. Confident adaptive language modeling. Advances in Neural Information Processing Systems ,35:17456–17472, 2022. [33] Y. Shang, G. Liu, R. Kompella, and Y. Yan. Quantized-vit efficient training via fisher ma-trix regularization. In International Conference on Multimedia Modeling , pages 270–284. Springer, 2024. 11 [34] Z. Shen, Z. Liu, and E. Xing. Sliced recursive transformer. In European Conference on Computer Vision , pages 727–744. Springer, 2022. [35] H. Shi, X. Cheng, W. Mao, and Z. Wang. P2-vit: Power-of-two post-training quantization and acceleration for fully quantized vision transformer. IEEE Transactions on Very Large Scale Integration (VLSI) Systems , 2024. [36] Y.-S. Tai and A.-Y. Wu. Mptq-vit: Mixed-precision post-training quantization for vision trans-former. arXiv preprint arXiv:2401.14895 , 2024. [37] S. Teerapittayanon, B. McDanel, and H.-T. Kung. Branchynet: Fast inference via early exiting from deep neural networks. In 2016 23rd international conference on pattern recognition (ICPR) , pages 2464–2469. IEEE, 2016. [38] H. Touvron, M. Cord, M. Douze, F. Massa, A. Sablayrolles, and H. J´ egou. Training data-efficient image transformers & distillation through attention. In International conference on machine learning , pages 10347–10357. PMLR, 2021. [39] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, Ł. Kaiser, and I. Polo-sukhin. Attention is all you need. Advances in neural information processing systems , 30, 2017. [40] L. Wang, C. Zeng, M. Zhang, J. Wu, and L. Nie. Domain aware post training quantization for vision transformers in deployment. Pattern Recognition , page 112182, 2025. [41] J. Xiao, Z. Li, L. Yang, and Q. Gu. Patch-wise mixed-precision quantization of vision trans-former. In 2023 International Joint Conference on Neural Networks (IJCNN) , pages 1–7. IEEE, 2023. [42] E. Xie, W. Wang, Z. Yu, A. Anandkumar, J. M. Alvarez, and P. Luo. Segformer: Simple and efficient design for semantic segmentation with transformers. Advances in neural information processing systems , 34:12077–12090, 2021. [43] J. Xin, R. Tang, J. Lee, Y. Yu, and J. Lin. Deebert: Dynamic early exiting for accelerating bert inference. In Proceedings of the 58th Annual Meeting of the Association for Computational Linguistics , pages 2246–2251, 2020. [44] G. Xu, J. Hao, L. Shen, H. Hu, Y. Luo, H. Lin, and J. Shen. Lgvit: Dynamic early exiting for accelerating vision transformer. In Proceedings of the 31st ACM International Conference on Multimedia , pages 9103–9114, 2023. [45] J. Yang, X. Shen, J. Xing, X. Tian, H. Li, B. Deng, J. Huang, and X.-s. Hua. Quantization networks. In Proceedings of the IEEE/CVF conference on computer vision and pattern recog-nition , pages 7308–7316, 2019. [46] J. Zheng, L. Yang, Y. Li, K. Yang, Z. Wang, and J. Zhou. Lightweight vision transformer with spatial and channel enhanced self-attention. In 2023 IEEE/CVF International Conference on Computer Vision Workshops (ICCVW) , pages 1484–1488. IEEE, 2023. [47] Y. Zhong, Y. Huang, J. Hu, Y. Zhang, and R. Ji. Towards accurate post-training quantization of vision transformers via error reduction. IEEE Transactions on Pattern Analysis and Machine Intelligence , 2025. [48] B. Zhou, H. Zhao, X. Puig, S. Fidler, A. Barriuso, and A. Torralba. Scene parsing through ade20k dataset. In Proceedings of the IEEE conference on computer vision and pattern recog-nition , pages 633–641, 2017. [49] Y. Zhou, T. Lei, H. Liu, N. Du, Y. Huang, V. Zhao, A. M. Dai, Q. V. Le, J. Laudon, et al. Mixture-of-experts with expert choice routing. Advances in Neural Information Processing Systems , 35:7103–7114, 2022. 12 A Detailed Proof 
+
+A.1 Proof of Theorem 1 Theorem 1. Assume that the confidence perturbation ξℓ, b(x) satisfies the tail bound 
+
+Pr( |ξℓ, b(x)| > τ ℓ) ≤ qℓ(τℓ, b ℓ),
+
+where qℓ(τℓ, b ℓ) is non-increasing in τℓ and non-decreasing as bℓ decreases. Then, for any tolerance 
+
+τℓ > 0, the mis-exit probability satisfies 
+
+Pr(˜ eℓ(x)̸ = eℓ(x)) ≤ Pr( |∆ℓ(x)| ≤ τℓ) + qℓ(τℓ, b ℓ).
+
+Proof. A mis-exit can occur only when the quantization-induced perturbation crosses the full-precision confidence boundary. Therefore, if ˜eℓ(x)̸ = eℓ(x), then |ξℓ, b(x)| ≥ | ∆ℓ(x)|. For any tolerance τℓ > 0, this implies 
+
+{˜eℓ(x)̸ = eℓ(x)} ⊆ {| ∆ℓ(x)| ≤ τℓ} ∪ {| ξℓ, b(x)| > τ ℓ}.
+
+By the union bound, 
+
+Pr(˜ eℓ(x)̸ = eℓ(x)) ≤ Pr( |∆ℓ(x)| ≤ τℓ) + Pr( |ξℓ, b(x)| > τ ℓ) .
+
+Applying the assumed tail bound to the second term gives 
+
+Pr(˜ eℓ(x)̸ = eℓ(x)) ≤ Pr( |∆ℓ(x)| ≤ τℓ) + qℓ(τℓ, b ℓ).
+
+The theorem follows. 
+
+A.2 Proof of Corollary 1 Corollary 1. Let Kϕ(x) and ˜Kϕ,b(x) denote the first layers where the full-precision and quantized confidences exceed ϕℓ, respectively, with fallback value L if no earlier exit is triggered. Then 
+
+Pr 
+
+ ˜Kϕ,b(x)̸ = Kϕ(x)
+
+
+
+≤
+
+> L
+
+X
+
+> ℓ=1
+
+Pr(˜ eℓ(x)̸ = eℓ(x)) .
+
+Consequently, 
+
+Ex∼D 
+
+h ˜Kϕ,b(x)
+
+i
+
+− Ex∼D [Kϕ(x)] ≤ (L − 1) 
+
+> L
+
+X
+
+> ℓ=1
+
+Pr(˜ eℓ(x)̸ = eℓ(x)) .
+
+Proof. If the full-precision and quantized stopping depths differ, then the two exit policies must disagree at least at one layer. Otherwise, if ˜eℓ(x) = eℓ(x) for all ℓ ∈ { 1, . . . , L }, the first layer satisfying the exit condition would be the same under full precision and quantization, implying 
+
+˜Kϕ,b(x) = Kϕ(x). Hence, 
+
+{ ˜Kϕ,b(x)̸ = Kϕ(x)} ⊆ 
+
+> L
+
+[
+
+> ℓ=1
+
+{˜eℓ(x)̸ = eℓ(x)}.
+
+Applying the union bound gives 
+
+Pr 
+
+ ˜Kϕ,b(x)̸ = Kϕ(x)
+
+
+
+≤
+
+> L
+
+X
+
+> ℓ=1
+
+Pr(˜ eℓ(x)̸ = eℓ(x)) .
+
+For the expectation bound, since both stopping depths take values in {1, . . . , L }, we have 
+
+˜Kϕ,b(x) − Kϕ(x) ≤ (L − 1) · 1{ ˜Kϕ,b(x)̸ = Kϕ(x)}.
+
+Taking expectation over x ∼ D yields 
+
+Ex∼D [ ˜Kϕ,b(x)] − Ex∼D [Kϕ(x)] ≤ (L − 1) Pr 
+
+ ˜Kϕ,b(x)̸ = Kϕ(x)
+
+
+
+.
+
+Combining this inequality with the union bound proves the claim. The corollary follows. 13 A.3 Proof of Theorem 2 Theorem 2. For any realized stopping depth k, the accumulated representation error satisfies 
+
+∥˜hk, b(x) − hk (x)∥ ≤ 
+
+> k
+
+X
+
+> ℓ=1
+
+εℓ(bℓ)
+
+> k
+
+Y
+
+> r=ℓ+1
+
+γr−1,
+
+where the empty product is defined as 1. Under early exiting with random stopping depth Kϕ(x),the expected distortion satisfies 
+
+Ex∼D 
+
+h
+
+∥˜hKϕ(x),b(x) − hKϕ(x)(x)∥
+
+i
+
+≤ Ex∼D 
+
+
+
+> Kϕ(x)
+
+X
+
+> ℓ=1
+
+εℓ(bℓ)
+
+> Kϕ(x)
+
+Y
+
+> r=ℓ+1
+
+γr−1
+
+ .
+
+Proof. Let 
+
+Ek(x) = ∥˜hk, b(x) − hk(x)∥.
+
+By the assumed layer-wise distortion bound, for each layer ℓ = 1 , . . . , L ,
+
+Eℓ(x) ≤ γℓ−1Eℓ−1(x) + εℓ(bℓ),
+
+with initial distortion E0(x) = 0 . Unrolling this recurrence up to depth k gives 
+
+Ek(x) ≤ E0(x)
+
+> k
+
+Y
+
+> r=1
+
+γr−1 +
+
+> k
+
+X
+
+> ℓ=1
+
+εℓ(bℓ)
+
+> k
+
+Y
+
+> r=ℓ+1
+
+γr−1.
+
+Since E0(x) = 0 , this reduces to 
+
+∥˜hk, b(x) − hk(x)∥ ≤ 
+
+> k
+
+X
+
+> ℓ=1
+
+εℓ(bℓ)
+
+> k
+
+Y
+
+> r=ℓ+1
+
+γr−1,
+
+where the empty product is defined as 1.Since the above bound holds for any realized stopping depth k, we can substitute the random stop-ping depth Kϕ(x) for k. Taking expectation over x ∼ D yields 
+
+Ex∼D 
+
+h
+
+∥˜hKϕ(x),b(x) − hKϕ(x)(x)∥
+
+i
+
+≤ Ex∼D 
+
+
+
+> Kϕ(x)
+
+X
+
+> ℓ=1
+
+εℓ(bℓ)
+
+> Kϕ(x)
+
+Y
+
+> r=ℓ+1
+
+γr−1
+
+ .
+
+The theorem follows. 
+
+A.4 Proof of Theorem 3 Theorem 3. Assume that static MPQ ranks layers by their static sensitivities Sℓ, while APQ ranks layers by their utilization-weighted sensitivities uℓ(ϕ)Sℓ. If there exist two layers i and j such that 
+
+Si > S j but ui(ϕ)Si < u j (ϕ)Sj ,
+
+then the static MPQ ranking is inconsistent with the APQ ranking. Moreover, under equal marginal bit-cost increments and marginal APQ benefit proportional to uℓ(ϕ)Sℓ, the static MPQ allocation can be suboptimal for the APQ objective. Proof. The first claim follows directly from the assumed sensitivity and utilization-weighted order-ings. Static MPQ ranks layer i above layer j because Si > S j , whereas APQ ranks layer j above layer i because ui(ϕ)Si < u j (ϕ)Sj . Hence, the two rankings are inconsistent. For the second claim, consider a fixed bit budget that allows assigning one additional bit-width increment to exactly one of the two layers. Under equal marginal bit-cost increments, the two choices have the same budget cost. If the marginal APQ benefit is proportional to uℓ(ϕ)Sℓ, then assigning the additional precision to layer j yields a larger APQ benefit than assigning it to layer i,since 
+
+uj (ϕ)Sj > u i(ϕ)Si.
+
+However, static MPQ selects layer i because Si > S j . Therefore, the static MPQ allocation is suboptimal for the APQ objective under this budget. The theorem follows. 14 A.5 Proof of Theorem 5 Theorem 5. The APQ bi-level optimization is NP-hard. Moreover, each level is NP-hard on its own: (i) with fixed exit thresholds ϕ, the inner bit-width allocation is NP-hard; and (ii) with fixed bit-widths b, the outer exit-threshold optimization is also NP-hard. Proof. We first prove that the inner-level bit-width allocation is NP-hard when the thresholds ϕ are fixed (Lemma 1), and then show that the outer-level threshold optimization is NP-hard when the bit-widths b are fixed (Lemma 2). 
+
+Lemma 1. Fix any thresholds ϕ. Consider the decision problem: “Does there exist a bit allocation b ∈ B (e.g., discrete per-layer bit choices) such that the expected complexity 
+
+Ex[P 
+
+> ℓ
+
+uℓ(x; ϕ) cℓ(x, b ℓ)] is at most B while the expected loss E(x,y )[LCE (fθ, b,ϕ(x), y )] is at most 
+
+A?” This problem is NP-hard. Proof. Reduce from the classical 0–1 Knapsack . Given items {1, . . . , L } with values vℓ > 0,weights wℓ > 0, and capacity W , ask whether there exists a subset S with P 
+
+> ℓ∈S
+
+wℓ ≤ W
+
+and P 
+
+> ℓ∈S
+
+vℓ ≥ V . Construct an APQ instance with L layers and a binary bit-choice set 
+
+Bℓ = {b(0)  
+
+> ℓ
+
+, b (1)  
+
+> ℓ
+
+} per layer: i) Complexity mapping: set cℓ(·) and (fixed) utilization uℓ(·; ϕ) so that Ex[uℓ cℓ(x, b (1)  
+
+> ℓ
+
+)] − Ex[uℓ cℓ(x, b (0)  
+
+> ℓ
+
+)] = wℓ. ii) Accuracy mapping: choose a dataset and a head such that turning on the high-bit option at layer ℓ reduces the loss by exactly vℓ in expectation (e.g., via a separable surrogate Dℓ(bℓ) scaled appropriately). Set B = P 
+
+> ℓ
+
+Ex[uℓ cℓ(x, b (0)  
+
+> ℓ
+
+)] + W and 
+
+A = L0 − V , where L0 is the loss under all baselines b(0)  
+
+> ℓ
+
+. Then selecting S = {ℓ : bℓ = b(1)  
+
+> ℓ
+
+} is feasible iff the knapsack instance is feasible. Hence NP-hardness follows. 
+
+Lemma 2. Fix any bit-widths b. Consider the decision problem: “Does there exist thresh-olds ϕ such that the expected complexity Ex[T (ϕ)] is at most B while the expected loss 
+
+E(x,y )[LCE (fθ, b,ϕ(x), y )] is at most A?” This problem is NP-hard. Proof. Reduce from 0–1 Knapsack . Take a two-exit cascade (layers 1 and 2) with fixed logits/soft-max scores precomputed on a finite dataset {xi}ni=1 . Let C1(xi) ∈ (0 , 1) be the confidence at the first exit and suppose the final exit (layer 2) always predicts correctly with unit cost, while exiting at layer 1 costs zero additional depth but may misclassify some points. Associate each item i with a sample xi and set: i) If xi exits at layer 1 (i.e., C1(xi) ≥ ϕ1), we save expected depth wi > 0
+
+(benefit), but we incur a loss penalty pi ≥ 0 if that early decision is wrong. ii) If it proceeds to layer 2 (i.e., C1(xi) < ϕ 1), we pay depth wi but incur no penalty. Choose the surrogate loss so that total early-exit penalty equals P 
+
+> i∈S
+
+pi, where S = {i : C1(xi) ≥
+
+ϕ1}. Then the constraints Ex[T (ϕ)] ≤ B and E[LCE ] ≤ A become P 
+
+> i∈S
+
+wi ≥ V and P 
+
+> i∈S
+
+pi ≤
+
+W , exactly the knapsack feasibility test. Thus finding ϕ1 is NP-hard. The argument extends to multiple exits by letting only the first threshold be active. Concluding Lemmas 1 and 2, each level already involves an NP-hard subproblem, even when the other level is fixed. Consequently, the joint bi-level problem is at least as hard as solving either level in isolation, thereby implying NP-hardness. Hence, the theorem follows. 
+
+## B Experiments 
+
+B.1 Implementation Details 
+
+All training runs are conducted on NVIDIA H100 GPUs. We adopt the SegFormer [42] head on a ViT-B for semantic segmentation, and conduct object detection experiments on YOLOS-Base [9], which is based on DeiT-B. For each model, we configure four exit heads: the first two are convo-lutional, and the latter two are attention-based. In the 12-layer DeiT-B and ViT-B models, the exit heads are inserted at the 4 th , 6 th , 8 th , and 10 th layers. For the Swin model, they are placed at the 2 nd ,4th , 14 th , and 20 th layers, approximately uniformly distributed with respect to computational cost. All models are trained with AdamW and a cosine-decay schedule with a 1×10 −5 peak LR. For MPQ 15 Table 4: Performance on Image Classification of DeiT and ViT-L. Bits (W/A) Quant EE CIFAR-100 ImageNet Controlled Perf. Std. Config Controlled Perf. Std. Config 
+
+ˆL ↓ ˆBOPs ↓ ¯L ↓ ¯BOPs ↓ Acc. ↑ ˆL ↓ ˆBOPs ↓ ¯L ↓ ¯BOPs ↓ Acc. ↑
+
+> DeiT
+
+FP32 -
+
+- / / 12 1.80E13 91.86 / / 12 1.80E13 83.10 
+
+ViT-EE 7.20 1.84E13 8.10 1.97E13 89.24 9.59 2.19E13 8.15 1.97E13 80.51 LGViT 5.47 1.61E13 6.33 1.70E13 89.03 6.19 1.72E13 7.18 1.87E13 81.70 FP4/4 RepQ ViT-EE N/A N/A 9.91 3.59E11 84.79 N/A N/A 11.42 3.85E11 70.58 LGViT N/A N/A 9.37 3.42E11 75.43 N/A N/A 10.03 3.56E11 69.31 ERQ ViT-EE 8.77 3.23E11 9.28 3.35E11 87.86 11.79 3.91E11 10.86 3.72E11 77.59 LGViT N/A N/A 9.00 3.34E11 78.51 N/A N/A 9.09 3.37E11 71.32 MP4/4 MPTQ ViT-EE 8.81 3.25E11 8.51 3.17E11 84.57 11.80 3.94E11 10.56 3.65E11 76.15 LGViT 11.35 3.93E11 7.76 3.07E11 83.15 12 4.09E11 8.86 3.34E11 73.58 
+
+MAQEE 5.86 2.61E11 5.98 2.64E11 87.86 7.92 3.10E11 7.59 3.01E11 78.57 
+
+> ViT-L
+
+FP32 -
+
+- / / 24 6.31E13 93.25 / / 24 6.31E13 85.30 
+
+ViT-EE 11.75 3.11E13 12.94 3.41E13 92.40 12.43 3.36E13 16.01 4.37E13 82.86 LGViT 8.34 2.26E13 10.85 2.93E13 92.53 9.95 2.69E13 12.52 3.38E13 82.02 FP4/4 RepQ ViT-EE N/A N/A 23.11 1.12E12 81.31 N/A N/A 19.95 9.81E11 76.62 LGViT 23.94 1.14E12 20.69 1.01E12 85.97 N/A N/A 15.76 8.18E11 74.02 ERQ ViT-EE N/A N/A 22.58 1.09E12 82.34 N/A N/A 21.53 1.05E12 58.89 LGViT 21.06 1.02E12 20.74 1.01E12 85.59 22.20 1.08E12 17.53 8.95E11 76.52 MP4/4 MPTQ ViT-EE N/A N/A 21.96 1.06E12 83.31 N/A N/A 21.33 1.04E12 75.44 LGViT 20.28 9.92E11 21.64 1.05E12 84.33 21.32 1.01E12 17.10 8.53E11 75.12 
+
+MAQEE 9.66 5.64E11 9.71 5.79E11 88.17 12.39 6.32E11 18.64 9.15E11 80.29 
+
+optimization, the process is initialized using the FPQ configuration of the layer immediately preced-ing the target precision. The optimization is then progressively refined toward the desired precision until convergence is achieved. We set the hyperparameters as follows: λouter = 0 .5, λinner = 0 .5,
+
+α = 0 .75 , τ = 0 .05 , T = 2 , bmin = 3 , and bmax = 6 .
+
+B.2 Results on DeiT and ViT-L 
+
+As shown in Table 4, DeiT delivers performance broadly comparable to ViT-B, consistent with their structural similarity. MAQEE preserves FP32-level exiting accuracy and enables, on average, 3–4 earlier exits at the same accuracy. Although MPQ alleviates part of the accuracy degradation of FPQ under Early Exiting, its assumption of a fixed inference path constrains exit efficiency, leaving it less effective than MAQEE. A similar pattern is observed for ViT-L. While the increased parameter count provides higher capacity, the greater depth also amplifies quantization-induced perturbations, leading to limited gains in quantized model performance. Nevertheless, MAQEE still enables exits that are 6–9 layers earlier than the strongest baseline at the same accuracy, matching the proportional increase in model depth. 
+
+## C Bi-Level Optimization Algorithm 
+
+16 Algorithm 1 Bi-level optimization 
+
+Require: Parameters θ; datasets Dtrain , Dcal ; initial bit allocation b(0) ; threshold grid Λ; hyper-parameters α, λ outer , λ inner ; per-layer bit bounds bmin , b max 
+
+Ensure: Thresholds ϕ⋆, bit-widths b⋆
+
+Initialization: set ϕ(0) ; quantize with b(0) ; estimate utilization uℓ(ϕ(0) ) on Dcal .
+
+ϕ ← ϕ(0) , b ← b(0) .
+
+while true do 
+
+bprev ← b
+
+Outer loop (threshold search): 
+
+Given b:
+
+for each exit ℓ and candidate λ ∈ Λ do 
+
+Compute PGR ℓ, BSR ℓ, QID ℓ, SQNR −1 
+
+> ℓ
+
+.Compute total risk Rℓ(λ) (Eq. (11)). Evaluate Jout (ϕ) = P 
+
+> e∈E
+
+Re + λouter BOPs( b; ϕ). (Eq. (12)). 
+
+end for 
+
+Update thresholds ϕ by coordinate/grid search minimizing Jout .Re-estimate uℓ(ϕ) on Dcal .
+
+Inner loop (bit re-allocation): for each layer ℓ do 
+
+Compute risk Rℓ (Eq. (11)). Compute score Ψℓ (Eq. (13)) using Rℓ, uℓ(ϕ) and ∆BOPs ℓ.
+
+end for 
+
+L↓ = {ℓ | bℓ > b min }, L↑ = {ℓ | bℓ < b max }.
+
+ℓ↓ = arg min ℓ∈L ↓ Ψℓ, ℓ↑ = arg max ℓ∈L ↑ Ψℓ.Update bits: bℓ↓ ← bℓ↓ − 1; bℓ↑ ← bℓ↑ + 1 .
+
+if b = bprev then break end if Self-distillation recovery: train on Dtrain with loss L (Eq. (15)). 
+
+end while return ϕ⋆ = ϕ, b⋆ = b
+
+## D Notation Table 
+
+17 Symbol Description 
+
+L Number of layers. 
+
+ℓ Layer index, ℓ = 1 , . . . , L .
+
+x, y Input sample and label. 
+
+D Data distribution. 
+
+θ Model parameters. 
+
+B Set of admissible bit-widths, e.g., {2, 4, 8}.
+
+bℓ Bit-width assigned to layer ℓ, with bℓ ∈ B.
+
+b Layer-wise bit allocation, b = {bℓ}Lℓ=1 .
+
+Bw , B a Weight and activation bit-widths. 
+
+Btot Total bit budget for mixed-precision allocation. 
+
+cℓ(x, b ℓ) Computational cost of layer ℓ under bit-width bℓ.
+
+BOPs( b; φ) Bit operations under bit allocation b and exit policy φ.
+
+CAPQ (b, φ) Amortized computational cost under APQ. 
+
+zℓ(x) Logits produced at layer ℓ.
+
+ρℓ(x) Exit confidence, ρℓ(x) = max j softmax( zℓ(x)) j .
+
+φℓ Confidence threshold at layer ℓ.
+
+φ Exit policy, φ = {φℓ}Lℓ=1 .
+
+Kφ(x) Stopping depth induced by the full-precision exit policy. 
+
+eKφ,b(x) Stopping depth after quantization. 
+
+uℓ(x, φ) Indicator that input x reaches layer ℓ.
+
+uℓ(φ) Expected utilization of layer ℓ, Ex∼D [uℓ(x, φ)] .
+
+∆ℓ(x) Confidence margin, ∆ℓ(x) = ρℓ(x) − φℓ.
+
+ξℓ, b(x) Quantization-induced confidence perturbation. 
+
+hℓ(x) Full-precision hidden state at layer ℓ.
+
+˜hℓ, b(x) Quantized hidden state at layer ℓ.
+
+ϵℓ(bℓ) Local quantization error bound at layer ℓ.
+
+γℓ Local error amplification factor. 
+
+Sℓ Static quantization sensitivity of layer ℓ.
+
+PGR ℓ Performance gap risk of early exiting at layer ℓ.
+
+BSR ℓ Boundary sensitivity risk at layer ℓ.
+
+QID ℓ Quantization-induced drift at layer ℓ.
+
+SQNR −1 
+
+> ℓ
+
+Inverse signal-to-quantization-noise ratio at layer ℓ.
+
+Rℓ Overall risk score of layer ℓ.
+
+α Weight balancing decision-level and representation-level risks. 
+
+Ψℓ(b; φ) Priority score for bit-width reallocation. 
+
+λ Trade-off coefficient in the APQ objective. 
+
+λouter Trade-off coefficient for threshold optimization. 
+
+λinner Trade-off coefficient for bit-width allocation. 
+
+T Distillation temperature. 
+
+ˆL Exit layer required to reach the target performance. 
+
+¯L Average exit layer. 
+
+\BOPs BOPs required to reach the target performance. 
+
+BOPs Average BOPs under the standard configuration. Table 5: Notation used throughout the paper. 
+
+18
