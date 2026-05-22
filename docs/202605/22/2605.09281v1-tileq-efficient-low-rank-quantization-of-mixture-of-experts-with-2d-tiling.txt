@@ -1,0 +1,1924 @@
+Title: TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling
+
+URL Source: https://arxiv.org/pdf/2605.09281v1
+
+Published Time: Tue, 12 May 2026 01:19:07 GMT
+
+Number of Pages: 28
+
+Markdown Content:
+# TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+Hongyaoxing Gu 1 2 Xinzhe Chen 1 2 Lijuan Hu 1 Fangfang Liu 1
+
+Abstract 
+
+Mixture-of-Experts (MoE) models achieve re-markable performance by sparsely activating specialized experts, yet their massive parame-ters in experts pose significant challenges for deployment. While low-rank quantization of-fers a promising route to compress MoE mod-els, existing methods still incur nonnegligible memory overhead and inference latency. To ad-dress these limitations, we propose T ILE Q, a fine-tuning-free post-training quantization (PTQ) method that employs 2D-tiling structured low-rank quantization to share low-rank factors across both input and output dimensions of MoE ex-perts. Furthermore, we introduce an efficient inference technique for T ILE Q that fuses mul-tiple low-rank expert computations into a single-pass operation, significantly improving hardware utilization. Experiments show that T ILE Q cuts down additional memory usage up to 10 × and reduces inference latency to ∼5% while pre-serving state-of-the-art accuracy. Our code is available at: https://anonymous.4open. science/r/TileQ-BE20 
+
+1. Introduction 
+
+In recent years, the MoE architecture has emerged as a pow-erful paradigm for scaling large language models (LLMs), achieving remarkable success (Guo et al., 2025). MoE models distribute computational workloads across a set of “experts,” and employ sparse activation mechanisms such that only a small subset of experts is activated during each inference step. This design enables MoE models to deliver performance comparable to larger dense models while sub-stantially reducing computational costs (Muennighoff et al., 2025; Lin et al., 2024a; Kim et al., 2023). However, despite their computational efficiency, MoE archi-tectures introduce a critical challenge: substantial memory 
+
+> 1
+
+Institute of Software Chinese Academy of Sciences 
+
+> 2
+
+University of Chinese Academy of Sciences. Correspondence to: Fangfang Liu <fangfang@iscas.ac.cn >.
+
+Preprint. May 12, 2026. 
+
+overhead. Although each input token activates only a small subset of experts during inference, the entire set of model parameters must remain resident in memory (Rajbhandari et al., 2022). This large memory footprint severely limits the deployment of MoE models on resource-constrained hard-ware and significantly increases the cost of cloud inference. To address the memory bottleneck, model compression techniques such as quantization have become a crucial av-enue of research (Li et al., 2025a; Frantar et al., 2023; Li et al., 2026). Consequently, developing advanced MoE quantization methods is essential for lowering deployment barriers and inference costs. Among existing approaches, PTQ (Frantar et al., 2023; Hubara et al., 2021; Chen et al., 2025c; Zhang et al., 2025) offers significant practical advan-tages over quantization-aware training (QAT) (Chen et al., 2025a), which enabling rapid deployment with minimal computational overhead without retraining. Moreover, re-cent SOTA PTQs have narrowed the accuracy gap with QAT (Tseng et al., 2024b; Lin et al., 2024b), making it par-ticularly well-suited for MoE models that prioritize efficient inference without compromising fidelity. Among PTQs, low-rank methods have demonstrated strong performance in MoE quantization (Huang et al., 2025; Li et al., 2025b). Nevertheless, the challenge lies in the trade-off among three key points : (i). Simple quantization schemes suffer from severe accuracy degradation under ex-tremely low bit-widths; (ii). Experts are small and sparse in the MoE models, where low-rank PTQs often incur sig-nificant additional memory overhead; (iii). High-accuracy quantization methods typically introduce considerable infer-ence latency. Moreover, fine-tuning (FT) methods degrade model generalization, limiting their applicability for rapid task adaptation (Zhang et al., 2024b;a). To tackle these challenges, our aim is ‘achieving high accu-racy and compression ratios while keeping minimal infer-ence latency’ . Our contributions are as follows: • To overcome the limitation of traditional low-rank methods, we propose TILEQ—a fine-tuning-free PTQ approach for MoE models that leverages a 2D-tiling layout based on singular subspace clustering to enable efficient shared representations across experts. • We proposed an optimized fusion algorithm that com-bines multiple low-rank expert GPU kernels across 1
+
+> arXiv:2605.09281v1 [cs.LG] 10 May 2026 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling
+
+all tokens into a single-pass operation, significantly accelerating both the prefill and decode phases. • Experiments show that T ILE Q executes swiftly with-out fine-tuning and achieves state-of-the-art quantiza-tion accuracy while saving up to 90% low-rank extra memory and reducing inference latency to 5% .
+
+2. Related Works 
+
+2.1. Post-Training-Quantization 
+
+In post-training quantization (PTQ) for large language mod-els, existing methodologies can be systematically organized into three hierarchical categories: 
+
+Base Format. These foundational quantization schemes establish the core framework for PTQ: • Symmetric Format (Nagel et al., 2020): Employs a symmetric grid centered at zero to simplify arithmetic operations, but is highly susceptible to outliers. • Asymmetric Format : Introduces new formats or learn-able zero-point offset (Li et al., 2025d; Rusci et al., 2020) to better align the quantization range with the empirical weight distribution. • Vector Format (Chee et al., 2023; Van Baalen et al., 2024; Liu et al., 2024): Represents groups of weights as vectors and compresses them by clustering or codebook-based encoding. 
+
+Optimization methods. These techniques build upon base methods by incorporating model-aware refinements to mitigate quantization-induced degradation: • Hessian optimization (Frantar et al., 2023): Opti-mizes quantized weights Q by minimizing a Hessian-weighted reconstruction loss, typically formulated as, 
+
+L(W ) = EX
+
+
+
+∥W X − ˆW X ∥
+
+
+
+, (1) where H is a proxy Hessian matrix. • Activation-aware scaling : Identifies channels with salient activation magnitudes and adjusts their corre-sponding weight scales to minimize downstream per-formance loss (Lin et al., 2024c; Xiao et al., 2023; Zhao et al., 2026a). • Outlier mitigation : Addresses outliers through: 
+
+– Rotation : Exploits the orthogonality invariance through Hadamard rotations (Ashkboos et al., 2024; Chee et al., 2023; Lin et al., 2024b) or learn-able orthogonal matrices (Liu et al., 2025). 
+
+– Clipping : Cutoff outliers to constrain numerical range, thereby stabilizing quantization and im-proving overall fidelity (Shao et al., 2023). • Low-rank and sparsification : Decomposes weight ma-trices into low-rank (Li et al., 2025b; Gu et al., 2026; Zhao et al., 2026b) factors or enforces structured spar-sity (Dettmers et al., 2024), lowering both memory footprint and error propagation during quantization. 
+
+Fine-tuning. These approaches recover lost accuracy through lightweight adaptation, though task-specific fine-tuning may compromise model generality: • LoRA-based FT (Dettmers et al., 2023; Zhang et al., 2024b): Integrates low-rank adapters into the quan-tized model and updates only these lightweight mod-ules, achieving significant performance recovery with minimal overhead. • Self-supervised FT : Leverages unlabeled data and self-supervised objectives to recalibrate internal representa-tions of the quantized model (Chen et al., 2020). Contemporary PTQs typically compose these strategies in a modular fashion: they begin with a base format, enhance it with one or more optimization techniques tailored to model architecture and data characteristics, and optionally apply FT when higher accuracy is required. 
+
+2.2. Low-Rank Methods in MoE Quantization 
+
+In MoE models, about 95% of the parameters reside in the MLP experts and low-rank methods has emerged as a promising direction for MoE quantization due to its abil-ity to simultaneously reduce the storage consumption of experts. Formally, low-rank quantization approximates a weight matrix W ∈ Ri×o as: 
+
+W ≈ Q(W −Wr )+ Wr ; Wr = U V = SVD (W ), (2) where U ∈ Ri×r , V ∈ Rr×o and r ≪ min( i, o ) stands for the rank and Q(·) denotes a quantization operator applied to the low-rank factors. Traditional methods applies low-rank quantization to each expert independently, without consider-ing relationships or redundancies across other experts and typically stored in 16-bit (Zhang et al., 2024a; Li et al., 2025b; Yang et al., 2024; Chen et al., 2025b). However, these methods yields limited compression gains when the number of experts K is large. To address this limitation, PTQs for MoE apply shared low-rank basis U ∈ Ri×r and specific V ∈ Rr×(o×K) in 1D-tiling to capture common structures across all experts (Li et al., 2025c). Although the shared singular method achieves a higher com-pression ratio, it only cutoff half the memory costs and still introduces significant memory overhead in sparse MoE models (Team, 2025). Furthermore, during inference, the V
+
+matrices of different experts remain disjoint, necessitating separate GEMM operations for each expert. The absence of computational fusion further leads to an additional latency overhead of more than 50% (Huang et al., 2025). 2TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+To address both the compression ceiling and inference ineffi-ciency, we propose a fine-tuning-free PTQ method T ILE Q, achieving significantly higher compression ratios and min-imum latency in inference. 
+
+3. Method 
+
+Model: Denote that each MoE module has K experts and includes a router G, so that W = {Wk ∈ Ro×i}Kk=1 . For an input X ∈ RB×i, the output is given by 
+
+MoE( X) = X 
+
+> Wk∈ek, X
+
+Gk(X) · Wk(X), (3) where G(x) provides routing scores and ek, x denotes the set of selected top-K experts. The resulting output is a weighted combination of the outputs of the selected experts. In this section, we focus on the experts in MoE models and propose a novel 2D low-rank PTQ method. Based on the proposed 2D-Tiling format (§3.1), we further introduce a fusion algorithm to enhance the inference speed for MoE models in both prefilling and decoding (§3.2). 
+
+3.1. TileQ: 2D-Tiling Structured Low-Rank Quantization for MoE Models 
+
+Motivation. In MoE models, expert similarity serves as a key criterion for enabling efficient prun-ing and compression or redundant experts can be identified by the gating matrix (Li et al., 2025c; Frantar & Alistarh, 2023). However, existing low-rank methods either decompose each expert indepen-dently or concatenate all experts in one dimension to share singular U or V , resulting in limited com-pression ratio and non-negligible inference latency (Huang et al., 2025). 
+
+Solution. Inspired by expert similarity, we propose a fine-tuning-free low-rank PTQ method as shown in Figure 1: all experts are arranged into a 2D tiled layout, explicitly leveraging similarity along both row and column to jointly share the U and V matrices in (K → M ∗ N ) — for an expert weight Wk in Eq.3, 
+
+Wk = U pΣV q + ˆWk, {p, q } = ϕk (4) where U = [ U1, U2, · · · , UM ]⊤ ∈ R(M ×i)×r and V =[V1, V2, · · · , VN ] ∈ Rr×(N ×o); ϕ is a position table that maps the weights at the original t-th expert to {p, q }-blocks in the 2D low-rank matrix; ˆWk is a quantization matrix. 
+
+Step 1: Scaling. Since important activation values signif-icantly affect quantization accuracy (Lin et al., 2024c), a diagonal scaling matrix is encoded into the weight matrix at the beginning. For each Wk, form 
+
+˜W scale k = Wksk ∈ Ri×o, (5) where sk is a scaling vector calculated by calibration. This transposition ensures that the left singular vectors of ˜Wk
+
+correspond to the input feature space (facilitating clustering of U ), while the right match the output (for V clustering). 
+
+Step 2: Extracting. For each ˜W scale k , we compute an approximate rank-r0 approximation: 
+
+˜W scale k ≈ UkΣkV ⊤ 
+
+> k
+
+, (6) then vectorization flatten and normalize Uk, Vk into Rri 
+
+and Rro to extract norm feature embeddings: 
+
+uk = vec( Uk)
+
+∥ vec( Uk)∥2
+
+, vk = vec( Vk)
+
+∥ vec( Vk)∥2
+
+. (7) 
+
+Step 3: Clustering. We perform biclustering on the nor-malized embeddings to assign each expert k an ideal grid coordinate (mk, n k). Then apply KMeans to obtain: 
+
+({G row  
+
+> m
+
+}M −1 
+
+> m=0
+
+= KMeans  {¯uk}Kk=1 , n clusters = M ,
+
+{G col  
+
+> n
+
+}N −1 
+
+> n=0
+
+= KMeans  {¯vk}Kk=1 , n clusters = N ,
+
+(8) where m and n denote the cluster indices of row and column and the resulting partitions are defined as Grow  
+
+> m
+
+= {k | rk =
+
+m} and Gcol  
+
+> n
+
+= {k | ck = N }. This assignment encour-ages experts with similar singular matrix to share rows or columns, yielding the ideal tiling (mk, n k) for expert k.
+
+Step 4: 2D-Tiling. The ideal tiling in ¶ Step 3 is hardly met, as multiple experts may be simultaneously assigned to the same position. The mapping must satisfy: (i) no two blocks occupy the same tile; (ii) each block remains as close as possible to its ideal location. Formally, we seek a placement function ϕ(k) 7 → (m, n )
+
+that approximately solves 
+
+min 
+
+> ϕK
+
+X
+
+> k=1
+
+∥ϕ(k) − (mk, n k)∥1 . (9) To solve this, we use a greedy spatial allocation strategy. For each position (m, n ), we define its anchor in the phys-ical grid as (m⋆, n ⋆) = (min( m, M −1) , min( n, N −1)) .Blocks are placed in unoccupied cells around the anchor using a concentric search ordered by Chebyshev distance: 
+
+Nρ = (m′, n ′) ∈ P (m′, n ′) − (m⋆, n ⋆) ∞ = ρ ,
+
+(10) for ρ = 0 , 1, 2, . . . . Once placements {(mk, n k)}Kk=1 are determined, we construct the tiling matrix Wbig as: 
+
+Wbig =
+
+> K
+
+X
+
+> k=1
+
+Emk ,n k ⊗ ˜Wk ∈ RM i ×N o , (11) 3TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling PTQs: Trade -Off in Accuracy & 
+
+Efficiency and Memory Costs. 
+
+Fast & Accurate & FT -Free PTQ 
+
+with Low Memory Cost 
+
+> Observation 1
+
+(a) Observations 
+
+> MoE, low -rank PTQs
+> gain higher accuracy
+> via expert similarity.
+
+However the costs is non -negligible 
+
+in memory and inference latency! 
+
+(b) Challenges & Strategies  (c) Results 
+
+C1. LoRA potential in PTQs 
+
+remains underexploited. 
+
+𝑾 𝒌 × 𝚱  𝑼 𝒌                   
+
+> 𝑽 𝒌 r
+> i). Element -wise Experts
+> 𝚱 ×𝒊
+> 𝒐
+> 𝑾
+> Takes ~ () extra -bit.
+> ii). 1D -Sharing
+> …
+> Concatenate 𝑲 experts
+> 𝑾 𝟏 𝑾 𝟐 𝑾 𝑲
+> …×𝑼 𝑽 𝟏 𝑽 𝟐 𝑽 𝑲
+> Exclusive
+> Shared
+> extra -bit:.
+> 𝒕𝒚𝒑𝒆 :𝒅 𝒇𝒑
+> ~2x less
+> Extra -bit ( memory ) and memref irregular ( latency ).
+
+S1. Dual clustering of scaled 
+
+left and right singular values. 
+
+S2. Resolve expert placement 
+
+conflicts by Greedy algorithm. 
+
+> 𝑼 𝒌
+> 𝑻
+> 𝑽 𝒌
+> LoRa
+
+𝑾 𝒌                              
+
+> Norm &
+> 𝓖 𝓶
+> 𝓇
+> 𝓖 𝓷
+> 𝒸
+> [1,3…4]
+> [2,15]
+> …
+> [5,K -1]
+> M×N≥𝐊
+> M
+> [5,7]
+> [1,2]
+> …
+> [6,K -3]
+> N
+> Kmeans
+> Greedy seek a placement function
+> min
+> 𝝓 σ𝒌 =𝟏
+> 𝑲 |𝝓 𝒌 −𝒎 𝒌 ,𝒏 𝒌 |𝟏 .
+> 𝓝 𝝆 =𝒎 ′,𝒏 ′∈𝓟 |𝒎 ′,𝒏 ′−𝒎 ⋆,𝒏 ⋆|∞=𝝆
+> 1 to 1 match
+> org idx
+> 1
+> row column
+> 2
+> …
+> K
+> 𝝓
+> 3
+> 6N
+> M
+> …
+> …
+> 2
+> 4
+> Scale by calibration
+> Observation 2
+> Low -rank PTQs suffer
+> Low compressibility
+> & slow computation.
+
+S3. Faster 2D -Tiling low -rank 
+
+and quantization scheme.       
+
+> Find an ideal grouping map
+> from independent features.
+> How to place experts by grouping?
+> Cluster & Group Place & Tile 𝓖 𝓶
+> 𝓇
+> 𝓖 𝓷
+> 𝒸
+> Row:
+> Column :
+> 𝑾 16 𝑾 7𝑾 1𝑾 3
+> 𝑾 9𝑾 5
+> 𝑾 15 𝑾 6𝑾 10
+> …
+> …
+
++    
+
+> Placement Conflict!
+> R: (2,15)
+> C: (2,1)
+> ×𝑾 2
+> M×N
+> Solve
+> 2x
+> 𝑲
+
+2D -Tiling cuts extra memory sharply, 
+
+but SVD bottlenecks computation.                           
+
+> ☺
+> K2
+> …
+> …
+> … M×N
+> Plug -in: 𝝓 k→(m,n )
+> 𝑾 16 𝑾 7𝑾 1𝑾 3
+> 𝑾 9𝑾 5𝑾 12 𝑾 11
+> 𝑾 15 𝑾 6𝑾 10 𝑾 8
+> 𝑽
+> 𝑼 𝑻
+> ×
+> Mix -prec Rank -1 Sketch
+> LoRa
+> 𝑽
+> 𝑼 𝑻
+> fp8
+> 𝜮 fp16
+> Gaussian
+> Sketch rTimes
+> 𝑾 −=𝑾 𝒓𝒂𝒏𝒌 𝟏
+> Draw U,𝜮 ,V
+> Quantization:
+> Multi Level
+> 𝐾 bits ,O(n) faster
+> Scalar
+> Vector
+> Rotate
+> Per group Hessian
+> Codebook Per block
+> Walsh -Hadamard
+> 8×less
+
+Achieves comparable quantization accuracy with 
+
+the lowest average extra bitwidth (below 0.05 ). 
+
+Faster quantization speed than SVD , while 
+
+incurring low latency in both prefill and decode . 
+
+> Accuracy &
+> Mem costs
+> Quant Costs & Inference latency (Prefill/Decode)
+
+Figure 1. Overview of T ILE Q. (a) discusses the observations and motivations of low-rank PTQs, (b) presents the challenges and strategies of our algorithm, and (c) shows the evaluations results. The pseudo-code is shown in Algorithm 1. 
+
+where Em,n ∈ { 0, 1}M ×N is the basis matrix with 1 at 
+
+(m, n ), and ⊗ denotes the Kronecker product in block (i.e., placing ˜Wk at the (mk, n k)-th tile). The resulting mapping is ϕ(k) 7 → (mk, n k), and the rank-r
+
+shared tiling matrix is formed as: 
+
+˜Wk = ( Wbig )rank ϕ(k) s−1
+
+k = Umk ΣV ⊤
+
+nk s−1
+
+k , (12) Here, we obtain the first form in Eq 4, which corresponds to the low-rank component of TileQ. 
+
+Step 5: Quantization. Now we quantize the residual after expert low-rank decomposition: 
+
+ˆW = Quant (W − ˜W ) = Q(R).
+
+TileQ targets the low-rank component in MoE quantiza-tion and remains compatible with mainstream quantization methods on the residual. Aiming for optimal accuracy, we choose three strategies from §2.1: 1 Apply GPTQ /GPTVQ ’s hessian optimization for scalar- and vector-level quantiza-tion, respectively. 2 Incorporate L OPR O’s (Gu et al., 2026) low-rank rotation to maximize quantization accuracy. 
+
+∗Plug-in. In TILE Q, since feature extraction (K ×
+
+SV D (Ro×i)) and decomposition of the 2D-tiling matrix (SV D (R(M ×o)×(N ×i))) are computationally expensive, we replace it with Gaussian Sketch approximation (Gul et al., 2026). Calculate the rank-1 matrix W1 = U1Σ1V1 by: 
+
+U = Q
+
+∥Q∥ , Σ = ∥Q⊤W ∥∥Q∥ , V = Q⊤W
+
+∥Q⊤W ∥ , (13) where S ∈ Ri is a Gaussian sketch vector, it is the it-eration times and Q = ( W W ⊤)it W Σ. Then, we set 
+
+W = W − W1 and do the same process for r times to have any rank approximation. Since the singular value matrix 
+
+Σ is diagonal with low storage cost, by storing U and V
+
+in fp8 while retaining Σ in fp16 , the storage overhead can be reduced by half. This iterative approach achieves nearly identical to SVD while being way faster in computation. 
+
+Insights . TILE Q jointly structures MoE experts into a 2D-tiling low-rank layout quantization without fine-tuning. This pipeline explicitly exploits expert similarity to enable shared U and V factors across tiles. Our method is highly flexible, supporting quantization meth-ods from scalar to vector-wise and other optimization. Furthermore, we replace costly SVD with a fast sketch-low-rank approximation and adopts a mixed-precision storage strategy, which simultaneously reduces quantiza-tion cost and improves model compression ratio. 
+
+3.2. Efficient Fused Sparse Low-Rank Inference in 2D-Tiling 
+
+Motivation. Traditional low-rank PTQs only takes minor latency overhead (under 10%) in dense mod-els (Li et al., 2025b). However, in MoE models, experts are much smaller, making the overhead non-negligible (from 15 % to more than 75 %). Shared-U
+
+approach like M ILO (Huang et al., 2025) reduces this overhead to around 10% on Mixtral-8x7B through kernel optimizations, but the latency rises to more than 50% on newer, sparser models such as Qwen3-30B-A3B, significantly degrading practical usability. 
+
+Solution. We propose an efficient low-rank inference algo-rithm based on 2D-Tile low-rank shown in Figure 2, formu-lated as follows: 
+
+MoE( X) = QMoE( X) + LoTileMoE(X) , (14) where QMoE denotes the standard quantized MoE forward 4TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling X i  
+
+> Seqlen
+> Gate
+> Expert
+> 1
+> Token Weight
+> 2
+> …
+> K
+> [3,4…]
+> …
+> …
+> [0.2,0.4…]
+> Mask
+> [1,2…]
+> [1,9…]
+> [0.9,0.1…]
+> [0.5,0.3…]
+> Top K
+> K
+> 𝑽 𝒌
+
+𝑼 
+
+*@
+
+@ 
+
+> 𝒘 𝒌 𝒚 𝒌
+> 𝑽 K
+
+*@
+
+=
+
+> …
+> …
+> …
+> …+
+> Y
+> 𝒙 𝒌
+> 𝑺𝒉𝒂𝒓𝒆
+
+A1. Per -Expert Low -Rank   
+
+> i
+> Seqlen
+> X
+> K
+> Gate
+> Expert
+> 1
+> Token Weight
+> 2
+> …
+> K
+> [3,4…]
+> …
+> …
+> [0.2,0.4…]
+> Mask
+> [1,2…]
+> [1,9…]
+> [0.9,0.1…]
+> [0.5,0.3…]
+> 𝑽 𝒌 𝑼 1
+
+*@@
+
+> 𝒘 𝒌
+> 𝒙 𝒌
+
+= 
+
+> 𝒚 𝒌
+> 𝑽 K𝑼 K
+
+*@@= 
+
+> …
+> …
+> …
+> …
+> …
+> Top K
+> Index add
+> +
+> Y
+
+B. TileQ : 2D -Tiling Low -Rank 
+
+→ (m,n )
+
+𝑽 
+
+> M × i
+> …
+> …
+
+M × N
+
+𝑾 16  𝑾 7 𝑾 1 𝑾 3
+
+𝑾 9 𝑾 5 𝑾 12  𝑾 11 
+
+𝑾 15  𝑾 6 𝑾 10 
+
+𝑼 
+
+𝜮 
+
+𝝓 k
+
+𝑾 8
+
+N × o r     
+
+> M×r𝑿 𝒑𝒓𝒐𝒋
+> 3D
+> M
+> t1t2t3t4
+> bs
+> N×r
+> copy
+> copy
+
+*      
+
+> Weight mask
+> 00
+> 00
+> 0000
+> 0
+> 0
+> 00𝒘 3𝒘 4
+> 𝒘 1
+> 𝒘 2
+> Top K at 𝝓 k→(m,n)
+> M
+> N
+> Sum M-axis
+> o
+> M
+> bs
+> ∑
+> 𝒀 𝑻
+
+D. Inference 
+
+@
+
+> Batch  × Seqlen
+> 𝑿 𝒓𝒆𝒔𝒉𝒂𝒑𝒆
+
+bs  
+
+> 𝑼 𝒓𝒆𝒔𝒉𝒂𝒑𝒆
+> i
+> M×r
+
+@
+
+> 𝜮 𝒓𝒆𝒔𝒉𝒂𝒑𝒆
+
+Format 0 Matmul of U1
+
+Matmul of V 33D Transform 2    
+
+> 𝑿 𝒑𝒓𝒐𝒋 N×r
+> 𝑮 ∗𝑿 𝒕𝒊𝒍𝒆
+> bs
+> M
+> 𝑽 𝒓𝒆𝒔𝒉𝒂𝒑𝒆
+
+@   
+
+> 𝑿 𝒕𝒊𝒍𝒆 𝑮
+> 𝑮 ∗𝑿 𝒕𝒊𝒍𝒆
+> Dimention
+> Memory
+> Bound
+> Compute
+> Bound
+> Flops
+
+Prefill 
+
+Decode 
+
+> K
+
+*@@=
+
+> …
+> …
+> …
+> …
+> ×K
+
+= ×1@ @      
+
+> Faster by fully utilize tensor
+> processing units in eliminating
+> small -sized Matmuls !
+> TCU,
+> NPU
+> …
+> Extra memory costs
+> 𝟐 √𝑲 𝒍𝒆𝒔𝒔 !
+> Memory
+> Faster by significantly reduce
+> additional memory overhead
+> and the number of function calls !
+> In Practice, we  avoid  explicitly
+> construct 3D  𝑿 𝒕𝒊𝒍𝒆  by  in -place
+> weight  𝑿 𝒑𝒓𝒐𝒋  .
+> Gather
+> Scatter
+> Add
+
+A2. 1D -Shared Low -Rank 
+
+C. Optimization 
+
+Figure 2. Efficient MoE with Low-Rank Decomposition in T ILE Q: Enable 2D-Tiling to In-Place Optimization and Fast Inference 
+
+pass, where the weights in Eq.3 are replaced with quantized matrices, ensuring compatibility with established inference frameworks (Kwon et al., 2023; Zheng et al., 2024). Mean-while, LoTileMoE is an efficient inference method for the tiled low-rank. It exploits the low-rank structure to fused compute all low-rank experts and performs as follows: For each token b ∈ { 1, . . . , B } and its t-th ∈ { 1, . . . , K} 
+
+selected expert. Denote the set is E = {eb,t | b ∈ [B], t ∈
+
+[K]} and gb,t is the routing weight from G. The mapping ϕ
+
+assigns this expert to a unique tile in the 2D grid: 
+
+(mb,t , n b,t ) := ϕ(eb,t ),
+
+Firstly, define the scaled left factor as U Σ ∈ R(M i )×r and project the entire batch: 
+
+Xproj = X · (U Σ)reshape ∈ RB×(M r ),
+
+where (U Σ)reshape ∈ Ri×(M r ) reshapes the tall matrix into feature-aligned blocks. This is then reshaped into a 3D tensor and broadcast across the column dimension: 
+
+Xtile = reshape( Xproj , [b, M, r ]) ⊗ 1⊤
+
+N ∈ Rb×M ×(rN ),
+
+where ⊗ denotes channel-wise repetition. Next, we zero out all unselected tiles and inject routing-weighted contribu-tions only at active expert locations. For each token–expert pair (b, t ), the corresponding slice in Xtile spans columns 
+
+[nb,t r, (nb,t +1) r) within row mb,t . We construct an output accumulator A ∈ Rb×M ×(rN ), and update the accumulator as 
+
+A[b, m b,t ](nb,t ) ← gb,t · Xtile [b, m b,t ](nb,t ),
+
+where the superscript (n) denotes the n-th contiguous block of size r along the last dimension (i.e., indices [nr, (n +1) r)). Then a batched matrix multiplication yields: 
+
+Y = A · V ⊤
+
+reshape ∈ Rb×M ×o,
+
+where the same reshape is performed to V as U and each row slice Y [b, m, :] corresponds to the contribution of all experts assigned to tile row m. The outputs are aggregated by summing over the top-K dimension: 
+
+LoTileMoE( X) = 
+
+M −1X
+
+m=0 
+
+Y [b, m, :] ∈ Rb×o. (15) This formulation replaces irregular sparse accesses with regular tensor operations (reshape, matrix multiplication 
+
+· · · ), which are highly optimized on modern accelerators. The method thus achieves an optimal trade-off between memory efficiency and hardware utilization. 
+
+∗Tricks. In implementation, we avoid explicitly construct-ing the accumulating tensors (Figure 2.C). Instead, we gather the routing-weighted activations directly into a com-pact 2D buffer Σ ∈ Rb×(N r ), where each column n holds the sum of all activations assigned to that tile: 
+
+S[b](n) = X
+
+t: nb,t =n
+
+gb,t Xproj [b](mb,t ), ∀ n ∈ [N ]. (16) The final output is then computed as S · V ⊤
+
+flat . This for-mulation reduces memory complexity from O(bM rN ) to 
+
+O(bN r ) and enables fully parallel execution without instan-tiating large intermediate tensors. 
+
+Insights . LoTileMoE enables efficient batched in-ference for low-rank quantization in 2D-tiling. It re-places irregular expert dispatch with regular tensor op-erations—projecting inputs once to eliminate dynamic loops and sparse memory accesses, thereby incurring 
+
+negligible latency while leveraging highly optimized dense kernels (demonstrated in §4). 5TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+3.3. Analysis of T ILE QCompression ratio. TILE Q achieves superior compres-sion by exploiting 2D tiling across experts, achieving √K
+
+lower storage cost than 1D baselines and 2√K less com-pared to element-wise methods. Especially beneficial in larger, sparser MoE models. (Detailed in Appendix A.3) 
+
+Quantization Error. In T ILE Q, the error of e(k) satisfies 
+
+E(k)TileQ ≤ E (k)ind + ϵcluster , (17) where E(k)ind stands for the error of per-expert low-rank meth-ods and ϵcluster is the error introduced by low-rank under 2D-Tiling. Consequently, T ILE Q achieves quantization ac-curacy on par with independent per-expert compression. (Proved in Appendix A.2) 
+
+Inference latency. By replacing irregular per-token ex-pert dispatch with dense GEMMs and vectorized operations, TILE Q avoids the kernel launch and reduces memory band-width bottleneck of MoE and achieves a complexity 
+
+CT ileQ = O(BiM r + BN ro + BKr). (18) By aligning computation with tensor-specific hardware, TILE Q has significantly lower latency in both prefill and decode stages. (Detailed in Appendix A.4) 
+
+4. Evaluations 
+
+4.1. Setups Models: Evaluations are carried out on a set of repre-sentative Mixture-of-Experts language models, including Qwen1.5-MoE-A2.7B (Team, 2024), Qwen3-30B-A3B, Qwen3-Next-80B-A3B (Team, 2025), Mixtral-8×7B (Jiang et al., 2024), and Deepseek-MoE-16B (Dai et al., 2024). Ar-chitectural details of each model are summarized in Table 2. 
+
+Baselines: We compare against GPTQ (standard per-channel PTQ) (qubitium, 2024), GPTVQ (vector quantization variant) (Van Baalen et al., 2024), L OPR O (low-rank rotation) (Gu et al., 2026) and M OEQ UANT (Chen et al., 2025c) (MoE quantization) in main evaluations with the same protocol; FP16 results serve as upper bounds. 
+
+Metrics: We evaluate model performance by multiple benchmarks: perplexity is measured on WikiText-2 (Mer-ity et al., 2016), while down-stream tasks is assessed on: the AI2 Reasoning Challenge (Boratko et al., 2018), Phys-ical Interaction Question Answering (Bisk et al., 2020), Winogrande (WI) (Sakaguchi et al., 2021), and the Massive Multitask Language Understanding benchmark (Hendrycks et al., 2020). All evaluations are conducted by lm-eval 
+
+framework (Gao et al., 2024). Other experimental details are provided in Appendix B.                    
+
+> Table 2. Architectural configurations of experts in MoE models, with the number of experts reported as “regular + shared”. MoE-Models Experts Top-K Dimension Qwen1.5-MoE-A2.7B 60+4 4[1408,2048] Qwen3-30B-A3B 128+0 8[768,2048] Qwen3-Next-80B-A3B 512+1 10 [512,2048] Mixtral-8×7B 8+0 2[14336,4096] Deepseek-MoE-16B 64+2 6[1408,2048]
+
+4.2. Main Results 
+
+We compare T ILE Q with baselines on quantization perfor-mance, results are shown in Table 1 and can be analyzed from three directions. The comparison with other 2 MoE-Specific PTQ methods (M ILO (Huang et al., 2025) and MXMOE (Duanmu et al., 2025)) are provided in Appendix D.2. 
+
+Across bit-widths: TILE Q demonstrates exceptional ro-bustness under extreme low-bit settings, consistently outper-forming all no-finetuning baselines—including GPTQ and 
+
+> GPTVQ
+
+. In the highly challenging 2-bit scenario, most meth-ods suffer severe degradation (e.g., GPTQ on Mixtral-8x7B PPL drops from 3.87 to 15.3), whereas T ILE Qv achieves a perplexity of 4.78; Under 3-bit quantization, performance further approaches FP16: T ILE Qs attains a perplexity of 4.10 on Mixtral—nearly matching FP16 (3.87)—and scores 69.4 on MMLU, comparable to the unquantized model. This consistent cross-bit-width advantage stems from T ILE Q’s hybrid multi-layer quantization strategy. Moreover, com-pared to the element-wise method LoPRo, T ILE Q achieves comparable or even higher accuracy, indicating that the fused expert features in MoE is effective. 
+
+Quantization Strategies: TILE Q offers both scalar (T ILE Qs) and vector (T ILE Qv ) variants, revealing a fine-grained trade-off between accuracy and practical efficiency. At 2-bit, T ILE Qv consistently achieves the best performance. This gain arises from its multidimensional codebook model-ing intra-tile correlations. However, at 3-bit, the benefit of vector quantization diminishes: T ILE Qs matches or slightly surpasses T ILE Qv on key metrics, this stems from reduced reliance on complex codebooks at higher precision. No-tably, both variants share the same low-rank method back-bone—indicating that the core innovation lies not in the quantizer itself, but in the 2D-Tiling mechanism. This mod-ular design allows users to flexibly choose: T ILE Qs for 
+
+hardware-friendly, low-latency deployment , and T ILE Qv
+
+for ultra-low-bit applications demanding peak accuracy .
+
+Generalization and Scalability: TILE Q excels across di-verse MoE models with varying sparsity and scale. On the large-expert model Mixtral-8 ×7B, T ILE Qv effectively re-ducing it to 4.78 and significantly boosting downstream task performance. On sparse models like Qwen3-MoE, T ILE Qstill works well, achieving 71.3 MMLU at 2-bit. Notably, 6TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+Table 1. Quantization results of TileQ and baseline methods under 2-bit and 3-bit settings. Here, Extra.Bits ( Xy ) denote the average bitwidths allocated to the group-wise quantization scales and the low-rank components, respectively. We report perplexity on WikiText-2 and accuracy on six downstream tasks: ARC-Challenge (AC), ARC-Easy (AE), PIQA (PQ), WinoGrande (WI), MMLU (MU), and HellaSwag (HS). M OEQ is in short of M OEQ UANT . Further experimental details are provided in Appendix B. Models Methods Extra. 2-BiT Quantization 3-BiT Quantization PPL ↓ Accuracy ↑ PPL ↓ Accuracy ↑
+
+Bits ↓ Wiki AC AE PQ WI MU HS Wiki AC AE PQ WI MU HS DEEP SEEK -MOE-16 B
+
+FP16 - 6.11 45.1 75.9 78.6 70.5 45.1 59.7 6.11 45.1 75.9 78.6 70.5 45.1 59.7 GPT Q 0.13 0.0 24.1 24.4 50.2 66.5 53.3 25.3 45.3 7.17 32.3 66.7 76.1 67.9 37.3 53.7 GPTV Q 0.13 0.0 7.32 35.5 70.1 75.2 66.6 35.3 51.1 6.53 37.2 70.2 77.1 68.6 42.5 56.9 MOE Q 0.0 0 1e3 24.9 30.2 35.3 32.1 26.2 28.2 7.78 37.6 69.2 74.3 62.1 41.2 45.8 LOPR O 0.43 0.31 7.03 38.3 72.5 75.8 68.4 38.2 52.5 6.19 42.6 74.8 78.7 69.8 45.1 58.8 
+
+TILE Qs 0.16 0.04 7.06 38.1 72.7 76.1 68.5 37.9 52.2 6.24 43.2 75.0 78.6 69.9 44.3 58.3 TILE Qv 0.16 0.04 6.71 40.2 73.3 76.2 68.8 39.1 53.0 6.23 43.2 74.9 78.8 70.3 44.4 58.6 
+
+MIXTRAL 
+
+-8 X7B
+
+FP16 - 3.87 61.9 87.3 83.7 77.1 71.2 67.3 3.87 61.9 87.3 83.7 77.1 71.2 67.3 GPT Q 0.13 0.0 15.3 26.5 35.6 53.0 49.3 24.3 28.2 4.72 52.4 69.3 79.1 74.4 58.4 44.8 GPTV Q 0.13 0.0 5.28 42.0 71.6 75.9 66.5 58.9 55.4 4.27 54.9 72.9 82.6 74.8 65.9 63.1 MOE Q 0.0 0 13.4 38.9 49.8 60.3 49.9 44.2 40.5 5.45 57.4 80.2 78.9 71.9 63.4 60.1 LOPR O 0.21 0.08 5.01 55.3 82.5 80.6 74.9 63.7 60.2 4.13 60.3 85.9 82.7 76.2 69.2 66.2 TILE Qs 0.16 0.03 4.98 55.5 82.8 80.9 75.1 63.8 60.3 4.10 60.4 86.1 82.9 76.4 69.4 66.4 TILE Qv 0.16 0.03 4.78 56.3 83.8 80.5 74.8 64.4 61.4 4.13 61.4 86.1 82.8 77.2 69.2 66.6 
+
+QWEN 1.5-MOE-A2.7 B
+
+FP16 - 6.79 41.6 72.9 79.6 69.1 61.2 59.3 6.79 41.6 72.9 79.6 69.1 61.2 59.3 GPT Q 0.13 0.0 12.5 29.4 42.7 50.2 53.2 25.2 30.1 7.98 33.4 64.3 77.1 64.5 51.5 52.2 GPTV Q 0.13 0.0 8.12 34.1 68.4 71.4 62.5 53.9 49.8 7.1 38.8 71.2 78.4 68.3 59.6 57.7 MOE Q 0.0 0 5e5 34.9 34.8 59.0 58.2 48.4 38.5 8.21 32.6 63.6 76.2 63.8 50.1 50.4 LOPR O 0.43 0.31 7.52 39.9 72.7 77.6 68.2 56.8 53.4 6.94 40.1 72.9 78.8 69.4 60.8 57.6 TILE Qs 0.16 0.04 7.56 39.6 72.5 77.8 68.9 57.5 54.1 6.94 40.3 72.9 79.1 69.4 61.0 58.0 TILE Qv 0.16 0.04 7.35 40.2 73.4 78.5 68.6 58.8 55.5 6.93 40.1 74.1 80.0 68.6 60.3 58.3 
+
+QWEN 3-30B-A3 B
+
+FP16 - 8.07 52.6 79.2 79.7 70.3 79.6 58.8 8.07 52.6 79.2 79.7 70.3 79.6 58.8 GPT Q 0.13 0.0 14.6 31.1 54.4 68.9 57.2 53.1 43.2 9.42 44.0 70.3 75.1 63.4 72.2 50.1 GPTV Q 0.13 0.0 11.8 34.1 58.5 70.7 61.2 61.5 47.9 8.7 47.9 73.1 76.5 66.2 76.1 54.1 MOE Q 0.0 0 3e4 26.6 29.8 50.5 49.8 41.4 28.5 28.1 37.8 30.6 59.4 55.3 60.1 43.2 LOPR O 0.58 0.46 11.1 34.4 58.3 71.5 62.9 62.9 48.0 8.57 50.2 75.4 77.4 68.7 77.7 56.1 TILE Qs 0.16 0.04 11.3 34.6 58.4 71.8 63.1 62.9 48.3 8.58 50.3 76.3 77.3 68.9 77.9 56.9 
+
+TILE Qv 0.16 0.04 10.1 42.2 70.4 74.1 65.7 71.3 50.8 8.64 50.8 76.6 77.0 68.2 77.3 56.8 
+
+its lightweight low-rank (only 0.04 bit) attains near-optimal accuracy, yielding an 8× reduction in memory overhead compared to per-expert ( 0.04 vs. 0.32 ). In summary, re-gardless of whether experts are “ big-and-dense ” or “ small-and-sparse ”, T ILE Q adaptively maintains high accuracy. This scalability positions T ILE Q as a universal compression framework for next-generation sparse MoE models. 
+
+4.3. Inference latency 
+
+We evaluate inference latency in MoE block on 3 GPU architectures and A800 results are shown in Figure 3 and the proportion of each module in Qwen1.5-MoE is shown in Figure 4. Other results refer to Appendix D.1. 
+
+Prefill. During prefill, all tokens are processed simulta-neously, leading to large, dense activation matrices that favor compute-bound, regular operations. T ILE Q achieves minimal latency ( less than 5% ) by replacing irregular, per-expert sparse dispatch with a single structured GEMM. This trend holds consistently across model scales and batch sizes, confirming that T ILE Q’s 2D tiling maximizes hardware utilization during bulk processing. 
+
+Decode. Only few experts are active in this step, making memory bandwidth to be the primary bottleneck. Despite the reduced computational intensity, T ILE Q remains a static, contiguous weight layout that enables efficient caching and vectorized access. Meanwhile, element-wise and Milo-1D are still slow (around 75% latency on Qwen3-MoE), under-scoring its unsuitability for inference. Thus, since the MoE MLP blocks account for about 50% of the total inference time in practice (Figure 4), the end-to-end latency of T ILE Q is even lower in end-to-end deployment. 7TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 1 4 16 32                               
+
+> 0%
+> 25%
+> 50%
+> 75%
+> 100%
+> Prefill Latency (%)
+> Deepseek-MoE-16B
+> 1416 32
+> Mixtral-8x7B
+> 1416 32
+> Qwen1.5-MoE-A2.7B
+> 1416 32
+> Qwen3-30B-A3B
+> 1416 32
+> Qwen3-Next-80B-A3B
+> 1416 32
+> 0%
+> 25%
+> 50%
+> 75%
+> 100%
+> Decode Latency (%)
+> Deepseek-MoE-16B
+> 1416 32
+> Mixtral-8x7B
+> 1416 32
+> Qwen1.5-MoE-A2.7B
+> 1416 32
+> Qwen3-30B-A3B
+> 1416 32
+> Qwen3-Next-80B-A3B
+> Element-Wise MiLo-1D TileQ-1D TileQ-2D
+
+Figure 3. Inference latency in MoE MLP-block on A800. Here T ILE Q-2D denotes our proposed 2D-tiling low-rank algorithm. The 
+
+Element-wise baseline refers to the traditional per expert low-rank approach. The results of H800 and 5090 are given in Appendix D.1. 1 4 8 16 32        
+
+> Batch Size
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> 3.0
+> Throughput in log scale (token/s)
+> 7.8%
+> 52.2%
+> 40.0%
+> 7.8%
+> 51.7%
+> 40.6%
+> 7.8%
+> 51.6%
+> 40.6%
+> 7.8%
+> 51.6%
+> 40.6%
+> 7.1%
+> 48.3%
+> 44.6%
+> 24.1
+> 93.2
+> 184.0
+> 374.3
+> 689.2
+> Decode
+> Attention
+> MLP
+> Others
+> 14816 32
+> Batch Size
+> 0
+> 2
+> 4
+> 6
+> 7.7%
+> 51.5%
+> 40.8%
+> 7.0%
+> 50.2%
+> 42.8%
+> 6.8%
+> 52.2%
+> 41.1%
+> 7.2%
+> 49.7%
+> 43.1%
+> 6.6%
+> 51.4%
+> 42.0%
+> 94.8K
+> 342.4K 641.7K 1.38M 2.55M
+> Prefill
+
+Figure 4. Inference throughput and the time proportion of each module in Qwen1.5-MoE-A2.7B with sequence length 4096. 
+
+Table 3. Ablation studies on each component of T ILE Q in QWEN 1.5-M OE-A2.7 B under 2-bit quantization. Ablation On LORA .BITS 
+
+2bit 3bit PPL ↓ ACC ↑ PPL ↓ ACC ↑
+
+TILE Qv 0.04 7.35 62.5 6.93 63.6 
+
+× Vector Q 0.04 7.56 61.6 6.94 63.5 
+
+× Rotation 0.04 7.6 61.8 6.97 63.5 
+
+× 2D-Tiling 0.31 7.49 61.6 6.94 63.5 
+
+× LoRa 0.00 12.5 38.5 7.98 57.2 
+
+4.4. Ablation Studies 
+
+To validate each component’s contribution in T ILE Q, we perform an ablation study, with results shown in Table 3. TILE Qv , incorporating 2D-Tiling, vector-wise quantization, and rotation, outperforms all variants at 2-bit, highlighting the synergy among these components. Replacing vector-wise with scalar quantization, or rotation, causes minor degradation (PPL to 7.56–7.60), suggesting limited benefits of higher-order optimizations at low bit-widths. However, at 3-bit, all configurations perform similarly, indicating higher bit-widths better suit advanced quantization strategies. Then, removing 2D-Tiling maintains accuracy but increases bit-width by 8× . Conversely, eliminating the low-rank mecha-nism severely degrades performance—PPL rises to 12.5 and ACC drops to 38.5 at 2-bit. This confirms that leveraging expert similarity via 2D-Tiling with low-rank modeling is key for efficient compression, significantly enhancing ac-curacy without additional storage costs. Further ablation studies on rank and tile size are in Appendix D.1. 
+
+4.5. Quantization Time 
+
+Table 4. The time costs (hours) of each part in T ILE QModels Total Tiling Quant DS 16 B 1.60 0.10 1.50 M8 7B 2.22 0.22 2.00 Q1.5 13 B 1.52 0.12 1.40 Q3 30 B 5.70 0.20 5.50 
+
+As shown in Table 4 and the model names are in short of that in Table 1, the runtime of TILE Q is overwhelm-ingly dominated by the quantization phase, which accounts for more than 90% of the total time across all models. In contrast, the 2D-Tiling step is highly efficient by fast low-rank sketching, demonstrating its computational lightness and scalability. Notably, on sparse architectures such as Qwen3-30B-A3b, the quantization stage remains a bottleneck due to the inefficiency of GPTQ when applied to sparse experts and remains for future optimization. 
+
+5. Conclusion 
+
+In this work, we have presented T ILE Q, an efficient low-rank PTQ method for MoE models. By introducing a novel 2D tiling strategy, TileQ significantly reduces the storage overhead of low-rank matrices while preserving model accu-racy. Moreover, the structured computation pattern enabled by tiling facilitates highly parallel inference, leading to sub-stantial reductions in latency compared to traditional MoE low-rank computation mechanisms. Overall, T ILE Q serves as a lightweight, general-purpose extension to existing PTQ methods (e.g., GPTQ ), achieving SOTA performance 
+
+with minimal memory overhead and negligible inference latency , providing a scalable and hardware-friendly so-lution towards deploying MoE models under memory and computational constraints. 8TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+Impact Statements 
+
+This paper presents work whose goal is to advance the field of machine learning. There are many potential societal consequences of our work, none of which we feel must be specifically highlighted here. 
+
+References 
+
+Ashkboos, S., Mohtashami, A., Croci, M. L., Li, B., Cameron, P., Jaggi, M., Alistarh, D., Hoefler, T., and Hensman, J. Quarot: Outlier-free 4-bit inference in ro-tated llms. Advances in Neural Information Processing Systems , 37:100213–100240, 2024. Bisk, Y., Zellers, R., Le bras, R., Gao, J., and Choi, Y. Piqa: Reasoning about physical commonsense in natu-ral language. Proceedings of the AAAI Conference on Artificial Intelligence , pp. 7432–7439, Jun 2020. doi: 10.1609/aaai.v34i05.6239. URL http://dx.doi. org/10.1609/aaai.v34i05.6239 .Boratko, M., Padigela, H., Mikkilineni, D., Yuvraj, P., Das, R., McCallum, A., Chang, M., Fokoue-Nkoutche, A., Kapanipathi, P., Mattei, N., et al. A systematic classifica-tion of knowledge, reasoning, and context within the arc dataset. arXiv preprint arXiv:1806.00358 , 2018. Chee, J., Cai, Y., Kuleshov, V., and De Sa, C. M. Quip: 2-bit quantization of large language models with guarantees. 
+
+Advances in Neural Information Processing Systems , 36: 4396–4429, 2023. Chen, M., Shao, W., Xu, P., Wang, J., Gao, P., Zhang, K., and Luo, P. Efficientqat: Efficient quantization-aware training for large language models. In Proceedings of the 63rd Annual Meeting of the Association for Computa-tional Linguistics (Volume 1: Long Papers) , pp. 10081– 10100, 2025a. Chen, T., Liu, S., Chang, S., Cheng, Y., Amini, L., and Wang, Z. Adversarial robustness: From self-supervised pre-training to fine-tuning. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pp. 699–708, 2020. Chen, Y., Shao, Y., Wang, P., and Cheng, J. Eac-moe: Expert-selection aware compressor for mixture-of-experts large language models. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 12942–12963, 2025b. Chen, Z., Hu, X., Yang, D., Xu, Z., XUCHEN, Yuan, Z., Zhou, S., and JiangyongYu. MoEQuant: Enhancing quan-tization for mixture-of-experts large language models via expert-balanced sampling and affinity guidance. In Forty-second International Conference on Machine Learning ,2025c. URL https://openreview.net/forum? id=0epuNvt5Dj .Dai, D., Deng, C., Zhao, C., Xu, R. X., Gao, H., Chen, D., Li, J., Zeng, W., Yu, X., Wu, Y., Xie, Z., Li, Y. K., Huang, P., Luo, F., Ruan, C., Sui, Z., and Liang, W. Deepseekmoe: Towards ultimate expert special-ization in mixture-of-experts language models. CoRR ,abs/2401.06066, 2024. URL https://arxiv.org/ abs/2401.06066 .Dettmers, T., Pagnoni, A., Holtzman, A., and Zettlemoyer, L. Qlora: Efficient finetuning of quantized llms. Advances in neural information processing systems , 36:10088–10115, 2023. Dettmers, T., Svirschevski, R. A., Egiazarian, V., Kuznedelev, D., Frantar, E., Ashkboos, S., Borzunov, A., Hoefler, T., and Alistarh, D. Spqr: A sparse-quantized representation for near-lossless llm weight compression. In The Twelfth International Conference on Learning Representations , 2024. Duanmu, H., Li, X., Yuan, Z., Zheng, S., Duan, J., Zhang, X., and Lin, D. Mxmoe: Mixed-precision quantization for moe with accuracy and performance co-design. In Forty-second International Conference on Machine Learning ,2025. URL https://openreview.net/forum? id=pXoZLGMNDm .Frantar, E. and Alistarh, D. Qmoe: Practical sub-1-bit compression of trillion-parameter models. arXiv preprint arXiv:2310.16795 , 2023. Frantar, E., Ashkboos, S., Hoefler, T., and Alistarh, D. Gptq: Accurate post-training quantization for generative pre-trained transformers. In The Eleventh International Con-ference on Learning Representations , 2023. Gao, L., Tow, J., Abbasi, B., Biderman, S., Black, S., DiPofi, A., Foster, C., Golding, L., Hsu, J., Le Noac’h, A., Li, H., McDonell, K., Muennighoff, N., Ociepa, C., Phang, J., Reynolds, L., Schoelkopf, H., Skowron, A., Sutawika, L., Tang, E., Thite, A., Wang, B., Wang, K., and Zou, A. A framework for few-shot language model evaluation, 07 2024. URL https://zenodo.org/records/ 12608602 .Gu, H., Hu, L., Yu, L., Li, H., and Liu, F. Lopro: Enhanc-ing low-rank quantization via permuted block-wise rota-tion, 2026. URL https://arxiv.org/abs/2601. 19675 .Gul, H., Hu, L., Niu, S., and Liu, F. Flrq: Faster llm quan-tization with flexible low-rank matrix sketching, 2026. URL https://arxiv.org/abs/2601.05684 .9TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+Guo, D., Yang, D., Zhang, H., Song, J., Zhang, R., Xu, R., Zhu, Q., Ma, S., Wang, P., Bi, X., et al. Deepseek-r1: In-centivizing reasoning capability in llms via reinforcement learning. arXiv preprint arXiv:2501.12948 , 2025. Hendrycks, D., Burns, C., Basart, S., Zou, A., Mazeika, M., Song, D., and Steinhardt, J. Measuring mas-sive multitask language understanding. arXiv preprint arXiv:2009.03300 , 2020. Huang, B., Yuan, Y., SHAO, Z., and Zhang, M. Milo: Efficient quantized moe inference with mixture of low-rank compensators. In Eighth Conference on Machine Learning and Systems , 2025. Hubara, I., Nahshan, Y., Hanani, Y., Banner, R., and Soudry, D. Accurate post training quantization with small cal-ibration sets. In International Conference on Machine Learning , pp. 4466–4475. PMLR, 2021. Jiang, A. Q., Sablayrolles, A., Roux, A., Mensch, A., Savary, B., Bamford, C., Chaplot, D. S., Casas, D. d. l., Hanna, E. B., Bressand, F., et al. Mixtral of experts. arXiv preprint arXiv:2401.04088 , 2024. Kanungo, T., Mount, D. M., Netanyahu, N. S., Piatko, C. D., Silverman, R., and Wu, A. Y. A local search approxima-tion algorithm for k-means clustering. Computational Geometry , 28(2):89–112, 2004. ISSN 0925-7721. doi: https://doi.org/10.1016/j.comgeo.2004.03.003. URL https://www.sciencedirect.com/ science/article/pii/S0925772104000215 .Special Issue on the 18th Annual Symposium on Computational Geometry - SoCG2002. Kim, Y. J., Fahim, R., and Awadalla, H. H. Mixture of quantized experts (moqe): Complementary effect of low-bit quantization and robustness. arXiv preprint arXiv:2310.02410 , 2023. Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu, C. H., Gonzalez, J. E., Zhang, H., and Stoica, I. Efficient memory management for large language model serving with pagedattention. In Proceedings of the ACM SIGOPS 29th Symposium on Operating Systems Principles , 2023. Li, M., Gou, H., Zhang, D., Liang, S., Xie, X., Ouyang, D., and Qin, K. Beyond random: Automatic inner-loop optimization in dataset distillation. In NeurIPS , 2025a. Li, M., Lin, Y., Zhang, Z., Cai, T., Li, X., Guo, J., Xie, E., Meng, C., Zhu, J.-Y., and Han, S. Svdquant: Absorbing outliers by low-rank component for 4-bit diffusion models. In Yue, Y., Garg, A., Peng, N., Sha, F., and Yu, R. (eds.), International Conference on Learning Representations , volume 2025, pp. 97831– 97858, 2025b. URL https://proceedings. iclr.cc/paper_files/paper/2025/file/ f34f0630c33be15b8c89426bb8056798-Paper-Conference. pdf .Li, M., Gou, H., Ma, Y., Wang, R., Qin, K., and He, T. Fixed anchors are not enough: Dynamic retrieval and per-sistent homology for dataset distillation. arXiv preprint arXiv:2602.24144 , 2026. Li, W., Li, L., Gu, H., Huang, Y.-L., Lee, M. G., Sun, S., Xue, W., and Guo, Y. Moe-svd: Structured mixture-of-experts llms compression via singular value decom-position. In Forty-second International Conference on Machine Learning , 2025c. Li, Y., Yin, R., Lee, D., Xiao, S., and Panda, P. Gptaq: Efficient finetuning-free quantization for asymmetric cal-ibration. In Forty-second International Conference on Machine Learning , 2025d. Lin, B., Tang, Z., Ye, Y., Cui, J., Zhu, B., Jin, P., Huang, J., Zhang, J., Pang, Y., Ning, M., et al. Moe-llava: Mixture of experts for large vision-language models. arXiv preprint arXiv:2401.15947 , 2024a. Lin, H., Xu, H., Wu, Y., Cui, J., Zhang, Y., Mou, L., Song, L., Sun, Z., and Wei, Y. Duquant: Distributing outliers via dual transformation makes stronger quantized llms. In The Thirty-eighth Annual Conference on Neural Infor-mation Processing Systems , 2024b. Lin, J., Tang, J., Tang, H., Yang, S., Chen, W.-M., Wang, W.-C., Xiao, G., Dang, X., Gan, C., and Han, S. Awq: Activation-aware weight quantization for on-device llm compression and acceleration. Proceedings of Machine Learning and Systems , 6:87–100, 2024c. Liu, Y., Wen, J., Wang, Y., Ye, S., Zhang, L. L., Cao, T., Li, C., and Yang, M. Vptq: Extreme low-bit vector post-training quantization for large language models. In 
+
+EMNLP , 2024. Liu, Z., Zhao, C., Fedorov, I., Soran, B., Choudhary, D., Kr-ishnamoorthi, R., Chandra, V., Tian, Y., and Blankevoort, T. Spinquant: Llm quantization with learned rotations. In Yue, Y., Garg, A., Peng, N., Sha, F., and Yu, R. (eds.), 
+
+International Conference on Representation Learning ,volume 2025, pp. 92009–92032, 2025. Ma, Y., Li, H., Zheng, X., Ling, F., Xiao, X., Wang, R., Wen, S., Chao, F., and Ji, R. Affinequant: Affine transformation quantization for large language models. In The Twelfth International Conference on Learning Representations ,2024. Merity, S., Xiong, C., Bradbury, J., and Socher, R. Pointer sentinel mixture models. arXiv preprint arXiv:1609.07843 , 2016. 10 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+Muennighoff, N., Soldaini, L., Groeneveld, D., Lo, K., Mor-rison, J., Min, S., Shi, W., Walsh, E. P., Tafjord, O., Lam-bert, N., et al. Olmoe: Open mixture-of-experts language models. In The Thirteenth International Conference on Learning Representations , 2025. Nagel, M., Amjad, R. A., Van Baalen, M., Louizos, C., and Blankevoort, T. Up or down? adaptive rounding for post-training quantization. In International conference on machine learning , pp. 7197–7206. PMLR, 2020. qubitium. Gpt-qmodel. https://github.com/ modelcloud/gptqmodel , 2024. Contact: qubitium@modelcloud.ai. Raffel, C., Shazeer, N., Roberts, A., Lee, K., Narang, S., Matena, M., Zhou, Y., Li, W., and Liu, P. J. Exploring the limits of transfer learning with a unified text-to-text transformer. Journal of machine learning research , 21 (140):1–67, 2020. Rajbhandari, S., Li, C., Yao, Z., Zhang, M., Aminabadi, R. Y., Awan, A. A., Rasley, J., and He, Y. Deepspeed-moe: Advancing mixture-of-experts inference and training to power next-generation ai scale. In International con-ference on machine learning , pp. 18332–18346. PMLR, 2022. Rusci, M., Capotondi, A., and Benini, L. Memory-driven mixed low precision quantization for enabling deep net-work inference on microcontrollers. Proceedings of Ma-chine Learning and Systems , 2:326–335, 2020. Sakaguchi, K., Bras, R. L., Bhagavatula, C., and Choi, Y. Winogrande: An adversarial winograd schema challenge at scale. Communications of the ACM , 64(9):99–106, 2021. Shao, W., Chen, M., Zhang, Z., Xu, P., Zhao, L., Li, Z., Zhang, K., Gao, P., Qiao, Y., and Luo, P. Omniquant: Omnidirectionally calibrated quantization for large lan-guage models. arXiv preprint arXiv:2308.13137 , 2023. Team, Q. Qwen1.5-moe: Matching 7b model per-formance with 1/3 activated parameters”, February 2024. URL https://qwenlm.github.io/blog/ qwen-moe/ .Team, Q. Qwen3 technical report, 2025. URL https: //arxiv.org/abs/2505.09388 .Tseng, A., Chee, J., Sun, Q., Kuleshov, V., and De Sa, C. Quip# : Even better llm quantization with hadamard inco-herence and lattice codebooks. In Forty-first International Conference on Machine Learning , 2024a. Tseng, A., Sun, Q., Hou, D., and De Sa, C. M. Qtip: Quan-tization with trellises and incoherence processing. Ad-vances in Neural Information Processing Systems , 37: 59597–59620, 2024b. Van Baalen, M., Kuzmin, A., Koryakovskiy, I., Nagel, M., Couperus, P., Bastoul, C., Mahurin, E., Blankevoort, T., and Whatmough, P. Gptvq: The blessing of dimensional-ity for llm quantization. arXiv preprint arXiv:2402.15319 ,2024. Xiao, G., Lin, J., Seznec, M., Wu, H., Demouth, J., and Han, S. Smoothquant: Accurate and efficient post-training quantization for large language models. In International Conference on Machine Learning , pp. 38087–38099. PMLR, 2023. Yang, C., Sui, Y., Xiao, J., Huang, L., Gong, Y., Duan, Y., Jia, W., Yin, M., Cheng, Y., and Yuan, B. MoE-i 2:Compressing mixture of experts models through inter-expert pruning and intra-expert low-rank decomposition. In Al-Onaizan, Y., Bansal, M., and Chen, Y.-N. (eds.), 
+
+Findings of the Association for Computational Linguis-tics: EMNLP 2024 , pp. 10456–10466, Miami, Florida, USA, November 2024. Association for Computational Linguistics. doi: 10.18653/v1/2024.findings-emnlp. 612. URL https://aclanthology.org/2024. findings-emnlp.612/ .Yu, Y., Wang, T., and Samworth, R. J. A useful variant of the davis–kahan theorem for statisticians. Biometrika ,102(2):315–323, 2015. Zellers, R., Holtzman, A., Bisk, Y., Farhadi, A., and Choi, Y. Hellaswag: Can a machine really finish your sentence? 
+
+arXiv preprint arXiv:1905.07830 , 2019. Zhang, C., Cheng, J., Constantinides, G. A., and Zhao, Y. Lqer: Low-rank quantization error reconstruction for llms. 
+
+arXiv preprint arXiv:2402.02446 , 2024a. Zhang, C., Wong, J. T., Xiao, C., Constantinides, G. A., and Zhao, Y. Qera: an analytical framework for quantization error reconstruction. arXiv preprint arXiv:2410.06040 ,2024b. Zhang, J., Zhang, Y., Zhang, B., Liu, Z., and Cheng, D. Moqe: Improve quantization model performance via mixture of quantization experts, 2025. URL https: //arxiv.org/abs/2508.09204 .Zhao, Z., Liu, F., Wang, J., Guan, C., Wang, Z., Jiang, L., and Guan, H. Specquant: Spectral decomposition and adaptive truncation for ultra-low-bit llms quantization. 
+
+Proceedings of the AAAI Conference on Artificial Intelli-gence , 40(34):28786–28794, Mar. 2026a. doi: 10.1609/ aaai.v40i34.40112. URL https://ojs.aaai.org/ index.php/AAAI/article/view/40112 .11 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+Zhao, Z., Xu, Z., and Yang, D. Bwla: Breaking the barrier of w1ax post-training quantization for llms. arXiv preprint arXiv:2605.00422 , 2026b. Zheng, L., Yin, L., Xie, Z., Sun, C. L., Huang, J., Yu, C. H., Cao, S., Kozyrakis, C., Stoica, I., Gonzalez, J. E., et al. Sglang: Efficient execution of structured language model programs. Advances in neural information processing systems , 37:62557–62583, 2024. 12 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+Appendix Contents 
+
+Organization: In this appendix, we provide further details as follows: • A Detail of T ILE Q
+
+– A.1 Codes of T ILE Q
+
+– A.2 Error bounds of T ILE Q
+
+– A.3 Compression Ratio Analysis 
+
+– A.4 Time Complexity • B Evaluation Details 
+
+– Hardware Configuration 
+
+– Calibration Strategy 
+
+– Experimental Settings 
+
+– Hyperparameter selection 
+
+– Quantization Implementation 
+
+– Baseline Methods • C More Ablation Studies 
+
+– C.1 Ablation on Rank 
+
+– C.2 Ablation on Tile • D Appendix Evaluation Results 
+
+– D.1 Inference on other GPU Architecture 
+
+– D.2 Comparison with Other MoE Methods * Compare with M XMOE* Compare with M ILO
+
+* Summary 13 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+Table 5. Symbols and Description in this paper. Symbols Description 
+
+Scalars 
+
+K Number of experts in each MoE module. 
+
+i, o The dimensions of input and output. 
+
+r Rank of the low-rank approximation. 
+
+K Number of activated experts. 
+
+r0 Rank used in SVD of scaled weight (implied from Uk , Sk , Vk ). 
+
+M, N Number of row/column tiles (implied from U , V definitions). 
+
+b, t Token batch index and expert rank index (from gb,t ). 
+
+Vectors 
+
+uk , v k Normalized vectorized Uk and Vk for clustering (Eq. 7). 
+
+S ∈ Ri Gaussian sketch vector used in fast low-rank approximation. 
+
+Matrices 
+
+W = {Wk ∈ Ro×i}Kk=1 Set of expert weight matrices, each of size output × input. 
+
+X ∈ RB×i Input batch tensor with B tokens and i input features. 
+
+Wk Weight matrix of the k-th expert, Wk ∈ Ro×i.
+
+U = [ U1, . . . , UM ]⊤ ∈ R(M i )×r Stacked shared left low-rank factor across row tiles. 
+
+V = [ V1, . . . , VN ] ∈ Rr×(N o ) Stacked shared right low-rank factor across column tiles. 
+
+R Residual matrix for expert k, i.e., R = Wk − ˜Wk .
+
+ˆWk Quantized residual matrix for expert k, i.e., ˆWk = Quant (R).
+
+sk Scaling diagonal matrix from calibration. 
+
+˜W scale k = Wk · sk Scaled weight matrix of expert k (Eq. 5). 
+
+Uk , Sk , Vk Rank-r0 SVD factors of ˜Wk (Eq. 6). 
+
+˜Wk = Umk SV ⊤ 
+
+> nk
+
+s−1 
+
+> k
+
+Low-rank matrix of ˜W scale k (Eq. 5). 
+
+Em,n Basis matrix for routing low-rank construction with 1 at (m, n ).
+
+Wbig Large tiled matrix formed by placing ˜Wk into a 2D grid (Eq. 11). 
+
+Xproj Projected input via shared left factor U S .
+
+S ∈ Rb×(N r ) Compact accumulator buffer avoiding 3D tensor (Eq. 16). 
+
+Q Intermediate matrix in sketch low-rank approximation (Eq. 13). 
+
+Functions 
+
+G(X) Router function that outputs routing scores for experts. 
+
+MoE( X) Output of the Mixture-of-Experts layer (Eq. 3). 
+
+ek, X Set of top-K experts selected by the router for input X.
+
+ϕk 7 → { p, q } Mapping from expert index k to position (p, q ) in the 2D tile. 
+
+Q(·) Generic quantization function applied to the residual. 
+
+QMoE( X) Standard quantized MoE forward pass using ˆWk .
+
+LoTileMoE( X) Efficient low-rank inference path using shared U , V and tiling (Eq. 15). 
+
+Grow  
+
+> m
+
+, Gcol  
+
+> n
+
+Row and column expert clusters from biclustering (Eq. 8). 
+
+ϕ(k) = ( m, n ) Final placement function assigning expert k to a unique tile (Eq. 9). 
+
+gb,t Routing weight for token b and its t-th selected expert. 
+
+14 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+A. Detail of T ILE Q
+
+In this appendix, we provide a comprehensive theoretical and empirical analysis of T ILE Q from three critical perspectives: compression ratio, quantization error, and inference latency. These analyses collectively justify the design choices in our method and explain its superiority over existing low-rank post-training quantization (PTQ) approaches for Mixture-of-Experts (MoE) models. 
+
+A.1. Codes of T ILE QQuantization processes Algorithm 1 outlines process of MoE experts quantization in T ILE Q. 
+
+Algorithm 1 TileQ: 2D-Tiling Structured Low-Rank Quantization for MoE Models 
+
+Require: W = {Wk ∈ Ro×i}Kk=1 (MoE expert weights), Sample (calibration data), d (quantization bit), r
+
+(low-rank), M, N (tiling grid size) 
+
+Ensure: QM odule (quantized MoE module), {Um}M −1 
+
+> m=0
+
+, {Vn}N −1 
+
+> n=0
+
+, Σ (shared low-rank factors) 
+
+1: Initialize QM odule ← ∅ 
+
+2: for each MoE layer in Module do 
+
+3: Collect input activations over calibration set: Xk ← forward (Sample ) for each expert k
+
+{Step 1: Scaling }
+
+4: for k = 1 to K do 
+
+5: Compute scaling vector: sk ← Xkp/
+
+q
+
+max( Xk) · min( Xk)
+
+6: Scale weight: fWk ← Wk · diag (sk)
+
+7: end for 
+
+{Step 2: Extracting low-rank features via sketching }
+
+8: Initialize U = [] , V = [] 
+
+9: for k = 1 to K do 
+
+10: Uk, Vk, Σk ← SketchSVD ( fW ⊤ 
+
+> k
+
+, r 0 = r/ 2) {using Gaussian sketch, Eq. 13 }
+
+11: Flatten and normalize: uk ← vec (Uk)/∥vec (Uk)∥, vk ← vec (Vk)/∥vec (Vk)∥
+
+12: Append to lists: U.append (uk), V.append (vk)
+
+13: end for 
+
+{Step 3: Biclustering for 2D tiling assignment }
+
+14: Row clusters: {G row  
+
+> m
+
+}M −1 
+
+> m=0
+
+← KMeans (U, n clusters = M )
+
+15: Col clusters: {G col  
+
+> n
+
+}N −1 
+
+> n=0
+
+← KMeans (V, n clusters = N )
+
+16: Assign ideal tile: (m⋆k, n ⋆k) ← (cluster id U (k), cluster id V (k)) 
+
+{Step 4: Greedy spatial placement to resolve collisions }
+
+17: ϕ ← GreedyPlacement ({(m⋆k, n ⋆k)}Kk=1 , M, N ) {minimize ℓ1 distance, Eq. 9 }
+
+18: Construct tiled matrix: Wbig ← PKk=1 Eϕ(k) ⊗ fWk ∈ RM i ×N o 
+
+{Step 5: Global low-rank decomposition + residual quantization }
+
+19: Ubig , Σ, Vbig ← SketchSVD (Wbig , r )
+
+20: for k = 1 to K do 
+
+21: (m, n ) ← ϕ(k)
+
+22: Extract shared factors: Uk ← Ubig [mi : ( m + 1) i, :] , Vk ← Vbig [: , no : ( n + 1) o]
+
+23: Reconstruct low-rank part: fW lr  
+
+> k
+
+← UkΣV ⊤ 
+
+> k
+
+· diag (sk)−1
+
+24: Compute residual: Rk ← Wk − fW lr 
+
+> k
+
+{Quantize residual with Hessian-aware loss }
+
+25: Hk ← E[XkX⊤ 
+
+> k
+
+]
+
+26: Wk,q ← Q GPTQ/GPTVQ (Rk; Hk, d )
+
+27: Store result: QM odule. expert [k] ← (Wk,q , Uk, Vk, Σ, s k, ϕ (k)) 
+
+28: end for 
+
+29: end for 
+
+30: return QM odule 
+
+15 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+Inference processes Figure 1 shows the inference code of low-rank MoE layers in T ILE Q. 
+
+Figure 5. Implementation of inference codes in T ILE Q. 
+
+16 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+A.2. Error bound 
+
+Algorithm Review 
+
+TileQ seeks a shared low-rank factorization that jointly approximates all experts in a 2D tiled layout. These scaled experts are then embedded into a large block matrix Wbig ∈ RM i ×N o according to a placement mapping 
+
+ϕ(k) = ( pk, q k):
+
+[Wbig ](p,q ) =
+
+( ˜Wk, if ϕ(k) = ( p, q ),
+
+0, otherwise ,
+
+The overall optimization objective of T ILE Q balances four key sources of approximation error: 1. Per-module reconstruction error : PKk=1 ∥Wk − ˜W tile  
+
+> k
+
+∥2 
+
+> F
+
+penalizes deviations between each original expert weight Wk and its reconstructed version from the tiled low-rank components. This term preserves individual expert functionality despite parameter sharing. 2. Structural consistency : ϕ enforces spatial coherence in the 2D tiling layout—e.g., by discouraging large dis-placements from ideal cluster-assigned positions (mk, n k). This regularizer maintains the semantic alignment between expert similarity and tile placement. 3. Global low-rank error : ∥Wbig − U ΣV ⊤∥2 
+
+> F
+
+measures the fidelity of the shared 2D-tiling low-rank approxi-mation across all experts. Minimizing this term ensures that the structured decomposition captures the dominant subspace of the aggregated expert weights. 4. Quantization error : PKk=1 ∥Rk − Q (Rk)∥2 
+
+> F
+
+, Rk = Wk − ˜Wk accounts for the distortion introduced when mapping full-precision weights to discrete quantized values. 
+
+From the review of T ILE Q, the core optimization balances global compression, per-expert fidelity, structural coherence, and quantization compatibility. In the steps, errors do not accumulate progressively; instead, the error introduced at one stage is compensated for by the subsequent stage. Consequently, the final error of the algorithm is determined solely by the quantization error, which can be formalized as: 
+
+LTileQ =
+
+> K
+
+X
+
+> k=1
+
+∥Rk − Q(Rk)∥2
+
+> F
+
+| {z }
+
+> quantization error
+
+≤ min    
+
+> Wbig =[ ˜Wk]ϕ(k)
+> U,Σ,V
+
+∥Wbig − U ΣV ⊤∥2
+
+> F
+
+| {z }
+
+> global low-rank error
+
+, (19) To capture the impact on model output, we adopt the activation-weighted norm induced by A = X⊤X, which reflects how errors propagate to the actual predictions. Our goal is to bound the per-expert reconstruction error of this procedure. 
+
+Error-Controlled Subspace Sharing via Activation-Aware Clustering We now justify the local low-rank structure of experts in a manner that explicitly accounts for input activation statistics through A = X⊤X. The error norm is 
+
+LTileQ = tr 
+
+
+
+(Wk − ˆWk)⊤A(Wk − ˆWk)
+
+
+
+.For each expert k, compute the rank-r approximation minimizing the A-weighted error: 
+
+˜Wk = min  
+
+> rank( U)≤r
+
+∥Wk − UV ⊤∥2
+
+> A
+
+. (20) This yields a generalized SVD under metric A: ˜Wk = UkSkV⊤ 
+
+> k
+
+, where columns of Uk ∈ Rm×r are A-orthonormal: 
+
+U⊤ 
+
+> k
+
+AU k = Ir .Define the activation-aware left embedding as the vectorized A-normalized basis: 
+
+uk = vec( Uk)
+
+∥ vec( Uk)∥A⊗I
+
+∈ Rmr , (21) 17 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+where the norm is induced by the Kronecker product metric A ⊗ Ir , i.e., 
+
+∥ vec( U)∥2 
+
+> A⊗I
+
+= tr( U⊤AU ). (22) Similarly define vk from Vk (using output-side activations if available, or identity otherwise). Apply KMeans to {uk}Kk=1 using Euclidean distance (which now implicitly respects A due to embedding construction). Let cUm be the centroid of cluster m, and reshape it to matrix form ¯Um such that vec( ¯Um) ∝ cUm and ¯U⊤
+
+> m
+
+A ¯Um = Ir (via normalization). By the c-approximation guarantee of KMeans (Kanungo et al., 2004), 
+
+> K
+
+X
+
+> k=1
+
+∥uk − cUmk ∥22 ≤ c · OPT U , (23) where OPT U is the optimal clustering cost. Let Sk = col( Uk) and ¯Sm = col( ¯Um) denote the column subspaces. The canonical angles between them under metric A
+
+satisfy the generalized Davis–Kahan bound (Yu et al., 2015): 
+
+∥ sin Θ A(Sk, ¯Smk )∥F ≤ ∥Uk − ¯Umk Q∥A
+
+δk
+
+, (24) for some orthogonal Q ∈ Rr×r, where δk is the spectral gap between the r-th and (r + 1) -th generalized singular values of 
+
+Wk w.r.t. A, assumed bounded below by δ > 0. Crucially, both Uk and ¯Umk are A-orthonormal, we have 
+
+∥Uk − ¯Umk Q∥2 
+
+> A
+
+= 2 r − 2 tr  Q⊤ ¯U⊤ 
+
+> mk
+
+AU k
+
+ ≤ C · ∥ uk − cUmk ∥22, (25) for some constant C depending on r and norm alignment during centroid reshaping. Recall that in the Local Subspace Proximity model, we write ˜Wk = ¯Umk Mk ¯V⊤ 
+
+> nk
+
++ Ek, (26) and define ϵk = ∥Ek∥A =
+
+q
+
+tr( E⊤ 
+
+> k
+
+AE k). Using the projection property of A-orthonormal bases, the residual satisfies 
+
+ϵk ≤ ∥ ˜Wk − ¯Umk ( ¯U⊤ 
+
+> mk
+
+A ˜Wk)∥A ≤ ∥ sin Θ A(Sk, ¯Smk )∥F · ∥ ˜Wk∥A. (27) Combining with the Davis–Kahan bound and KMeans guarantee, we obtain 
+
+ϵk ≤ ∥ ˜Wk∥A
+
+δ · √C · ∥ uk − cUmk ∥2. (28) Summing over all experts and applying the same argument to right subspaces, the total activation-weighted error is bounded by KX
+
+> k=1
+
+ϵ2 
+
+> k
+
+≤ C′
+
+δ2
+
+> K
+
+X
+
+> k=1
+
+∥uk − cUmk ∥22 + ∥vk − cVnk ∥22
+
+!
+
+≤ C′cδ2 (OPT U + OPT V ) . (29) Thus, the Local Subspace Proximity assumption is not heuristic: the per-expert error ϵk is provably controlled by the quality of activation-aware clustering and the stability of generalized singular subspaces under A. When inputs induce strong similarity among expert subspaces (small OPT U , OPT V ), the global quantization error ∥X(W − ˆW)∥2 
+
+> F
+
+remains small. 
+
+Reconstruction Error of T ILE Q under Activation-Aware Subspace Sharing The analysis above establishes that when experts exhibit clustered activation-aware subspaces—i.e., small OPT U and OPT V —their low-rank approximations can be well-approximated by shared bases within each cluster, with provably bounded residual error ϵk. This insight directly motivates the design of T ILE Q: by grouping experts into tiles based on their left/right singular vector embeddings (as constructed from A = X⊤X), the method enforces exactly such local subspace sharing. Consequently, the tiling-induced approximation error ϵ(k)tiling inherits the guarantees derived above. We now formalize the total reconstruction error of T ILE Q, combining this structured low-rank approximation with quantization. 18 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+Theorem A.1 (Error of T ILE Q) . Consider a Mixture-of-Experts (MoE) layer with TILE Q format. Then the error for expert 
+
+k satisfies 
+
+E(k) = ∥(Wk − ˜Wk − ˆWk)X∥F ≤ E (k)ind + ϵcluster (30) 
+
+where E(k)ind is the error of an independent per-expert low-rank + quantization baseline and ϵcluster is the error introduced by low-rank under 2D-Tiling. Proof. The total error is defined as 
+
+E(k) = ∥(Wk − ˜Wk − ˆWk)X∥F = ∥(R(k) − ˆWk)X∥F . (31) First, consider the low-rank approximation step. The scaled weight ˜Wk = Wk ·diag( sk) admits a global SVD (or sketching) such that 
+
+∥ ˜Wk − UkΣkV ⊤ 
+
+> k
+
+∥F ≤ ϵsvd . (32) Recovering in the unscaled domain gives 
+
+∥(Wk − UkΣkV ⊤ 
+
+> k
+
+diag( sk)−1)X∥F = ∥ diag( sk)−1( ˜Wk − UkΣkV ⊤ 
+
+> k
+
+)X∥F . (33) Let s(k)min = min i(sk)i > 0. Then 
+
+1
+
+s(k)min 
+
+∥( ˜Wk − UkΣkV ⊤ 
+
+> k
+
+)X∥F ≤ ϵsvd · ∥ X∥2
+
+s(k)min 
+
+. (34) Thus, the low-rank error contribution is bounded by ϵ(k)tiling ·∥ X∥2
+
+> s(k)min
+
+, where ϵ(k)tiling = ∥ ˜Wk − UkΣkV ⊤ 
+
+> k
+
+∥F .Second, for quantization, GPTQ guarantees 
+
+∥(R(k) − ˆWk)H1/2∥F ≤ δ(k)gptq . (35) Assuming i.i.d. token columns in X, we have H = E[XX ⊤], and 
+
+∥(R(k) − ˆWk)X∥2 
+
+> F
+
+= Tr 
+
+
+
+(R(k) − ˆWk)H(R(k) − ˆWk)⊤
+
+. (36) Since H ⪯ λmax (H)I, it follows that 
+
+∥(R(k) − ˆWk)X∥F ≤ pλmax (H) · ∥ R(k) − ˆWk∥F . (37) Moreover, the GPTQ guarantee implies 
+
+∥R(k) − ˆWk∥F ≲ δ(k)gptq 
+
+pλmin (H) , (38) hence 
+
+∥(R(k) − ˆWk)X∥F ≲ δ(k)gptq ·
+
+s
+
+λmax (H)
+
+λmin (H) = δ(k)gptq · κ(H)1/2. (39) Now compare with the independent baseline, where each expert uses its own SVD: 
+
+˜Wk ≈ ˆUk ˆΣk ˆV ⊤ 
+
+> k
+
+, rank r0, (40) with optimal error 
+
+ϵ(k)ind =
+
+> min( o,i )
+
+X
+
+> j=r0+1
+
+σ(k) 
+
+> j
+
+. (41) 19 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+In contrast, the 2D-tiling method applies a global SVD on Wbig , yielding for any sub-block: 
+
+∥ ˜Wk − UkΣkV ⊤ 
+
+> k
+
+∥F ≤
+
+> min( Ro,Ci )
+
+X
+
+> j=r+1
+
+σj (Wbig ). (42) Define the excess tiling error 
+
+η(k) := ϵ(k)tiling − ϵ(k)ind ≥ 0. (43) When experts exhibit clustered activation-aware singular vectors—i.e., when OPT U and OPT V are small—biclustering produces row/column clusters Grow  
+
+> m
+
+, Gcol  
+
+> n
+
+, and the extra error from shared bases satisfies 
+
+η(k) ≤ O 1
+
+p|G row  
+
+> m
+
+| + 1
+
+p|G col  
+
+> n
+
+|
+
+!
+
+· diam( cluster ), (44) Combining both error sources, we obtain 
+
+E(k) ≤ ϵ(k)tiling · ∥ X∥2
+
+s(k)min 
+
+| {z }
+
+> low-rank error
+
++ δ(k)gptq · κ(H)1/2
+
+| {z }
+
+> quantization error
+
+, (45) Recall from Equations (45) that both methods share the same quantization error term. Therefore, 
+
+E(k) ≤ ϵ(k)tiling · ∥ X∥2
+
+s(k)min 
+
++ δ(k)gptq · κ(H)1/2
+
+= (ϵ(k)ind + η(k)) · ∥ X∥2
+
+s(k)min 
+
++ δ(k)gptq · κ(H)1/2
+
+= E(k)ind + η(k) · ∥ X∥2
+
+s(k)min 
+
+(46) Let ϵcluster = η(k)·∥ X∥2
+
+> s(k)min
+
+as the error introduced by low-rank under 2D cluster tiling. we have 
+
+E(k) ≤ E (k)ind + ϵcluster (47) 
+
+Discussion The theoretical analysis establishes that the reconstruction fidelity of T ILE Q hinges on two interrelated conditions: 1. Global low-rank structure : The block matrix Wbig admits an accurate low-rank approximation when its singular val-ues decay rapidly. This occurs precisely when experts exhibit strong similarity in their activation-aware subspaces—i.e., when the optimal clustering costs OPT U and OPT V are small—as formalized in ¶ A.2. 2. Local subspace alignment : The residual error ϵk quantifies the deviation of expert k from the shared subspace assigned to its tile. By clustering experts based on their activation-aware left and right singular vectors ( uk, vk), the biclustering step promotes small ϵk, provided the underlying subspaces are well-separated. Critically, T ILE Q avoids the over-constrained sharing of prior approaches that enforce a single global U or V . Instead, its 2D tiling enables structured parameter sharing : experts assigned to the same row of the tiling share a common left basis ¯Um
+
+(capturing output-space structure), while those in the same column share a right basis ¯Vn (modeling input-space structure). This design preserves model expressivity while drastically reducing redundancy. When the activation-aware singular subspaces of experts are well-clustered—a condition reflected by small OPT U and 
+
+OPT V , and commonly observed in practice due to routing-induced functional overlap—the per-expert reconstruction error of T ILE Q nearly matches that of an independent low-rank baseline. Yet, it achieves this with only O(( M + N )r)
+
+shared basis matrices, compared to O(Kr ) for independent decompositions. This confirms T ILE Q’s suitability for scalable, high-fidelity quantization of large MoE models. 20 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+A.3. Compression Ratio Analysis 
+
+In this part, we provide a analysis of the compression ratio on (i) element-wise quantization (Zhang et al., 2024a; Li et al., 2025b); (ii) 1D shared low-rank quantization (Huang et al., 2025; Li et al., 2025c) (iii) 2D-Tiling low-rank quantization (T ILE Q). Most definitions follow table 5. We denote the following parameters to derive the method compression efficiency: • d: target quantization bit-width for quantized components (e.g., 2 or 3 bits), • dfp : bit-width of the original floating-point format (e.g., 16 for float16 ), • dlow : bit-width used to store the shared low-rank factors in T ILE Q U , V (typically fp8 , i.e., 8 bits), • g: group size used in grouped quantization (for scaling factors). 
+
+Basic Quantization. This baseline applies standard post-training quantization (PTQ) directly to the full expert weights without any low-rank decomposition. Each weight matrix Wk is quantized independently using either scalar or vector (group-wise) quantization. The storage cost consists of: • K · oi · d bits for quantized weights, • K · ⌈ oi g ⌉ · dfp bits for scaling factors (with g = 1 for scalar quantization and g > 1 for grouped/vector quantization). Thus, the average bit-width per weight element is simply as dbasic = d + dfp  
+
+> g
+
+:
+
+Element-wise Low-Rank Quantization. In this variant, each expert weight matrix Wk is independently decomposed into a low-rank approximation without any parameter sharing across experts. The extra storage cost includes: • K · (or + ir ) · dlow bits for all Uk and Vk factors, • K · r2 · dfp bits for the singular value matrices Σk.Dividing by the total number of weight elements Koi , the average bit-width per element is: 
+
+dper-expert = dbasic + (or + ir ) · dfp 
+
+oi + r2 · dfp 
+
+oi = dbasic + rd fp 
+
+ 1
+
+i + 1
+
+o
+
+
+
++ r2dfp 
+
+oi . (48) This approach incurs significantly higher low-rank storage overhead compared to both 1D and T ILE Q due to the absence of any cross-expert sharing, especially when K is large. 
+
+1D Shared Low-Rank Quantization. This baseline concatenates all expert weights along one dimension (e.g., Wcat ∈
+
+Ro×(Ki )) and applies a shared left factor U ∈ Ro×r , yielding Wcat ≈ U V . Each expert’s low-rank component is reconstructed from slices of V . Low-rank storage includes: • or · dfp bits for the shared factor U ∈ Ro×r , with a total size of or ,• Kir · dfp bits for V ∈ Rr×Ki , with no sharing across experts and a total size of Kir .The total number of weight elements is Koi , so the average bit-width is: 
+
+d1D = dbasic + ( rKi + ro )dfp . (49) Note that the term ro dfp arises from the shared U amortized over all experts. 21 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+TILE Q: 2D-Tiling Structured Low-Rank Quantization. In T ILE Q, experts are arranged into an M × N grid. The shared factors are: • U = [ U ⊤ 
+
+> 1
+
+, . . . , U ⊤ 
+
+> M
+
+]⊤ ∈ RM i ×r , composed of M row blocks with a total size of M ir ,• V = [ V1, . . . , VN ] ∈ Rr×N o , composed of N column blocks with a total size of N or ,• Singular values Σ ∈ Rr×r (shared globally or per tile; we assume global for minimal overhead), with a total size of r2
+
+and stored in r2 · dfp bits. Since K ≤ M N , the average bit-width per weight element becomes: 
+
+dTileQ = dbasic + M ir · dlow + N or · dlow 
+
+Koi | {z }
+
+> shared low-rank overhead
+
++ r2 · dfp 
+
+Koi | {z }
+
+> singular vector
+
+≈ dbasic + rd low 
+
+ MKo + NKi 
+
+
+
+. (50) Under the conditions M = N , i = o, the extra bit-widths d′
+
+of three quantization methods are: 
+
+d′ 
+
+> per-expert
+
+≈ 2rd fp 
+
+i , d′ 
+
+> 1D
+
+≈ ( ri )dfp , d′ 
+
+> TileQ
+
+≈ 2rd low 
+
+i√K , (51) where the singular value overhead in dTileQ is omitted as it is negligible for large K. From the results, T ILE Q reduces the additional memory by 2√K compared with element-wise methods, and by √K times compared with 1D-sharing mathods. In summary, T ILE Q achieves the lowest average bit-width among the three methods due to its two-dimensional parameter sharing, which exploits expert similarity more effectively and reduces redundancy in both input and output feature spaces simultaneously. This theoretical advantage directly translates into higher compression ratios and lower memory footprint at inference time. 
+
+Example. Numerical analyze on Qwen3-30B-A3B We instantiate our analysis using a representative MoE layer from Qwen3-30B-A3B , with the following configuration: • Expert weight: Wk ∈ Ro×i = R2048 ×768 (i.e., i = 768 , o = 2048 ) with experts K = 128 .• Let quantization bit d = 2 ; groupsize g = 128 and approximation rank r = 32 ,The base quantization cost is dbasic = d + dfp /g = 3 + 16 /128 = 2 .125 bits per weight. Below, we report the additional 
+
+average bit-width for each method. • Per-Expert Low-Rank: 
+
+∆bper-expert = rd fp 
+
+ 1
+
+i + 1
+
+o
+
+
+
++ r2dfp 
+
+io = 32 · 8
+
+ 1768 + 12048 
+
+
+
++ 32 2 · 16 768 · 2048 ≈ 0.417 + 0 .010 = 0.427 bits .
+
+• 1D Shared Low-Rank: 
+
+∆b1D = rd fp 
+
+Ki + rd low 
+
+o = 32 · 16 128 · 768 + 32 · 16 2048 ≈ 0.0052 + 0 .256 = 0.257 bits .
+
+• TILE Q (with tiling M = 16 and N = 8 ): 
+
+∆bTileQ ≈ rd low 
+
+ MKo + NKi 
+
+
+
+= 32 · 8
+
+ 8128 · 2048 + 8128 · 768 
+
+
+
+≈ 0.0117 + 0 .0313 = 0.041 bits .
+
+This example demonstrates that T ILE Q reduces the low-rank storage overhead by 6× compared to 1D sharing and by 
+
+10 × compared to per-expert decomposition and when the model becomes sparser (i.e., with a larger K), the advantage of TILE Q becomes more pronounced. 22 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+A.4. Time Complexity 
+
+In T ILE Q, the forward pass consists of the following key steps: 
+
+1. Global Input Projection. The input tensor X ∈ RB×i is multiplied with the reshaped shared factor (U Σ)reshape ∈
+
+Ri×(M r ):
+
+Xproj = X · (U Σ)reshape ∈ RB×(M r ). (52) This is a single dense GEMM with time complexity O(BiM r ).
+
+2. Routing-Weighted Selection and Accumulation. For each token–expert pair (b, t ), the algorithm: • Extracts a rank-r slice from Xproj using precomputed tile coordinates (mb,t , n b,t ),• Scales it by the routing weight gb,t ,• Accumulates the result into a buffer indexed by column tile nb,t via scatter add .The selection involves indexing into a (B, M r ) tensor using (B, K, r ) indices—costing O(BKr) memory operations. The accumulation uses a vectorized scatter add over BKr elements into a (B, N, r ) buffer, also O(BKr).
+
+3. Output Reconstruction. The accumulated buffer Xsum ∈ RB×(N r ) is multiplied with the reshaped shared right factor 
+
+Vflat ∈ R(N r )×o:
+
+Y = Xsum · Vflat ∈ RB×o, (53) which is another dense GEMM with complexity O(BN ro ).
+
+Total Time Complexity. Summing the dominant terms, the overall time complexity of T ILE Q inference is: 
+
+TTileQ = O BiM r + BN ro + BKr. (54) 
+
+Insights Why is L OTILE MOE Fast? LOTILE MOE achieves low-latency inference by replacing irregular, sparse expert computation with structured, batched dense operations. We analyzed its efficiency in prefill–decode (P–D) separation serving through: • vs. Per-Token Expert Dispatch. In a MoE implementation with low-rank decomposition, each token–expert pair 
+
+(b, t ) executes an independent small GEMM, which leads to BK separate kernel launches. During prefill (large 
+
+B, compute-bound), this results in poor arithmetic intensity and wasted compute capacity. During decode (small 
+
+B = 1 , memory-bound), the overhead is even worse: frequent kernel launches, non-coalesced memory accesses, and scattered weight reads dominate latency. The total cost is: 
+
+Tper-token = O BK(ir + ro ) + Ω( BK)
+
+| {z }
+
+> kernel launch & memory scatter
+
+,
+
+where the second term reflects unavoidable software and hardware inefficiencies. Moreover, these GEMMs have highly unfavorable shapes—typically “tall-and-skinny” that cannot fully utilize modern accelerators (e.g. Tensor core, NPU). As a result, despite modest theoretical FLOP counts, per-token dispatch exhibits poor hardware efficiency and high latency. In contrast, L OTILE MOE performs only two large, well-shaped GEMMs for the entire batch— O(BiM r ) and 
+
+O(BN ro )—with inner dimensions ( M r , N r ) large enough to activate tensor-core pipelines. Combined with vectorized indexing and scatter-add, this eliminates per-token overhead and fully exploits hardware parallelism. • vs. 1D Shared Low-Rank. Methods like M ILO share a matrix across all experts but keep the other factor expert-specific. This corresponds to a degenerate 2D tiling configuration with M = 1 and N = K, i.e., no sharing along the output dimension. In low-rank computation, the bottleneck lies in loading and storing the weights in both prefill and decode stages, whereas L OTILE MOE reduces the costs significantly (e.g., 6× less in qwen3 ) by balanced 2D tiling. This directly lead to higher effective bandwidth. 23 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+Thus, L OTILE MOE is fast not because it reduces asymptotic FLOPs dramatically, but because it restructures computation to align with the strengths of modern accelerators— dense linear algebra , minimal memory access , and efficient control flow —while preserving cross-expert parameter sharing through 2D tiling. 
+
+B. Evaluation Details 
+
+Hardware Configuration. All quantization and accuracy evaluations in our experiments were conducted on a single NVIDIA A800-80GB GPU, with the exception of downstream evaluations for the Mixtral-8x7B model, which required two A800 GPUs due to out-of-memory (OOM) errors on a single device. For inference latency measurements, we performed MLP block latency on 3 GPU platforms: A800, H800, and RTX 5090. 
+
+Calibration Strategy. Our calibration process utilizes a dataset comprising 128 randomly sampled sequences from the C4 corpus (Raffel et al., 2020), each containing 2048 tokens. This approach has been demonstrated to be effective in prior works such as OmniQuant (Shao et al., 2023) and AffineQuant (Ma et al., 2024). 
+
+Experimental Settings. In both perplexity and inference efficiency experiments, we uniformly set the sequence length to 4096 tokens across all models. For downstream task evaluation, we employed the lm-eval (Gao et al., 2024) framework consistently and reported raw accuracy ( acc )—not normalized accuracy ( acc norm )—as the final metric and we adopt the n−shot ( ns ) param to each tasks from OpenLLM-V1 benchmark. Details are as follows: • ARC-Challenge (AC) and ARC-Easy (AE), ns = 0 (Boratko et al., 2018): The AI2 Reasoning Challenge (ARC) consists of grade-school-level multiple-choice science questions. ARC-Challenge focuses on questions that are resistant to simple retrieval or co-occurrence heuristics and demand genuine reasoning, whereas ARC-Easy contains items more solvable by basic methods. • PIQA (QA), ns = 0 (Bisk et al., 2020): The Physical Interaction Question Answering dataset assesses a model’s grasp of physical commonsense by asking it to select the more plausible outcome between two scenarios involving everyday object interactions. • Winogrande (WI), ns = 0 (Sakaguchi et al., 2021): Designed to scale up the Winograd Schema Challenge, Winogrande uses adversarial filtering to construct difficult pronoun resolution problems that require deep contextual understanding. • Hellaswag (HS), ns = 10 (Zellers et al., 2019): This tests commonsense inference through sentence completion, where models choose the most likely continuation of a scenario from multiple options, including adversarially crafted distractors. • Massive Multitask Language Understanding (MU), ns = 5 (Hendrycks et al., 2020): The task spans 57 subjects across STEM, humanities, and social sciences, measuring both factual knowledge and the capacity for reasoning in specialized domains beyond superficial pattern matching. 
+
+Hyperparameter selection. The hyperparameters in TileQ are specified as follows: • Tile-Rank : the rank of the low-rank approximation in the 2D-tiling matrix (see Figure 1), setting to 32 .• Tiling-size : the dimensions (M, N ) of the tiling grid, which determines how the K experts are arranged into an m × n
+
+block matrix. We choose m = ⌊√K⌉ (the integer closest to √K) and set n = ⌈K/m ⌉ and ensure M ∗ N ≥ K, this ensuring a near-square layout that balances row and column coherence while accommodating all experts. 
+
+Quantization Implementation. In the quantization phase of TileQ, we adopt a multi-level quantization strategy. Specifically, for scalar and vector quantization, we employ the Hessian-based proxy quantization scheme from GPTQ (Frantar et al., 2023) and GPTVQ (Van Baalen et al., 2024), without incorporating advanced optimizations such as weight clipping or learnable codebooks. For the rotation component, our approach aligns with the rotation technique used in L OPR O (Gu et al., 2026). 
+
+Baseline Methods. We primarily compare against three established baselines: GPTQ (Frantar et al., 2023), GPTVQ (Van Baalen et al., 2024), and LoPRo (Gu et al., 2026) where LoPRo represents the most recent state-of-the-art method for 24 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+ultra-low-bit (e.g., 2–3 bit) weight-only PTQ that we are aware of, consistently outperforming earlier approaches such as QuIP# (Tseng et al., 2024a), OmniQuant (Shao et al., 2023), and others in terms of accuracy. Other low-rank PTQs such as SVDQuant (Li et al., 2025b) and LQER (Zhang et al., 2024a)—have been proposed, and several works target MoE models specifically (e.g., MoEQuant (Chen et al., 2025c), MiLo (Huang et al., 2025)), we found it impractical to include them in a fully fair and comprehensive comparison across all 4 evaluation models. The main obstacles include unavailability of open-source code, lack of support for newer MoE architectures, absence of 2–3 bit PTQ configurations, or insufficient experimental details necessary for faithful reproduction. Consequently, we restrict our main accuracy comparison to the three aforementioned methods listed in Table 1. In inference efficiency evaluations, only MiLo and SVDQuant focused on efficient low-rank inference: MiLo aims at MoE models, while SVDQuant targets diffusion models. So we adopt the low-rank MoE design from MiLo for latency evaluations. 
+
+C. More Ablation Studies 
+
+In this section, we validate the impact and justify the final selection of two key hyperparameters in T ILE Q by scalar quantizing the Qwen1.5-MoE-A2.7B model to 2-bit. 
+
+C.1. Ablation on Rank   
+
+> Table 6. Ablation on rank of Qwen1.5-MoE-A2.7B in 2bit T ILE QS, where Avg.Rank stands for the rank evenly distributed to each expert. Latency was tested in batch size 16. We set the rank 32 as the final setting in main evaluations.
+
+Tile-Rank Latency Memory Performance Decode Prefill Avg.Rank Ex.Bit Wiki AC AE PQ WI MU HS 8 3.6% 2.3% 0.08 0.01 7.62 36.6 69.2 77.1 68.9 56.6 53.7 16 4.2% 3.4% 1.63 0.03 7.56 37.8 69.7 77.8 69.2 57.3 53.9 32 5.0% 4.2% 3.26 0.06 7.54 37.5 70.8 77.6 68.9 57.5 54.1 64 7.1% 7.5% 6.5 0.11 7.53 37.8 70.6 78.1 68.9 57.7 54.4 128 12.1% 10.3% 12.7 0.22 7.52 38.6 71.5 78.3 69 67.8 53.8 As shown in Table 6, we conduct an ablation study on the TileQ rank (denoted as Tile-Rank ) to investigate its impact on model performance, memory overhead, and inference latency in Qwen1.5-MoE-A2.7B. The results reveal several key observations. Firstly, increasing the Tile-Rank consistently improves model accuracy across most benchmarks. This suggests that higher-rank approximations better preserve the expressive capacity of the original experts. However, despite the improvement in accuracy, the marginal gains diminish beyond rank 32 on many metrics, indicating a saturation point where additional rank yields diminishing returns. Secondly, both memory overhead (measured in average rank per expert and extra bits for factor storage) and decoding latency scale sublinearly with Tile-Rank, which bring a huge burden in memory cost and latency at a big rank (64 or more). In summary, we select Tile-Rank = 32 as our default configuration, which strikes a favorable trade-off among accuracy, memory costs, and inference speed. At this setting, TileQ achieves near-peak performance on most general reasoning and commonsense tasks while maintaining low overhead—validating that structured low-rank sharing can effectively compress MoE models without sacrificing practical utility 
+
+C.2. Ablation on Tile 
+
+Table 7 presents an ablation study on the 2D tiling configuration (M, N ), which governs how the 60 experts are arranged into a block matrix for shared low-rank approximation. We observe a clear U-shaped trade-off between inference latency and model performance with respect to layout aspect ratio. Extremely skewed layouts (e.g., 1 × 60 or 60 × 1) suffer from high decoding latency ( >13%) due to poor memory access patterns and limited cross-expert coherence in one dimension. Moreover, when the tiling dimension M are large, the decoding latency increases significantly. This is because a larger M
+
+leads to a taller shared left factor matrix U, which in turn requires more extensive gather-scatter operations (Figure 5: line 29,38) during expert reconstruction, which is memory-bound and suffers from poor cache locality and limited vectorization efficiency. Consequently, as M grows, the proportion of time spent on these unstructured memory operations rises, degrading 25 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+overall inference throughput—even though the total number of parameters and arithmetic operations remains unchanged. This explains why layouts with large M (e.g., 32 × 2, 60 × 1) exhibit higher latency despite using the same Tile-Rank. In contrast, near-square tilings—particularly 8×8 and 16 ×4—achieve the best balance: they minimize decode latency (as low as 5.1%) while delivering peak or near-peak accuracy across most benchmarks (e.g., ARC Challenge reaches 39.6 at 8 × 8). This confirms that balanced 2D clustering enhances both hardware efficiency and representation sharing. Consequently, we adopt the 8 × 8 layout as our default, which provides the lowest latency without sacrificing task performance.              
+
+> Table 7. Ablation study on tiling dimensions (M, N )in TileQ for Qwen1.5-MoE-A2.7B (2-bit). Mand Ndenote the number of rows and columns in the 2D expert layout ( M×N≥K= 60 ). Latency is reported with batch size 16.
+
+Tile-Dimention Latency Performance M N Decode Prefill Wiki AC AE PQ WI MU HS 1 60 13.2% 5.4% 7.62 38.1 70.2 76.8 70.0 58.4 53.9 2 30 10.1% 5.3% 7.65 37.8 71.2 77.5 68.7 57.2 53.9 4 15 7.8% 5.2% 7.56 37.2 71.2 77.4 67.8 56.7 53.8 8 8 5.1% 5.2% 7.56 39.6 72.5 77.8 68.9 57.0 53.5 16 4 8.1% 5.2% 7.52 39.0 72.6 77.9 68.5 56.9 53.5 32 2 11.4% 5.3% 7.54 37.4 69.1 77.7 68.7 57.0 53.4 60 1 15.2% 5.5% 7.53 37.2 70.0 77.1 68.6 56.8 53.3 
+
+D. Appendix Evaluation Results 
+
+D.1. Inference on other GPU Architecture 
+
+We conducted additional MoE-block inference latency evaluations on RTX 5090 (Blackwell architecture) and H800 (Hopper architecture). The results are presented in Figures 6 and 7. The findings are consistent with those observed on the A800: conventional expert-parallel approaches exhibit high latency under sparse MoE configurations, whereas the TileQ scheme—by fusing low-rank operations—achieves consistently low latency across MoE models with varying sparsity levels, delivering higher speedups as model sparsity increases. Furthermore, TileQ’s fused computation strategy remains highly effective under the 1D-Sharing paradigm, which can be interpreted as a special case of 2D tiling with row = 1 . Compared to the tradidional 1D low-rank computation employed in Milo, TileQ achieves a 3 × to 20 × speedup. 
+
+Reason : The significant acceleration achieved by TileQ primarily stems from two key factors: 
+
+Prefill Stage : During prefill, computation is predominantly compute-bound. TileQ improves computational efficiency by fusing multiple fine-grained GEMM operations into a single large-scale matrix multiplication. This substantially increases the arithmetic intensity, enabling better utilization of tensor-core hardware and achieving over 60% of the peak compute throughput for the current batch size. 
+
+Decode Stage : In contrast, decoding is memory-bound. Here, TileQ eliminates repeated reads of the input matrix caused by the Top-K routing mechanism. Instead of performing weighted aggregation over Ri tokens, it operates on a compressed low-rank intermediate representation of Rr , thereby reducing memory access by more than 20 ×. Additionally, it reduces the number of kernel calling from K—to constant (refer to Figure 5). Together, these optimizations enable TileQ to maintain exceptional computational efficiency even in the decode phase. 
+
+D.2. Compare with other MoE methods 
+
+We noticed that several works on low-bit PTQ for MoE models have been published or accepted around the same time as our submission, including M OE QUANT (Chen et al., 2025c), M ILO (Huang et al., 2025), M XMOE (Duanmu et al., 2025), and L OPR O (Gu et al., 2026). For the remaining three methods— M ILO, and M XMOE—we were unable to conduct complete and fair comparisons due to multiple practical constraints: • MILO and M XMOE lack sufficient implementation details (e.g., sequence length, average bit) and do not provide 26 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 1 4 16 32                            
+
+> 0%
+> 25%
+> 50%
+> 75%
+> 100%
+> Prefill Latency (%)
+> Deepseek-MoE-16B
+> 1416 32
+> Mixtral-8x7B
+> 1416 32
+> Qwen1.5-MoE-A2.7B
+> 1416 32
+> Qwen3-30B-A3B
+> 1416 32
+> Qwen3-Next-80B-A3B
+> 1416 32
+> 0%
+> 25%
+> 50%
+> 75%
+> 100%
+> Decode Latency (%)
+> Deepseek-MoE-16B
+> 1416 32
+> Mixtral-8x7B
+> 1416 32
+> Qwen1.5-MoE-A2.7B
+> 1416 32
+> Qwen3-30B-A3B
+> 1416 32
+> Qwen3-Next-80B-A3B
+
+Element-Wise MiLo-1D TileQ-1D TileQ-2D 
+
+Figure 6. Inference latency in MoE MLP-block on H800 1 4 16 32                            
+
+> 0%
+> 25%
+> 50%
+> 75%
+> 100%
+> Prefill Latency (%)
+> Deepseek-MoE-16B
+> 1416 32
+> Mixtral-8x7B
+> 1416 32
+> Qwen1.5-MoE-A2.7B
+> 1416 32
+> Qwen3-30B-A3B
+> 1416 32
+> Qwen3-Next-80B-A3B
+> 1416 32
+> 0%
+> 25%
+> 50%
+> 75%
+> 100%
+> Decode Latency (%)
+> Deepseek-MoE-16B
+> 1416 32
+> Mixtral-8x7B
+> 1416 32
+> Qwen1.5-MoE-A2.7B
+> 1416 32
+> Qwen3-30B-A3B
+> 1416 32
+> Qwen3-Next-80B-A3B
+
+Element-Wise MiLo-1D TileQ-1D TileQ-2D 
+
+Figure 7. Inference latency in MoE MLP-block on 5090 
+
+support for the newer model families evaluated in our work; • MXMOE further relies on custom operators or hardware-specific primitives that are incompatible with our experimental infrastructure. Nevertheless, to situate our approach within the broader research landscape, we include in this appendix a brief overview of these concurrent methods and perform limited case-wise comparisons wherever possible. Specifically, we extract reported results from their original papers under settings that align with ours—such as identical base models (e.g., Qwen1.5-MoE), quantization bitwidths (e.g., 2,3bit), and evaluation benchmarks (e.g., WikiText)—and compare them with our own results obtained under the same conditions. 
+
+Table 8. Compare with M XMOE. 
+
+Model Method Avg.bit ↓ AC ↑ AE ↑ PQ ↑ WI ↑ PPL ↓
+
+Qwen1.5-MoE MXMOE 2.25 31.7 53.3 71.3 61.2 8.79 TILE Qs 2.16 39.6 67.3 77.6 68.9 7.56 
+
+MXMOE 3.25 43.8 66.0 79.1 68.0 7.02 TILE Qs 3.16 43.1 69.1 79.9 69.4 6.94 
+
+Mixtral-8x7B MXMOE 2.25 49.0 72.8 76.3 68.9 5.63 TILE Qs 2.16 58.8 81.3 81.5 75.1 4.98 
+
+MXMOE 3.25 64.3 84.2 84.2 75.9 4.15 TILE Qs 3.16 65.6 85.5 83.8 76.4 4.10 
+
+27 TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling 
+
+Compare with MxMoE. The comparison between T ILE Q in scalar quantization with M XMOE are shown in Table 8. We note that the downstream tasks metric reported for M XMOE corresponds to the acc norm score used in their original paper, rather than acc in lm-evaluation-harness (Gao et al., 2024). To ensure a fair comparison, our T ILE Qs results in this table are evaluated using the same acc norm protocol, which is different form Table 1. The results demonstrate that at the 2-bit setting, T ILE Qs consistently outperforms M XMOE across all metrics—achieving notably higher scores in all tasks (AC, PQ, PPL...). For instance, on Mixtral-8x7B, T ILE Qs reduces perplexity from 5.63 to 4.98 and improves AE by 8.5 points. At the 3-bit level, T ILE Qs is still maintaining advantages in most categories (e.g., +0.3 in WI and -0.05 in PPL on Mixtral). 
+
+Compare with MiLo. Then we make a comparison against M ILO (Huang et al., 2025), which only reports results at approximately 3-bit level quantization. Notably, the “HS” metric in their work is also based on acc norm and we adopt the same evaluation protocol for consistency. As shown in Table 9, T ILE Q consistently outperforms M ILO across all evaluated metrics and models. On Deepseek-MoE, T ILE Q improves PIQA by 1.3, HellaSwag by 3.9, and MMLU by 2.4 percent while simultaneously reducing perplexity from 6.42 to 6.24. The advantage becomes even more pronounced on the larger Mixtral-8x7B model with fewer memory costs (avg.bit: 3.16 vs. 3.40).  
+
+> Table 9. Compare with M ILO.
+
+Model Method Avg.bit PQ HS MU PPL Deepseek-MoE MILO 3.4 78.9 74.6 41.9 6.42 TILE Qs 3.16 80.2 78.5 44.3 6.24 Mixtral-8x7B MILO 3.4 81.3 82.2 67.1 4.03 TILE Qs 3.16 83.8 86.0 69.5 4.12 
+
+Summary. Across all MoE-specific PTQ methods—L OPR O, M XMOE, M ILO, and M OEQ UANT — T ILE Q demonstrates consistently stronger performance under comparable or even more aggressive quantization budgets. These comparisons collectively prove that T ILE Q offers a more robust and effective approach to low-bit PTQ for MoE models. 
+
+E. Limitations and Future Work 
+
+Computational Bottleneck in Quantization. The end-to-end runtime of TileQ is dominated by the post-decomposition quantization step (e.g., GPTQ or GPTVQ), particularly for sparse MoE models with numerous small experts (e.g., Qwen3-30B-A3B). Although the 2D tiling and low-rank decomposition stages are computationally lightweight, the quantization backend remains a scalability bottleneck. A key direction for future work is the co-design of quantization algorithms tailored specifically for low-rank–structured MoE weights, potentially integrating quantization-aware low-rank optimization to reduce calibration overhead. 
+
+Integration with Complementary Compression Techniques. This work focuses exclusively on low-rank quantization. An important avenue for future exploration is the synergistic combination of TileQ with other compression paradigms, such as structured pruning (to remove redundant experts or tokens) or knowledge distillation. Such hybrid approaches could yield further reductions in model size and latency without compromising task performance. 28

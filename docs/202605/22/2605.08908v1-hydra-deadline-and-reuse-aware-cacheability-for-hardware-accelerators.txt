@@ -1,0 +1,1784 @@
+Title: HyDRA: Deadline and Reuse-Aware Cacheability for Hardware Accelerators
+
+URL Source: https://arxiv.org/pdf/2605.08908v1
+
+Published Time: Tue, 12 May 2026 00:53:39 GMT
+
+Number of Pages: 21
+
+Markdown Content:
+> 1
+
+# HyDRA: Deadline and Reuse-Aware Cacheability for Hardware Accelerators 
+
+Ayushi Agarwal 1, Anannya Mathur 1, and Preeti Ranjan Panda 1,2 1Amar Nath and Shashi Khosla School of Information Technology, Indian Institute of Technology Delhi , India 
+
+> 2
+
+Department of Computer Science and Engineering, Indian Institute of Technology Delhi , India 
+
+Abstract —The system-level cache is a critical resource shared by processor cores and domain-specific accelerators in heteroge-neous systems on chips (SoCs). The strict QoS requirements of accelerators, such as deadlines, can lead to severe performance degradation of processor cores. Thus, managing the shared cache efficiently between cores and accelerators becomes crucial. State-of-the-art cache management techniques perform reuse-aware bypassing of accesses from cores with the help of reuse predic-tors to improve performance. However, architectural differences between accelerators and processor cores (often associated with deep cache hierarchies) can lead to significantly different reuse patterns at the shared cache. We propose a novel clustering-based methodology, LERN , for learning and predicting the reuse behavior of hardware accelerators at the shared cache. We then propose a deadline and reuse-aware cache management strategy, 
+
+HyDRA , which explores a novel tradeoff between reuse and deadline awareness for performance efficiency. It uses LERN to dynamically predict the reuse behavior of the accelerator accesses and make bypass decisions to maximize the system throughput while meeting accelerator deadlines. We evaluate HyDRA across different workloads and varied accelerator configurations. It significantly improves the system performance and reduces the accelerator deadline miss rate. 
+
+Index Terms —Shared Cache Management, Hardware Acceler-ators on MPSoCs, Accelerator Reuse Prediction. 
+
+I. I NTRODUCTION 
+
+# DOMAIN-specific hardware accelerators (HWA) have emerged as a compelling solution for meeting the in-creased computational demands of modern-day artificial in-telligence (AI) applications. Recent trends in SoC architecture show that accelerators are integrated in the system to share the on-chip last-level cache (LLC) with the other processing ele-ments, such as processor cores [1], [2], [3]. Figure 1 provides an overview of such a heterogeneous system architecture. The shared cache services read misses and writeback traffic from private caches of processor cores. Requests that miss in the shared cache are forwarded to off-chip memory, and returned data is written back to the shared cache. In systems with integrated accelerators, the shared cache must also handle read and write accesses from the accelerator. Hence, integrating accelerators on this critical shared resource increases its space and bandwidth contention. Therefore, intelligent management of the LLC space, bandwidth, or both, is crucial so that 
+
+> This paper is an extended version of a manuscript accepted for publication in IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems (IEEE TCAD). It includes additional experiments, analyses, and evaluation details omitted from the published version due to page limitations. A research grant from the R Systems Center of Excellence on Sustainable Artificial Intelligence supported this work.
+
+accelerators can meet their deadlines and maintain their quality of service (QoS) without degrading the performance of the rest of the system, including cores. LOWER - LEVEL MEMORY 
+
+L1 L2 Core 1 
+
+Core 2 L1 L2 
+
+Core 3 L1 L2 
+
+Core 4 L1 L2 
+
+> Accelerator
+
+Core 6 L1 L2 
+
+Core 7 L1 L2 
+
+Core 8 L1 L2 
+
+Core 5 L1 L2 
+
+> Request Queue
+
+Last-Level Cache 
+
+(LLC) 
+
+> Write Request Bypass
+
+Shared LLC Controller   
+
+> Read
+> Writeback
+> Write
+> Response
+> Bypass
+> Request serviced FIFO/ARP
+> Request Queue
+
+BYPASS BYPASS 
+
+Fig. 1: Overview of Heterogeneous System Architecture. We enhance gem5 [4] with integrated accelerators on the LLC [5] to add the write request/response bypass, and read response bypass for accelerator accesses ( highlighted in blue ). The efficient management of shared cache space between processor cores [6], [7], [8], [9] and between CPUs and GPUs [10], [11] has been comprehensively studied in MP-SoCs. Shared cache bandwidth management between cores [12], [13] and between cores and accelerators [5] has also only recently garnered attention. However, the interaction between cores and accelerators in the context of shared cache space remains unexplored. The most commonly used techniques for managing cache capacity across different computational units are static or dynamic cache space partitioning and selective caching or bypassing of memory accesses. Effective LLC bypassing depends heavily on the nature of the computational unit (CPU, GPU, or HWA) and on application characteristics, such as data locality and LLC reuse behavior. Prior work has shown that locality-aware cache bypass can reduce contention in shared caches [14], [15]. As shown in Figure 1, the cache controller may bypass certain accesses based on reuse predic-tions, such as accelerator write requests and read responses from memory for both cores and accelerators (shown in blue ), allowing them to bypass the shared cache and directly access main memory. The data locality of processor applications has been extensively studied to gain benefit from the on-chip cache hierarchies. Even though memory and data locality-
+
+> arXiv:2605.08908v1 [cs.AR] 9 May 2026 2
+
+aware design space optimizations [16], [17], [18] have been targeted for ML accelerators to optimize their performance, power, and area, their off-chip memory access patterns or data locality seen at the LLC have not been explored in CPU-HWA heterogeneous SoCs. Due to the architectural differences between processor cores, which are often associated with deep cache hierarchies, and accelerators, their reuse patterns observed at the LLC might differ significantly. Additionally, an efficient bypassing strategy, based on reuse behavior, designed for the processor applications might perform poorly with HWAs, negatively impacting the overall system performance. We motivate that the reuse analysis performed on processor applications does not necessarily hold for accelerators, and show that the state-of-the-art reuse predictors perform sub-optimally for accelerators. We propose a novel clustering-based methodology, LERN , for learning accelerator reuse be-havior at the LLC. We finally propose HyDRA , a deadline- and reuse-aware policy for dynamically deciding the cacheability of memory accesses from accelerators and cores at the LLC depending on the accelerator’s progress and reuse behavior. If the accelerator is in line to meet the deadline, HyDRA reallocates the cache space to processor cores by aggressively bypassing accelerator accesses from the LLC and positively impacting the performance of cores. The bypass contenders are determined by adding reuse awareness with offline-trained LERN predictors. If progress is insufficient to meet the deadline, accesses without reuse are bypassed. This brings out a novel and interesting tradeoff between deadline and reuse awareness. Without deadline awareness, a good reuse-aware policy would bypass accesses based solely on the reuse behavior, which might lead to deadline misses. A deadline-aware policy without good reuse awareness can help meet the deadline, but might not achieve better performance for cores. To our knowledge, this is the first comprehensive work to study the cache space contention and management between accelerators and cores. We make the following contributions: 1) We introduce a crucial tradeoff between deadline and reuse awareness to solve a novel problem of dynamically managing the LLC space between accelerators and cores. 2) We propose a reuse pattern detection framework, LERN, which uses K-means clustering to learn the reuse-based similarities between the accelerator’s memory accesses and partition them into clusters with similar reuse behav-ior. LERN efficiently forms distinct clusters of memory accesses to predict their reuse behavior dynamically. 3) We propose a novel approach, HyDRA, to improve the system performance by deadline and reuse-aware dy-namic LLC bypass while meeting accelerator deadlines. The bypass aggressiveness for accelerator accesses de-pends on the progress made in meeting the deadline. Deadline awareness conflicts with reuse awareness, as several accesses with low reuse properties might be cached to ensure meeting the deadlines, and vice versa. HyDRA achieves a balance between deadline and reuse awareness. 4) We enhance the gem5 [4] full-system simulator with accelerators integrated on the LLC [5] to add accelerator write request/response bypass as well as read response bypass at the LLC. We plan to integrate our infrastructure enhancements into the open-source gem5 repository. We evaluate HyDRA across multiple accelerator archi-tectures and machine learning (ML) models and show that it significantly improves cores’ performance while reducing accelerator deadline misses. The approach also extends to systems where the first shared level between cores and ac-celerators is an off-chip L4 cache rather than an on-chip LLC. II. R ELATED WORK 
+
+A. Shared Cache Management 
+
+Shared cache space and/or bandwidth management have received considerable attention for homogeneous multi-processor SoCs and heterogeneous SoCs with GPUs. Shared cache space has been managed by techniques such as static or dynamic space partitioning [6], [7], [8], [9], [11], efficient cache replacement [19], [20], and cache bypass [10], [14], [21], [22], [23]. These techniques are driven by features such as cache utility [6], [7], prefetch awareness [8], and data locality or reuse awareness [9], [14], [21], [19], [22]. Shared cache bandwidth management between CPUs and accelerators is also crucial. FLASH [5] proposes a dynamic deadline-aware shared cache management policy to partition its bandwidth between cores and accelerators. Depending on the accelerator’s progress, the shared cache bandwidth is reallocated to cores to improve IPC speedup. However, it assumes that all accelerator requests should be serviced by the shared cache, which can lead to inefficient utilization in heterogeneous systems where accelerator accesses exhibit diverse reuse behavior. DPCP [24], on the other hand, jointly uses data prefetching and static cache partitioning to manage cache space between cores and accelerators. However, DPCP evaluates a small system with a single CPU and a single accelerator and does not target QoS. Hence, the shared cache space management between CPUs and accelerators remains unexplored. 
+
+B. Reuse Analysis and Prediction: Uses and Methodologies 
+
+Researchers have extensively used reuse pattern analysis and prediction for optimizing web caching [25], and on-chip caches by efficient cache replacement [15], [19], [20], [22], [26], [27], [28], [29], [30], [31], [32], [33], [34], [35], [36], prefetching [37], and selective cache bypass [14], [21], [22], [27]. These predictions can broadly impact the cache performance by improving the cache hit rate and mitigating cache contention and interference. Heuristics-based solutions for reuse prediction, such as LRU, MRU, LRFU [20], and RRIP [19] have been proposed for efficient cache replacement. However, these solutions usually work well with commonly observed, limited cache access patterns despite low hardware overhead. More recently, learning-based algorithms [14], [15], [21], [22], [26], [27], [30], [31], [32], [33] have been presented for learning cache access patterns based on the past accesses, using standard features such as the Program Counter (PC), memory address, 3
+
+and reference count to predict the reuse probability of a future memory access for efficient cache replacement or bypass. These predictors often compromise the farsightedness of the reuse patterns for hardware efficiency. Deep Learning and Reinforcement Learning algorithms [25], [28], [29], [37] have also been explored for learning program behavior. LSTM-driven learning of reuse behavior for memory addresses can in-cur significant hardware and training overhead. Since the size and training time of the LSTM grow in proportion to the num-ber of inputs, previous work has shown that memory addresses are not feasible for LSTM training, as the number of unique memory addresses can be very large [28]. However, PCs are more suitable for training LSTMs. Glider [28] proposed an online, lighter SVM model for efficient cache replacement, using features learned by an offline-trained LSTM model on an unordered PC trace to mitigate the high computational and hardware footprint of LSTM models, which are unsuitable for hardware caches. RLR [29] and Stormbird [34] use reinforce-ment learning to learn an LLC replacement policy based on access, cache line, and set information. These techniques are often challenging to converge and generalize. Most of these techniques depend on processors’ features, such as PC, and are efficient for applications that show con-sistent reuse patterns. Hence, they are challenging to scale to accelerators that do not have such features, and their memory access patterns often exhibit long-range temporal correlations that exceed the short training horizons of hardware-optimized online schemes. Offline training, on the other hand, can capture global reuse behavior of memory accesses and learn long-range temporal correlations that online predictors usually miss. Offline training shifts the learning complexity from silicon to software. We combine static profiling of the accelerators’ off-chip memory accesses with dynamic on-chip cache manage-ment achieved by selective cache bypassing based on reuse awareness to maximize processor cores’ performance while meeting accelerators’ deadlines. 
+
+III. M OTIVATION 
+
+As shown in Figures 2 and 3, we use three key challenges to motivate the need for deadline-aware, dynamic LLC man-agement, with selective cache bypassing, between accelerators and cores, so that accelerator deadlines are met with minimal impact on cores’ performance. We use a state-of-the-art reuse prediction methodology (baseline or B), such as SHIP [15], to identify the low-reuse bypass contenders from cores and accelerators. We use the following notation for representing the different cache management policies discussed ahead: 
+
+{ Arbitration −C(Policy) −A(Policy) −Deadline },where Arbitration denotes the cache arbitration policy, 
+
+C(Policy) and A(Policy) denote the reuse-aware bypass poli-cies for core accesses and accelerator accesses at the cache, respectively, and Deadline denotes deadline awareness. For processor cores, we monitor the total achieved through-put. For accelerators, we use a metric called Deadline Miss Rate (DMR), the ratio of the number of input sets for which the deadline is missed to the total number of input sets executed. We analyze the mean performance obtained on a system with Key Challenge 1        
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> Speedup w.r.t. FIFO-NB
+> 1.0 1.01 0.88 0.88
+> FIFO-NB
+> FIFO-CB
+> ARP-NB
+> ARP-CB
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Deadline Miss Rate (DMR)
+> DMR
+> (a) Accelerator-friendly Bandwidth Allocation with Core Bypass. Key Challenge 2
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> Speedup w.r.t. FIFO-NB
+> 0.89
+> 1.04
+> ARP-CAB ARP-CB-AB
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Deadline Miss Rate (DMR)
+> DMR
+> (b) Performance with Shared vs. Private Reuse Predictors. Key Challenge 3
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> Speedup w.r.t. FIFO-NB
+> 1.03 0.94 1.04 0.93
+> ARP-AB
+> ARP-AB-D
+> ARP-CB-AB
+> ARP-CB-AB-D
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Deadline Miss Rate (DMR)
+> DMR
+> (c) Deadline and Reuse-Aware Cacheability for Accelerators.
+
+Fig. 2: Key Motivational Challenges 1, 2, and 3. Mean per-formance speedup and DMR with state-of-the-art LLC man-agement policies. FIFO, ARP: LLC Arbitration Policies. NB: 
+
+No Bypass, CB/AB: Core/ Accelerator bypass with Baseline predictor, D: Deadline-aware. eight processor cores running two different combinations of SPEC applications (1: omnetpp (high-reuse) on all cores, 2: 
+
+omnetpp on four cores, mcf (low-reuse) on four cores) and one TPU [38]-grade accelerator running the Tiny-YOLO network with configuration Config-1, as detailed in Tables II and IV. The deadline used for the accelerator is derived from a 10 inputs per second (IPS) image frame rate. In this case, an input is an image frame. 
+
+A. Key Challenge 1: Accelerator-friendly Bandwidth Alloca-tion along with Core Bypass. 1) With insufficient bandwidth allocation to the accelerator, is reuse-aware core bypass sufficient to meet its deadline? 
+
+Without intervention, the LLC controller schedules the re-quests from accelerators and cores in first-in, first-out (FIFO) order with no bypass (FIFO-NB). FIFO arbitration provides 4
+
+LLC bandwidth on demand, and when contending with mul-tiple processors, the accelerator might miss its deadline due to insufficient bandwidth (Figure 2a). Since accelerators also contend for cache space, this raises the question whether alleviating space contention with reuse-aware cache bypass of the core accesses or Core bypass using the Baseline predictor (CB) is enough to meet the accelerator’s deadline (FIFO-CB). With 2% core accesses bypassed, depending on the application, and a marginal throughput increase of 1%, the relieved cache space is insufficient to meet the deadline without sufficient bandwidth. Adding reuse-aware accelerator bypass would worsen its execution time and not help meet the deadline. Therefore, LLC intervention is required first to provide the accelerator with sufficient bandwidth. 
+
+2) With accelerator-friendly bandwidth allocation, is reuse-aware core bypass sufficient to restore the lost performance of processor cores? We use a static arbitration policy that prioritizes accelerator requests at each LLC access, called Accelerator Request Priority (ARP) [5] with no bypass (ARP-NB). Figure 2a shows that ARP-NB meets the given deadline but with a significant degradation of up to 12% in the cores’ performance as static arbitration can lead to over-allocation of bandwidth to the accelerator. To efficiently manage cache space with a static bandwidth allocation, we add reuse-aware 
+
+Core bypass with the Baseline predictor to see if it can restore the lost performance of cores while meeting the deadline (ARP-CB). The accelerator meets the deadline with sufficient bandwidth, but selective core bypass alone cannot restore the cores’ performance (Fig. 2a). 
+
+B. Key Challenge 2: Given sufficient bandwidth, can reuse-aware accelerator bypass, using shared reuse predictors with cores, restore the system performance? 
+
+Dynamic reuse prediction methodologies for efficient re-placement and bypass for cores have often shown that per-core private predictor tables perform comparably with shared but bigger predictor tables [15]. Given a heterogeneous system with an accelerator, we explore whether the same hypothesis holds. We compare two architectural configurations that are deadline-agnostic (denoted by the absence of −D), use ARP arbitration, perform core and accelerator bypass based solely on reuse behavior: (1) with a shared baseline reuse predictor (ARP-CAB), and (2) with separate baseline reuse predictors (ARP-CB-AB). As shown in Figure 2b, with shared predic-tors, we observe minimal performance improvement due to a marginal increase in the mean core bypass rate (Core BR), and the accelerator bypass rate (Accel BR) closely follows the cores, signifying access pattern interference. With separate predictors, we observe a speedup of 4% over FIFO-NB, and the accelerator shows a higher bypass rate that is not impacted by the interference from cores. We conclude that due to different access patterns, cores and accelerators should not share a reuse predictor. 
+
+C. Key Challenge 3: Deadline and Reuse-Aware Cacheability for Hardware Accelerators. 1) Adding deadline awareness to reuse-aware bypass. 
+
+In Section III-B, we observed that reuse-aware accelerator bypass leads to deadline misses without deadline awareness. We add deadline awareness to dynamically adjust the bypass aggressiveness based on the accelerator’s progress, which is monitored periodically after each epoch (of duration ET). For meeting the required inputs per second rate (IPS), the M mem-ory accesses in one input set, determined by static workload profiling based on accelerator characteristics, should complete in time Dsec (converted from IPS). These are communicated to the LLC controller at the beginning of the application’s execu-tion. To add Deadline awareness to the reuse-aware Core and 
+
+Accelerator bypass using different Baseline predictors (ARP-CB-AB-D), the accelerator bypass begins when the number of accesses completed within the epoch exceeds the number of accesses required to be completed in the epoch according to its deadline ( M × ET /D sec ). From Figure 2c, we observe that adding deadline awareness to reuse-aware bypass meets the deadline, but accelerator bypass rate drops significantly to less than 10% from around 60% (with ARP-CB-AB), and the cores’ performance reduces. This depicts a strong tradeoff between deadline and reuse awareness in bypassing decisions while optimizing performance with a deadline constraint. 
+
+2) Is the reuse predictor, designed for general-purpose applications, the right choice for hardware accelerators? 
+
+Figure 2 shows that performing reuse-aware accelerator bypass with and without deadline awareness can lead to significant performance variation. Without deadline awareness, we ob-serve a high DMR but a higher IPC speedup. With deadline awareness, the deadline is met, but the IPC drops significantly because of a lower accelerator bypass rate. This steep drop in the bypass rate raises an important question: Is the baseline reuse prediction methodology, designed for cores, the right choice for detecting reuse patterns from the accelerator? 
+
+Fig. 3: Limitations of the state-of-the-art cache management solutions and Key Motivational Challenges 1 , 2 , and 3 .The desired region shown in green represents the potential solutions for optimizing the system throughput with deadlines. Figure 3 highlights the three key challenges discussed earlier to emphasize the need for a shared cache management policy that addresses the tradeoff between reuse and deadline aware-5
+
+ness and maximizes the system throughput while meeting the accelerator’s deadline. The y-axis of the figure captures the performance speedup over the FIFO-NB baseline, and the 
+
+x-axis denotes the accelerator’s DMR. It shows that adding deadline awareness to reuse-aware bypass helps to meet the deadline. However, performance can be further improved with better reuse prediction. This points to the requirement of a different reuse prediction methodology for the accelerator rather than using the baseline predictors. The figure highlights the desired region (shaded in green) of optimization where a near-zero deadline miss rate is achieved with high system throughput. IV. LERN: C LUSTERING -BASED LE ARN ING AND 
+
+PREDICTION OF REUSE FOR HARDWARE ACCELERATORS .The reuse behavior of hardware accelerators can be charac-terized by their Reuse Interval (RI) and Reuse Count (RC) in the context of a memory access sequence. RI is defined as the number of accesses between two consecutive accesses to the same datum [25]. RC is defined as the number of times a single datum appears in the complete memory access sequence of the accelerator. Table I shows our interpretation of the RI and RC for a sample memory access sequence. We propose a statistical clustering-based learning methodology, called LERN (Figure 4), to statically profile the off-chip memory access sequence from accelerator simulators, such as SCALE-Sim [39], and learn the reuse behavior quantified by RI and RC. Using these two features, the complete memory access sequence is segmented into different reuse-based clusters, which are then used for LLC optimizations. 
+
+A. Dataset Formation 
+
+A memory access sequence is a series of M memory accesses with single or multiple occurrences of N unique addresses an, where 1 ≤ n ≤ N . To learn the reuse behavior at the shared cache, we generate a Reuse Signature Trace TR 
+
+for all the unique cache addresses ( Nc) in the original trace. Multiple addresses an can map to a single cache line address 
+
+ci, where 1 ≤ i ≤ Nc ≤ N . Therefore, the RI and RC of ci
+
+may differ from those of the addresses that map to it. In the example shown in Table I, M = 8 , N = 4 , and Nc = 2 . The access sequence for cache line address ci is given by r i, the sequence of memory access numbers (m) corresponding to the 
+
+ci accesses, the sequence length being Ti, and r i,j being the 
+
+jth element of sequence r i. For example, the cache line address 
+
+c1, as shown in Table I, occurs in the trace at m = 1 , 2, 3, 6, 7,hence, r 1 = {1, 2, 3, 6, 7}.The Reuse Signature Trace TR is a sequence of Reuse Vectors (RV) for all the unique cache line addresses. For each address ci, RV i is a sequence that records the RI for all its Ti
+
+occurrences. Each RI of address ci at occurrence j or RI i,j is defined as r i,j +1 − ri,j with the last interval being -1. 
+
+B. RI and RC Feature Extraction 
+
+We use the Reuse Signature Trace TR to extract the RI and RC features, FRI and FRC , respectively. FRC is a sequence of IMMEDIATE REMOTE NEAR FAR      
+
+> Feature Value
+> Accelerator
+> Simulator
+> DRAM
+> R/W Traces
+> Data Set
+> Formation
+> Neural Network
+> Topology (CONV1, CONV2, ... FC1)
+> Accelerator
+> HW Configuration (PE, SRAM, Dataflow) Cycle Accurate
+> Traces
+> Reuse
+> Count (RC) Feature Extraction
+> K-Means Clustering K=4
+> Cluster Annotation
+> Reuse Interval(RI) Feature Extraction
+> K-Means Clustering K=4
+> Cluster Annotation
+> Count RI [1,10]
+> Count RI (10, 100]
+> Count RI (100, 500]
+> Count RI (500, )Reuse Interval Feature Vector
+> Count of Memory Address Reuse Count Feature Vector
+> Reuse-Aware Clustering
+> Reuse Interval Clusters
+> IMMEDIATE
+> NEAR
+> FAR
+> REMOTE
+> 0
+> 1
+> 2
+> 3
+> Reuse Count Clusters
+> COLD
+> LIGHT
+> MODERATE
+> HOT
+> 0
+> 1
+> 2
+> 3
+> No Reuse -1
+> No Reuse -1
+> Cluster Annotations
+
+Fig. 4: LERN Methodology Overview: Reuse Count and Reuse Interval based Clustering of Accelerator Memory Accesses. TABLE I: Reuse Interval, Count for a Memory Access Se-quence. Memory addresses {a1, a 2} ∈ cache line c1, and 
+
+{a3, a 4} ∈ cache line c2.                                                        
+
+> Memory Access Number (m) 12345678
+> Memory Address a1a2a1a3a4a1a2a3
+> Reuse Interval (RI) 2534-1 -1 -1 -1
+> Reuse Count (RC) 11211322
+> Cache line Address c1c1c1c2c2c1c1c2
+> Reuse Interval (RI) 113131-1 -1
+> Reuse Count (RC) 12312453
+
+features {T1, T 2, .., T Nc }, where Ti (sequence length of RV i)is the reuse count of the unique cache line address ci occurring in the memory access sequence. FRI is a sequence of feature vectors for all cache line addresses. Each feature vector is a tuple of four features, f1, f 2, f 3, f 4, representing the frequency of the RI being in different bins, such as [1 , 10] , (10 , 100] ,
+
+(100 , 500] , and (500 , ∞), respectively. These bins are chosen based on system cache associativity (in this case, 16 ways) and interference characteristics, where RIs below 10 likely survive in the cache, intermediate intervals may or may not survive, and larger intervals represent long-range reuse with higher eviction probability. For the example in Table I, FRC =6
+
+{5, 3} and FRI = {{ 4, 0, 0, 0}, {2, 0, 0, 0}} for Nc = 2 .
+
+C. K-Means Clustering and Cluster Annotations 
+
+We formulate the reuse prediction problem as a pattern-detection and classification problem to classify memory ac-cesses based on reuse. As shown in Figure 4, we use K-Means clustering on the RI and RC features ( FRI , FRC ) to classify memory accesses into four clusters (K-Means input 
+
+n = 4) with predefined reuse behavior. Four clusters are used to provide finer-grained reuse classification than the binary live/dead decisions commonly used in LLC predic-tors. Binary classification collapses all reuse behavior into two decisions, and is insufficient for deadline-aware bypass because accelerator accesses exhibit diverse reuse distances, and bypass aggressiveness must adapt to different levels of the accelerator’s progress. 
+
+1) K-Means Clustering - Reuse Count. The K-means clus-tering algorithm uses the RC features ( FRC ) to cluster the memory accesses with similar reuse counts into four clusters of type “Cold” (0), “Light” (1), “Moderate” (2), and “Hot” (3). These clusters represent increasing levels of reuse observed in the reuse signature trace, where Cold corresponds to the smallest reuse counts, and Hot corresponds to accesses with the highest reuse counts. 
+
+2) K-Means Clustering - Reuse Interval. The K-Means clustering algorithm uses the normalized RI features ( FRI ) to cluster the memory accesses with similar RI distribution into four categories of type “Immediate” (0), “Near” (1), “Far” (2), and “Remote” (3). The K-Means algorithm categorizes the addresses based on which feature or group of features is dominant in the feature vectors. Post-clustering, we use the relative values of the features in the de-normalized cluster centers to annotate the clusters into the four reuse categories, as illustrated in Figure 4. 1) “Immediate” RI Cluster: The addresses in the cluster with dominant f1 are marked as Immediate RI. 2) “Near” RI Cluster: With multiple dominant features, if f1
+
+holds higher relative dominance over the other features, such as f2, that cluster is annotated as Near RI. Most address occurrences show low RI, although some can show higher RI. 3) “Far” RI Cluster: When f2 holds dominance over f1 or f3
+
+and f4 holds relative dominance over f1 but not f2, the cluster is annotated as Far RI. Most address occurrences show RI in the range represented by f2.4) “Remote” RI Cluster: Clusters with dominant f3 or f4 are annotated as Remote RI. Most occurrences show high RI, although some occurrences can show low RI. The memory accesses with only one occurrence in the trace are classified into the “No Reuse (-1)” RC and RI cluster. 
+
+D. Clustering Performance and Prediction Accuracy. 
+
+To determine the clustering performance, we observe the separability of the 4-D RI features ( FRI ) between the clusters in a 2-D space with PCA dimensionality reduction (Figure 5), along with the silhouette score achieved by K-Means on layers 0.5 0.0 0.5 1.0 1.5 2.0 2.5 3.0 3.5             
+
+> PCA Feature 1
+> 1
+> 0
+> 1
+> 2
+> 3
+> PCA Feature 2
+> Cluster Centers
+> f1
+> f2
+> f3
+> f4
+> R.I. Features
+> (a) Tiny-YOLO Conv-1 layer. Clustering silhouette score ( >90%). Good Feature Separation →Efficient clustering in 4 clusters. 1.0 0.5 0.0 0.5 1.0 1.5 2.0 2.5
+> PCA Feature 1
+> 1
+> 0
+> 1
+> 2
+> PCA Feature 2
+> Cluster Centers
+> f1
+> f2
+> f3
+> f4
+> R.I. Features
+> (b) Tiny-YOLO Conv-7 layer. Clustering silhouette score >75%. Satisfactory Feature Separation for clustering within 4 clusters.
+
+Fig. 5: PCA projection in 2-D for the 4-D RI features 
+
+(f1, f 2, f 3, f 4) to show the achieved Feature Separability on Accelerator Configuration: Config-3. Conv1 and Conv7 of the accelerator configuration Config-3 (Table IV). K-Means achieves good feature separability with a high silhouette score representing high clustering accuracy within four clusters on Conv-1. On Conv-7, the 75% silhouette score indicates a need for more clusters. However, increasing the number of clusters raises hardware overhead, while the marginal improvement in reuse discrimination diminishes at the LLC relative to the hardware cost. Additional clusters may be justified only in highly constrained systems with strict QoS or tighter deadlines, where small improvements in bypass decisions can yield measurable performance gains for cores. Figure 6 shows the percentage distribution of memory accesses in all the layers of accelerator Config-3 across the different RI and RC clusters. Figure 6a shows that more than 60% of the memory accesses in all the layers are classified in the Immediate RI cluster, indicating strong data locality, as the simulated accelerator has small on-chip SRAMs, thereby showing high sensitivity to accelerator hardware. A significant fraction of the accesses will be predicted to have good reuse if only RI is used to predict reuse behavior. Figure 6b shows a more uniform distribution of memory accesses across all the RC clusters, depicting varied reuse count behavior. Hence, considering RI and RC provides a more comprehensive view of the reuse behavior and could lead to better LLC optimiza-tions. LERN captures the most probable reuse behavior for a 73.5 
+
+> 2. 7
+> 23.7
+> 2.5
+> 67.6
+> (a) Memory Access Distribution from RI-based Clustering. 3.5
+> 42.2
+> 23.3
+> 17. 7
+> 13.2
+> (b) Memory Access Distribution from RC-based Clustering
+
+Fig. 6: Percentage of memory accesses clustered in different RI and RC clusters for different layers of Tiny-YOLO on Ac-celerator Configuration: Config-3; The order of layers follows outward concentric circles. memory access instead of learning the exact temporal variation of its reuse intervals throughout the execution. To calculate the mean accuracy of the LERN RI-based prediction, we compare the cluster allocations with the actual RI of the memory accesses at different occurrences in the memory access sequence. For an “Immediate” RI cluster access ai
+
+with RV i = {5, 20 , 9, 6}, the accuracy is calculated with three correct and one incorrect RI prediction. LERN achieves 100%, 100%, 87.4%, 89.8%, 95.6%, 93.9%, 93.2%, 93.6%, 99.7%, and 94.6% accuracy on the accelerator configurations Config-1 to Config-10 (Table IV), respectively. V. H YDRA: D EADLINE AND REUSE -A WARE 
+
+CACHEABILITY FOR HARDWARE ACCELERATORS 
+
+As motivated in Section III, with an accelerator-friendly arbitration policy, such as ARP, adding deadline awareness to reuse-aware cache bypass can not only help in meeting the accelerator’s deadline but can also improve the system’s throughput. Figure 7b presents an overview of our proposed deadline and reuse-aware cacheability policy, HyDRA, which combines deadline awareness with dynamic reuse-aware cache bypass and static bandwidth allocation by ARP arbitration to achieve the twofold performance objective. It uses the LERN reuse predictor designed for the accelerator’s memory access pattern to identify the bypass contenders based on reuse. As discussed in Section III-C1, the execution of the appli-cations is divided into equal-sized epochs of length ET so that the state of the system and the progress of the accelerator are periodically monitored. The LLC management is adapted to the dynamic variations in the memory access patterns of the applications and the accelerator. Figure 7a illustrates the main ideas behind the reuse and deadline-aware bypass in HyDRA. The first plot shows whether the accelerator is ahead or behind the required progress, depending on its progress in the last epoch. The second plot shows the variation in the bypass decision and the access path taken at the LLC, according to the accelerator’s progress and the predicted cache reuse of two accelerator accesses, Req j and Resp k, as shown in Figure 7b. When progress is good, we prefer to aggressively bypass accelerator access while taking a conservative bypass approach when the accelerator is behind the required progress. During epoch X, as the progress is excellent, both accesses are bypassed via access paths 1 and 3 as they lie in the bypass zone according to their predicted reuse. During epoch Y, actual progress is closer to the required progress, changing the reuse thresholds, RI Th and RC Th . In this epoch, only Req j
+
+is bypassed and Resp k is sent to the LLC via access path 4 .However, during epoch Z, the progress is critical and hence, both accesses are sent to the LLC via access paths 2 and 4 .Hence, with the dynamic exploitation of the tradeoff between deadline and reuse awareness, HyDRA can meet the deadline and enhance the cores’ performance. HyDRA employs (1) an Accelerator Progress Monitor (APM) that monitors the progress of the accelerator at the beginning of every epoch to decide the reuse thresholds for bypassing memory accesses in this epoch, (2) a pre-trained LERN Reuse Predictor Table to dynamically predict the reuse behavior of the accelerator memory accesses, (3) a 
+
+Deadline- and Reuse-aware Bypass Decision module which uses the prediction from LERN and the reuse thresholds to decide which memory accesses from the accelerator are bypassed at the LLC, and (4) a Core Bypass Decision module to bypass the read responses for the memory accesses from processor cores using a state-of-the-art reuse predictor. 
+
+A. Accelerator Progress Monitor (APM) 
+
+As discussed in Section III-C1, the accelerator communi-cates a user-defined execution deadline ( Dsec ) to the shared cache at the beginning of the execution along with the total memory accesses M required to complete one input set on the accelerator. The Accelerator Progress Monitor (APM) uses these to estimate MA global = ( M/D sec ) × ET, the total num-ber of memory accesses which should ideally be completed every epoch to meet the accelerator’s deadline. Based on the dynamic progress of the accelerator, the APM estimates the requirement of a safety margin to meet the deadline, the dy-namic bypass thresholds, and finally, the reuse thresholds to be 8Required              
+
+> Progress
+> Reuse-A ware
+> Bypass  Decision  cycles
+> Actual Progress
+> Actual Progress
+> Actual Progress
+> cycles
+> Bypass
+> RI
+> RC
+> No
+> Bypass
+> Bypass
+> RI
+> RC
+> No
+> Bypass
+> RI
+> RC
+> Reuse Thresholds (RC , RI )
+> Reuse Prediction (RC , RI )
+> Epoch X Epoch YEpoch Z
+> Reuse Prediction (RC , RI )
+
+(a) Overview of HyDRA’s Bypass Conditions. Based on the actual progress of the accelerator and the reuse predictions, accesses are bypassed at the LLC. Last-Level Cache         
+
+> (LLC)
+> Read / Writeback
+> zRequest Queue
+> LERN Reuse
+> Predictor
+> Table
+> Accelerator
+> Progress Monitor
+> Dynamic Bypass
+> Threshold Estimation
+> Reuse Threshold
+> Estimation
+> Accelerator Write Request
+> Deadline &
+> Reuse Aware
+> Bypass Decision
+> LERN Reuse
+> Predictor Table
+> Core
+> Bypass
+> Decision
+> Deadline & Reuse
+> Aware Bypass
+> Decision
+> Reuse Predictor Table Accelerator Read
+> Response
+> BYP ASS
+> BYP ASS
+
+HyDRA LLC Controller   
+
+> Mar gin Requirement
+> Estimation
+> Request serviced
+> ARP order
+> Core-side Interconnect
+> Memory-side Interconnect
+
+(b) HyDRA LLC Controller Overview. 
+
+Fig. 7: HyDRA’s Deadline with Reuse-Aware Bypass and Methodology Overview. used for selecting the bypass candidates. At the beginning of each epoch i, APM checkpoints several performance counters for the accelerator, listed below, to estimate its progress and decide the reuse thresholds for the epoch.  
+
+> •
+
+RA (i): Remaining accesses in this input set.  
+
+> •
+
+RT (i): Remaining time to the deadline Dsec . 
+
+> •
+
+MR i: Total shared cache miss rate encountered by all cores in the last epoch i − 1. 
+
+> •
+
+MA 1→i 
+
+> past
+
+: The average number of memory accesses com-pleted per epoch by the accelerator in the past until epoch 
+
+i−1. It is defined as (( M −RA (i))×ET )÷(Dsec −RT (i)). 
+
+> •
+
+AMAL (i): The average memory latency per access achieved by the accelerator in the last epoch i − 1.
+
+1) Margin Requirement Estimation. Based on reuse behav-ior and deadline awareness, some accelerator accesses are selected to be bypassed from the shared cache to alleviate space contention and improve the system throughput. Ag-gressive bypass at the beginning of the accelerator execution can increase the contention at the lower-level memory or DRAM, leading to high per-access memory latency. If the accelerator cannot recover from the impact of the increased memory contention, it can lead to deadline misses. Therefore, the APM adds two safety margins, margin high and margin low ,in the deadline provided for the accelerator to recover from the impact of aggressive bypassing in cases when it is hard for the accelerator to meet the deadline. Figure 8 shows that the safety margin requirement is estimated based on two conditions: a) If MR i > MR Th (miss rate threshold), it shows higher ex-isting contention at the DRAM. Aggressively bypassing the accelerator accesses can increase this contention, making it harder to meet the deadline. b) If MA 1→i 
+
+> past
+
+< (1 + α) × MA global , the APM foresees the requirement of a margin ( α is empirical tolerance on global progress). This is because, with the current bypass strategy, the accelerator has not been able to meet the memory access completion rate required for every epoch. Based on the margin requirement conditions shown in Figure 8, the per-epoch progress requirement or the number of accesses which are required to be completed in the epoch 
+
+i, MA (i), is either estimated according to the actual remaining time from the deadline RT i, as shown by condition 1 , or gradually overestimated with addition of the margins to reduce the bypass aggressiveness, as shown by conditions 2 – 4 .We discuss in Section V-A3 how an inflated estimate of MA (i)
+
+reduces the bypass aggressiveness. Even though the total work to be done for one input set is known when the accelerator begins execution, the number of accesses generated by the accelerator in every epoch during the execution is not known in advance. The dynamic, non-uniform, and unpredictable access rate from the accelerator plays a major role in meeting the per-epoch progress requirement. Low access rates in some epochs during execution can cause the accelerator to miss this epoch-level progress requirement MA (i). APM ensures the global deadline is met by adjusting the bypass aggressiveness in future intervals to compensate for deficits, as discussed in Sections V-A2 and V-A3. 
+
+2) Dynamic Bypass Threshold Estimation. APM employs five dynamic bypass thresholds T (i) 
+
+> A4
+
+, T (i) 
+
+> A3
+
+, T (i) 
+
+> A2
+
+, T (i) 
+
+> A1
+
+, T (i) 
+
+> B
+
+to determine the relative progress of the accelerator compared to the required epoch-level progress requirement MA (i) with 
+
+β tolerance, and decide the bypass aggressiveness for the accelerator’s memory accesses in the form of dynamic reuse thresholds (Section V-A3). As shown in Algorithm 1, at the beginning of each epoch i, after the margin requirement estimation, APM uses the proportional difference between MA (i) and MA global , to increase or decrease the thresholds in multiples of step sizes δA and δB , respectively. Higher values of the thresholds indicate less aggressive bypass, with reuse thresholds set such that the contenders for the bypass are limited, and lower values of these thresholds indicate a more 9NO 
+
+> NO
+> AND
+> YES
+> YES
+> YES
+> NO
+
+Fig. 8: Margin Requirement Estimation based on the acceler-ator’s progress and lower-level memory contention. 
+
+Algorithm 1: Dynamic Bypass Threshold Estima-tion : Update T (i) 
+
+> A4
+
+, T (i) 
+
+> A3
+
+, T (i) 
+
+> A2
+
+, T (i) 
+
+> A1
+
+, and T (i)                    
+
+> B
+> /* Dynamically update the bypass thresholds by monitoring the global progress of the accelerator on the current input set. */ // Start of Epoch i
+
+Input: MA (i), MA global , β, δ A, δ B
+
+Output: T(i) 
+
+> A4
+
+, T (i) 
+
+> A3
+
+, T (i) 
+
+> A2
+
+, T (i) 
+
+> A1
+
+, and T (i) 
+
+> B
+> 1
+
+forall j ∈ { 1, 2, 3, 4} do  
+
+> 2
+
+if MA (i) ≤ (1 −6β) MA global then  
+
+> 3
+
+T(i) 
+
+> Aj
+
+← max( TAj − 6δA, 1); T(i) 
+
+> B
+
+← TB − 6δB 
+
+> 4
+
+for k ← 5 to 1 do  
+
+> 5
+
+if (1 − (k + 1) β) MA global < MA (i) and 
+
+MA (i) ≤ (1 − kβ ) MA global then  
+
+> 6
+
+T(i) 
+
+> Aj
+
+← max( TAj − kδ A, 1)  
+
+> 7
+
+T(i) 
+
+> B
+
+← TB − kδ B 
+
+> 8
+
+if (1 −β) MA global < MA (i) ≤ (1+ β) MA global then  
+
+> 9
+
+T(i) 
+
+> Aj
+
+← TAj ; T(i) 
+
+> B
+
+← TB 
+
+> 10
+
+if MA (i) > (1+ β) MA global then  
+
+> 11
+
+T(i) 
+
+> Aj
+
+← TAj + δA; T(i) 
+
+> B
+
+← TB
+
+aggressive bypass with reuse thresholds set to select bypass contenders aggressively. 
+
+3) Reuse Threshold Estimation. For any epoch i, MA (i)
+
+serves as the accelerator’s progress requirement. The APM also monitors the average per-access memory latency, AMAL (i), achieved by the accelerator in the last epoch i − 1,which denotes the time each accelerator access spends in the memory hierarchy. APM uses this latency to predict the number of memory accesses that the accelerator would be able to complete in this epoch i or dMA (i)
+
+= ET /AMAL (i), given the same shared cache management strategy as the last epoch. APM uses the five dynamic bypass thresholds, discussed in Section V-A2, to determine the difference proportion between 
+
+dMA (i)
+
+and MA (i) and estimate how far ahead or behind the accelerator is in this epoch i. If dMA (i)
+
+> MA (i), it is likely that the accelerator would complete the required accesses, with a possibility of increasing its bypass aggressiveness. If 
+
+dMA (i)
+
+< MA (i), accelerator-friendly changes like reducing the bypass aggressiveness have to be made to meet the progress requirement. The bypass aggressiveness is controlled by reuse thresholds, which control access-level bypass according to the reuse behavior, instead of regulating the percentage of accesses bypassed at the LLC controller. If progress permits, accesses with good reuse properties can also be bypassed to improve cores’ performance. This contradicts the common reuse-aware notion without deadline awareness that good reuse accesses are prime candidates for caching. Figure 9 shows the selection of the reuse thresholds, RI Th 
+
+and RC Th , based on the progress estimate, discussed above. At the LLC controller, the bypass decision module dynamically bypasses all accesses in cluster RI cluster , RC cluster (LERN-clusters) if RI cluster > RI Th or RC cluster < RC Th (Section V-C). According to the proportional difference between dMA (i)
+
+and MA (i) being within certain bypass threshold levels, the clusters whose accesses will be bypassed at the LLC are decided by varying the reuse thresholds between -1 to 4 to increase or decrease the bypass aggressiveness. If sufficient progress has been made, more cache space is reallocated to the cores by choosing reuse thresholds to bypass accelerator accesses aggressively. Depending on the progress, the reuse thresholds are modified to vary the bypass aggressiveness. Beyond T (i)
+
+> A1
+
+and T (i) 
+
+> B
+
+, HyDRA chooses the reuse thresholds such that no accesses are bypassed, as the deadline could be missed, apart from some special cases discussed in Section V-C. 
+
+B. LERN Reuse Predictor Table 
+
+For each machine learning model and accelerator config-uration, offline learning of reuse patterns is performed to obtain a memory access-to-cluster mapping using the LERN methodology (Section IV). We propose a hybrid technique in which complex reuse behavior is learnt offline while compact hardware tables perform lightweight cluster-address mapping at runtime. At the LLC controller, we use a tagless, direct-mapped buffer called the LERN reuse predictor table (L-RPT) to store this mapping for the machine learning model, layer by layer. It has 512K entries, with 5 bits per entry (2 bits each for RI and RC-cluster IDs, and 1 valid bit), indexed by the lower block address bits (memory address >> 6). The cluster information for all block addresses in a single layer that show reuse during offline training is populated in this table. An invalid table entry represents an access with “No Reuse”. Each valid L-RPT lookup returns the cluster allocations for that block address, learnt offline. The hardware optimizations and overheads of the predictor table are discussed in Sections VI-J and VI-M. 
+
+C. Deadline and Reuse-Aware Bypass Decision 
+
+The deadline and reuse-aware bypass decision module uses RI Th and RC Th along with the dynamic per-access reuse 10 
+
+predictions from the LERN predictor or L-RPT to decide the bypass contenders at LLC. As shown in Figure 7b, when a write request Req j from the accelerator arrives at the LLC, a lookup is performed in the L-RPT to find a valid entry for this request. The L-RPT returns a reuse prediction or cluster allocation for this request in the form of a tuple, 
+
+(RC (j)
+
+> cluster
+
+, RI (j)
+
+> cluster
+
+). The request is bypassed if RI (j) 
+
+> cluster
+
+> RI Th 
+
+or RC (j) 
+
+> cluster
+
+< RC Th . If the cluster allocation is to the No Reuse cluster (-1) or an invalid table entry, Req j is bypassed from the LLC, suggesting no further reuse. If the request does not meet the bypass criteria, it is added to the LLC request queue and is serviced at priority by the LLC (ARP static bandwidth partitioning). Figure 9 provides a summary of the bypass decisions based on the reuse predictions and the reuse thresholds. If the write request Req j chosen for bypass is already present in the LLC, the cache copy is invalidated before proceeding to the next request. For a read request from the accelerator Req k already in the LLC, the bypass decision is ignored, and the cache services the request. In case of a miss, the L-RPT is looked up when the response Resp k arrives at the cache from the DRAM. The bypass decision criteria are similar to those for a write request bypass. As shown in Figure 9, when RC Th = 0 and the progress of the accelerator is critical, HyDRA conservatively bypasses accesses (special cases) in the Cold RC-cluster only if the cluster center is such that the accesses might only be reused only once more. All the other accesses are not bypassed. 
+
+D. Core Bypass Decisions 
+
+This further alleviates the LLC space and bandwidth con-tention and creates a positive feedback loop between the core and accelerator bypass. Core bypass leads to better accelerator progress, which increases its progress-dependent bypass aggressiveness and improves the cores’ performance. The parameter selection and the overheads of HyDRA are discussed in Section VI-L and Section VI-M, respectively. VI. E XPERIMENTS AND RESULTS 
+
+A. Infrastructure Enhancements to gem5 
+
+Cycle-accurate memory access traces extracted from accel-erator simulators, such as SCALE-Sim [39], and integrated 0 1 2 3 3210                                    
+
+> 012321
+> 0132
+> 03123210
+> 2310
+> 30
+> 01233210
+> Bypass Special Cases 01233210
+> 01233210
+> Bypass Special Cases
+> No Bypass
+> Bypass All -1
+> -1
+> -1
+> -1
+> -1
+> -1
+> -1
+> -1
+> -1
+> -1
+> -1
+> -1
+> -1
+> -1
+> BYP ASS
+> OR DON'T BYP ASS
+> Accelerator's
+> Progress
+> -1 4
+> 03
+> 12
+> 21
+> 30
+> 30
+> 3-1
+
+Fig. 9: Clusters to be bypassed determined by the reuse thresholds RC Th and RI Th selected based on the progress. into the gem5 architectural simulator, reasonably model the shared cache contention between hardware accelerators and processor cores [5]. By default, all the memory accesses arriving at the shared cache are written into the cache ( black 
+
+paths in Figure 1). We enhance this infrastructure to add selective bypassing of the accelerator’s memory accesses from the shared cache. We add a direct BYPASS request path for write requests from the requester to the DRAM, and a BYPASS response path for both read and write responses from the DRAM to the requester (highlighted in blue in Figure 1). TABLE II: System Configuration.      
+
+> Component Configuration
+> CPU 8 Intel X86 Out-of-Order (OoO) cores, 2 GHz,ROB size: 192, LQ/SQ entries: 32/32, Fetch/Decode/Issue/Commit/WB Width: 8/8/8/8/8 L1 Cache Private, 32KB L1-D, 32KB L1-I, 64B block, 8-way, parallel-access, Tag: 1 cycle, Data: 3 cycles L2 Cache Private, 256KB, 64B block, 8-way, parallel-access, Tag: 2 cycles, Data: 5 cycles Last-Level Cache Shared, Non-sliced, 8MB, 64B block, 16-way, parallel-access, Non-Inclusive, Tag: 3 cycles, Data: 9 cycles DRAM 8GB DDR3, 1600MHz, single channel, 2 ranks/channel, 8 banks/rank, page size: 1KB Accelerator Systolic PE Array, double-buffered On-Chip SRAM, OS/WS/IS dataflow (DF)
+
+TABLE III: SPEC CPU2006 benchmark evaluation workloads. Abbreviation: gamess (gs), soplex (so), omnetpp (om).              
+
+> Mixes Benchmarks running on 8 cores
+> Mix 1 wrf, hmmer, gromacs, namd, bzip2, gromacs, povray, dealII Mix 2 so, so, so, so, gs, gs, om, om Mix 3 gs, gs, gs, so, so, om, om, om Mix 4 so, gs, so, om, so, gs, gs, gs Mix 5 om, om, so, gs, gs, gs, so, so Mix 6 Gems FDTD , hmmer, Gems FDTD , gs, bwaves, lbm, mcf, zeusmp Mix 7 povray, astar, gromacs, om, gs, om, so, gs Mix 8 sjeng, namd, gobmk, bzip2, lbm, bwaves, libquantum, mcf Mix 9 gs, gs, gs, so, om, mcf, milc, zeusmp Mix 10 povray, dealII, so, om, gs, gs, lbm, milc Mix 11 hmmer, hmmer, gs, gs, lbm, milc, leslie3d, bwaves Mix 12 h264ref, gs, so, gs, so, mcf, lbm, zeusmp
+
+TABLE IV: Hardware Accelerator Configurations.                                                        
+
+> Config-nML model Accelerator Parameters PE Array SRAM size (in KB) DF
+> IFMAP, OFMAP, FIL Config-1 Tiny-YOLO 256 ×256 6144, 6144, 6144 OS Config-2 Tiny-YOLO 256 ×256 6144, 6144, 6144 WS Config-3 Tiny-YOLO 256 ×256 64, 64, 64 OS Config-4 Tiny-YOLO 64 ×64 64, 64, 64 OS Config-5 GoogleNet 64 ×64 64, 64, 64 OS Config-6 GoogleNet 64 ×64 64, 64, 64 WS Config-7 MobileNet 64 ×64 64, 64, 64 OS Config-8 Deep Speech2 64 ×64 64, 64, 64 OS Config-9 Faster R-CNN 256 ×256 6144, 6144, 6144 OS Config-10 AlphaGoZero 64 ×64 64, 64, 64 OS
+
+B. Experimental Setup 
+
+We experimentally evaluate the performance of HyDRA with the enhanced gem5 architectural simulator in system call 11 
+
+emulation mode (SE mode) on a system (Table II) repre-sentative of modern heterogeneous edge systems, including networking, automotive, aerospace, mobile, IoT, and edge-AI SoCs. We choose workloads from the SPEC CPU2006 benchmark suite and categorize them into Compute- (CI), LLC- (LI), or Memory-Intensive (MI) based on their stan-dalone cache behavior. We create two workload mixes using applications from different categories. A set of 30 workload mixes determines the policy parameters (Section VI-L). Once the parameters are finalized, a different set of 12 workload mixes, called the evaluation set (Table III), is used for the final evaluation. For each workload, we fast-forward for 1 billion instructions with the accelerator idle, then run the final simulation with the accelerator, which terminates when any core completes 400 million instructions. We use SCALE-Sim [39] to generate the cycle-accurate memory access traces for different accelerator configurations (Table IV). These configurations cover a broad design space with different machine learning models such as Tiny-YOLO, GoogleNet, MobileNet, Deep Speech2, Faster R-CNN, and AlphaGoZero, simulated on accelerator architectures with different SRAM, PE array sizes, and dataflow (DF) such as Output-Stationary (OS), Input-Stationary (IS), or Weight-Stationary (WS). 
+
+C. Performance Evaluation 
+
+We measure the overall system throughput using the com-bined Instructions Per Cycle (IPC) achieved by all eight pro-cessor cores. We use the Deadline Miss Rate (DMR) metric, defined in Section III, to determine accelerators’ performance. We use a deadline derived from an input rate of 10 IPS (inputs: frames/words/tokens) in our evaluation. The policy ARP-CS-AL-D is abbreviated as HyDRA, and ARP-AL-D represents a variation of HyDRA without core bypass. 
+
+1) Baselines. Since shared cache space management be-tween accelerators and cores has not been studied in previous work, we compare HyDRA with baselines based on state-of-the-art reuse predictors and cache bypass. We use the SHIP [15] as the baseline predictor for the cores and the accel-erator. Deadline-aware SHIP-driven accelerator bypass begins once the epoch-level progress requirement is met (Section III-C1). Bypass policies in the notations are denoted by their corresponding first letter (S: SHIP, L: LERN Predictor). a) FIFO/ARP-NB and FIFO/ARP-CS: The requests at the LLC are served in FIFO/ARP order with no bypass (NB) and with SHIP-driven reuse-aware Core bypass (CS). b) ARP-AS/ARP-AS-D: The LLC requests are served in ARP order with deadline-agnostic or deadline-aware ( −D)Mean across Mixes (G.M.) 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+1.2 
+
+1.4 
+
+> Normalized IPC over FIFO-NB
+
+1.0 1.04 0.91 0.94 1.02 1.02 0.96 1.01 0.99 1.05 0.98 1.04 
+
+> FIFO-NB
+> FIFO-CS
+> ARP-NB
+> ARP-CS
+> ARP-AS
+> ARP-AL
+> ARP-AS-D
+> ARP-AL-D
+> ARP-CAS
+> ARP-CS-AS
+> ARP-CS-AS-D
+> ARP-CS-AL-D
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Deadline Miss Rate (DMR) DMR
+> Accel BR
+> Core BR
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Bypass Rate
+
+(a) Performance Comparison of HyDRA with different cache space management policies. mix1 mix2 mix3 mix4 mix5 mix6 mix7 mix8 mix9 mix10 mix11 mix12 Mean 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+1.2 
+
+1.4 
+
+> Normalized IPC over FIFO-NB
+> 0.99
+> 1.0
+> 1.01
+> 1.0
+> 1.01
+> 0.84
+> 0.93
+> 1.02
+> 0.91
+> 1.03
+> 0.83
+> 0.9
+> 1.01
+> 0.91
+> 1.02
+> 0.84
+> 0.92
+> 1.02
+> 0.97
+> 1.08
+> 0.84
+> 0.92
+> 1.01
+> 0.9
+> 1.02
+> 0.94
+> 0.99
+> 1.01
+> 1.13
+> 1.15
+> 0.93
+> 0.96
+> 1.01
+> 0.95
+> 1.02
+> 0.98
+> 0.99
+> 1.0
+> 1.01
+> 1.02
+> 0.89
+> 0.97
+> 0.99
+> 0.96
+> 1.03
+> 0.94
+> 0.98
+> 1.0
+> 0.97
+> 1.0
+> 0.95
+> 0.99
+> 0.99
+> 1.07
+> 1.09
+> 0.93
+> 0.97
+> 0.99
+> 0.99
+> 1.02
+> 0.91
+> 0.96
+> 1.01
+> 0.98
+> 1.04
+
+FIFO-NB 
+
+ARP-NB 
+
+ARP-AS-D 
+
+ARP-AL-D 
+
+ARP-CS-AS-D ARP-CS-AL-D 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Deadline Miss Rate (DMR)
+
+DMR 
+
+(b) Performance Evaluation of HyDRA across different workload mixes. 
+
+Fig. 10: Performance Evaluation of HyDRA (ARP-CS-AL-D) on Accelerator Config-1. Deadline: 10 IPS. 12 
+
+SHIP-driven Accelerator bypass (AS). c) ARP-AL: The LLC requests are served in ARP order with deadline-agnostic reuse-aware Accelerator bypass using the pre-trained LERN predictor (AL). d) ARP-CAS: The LLC requests are served in ARP order with a deadline-agnostic, reuse-aware Core and Accelerator bypass, using a shared SHIP predictor (CAS). e) ARP-CS-AS/ARP-CS-AS-D: The LLC requests are served in ARP order with deadline-agnostic (or deadline-aware) reuse-aware accelerator and core bypass with different SHIP predictors (CS-AS). 
+
+2) Performance breakdown of HyDRA and all the baselines on Accelerator Config-1. Figure 10a shows the performance of all the policies on Config-1 compared to the FIFO-NB baseline. It shows the accelerator bypass (Accel BR) and core bypass (Core BR) rates, marked in green and red, respectively. As discussed in Section III-A, we observe that 1 FIFO-NB is unable to provide sufficient bandwidth to the accelerator to meet the deadline, 2 FIFO-CS bypasses up to 20% core accesses and gives 4% IPC speedup, but does not alleviate enough contention to meet the deadline, 3 ARP-NB meets the deadline but leads to a 9% drop in IPC, 4 ARP-CS bypasses 20% core accesses but does not restore the lost performance with only 3% IPC gain over ARP-NB. As discussed in Section III-B, we observe that 5 ARP-CAS shows accelerator BR closely following the core BR, indicating that shared reuse predictors cause access pattern interference. 6 ARP-CS-AS, on the other hand, minimizes the interference between them, shows a higher accelerator BR, and recovers the lost IPC but leads to deadline misses due to deadline unawareness. We also observe that 7 compared to ARP-AS, ARP-AL achieves a higher accelerator BR with a 40% drop in the DMR without impacting IPC, 8 ARP-AS-D meets the deadline, but a steep drop in the accelerator BR due to deadline-awareness causes IPC degradation. With ARP-AL-D, not only is the deadline met, but the IPC is also restored, with a 1% speedup over FIFO-NB. Therefore, LERN performs better at predicting the accelerator’s reuse patterns.  
+
+> 9
+
+ARP-CS-AS-D being deadline-aware meets the deadline with a 2% drop in the IPC compared to FIFO-NB. HyDRA (ARP-CS-AL-D), on the other hand, not only meets the accelerator’s deadline but also achieves a 4% IPC speedup with 50% DMR reduction over FIFO-NB and a 6.1% IPC speedup over the ARP-CS-AS-D policy. Hence, HyDRA can achieve an efficient balance between deadline and reuse awareness. For brevity, we choose the following baselines for a detailed performance comparison across different accelerator configu-rations: FIFO-NB, ARP-NB, ARP-AS-D, and ARP-CS-AS-D. 
+
+3) Performance breakdown of HyDRA on Config-1 across different workload mixes. Figure 10b shows the performance comparison of HyDRA against the deadline-aware SHIP-driven bypass baselines. On workload mix1 , which simulates CI applications on all cores with a very low LLC access rate, the performance of all the policies is within 1% of each other. Workloads mix2 - mix5 simulate LI benchmarks on all cores, posing high LLC contention to the accelerator. HyDRA achieves IPC speedups of up to 8% and 11% over FIFO-NB and ARP-CS-AS-D, respectively. For other workload mixes with varying combinations of CI, LI, and MI applications, HyDRA achieves significantly better performance than ARP-CS-AS-D whenever the cache contention is high. 
+
+4) Detailed analysis of accelerator’s epoch-wise LLC ac-cess rate with HyDRA on Config-1. Figure 11 shows the epoch-wise LLC access rate variation of the accelerator Config-1 with mix4 along with the evolution of the per-epoch progress requirement. The epoch-wise access completion rate is non-uniform with large spikes, deep troughs, and long regions of sustained high and low access rates with abrupt transitions based on the progress evaluation. We observe that the access rate changes dramatically and significantly over epochs. At the beginning of each frame, HyDRA alternates between low- and high-access phases by varying the bypass aggressiveness of the accelerator as progress is made. How-ever, towards the end, we observe that the access rate drops sharply as the per-epoch progress requirement decreases. We also observe that in some epochs, actual accesses completed are below the required accesses. In other epochs, actual accesses greatly exceed the requirement. This shows that the access rate is highly non-uniform throughout the execution. 
+
+5) Performance comparison of HyDRA across different ac-celerator configurations with varying memory intensity and 0 250 500 750 1000 1250 1500 1750 
+
+> Epoch Number (Epoch Length = 0.1ms)
+> 0
+> 2000
+> 4000
+> 6000
+> 8000
+> 10000
+> Number of Memory
+> Accesses
+
+Frame 1 Frame 2   
+
+> Memory Accesses Completed Memory Accesses Required Frame Completed (HyDRA)
+
+Fig. 11: Accelerator’s shared cache access rate during the execution compared with the per-epoch progress requirement based on deadline. Accelerator Configuration: Config-1, mix4 . Deadline: 10 IPS. 13 Config1 Config2 Config3 Config4 Config5 Config6 Config7 Config8 Config9 Config10 
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> Normalized IPC w.r.t. FIFO-NB
+> G.M. across Mixes
+> FIFO-NB
+> ARP-NB
+> DPCP
+> FLASH
+> ARP-AS-D
+> ARP-AL-D
+> ARP-CS-AS-D
+> ARP-CS-AL-D
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Deadline Miss Rate (DMR)
+> DMR
+> Core BR
+> Accel BR
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Bypass Rate
+
+Fig. 12: Performance Evaluation of HyDRA across Accelerator Configurations Config-1 to Config-10. Deadline: 10 IPS. Config1 Config2 Config3 Config4 Config5 Config6 Config7 Config8 Config9 Config10    
+
+> 10
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> Speedup (%) over baseline
+> G.M. across Mixes
+> 6.1 4.0 7.0
+> 3.9 6.7
+> -4.9
+> 4.8
+> -8.7
+> 28.5
+> -1.1
+> 26.3
+> -4.5
+> 23.1
+> -4.5
+> 10.7
+> -1.9
+> 16.2
+> -0.1
+> 42.2
+> 7.3
+> IPC baseline: FIFO-NB IPC baseline: ARP-CS-AS-D
+> -0.2
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> DMR Difference
+> (DMR baseline  DMR HyDRA )
+> DMR baseline: FIFO-NB
+> DMR baseline: ARP-CS-AS-D
+
+Fig. 13: Performance Comparison of HyDRA with FIFO-NB and ARP-CS-AS-D. Deadline: 10 IPS. 
+
+access patterns. Figure 12 shows the mean performance of HyDRA over all the mixes compared to the baseline policies for all the accelerator configurations, Config-1 to Config-10 (Table IV). Figure 13 compares HyDRA with the default LLC management policy, FIFO-NB, and with the ARP-CS-AS-D policy as it achieves the same DMR and hence, presents a fair comparison. Config-2 is similar to Config-1 but simulates the model on the accelerator with WS dataflow. As shown in Figures 12 and 13, the performance of all the policies is relatively similar to Config-1, as the large on-chip SRAMs hide the access pattern difference between the two dataflows. Config-3 and Config-4 have smaller on-chip memory and present higher memory intensity, partially due to repetitive accesses at the shared cache, and hence, pose higher contention with a higher cache hit rate. LERN achieves up to 10% accelerator BR in contrast to an almost negligible accelerator BR achieved by SHIP (due to high hit rate) with deadline awareness, and shows better performance. Hence, HyDRA achieves an IPC speedup of up to 6.7% over ARP-CS-AS-D policy and reduces the DMR by more than 90% compared to FIFO-NB. Config-5 and Config-6 simulate the GoogleNet model on an edge TPU equivalent accelerator with OS and WS dataflow, respectively. While SHIP cannot detect the dataflow-dependent variations in the memory access pattern, LERN captures the variations and shows a slightly lower accelerator BR with WS than OS dataflow. Hence, HyDRA shows up to 28% IPC improvement over ARP-CS-AS-D and reduces the DMR by more than 50% over FIFO-NB. Config-7 simulates MobileNet on an edge TPU equivalent accelerator and shows a similar access pattern and performance as Config-6. Config-10 simulates the AlphaGoZero network model on an edge-TPU equivalent accelerator and shows a very low memory intensity on the shared cache. HyDRA meets the deadline and provides an IPC speedup of 7.3% and 42% over FIFO-NB, and ARP-CS-AS-D, respectively. Config-8 and Config-9 simulate Deep Speech2 and Faster R-CNN on edge TPU and serve-grade TPU equivalent accelerators and show memory intensity between Config-10 (very low) and Config-4 (very high). HyDRA achieves more than 60% reduction in DMR over FIFO-NB and IPC improvement of up to 16.2% over the ARP-CS-AS-D policy. 
+
+6) Contribution of reuse-aware core bypass to the IPC speedup. We compare the performance of HyDRA with core bypass (ARP-CS-AL-D) and HyDRA’s adaptation with-out core bypass (ARP-AL-D) to quantify the IPC speedup achieved with core bypass at the shared cache. Across all the accelerator configurations, core bypass adds up to 2.6% – 4% IPC speedup and up to 8% DMR reduction (on Config-4). Hence, adding reuse-aware core bypass using any state-of-the-art predictor further alleviates space and bandwidth contention and improves throughput. 
+
+7) Comparison of cache occupancy across different cache management policies. HyDRA uses deadline-aware cache 14 0 250 500 750 1000 1250 1500 1750 
+
+Epoch Number (Epoch Length = 0.1ms) 
+
+> 0
+> 20000
+> 40000
+> 60000
+> 80000
+> 100000
+> 120000
+> Number of Cache Lines
+
+Frame 1 Frame 2 
+
+> FIFO-A
+> FIFO-C
+> ARP-A
+> ARP-C
+> SHIP-A
+> SHIP-C
+> HyDRA-A
+> HyDRA-C
+> 0
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> IPC Speedup w.r.t FIFO-NB Frame Completed (HyDRA)
+> IPC speedup (HyDRA)
+
+Fig. 14: Comparison of the shared cache space occupied by all cores (-C) and the accelerator (-A) during the execution with different cache management policies. Accelerator Configuration: Config-1, mix3 . Markers on the plot denote the maximum value across frames. Total shared cache lines = 131072 (8 MB, 64 B blocks). Deadline: 10 IPS. bypass to reclaim both cache space and bandwidth from the accelerator, improving the performance of cores. Figure 14 shows the comparison of the number of cache lines occupied by all processor cores together (denoted with -C )and the accelerator (denoted with -A ) across different cache management policies, such as FIFO-NB, ARP-NB, ARP-CS-AS-D (abbreviated as SHIP), and ARP-CS-AL-D (abbreviated as HyDRA), during the execution of the accelerator with configuration Config-1 and SPEC benchmarks mix3 . It also shows the maximum number of cache lines occupied during the execution in bold markers. Under FIFO-NB, cores occupy most of the cache while the accelerator experiences higher contention, leading to higher deadline miss rates. ARP-NB prioritizes the accelerator, in-creasing its cache occupancy by up to 27% but reducing space available to cores. ARP-CS-AS-D moderates this through deadline and SHIP-driven reuse-aware bypass, slightly reduc-ing accelerator occupancy by up to 8% compared to ARP-NB. In contrast, HyDRA dynamically adjusts the bypass based on deadline progress, significantly reducing accelerator cache usage by up to 36.5% and 25.8%, while increasing cores’ cache occupancy by up to 11.2% and 15.5% compared to ARP-CS-AS-D and FIFO-NB, respectively. As a result, HyDRA achieves higher cache space allocation for cores, meets accelerator deadlines, and improves IPC on mix3 by about 2% while eliminating deadline misses, demonstrating effective redistribution of cache resources between CPUs and the accelerator. 
+
+D. Performance Comparison of HyDRA with prior cache management policies DPCP and FLASH. 
+
+We implement DPCP [24] by statically allocating 1 cache way (out of 16 ways) to the accelerator and enabling a stride prefetcher at the LLC for accelerator accesses. All accesses (both demand and prefetch) from the accelerator are restricted to a single cache way across all sets. As shown in Figure 12, while prefetching reduces DMR for some configurations (Con-figs 1, 2, and 9), static partitioning limits cores’ performance, resulting in mean performance comparable to or worse than FIFO-NB. As DPCP is not QoS-aware, it misses deadlines across most configurations and cannot match HyDRA’s per-formance, highlighting the advantage of HyDRA’s deadline-and reuse-aware cache management. As discussed in Section II, FLASH [5] dynamically parti-tions shared cache bandwidth between cores and accelerators based on accelerator progress, but assumes all accelerator requests must be served by the shared cache, which can lead to inefficient cache utilization. HyDRA investigates complemen-tary cache bypassing techniques to manage cache interference between accelerators and cores and to leverage deadline and reuse awareness to determine the selective cacheability of accelerator accesses in the shared cache, thereby regulating both space and bandwidth contention. As shown in Figure 12, while both approaches aim to improve system performance while meeting accelerator deadlines, HyDRA achieves better cache utilization and up to 7.3% higher IPC than FLASH. The main contributor to the performance improvement is the efficient utilization of cache space and bandwidth via reuse-and deadline-aware cache bypass. 
+
+E. Comparison with ARP-CS-AS (deadline-agnostic SHIP-driven core and accelerator bypass) 
+
+In Figure 10a, we compare HyDRA’s performance on Config-1 (mean across all mixes) with several deadline-agnostic, deadline-aware, and reuse-aware cache management policies, including ARP-CS-AS and ARP-CS-AS-D. We ob-serve that the deadline-agnostic (no knowledge of the dead-line, as in HyDRA) SHIP-driven bypass policy, ARP-CS-AS, achieves similar accelerator bypass rates as HyDRA but with a high DMR of 1. We evaluate the performance of the policy ARP-CS-AS on other accelerator configurations. As shown in Figure 15a, ARP-CS-AS does not meet the accelerator deadline as it does not have the knowledge of the accelerator’s dynamic progress. For Config-1 – Config-4, ARP-CS-AS achieves 10%–20% higher bypass for accelerator accesses, 15 Config1 Config2 Config3 Config4 Config5 Config6 Config7 Config8 Config9 Config10 
+
+Accelerator Configurations 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+1.2 
+
+> Normalized IPC w.r.t. FIFO-NB
+> G.M. across Mixes
+> 1.0
+> 1.03
+> 1.05
+> 1.05
+> 1.04
+> 1.0
+> 1.04
+> 1.06
+> 1.05
+> 1.04
+> 1.0
+> 1.03
+> 1.05
+> 1.03
+> 0.95
+> 1.0
+> 1.03
+> 1.05
+> 1.03
+> 0.91
+> 1.0
+> 0.94
+> 0.96
+> 1.06
+> 0.99
+> 1.0
+> 0.96
+> 0.99
+> 0.96
+> 0.95
+> 1.0
+> 0.95
+> 0.97
+> 1.06
+> 0.95
+> 1.0
+> 0.97
+> 1.0
+> 1.06
+> 0.98
+> 1.0
+> 1.02
+> 1.05
+> 1.02
+> 1.0
+> 1.0
+> 0.81
+> 0.86
+> 1.09
+> 1.07
+> FIFO-NB
+> ARP-CS-AFR0.6
+> ARP-CS-AFR0.8
+> ARP-CS-AS
+> ARP-CS-AL-D (HyDRA)
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0  
+
+> Deadline Miss Rate (DMR) DMR Accel BR
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Bypass Rate
+
+(a) Performance achieved by deadline-agnostic SHIP-driven bypass policy and policies that choose accelerator bypass contenders randomly with 60% (AFR0.6) and 80% (AFR0.8) probability. Config1 Config2 Config3 Config4 Config5 Config6 Config7 Config8 Config9 Config10 
+
+Accelerator Configurations 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+1.2 
+
+> Normalized IPC w.r.t. FIFO-NB
+> G.M. across Mixes
+> 1.0
+> 0.98
+> 0.99
+> 0.98
+> 1.04
+> 1.0
+> 0.98
+> 0.99
+> 0.97
+> 1.04
+> 1.0
+> 0.9
+> 0.9
+> 0.89
+> 0.95
+> 1.0
+> 0.87
+> 0.88
+> 0.87
+> 0.91
+> 1.0
+> 0.77
+> 0.77
+> 0.77
+> 0.99
+> 1.0
+> 0.76
+> 0.76
+> 0.76
+> 0.95
+> 1.0
+> 0.78
+> 0.78
+> 0.78
+> 0.95
+> 1.0
+> 0.89
+> 0.9
+> 0.89
+> 0.98
+> 1.0
+> 0.87
+> 0.88
+> 0.86
+> 1.0
+> 1.0
+> 0.76
+> 0.76
+> 0.75
+> 1.07
+> FIFO-NB
+> ARP-CS-ASTh0.6-D
+> ARP-CS-ASTh0.3-D
+> ARP-CS-AS-D
+> ARP-CS-AL-D (HyDRA)
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0  
+
+> Deadline Miss Rate (DMR) DMR Accel BR
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Bypass Rate
+
+(b) Performance achieved by HyDRA over deadline-aware SHIP-driven bypass and FIFO-NB policies. Accelerator bypass starts after 30% (ASTh0.3), 60% (ASTh0.6), and 100% (AS) of the required memory accesses are completed in an epoch. 
+
+Fig. 15: Performance achieved by policies with similar accelerator bypass rates as HyDRA. Deadline: 10 IPS. with 1%–12% and 100% higher IPC and DMR, respectively, than HyDRA. On Config-6, ARP-CS-AS achieves an almost identical accelerator bypass rate, but with more than 60% DMR. 
+
+F. Performance Evaluation of deadline-agnostic probabilistic accelerator bypass policy 
+
+We design a probabilistic bypass policy, ARP-CS-AFR p,that randomly selects bypass contenders for accelerator ac-cesses with probability p. Figure 15a demonstrates the per-formance achieved by policies ARP-CS-AFR0.6 ( p = 0 .6)and ARP-CS-AFR0.8 ( p = 0 .8). However, if a read memory access is a bypass contender but is already present in the cache, it is not bypassed. We observe that ARP-CS-AFR0.6 achieves accelerator bypass rates similar to or higher than HyDRA’s, but it does not meet the accelerator deadline for all configurations except Configs 5, 6, and 7. On Configs 6 and 7, ARP-CS-FR0.6 shows similar performance to HyDRA. Similarly, ARP-CS-AFR0.8 also shows non-zero DMR for all accelerator configurations except Configs 7 and 10, with 2% IPC improvement on Config-7 and 21% IPC degradation on Config-10 compared to HyDRA. Therefore, even though other policies can achieve bypass rates similar to HyDRA, without HyDRA’s knowledge, accelerator deadlines cannot be met. 
+
+G. Detailed Comparison with deadline-aware SHIP-driven accelerator bypass with different bypass aggressiveness 
+
+We implemented a deadline-aware extension to SHIP-driven accelerator bypass to compare the performance improvements achieved by deadline-aware LERN-driven bypass. Deadline-aware SHIP-driven bypass is implemented as discussed in Section III-C1. The accelerator bypass begins once the epoch-level progress requirement is met. Since meeting the deadline is the primary objective, the ARP-CS-AS-D policy is insertion-heavy at the beginning of the epoch and becomes bypass-heavy towards the end when the epoch-level progress requirement is met. We create ARP-CS-ASTh t-D, which starts bypassing the accelerator accesses (according to the SHIP predictor) after 
+
+t times the required memory accesses have been completed. Figure 15b discusses the performance achieved by two vari-ations with t = 0 .3 and 0.6. We observe that with ARP-CS-ASTh0.6-D, the accelerator bypass rate slightly increases, with no impact on performance compared to ARP-CS-AS-D. The policy ARP-CS-ASTh0.3-D, on the other hand, begins bypass as soon as 30% of the progress requirement is met in the epoch. We observe that for Config-4, this policy increases the DMR by almost 10% with a 1% IPC improvement, and there-fore, cannot guarantee meeting deadlines. We also observe that 16 
+
+the performance improvements are not comparable to HyDRA. 
+
+H. Evaluation across different system architectures. 
+
+The system architecture used to evaluate HyDRA targets heterogeneous edge systems such as mobile, automotive, net-working, and edge-IoT SoCs, where cache sizes are con-strained by area and power. In these systems, 256 KB private L2 caches per core are common, particularly for efficiency and accelerator-adjacent cores, as seen in commercial platforms such as Qualcomm Snapdragon/Kryo processors [40], [41], [42], [43], Huawei Kirin SoCs [3], NVIDIA Jetson Orin [44], and MediaTek Dimensity devices [45]. However, commer-cial systems also include configurations with larger private caches and varying shared cache capacities, as well as varying memory systems. Most modern systems also enable hardware prefetchers in the private and shared caches. To understand HyDRA’s sensitivity to these architectural parameters, we evaluate its performance across different L2 sizes (e.g., 512 KB), shared LLC capacities (1–16 MB), DDR memory models (DDR4, DDR5), and with prefetchers enabled at the private caches. This analysis helps determine whether HyDRA’s bene-fits persist under varying cache hierarchies and memory system characteristics representative of real-world edge platforms. 
+
+1) Performance Evaluation with 512KB private L2 cache. 
+
+With a 512KB private L2 cache, FIFO-NB observes up to 63% fewer LLC accesses (on Config-1), significantly reducing interference between cores and the accelerator and allowing the accelerator to meet deadlines in most cases, except the more memory-intensive Configs 3 and 4. HyDRA improves IPC by up to 3% over FIFO-NB and 6% over ARP-CS-AS-D, and on Configs 3 and 4, reduces DMR by up to 35% (FIFO-NB) while incurring only 1% IPC degradation. 
+
+2) Performance Evaluation with varying LLC capacity. 
+
+We also evaluate HyDRA across shared LLC sizes from 1 MB to 16 MB on Config-1. Figures 16a and 16b show the performance of different cache management policies with varying cache capacity on accelerator configurations Config-1 and Config-3, respectively, with a 10 IPS deadline. For each LLC size, we compare the performance of HyDRA and ARP-CS-AS-D with that of FIFO-NB. With a 1 MB cache, high core-to-core interference increases cache miss rates and makes processor workloads memory-bound. As a result, the accelerator accesses get higher LLC bandwidth, and the FIFO-NB policy also meets the deadline. We also observe that cache bypass policies bypass more than 40% of core accesses, as reuse is low due to interference; however, this does not translate into higher speedups as off-chip memory becomes the bottleneck. HyDRA provides only modest gains of up to 2% over the FIFO-NB policy. In accelerator configurations Configs 3 and 4, we also observed that with 1 MB LLC cache, the accelerator is unable to meet the deadline with the ARP-NB policy (priority arbitration at the LLC), as these configurations exhibit high memory intensity and higher contention at the shared cache. Therefore, a very small shared cache for an EdgeTPU-grade accelerator might not be sufficient to meet the deadlines. As the cache size increases, interference decreases, and the available cache space per core increases, leading to higher 1 MB 4 MB 8 MB 16 MB 
+
+> LLC capacity
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> IPC speedup w.r.t.
+> respective FIFO-NB
+> 1.0
+> 1.01
+> 1.02
+> 1.0
+> 0.98
+> 1.02
+> 1.0
+> 0.98
+> 1.04
+> 1.0
+> 0.93
+> 0.99
+> FIFO-NB
+> ARP-CS-AS-D
+> ARP-CS-AL-D
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Deadline Miss Rate (DMR)
+> DMR
+> Core BR
+> Accel BR
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Bypass Rate
+
+(a) Config-1. Deadline: 10 IPS. 1 MB 4 MB 8 MB 16 MB 
+
+> LLC capacity
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> IPC speedup w.r.t.
+> respective FIFO-NB
+> 1.0
+> 0.96
+> 0.96
+> 1.0
+> 0.9
+> 0.94
+> 1.0
+> 0.89
+> 0.95
+> 1.0
+> 0.85
+> 0.91
+> FIFO-NB
+> ARP-CS-AS-D
+> ARP-CS-AL-D
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Deadline Miss Rate (DMR)
+> DMR
+> Core BR
+> Accel BR
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Bypass Rate
+
+(b) Config-3. Deadline: 10 IPS. 
+
+Fig. 16: Performance Evaluation with varying LLC capacity. The performance of HyDRA across LLC sizes is normalized to its respective FIFO-NB performance. cache hit rates per core. Accelerator accesses take longer to be serviced by the cache. With 4 MB and 8 MB shared cache, HyDRA consistently meets deadlines while improving IPC (2– 4%) and significantly reducing DMR (up to 45.8%) compared to FIFO-NB. With a 16 MB LLC, HyDRA reduces deadline miss rate by up to 60% with only 1% performance loss. As shown in Figure 16b, we observe similar benefits over the ARP-CS-AS-D policy on Config-3 as well. Compared to the FIFO-NB policy, HyDRA reduces the DMR by upto 90% on Config-3 with up to 9% degradation in performance. Overall, HyDRA ensures meeting deadlines across cache capacities while maintaining performance comparable to or better than FIFO-NB. 
+
+3) Performance Evaluation with different memory models. 
+
+The simulated system configuration uses a DDR3 1600 8x8 (as shown in Table II) memory model with DDR3 memory running at 1600MHz, with 2 ranks, 8 banks/rank, and a 64-bit interface. Each bank is 512KB in size with an 8-bit interface. With a burst size of 8, this memory provides 64B in one mem-ory access. We evaluate HyDRA on two other memory models, DDR4 2400 8x8 and LPDDR5 5500 1x16 BG BL16. The DDR4 2400 8x8 memory model has 2 ranks, 8 banks per rank, and a 64-bit interface. Each bank is 1 GB in size. The LPDDR5 5500 1x16 BG BL16 memory model simu-lates LPDDR5 with 4 bank groups of 4 banks each at 5500 MHz and a 16-bit interface. BL16 denotes a burst size of 16 (2 bytes each). So a single access provides 32B data as 17 DDR3 DDR4 LPDDR5 
+
+> DDR configuration
+> 0
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> IPC achieved
+> 5.31
+> 5.2
+> 5.52
+> 5.35
+> 5.21
+> 5.56
+> 5.17
+> 5.14
+> 5.31
+> 5.31
+> FIFO-NB
+> ARP-CS-AS-D
+> ARP-CS-AL-D
+> ARP-CS-AL-D-v1
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Deadline Miss Rate (DMR)
+> DMR
+> Core BR
+> Accel BR
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Bypass Rate
+
+Fig. 17: Performance evaluation of HyDRA with different DDR models on Config-1 (mean performance across mixes). Deadline: 10 IPS. opposed to 64B provided by DDR3 memory. DDR3 and DDR4 typically have lower access latency in cycles. Since LPDDR5 provides 32B per access, each cache line access takes longer to complete than in DDR3 and DDR4. LPDDR5 achieves its speed through complex pipelining and bank group parallelism. As shown in Figure 17, moving to DDR4 yields nearly identical performance to DDR3, with HyDRA achieving 4% IPC improvement and over 40% DMR reduction compared to FIFO-NB. In contrast, LPDDR5’s smaller burst size and higher effective latency increase DMR for FIFO-NB and initially cause HyDRA to miss deadlines, as its parameters are tuned for DDR3. We observe a 4.2% and 9.4% increase in the DMR of the FIFO-NB policy over DDR3 and DDR4, respectively. We evaluate a variation of HyDRA, ARP-CS-AL-D-v1 (HyDRA-v1), with parameters tuned for the DDR5 model. We increase the safety margins for recovering from the impact of high memory contention due to longer raw latencies and use margin high = 10% and margin low = 2% . The other parameters remain the same as ARP-CS-AL-D (HyDRA). We observe that the accelerator bypass rate decreases by 0.1% compared to HyDRA, and HyDRA-v1 meets deadlines without performance loss. Overall, HyDRA’s performance gains remain robust across memory models, though higher raw latencies may require minor fine-tuning to maintain deadline guarantees. 
+
+4) Performance Evaluation with Stride Prefetchers enabled at the private L2 caches. To understand the robustness of our approach, we evaluate a system configuration with L2 prefetchers enabled and observe that the overall performance trends remain similar. When L2 Stride prefetchers are enabled, they increase interference with the accelerator’s demand traffic. On Config-1, the FIFO-NB policy shows an increase in DMR by up to 20% and an IPC speedup of up to 3% with prefetchers enabled. Both HyDRA and the FIFO-NB baseline experience higher LLC pressure, yet the relative trends remain consistent: HyDRA meets the deadline and reduces the DMR by more than 60% while improving the IPC by up to 2%. This indicates that the proposed deadline- and demand-aware LLC regulation is robust even in the presence of prefetch traffic. No Way-Part 2-Way-Part Accelerator        
+
+> 0
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> IPC achieved
+> 5.31 5.59 5.2 5.52 5.26 5.56 5.18 5.49
+> FIFO-NB
+> ARP-CS-AS
+> ARP-CS-AS-D
+> ARP-CS-AL-D
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Deadline Miss Rate (DMR)
+> DMR
+> Core BR
+> Accel BR
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Bypass Rate
+
+Fig. 18: Performance evaluation with 2-way cache partitioning for Accelerator on Config-1. Deadline: 10 IPS. 
+
+I. Performance Evaluation with Cache Way Partitioning. 
+
+We implement cache-way partitioning in gem5 to isolate cache space contention between processor cores and accelera-tors. We allocate 2 ways of the shared cache to the accelerator, and the remaining 14 ways are shared between processor cores, eliminating direct cache-space interference. Figure 18 shows the performance achieved by different cache management policies, including HyDRA, on accelerator Config-1 with and without way partitioning. We observe that with 2 ways reserved for the accelerator, FIFO-NB policy shows a 1% drop in IPC achieved with no change in the DMR. Hence, way partitioning might not be sufficient to meet accelerator deadlines without a significant drop in cores’ performance (with a higher number of ways reserved for the accelerator). HyDRA with way partitioning, on the other hand, shows a 0.5% reduction in speedup compared to HyDRA with no way partitioning, with a slightly lower accelerator bypass rate. Hence, way partitioning in shared caches slightly reduces cores’ performance. However, the impact on IPC is lower with the HyDRA cache management policy. Additionally, HyDRA achieves 4.3% performance improvement over the FIFO-NB policy with 2-way partitioning, compared to 3.9% without 2-way partitioning. 
+
+J. Performance Evaluation with hardware-optimized L-RPT 
+
+When the required entries per layer exceed the hardware L-RPT capacity (512K entries in the current evaluated system), LERN predictor training is performed on block addresses hashed into the reduced table space so the predictor learns under the same aliasing conditions as the hardware and inter-nalizes the runtime conflicts to adapt its cluster assignments accordingly. This prevents a mismatch between offline learn-ing and hardware inference, which could otherwise degrade prediction accuracy. To optimize the hardware overhead of L-RPT, we conduct a design-space exploration by evaluating reduced table sizes (25% and 50% of the original 512K-entry configuration) and analyzing their performance impact. We evaluate L-RPT de-signs with 128K and 256K entries using two hashing methods: Bitmask and SplitMix32 [46]. With 5 bits of data per entry, the size of these L-RPT designs with 128K and 256K entries is 80KB and 160KB, respectively, as opposed to the 320KB 18 Config1 Config2 Config3 Config4 Config5 Config6 Config7 Config8 Config9 Config10 
+
+Accelerator Configurations 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+1.2 
+
+> Normalized IPC w.r.t. FIFO-NB
+> G.M. across Mixes
+> 1.0
+> 1.02
+> 1.02
+> 1.02
+> 1.02
+> 1.04
+> 1.0
+> 1.02
+> 1.02
+> 1.02
+> 1.02
+> 1.04
+> 1.0
+> 0.94
+> 0.93
+> 0.93
+> 0.94
+> 0.95
+> 1.0
+> 0.9
+> 0.9
+> 0.9
+> 0.9
+> 0.91
+> 1.0
+> 0.94
+> 0.94
+> 0.94
+> 0.94
+> 0.95
+> 1.0
+> 0.97
+> 0.97
+> 0.97
+> 0.97
+> 0.98
+> 1.0
+> 0.98
+> 1.0
+> 0.98
+> 0.98
+> 1.0
+> 1.0
+> 0.99
+> 0.99
+> 0.99
+> 0.99
+> 0.99
+> 1.0
+> 0.95
+> 0.95
+> 0.95
+> 0.95
+> 0.95
+> 1.0
+> 1.07
+> 1.07
+> 1.07
+> 1.07
+> 1.07
+> FIFO-NB
+> ARP-CS-ALOptv1-D
+> ARP-CS-ALOptv2-D
+> ARP-CS-ALOptv3-D
+> ARP-CS-ALOptv4-D
+> ARP-CS-AL-D (HyDRA)
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0  
+
+> Deadline Miss Rate (DMR)
+> DMR Accel BR
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Bypass Rate
+
+Fig. 19: Performance evaluation of HyDRA with different LERN predictor table entries. LERN is trained on hashed addresses. Deadline: 10 IPS. mix1 mix2 mix3 mix4 mix5 mix6 mix7 mix8 mix9 mix10 mix11 mix12 Mean 
+
+Mixes 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+1.2 
+
+1.4 
+
+> Normalized IPC over FIFO-NB
+> 1.01
+> 1.02
+> 1.01
+> 1.04
+> 1.05
+> 1.03
+> 1.03
+> 1.05
+> 1.02
+> 1.1
+> 1.05
+> 1.08
+> 1.02
+> 1.05
+> 1.02
+> 1.16
+> 1.03
+> 1.15
+> 1.01
+> 1.01
+> 1.02
+> 1.03
+> 1.0
+> 1.02
+> 1.06
+> 1.05
+> 1.03
+> 1.01
+> 1.01
+> 1.0
+> 1.13
+> 1.03
+> 1.09
+> 1.04
+> 1.04
+> 1.02
+> 1.05
+> 1.03
+> 1.04
+> FIFO-NB
+> ARP-CS-AS
+> ARP-CS-AS-Large
+> ARP-CS-AL-D (HyDRA)
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0   
+
+> Deadline Miss Rate (DMR) DMR Core BR Accel BR
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> Bypass Rate
+
+Fig. 20: Performance evaluation of HyDRA over FIFO-NB and SHIP-driven bypass with different SHIP predictor table size on Config-1. Deadline: 10 IPS. size of L-RPT with 512K entries. Figure 19 shows the perfor-mance achieved by HyDRA with the LERN predictor trained across different table sizes and address hashes. We evaluate 4 different versions of L-RPT size and hashing methodology:  
+
+> •
+
+LOptv1: L-RPT with 128K entries. Block addresses are hashed with a 17-bit bitmask.  
+
+> •
+
+LOptv2: L-RPT with 256K entries. Block addresses are hashed with an 18-bit bitmask.  
+
+> •
+
+LOptv3: L-RPT with 128K entries. Block addresses are hashed using SplitMix32 to generate a 32-bit hash value, from which the lower 17 bits are used as the final index.  
+
+> •
+
+LOptv4: L-RPT with 256K entries. Block addresses are hashed using SplitMix32 to generate a 32-bit hash value, from which the lower 18 bits are used as the final index. We observe that compared to HyDRA (with an unoptimized L-RPT table), these designs show at most 2% IPC reduction and up to 8% higher DMR ( mix8 on Config-4), while Configs 5 and 7 show no performance change. 
+
+K. Performance Evaluation with SHIP-driven bypass with predictor table of similar overhead as the LERN predictor. 
+
+In this work, the SHIP predictor is implemented with a 3-bit saturating counter and 4K table entries. To analyze the impact of increasing the predictor table size (comparable to L-RPT size of 320KB) and the counter size, on the accelerator’s performance, we modified the SHIP implementation to use an 8-bit saturating counter and a 128K-entry predictor table. In this configuration, the hardware overhead of two SHIP-predictor tables (one for all cores and one for the accel-erator) is 256 KB (128 KB each). Figure 20 demonstrates the performance achieved by HyDRA over FIFO-NB and deadline-agnostic SHIP-driven bypass policies, ARP-CS-AS (4K-entries, 3-bit counter), and ARP-CS-AS-Large (128K-entries, 8-bit counter). We observe that with a larger predictor table, SHIP lowers the bypass rate for processor cores, likely due to lower cross-interference, but does not have a significant impact on the accelerator bypass rate compared to SHIP with a smaller predictor table. We also observe that without 19 
+
+deadline awareness, reuse-aware SHIP-driven bypass shows a high DMR of 1, even though the achieved IPC is comparable to HyDRA. We have similar observations for Config-3 and Config-5, with different memory intensity and access patterns, compared to Config-1. Therefore, even with similar overhead, online training might not always be as accurate as offline training for a reuse predictor. We conclude that HyDRA consistently outperforms the SHIP-driven ARP-CS-AS-D policy. It can achieve a higher accelerator BR than SHIP-driven bypass without affecting the DMR. It shows up to 90% DMR reduction with up to 9% IPC degradation, and up to 50% DMR reduction with up to 7.3% IPC gain over the FIFO-NB policy. Therefore, it efficiently manages shared cache resources between the accelerator and the cores to maximize system throughput while meeting the accelerator’s deadline. 
+
+L. Parameter Selection 
+
+The parameters of HyDRA are finalized based on experi-ments across a different set of 30 workload mixes, running on cores and the accelerator configuration Config-3 at 10 IPS. 
+
+1) Margin High and Low. margin high is varied between 
+
+{1%, 2%, 3%, 4%, 5%, 7% } of the required deadline with marginal performance variations. We observe margin high of 5% generalizes well across different configurations. We vary the values of margin low between {0.5%, 1%, 2% } and observe that with margin high of 5%, margin low of 1% performs best. 
+
+2) Miss Rate Threshold. We vary MR Th between {0.1, 0.2, 0.3, 0.5, 0.7, 0.9 }. Higher thresholds do not meet the deadline, while lower ones cause IPC degradation. We choose MR Th =0.3 as it demonstrates high performance across configurations. 
+
+3) Tolerance Parameters α, β . We vary α across {0.02, 0.05, 0.1, 0.15, 0.2 } and β across {0.01, 0.02, 0.03, 0.05, 0.07, 0.1 }. We choose α = 0 .1 and β = 0 .05 as they give comparable speedup and perform well on all configurations. 
+
+4) Threshold Change Step Size δA, δ B . We vary δA across 
+
+{0.1, 0.15, 0.2, 0.25, 0.3, 0.5 } and δB across {0.05, 0.1, 0.15 }
+
+and observe minimal performance variations. We select δA =0.2 and δB = 0.1, which provide the best performance. 
+
+5) Epoch Length. We conduct experiments with epoch lengths (ET) of 2K, 10K, 20K, 100K, 200K, 400K, and 1M cy-cles and observe marginal performance variations. Very large ETs reduce the chances of adaptation. Very small ETs yield insufficient data for decision-making. Therefore, we choose an epoch length of 200K cycles to minimize the overhead of collecting performance counters every epoch. 
+
+M. Overhead Analysis 
+
+The overheads associated with HyDRA are estimated using the Synopsys 22nm technology library and CACTI. 
+
+1) Latency Overhead. HyDRA’s decisions do not lie on the performance-critical path, as the APM is invoked before the completion of the previous epoch to estimate the reuse thresholds, and the bypass decisions are evaluated in parallel with the servicing of accesses from the LLC queues. The LERN methodology is lightweight, and offline training takes less than 4 hours on a single Intel(R) Xeon(R) Gold 5220R CPU @ 2.20GHz for each network shown in Table IV. Online reuse prediction requires loading the layer-wise clustering information into the L-RPT before each layer be-gins execution. This is performed during the layer transition time [5]. The L-RPT is direct-mapped and provides a single-cycle lookup. 
+
+2) Area Overhead. HyDRA is implemented in the cache controller hardware. The computations done by APM and the bypass decision module require additional hardware including comparators (nineteen 3-bit, two 32-bit, two 82-bit, and twelve 114-bit), multipliers (fourteen 50-bit and twelve 32-bit), five 32-bit adders, nine 8-bit adders, seven 2 × 1 multiplexers, twenty seven 4×1 multiplexers, eight 8×1 multiplexers, two 8-bit shift registers, and logic gates (one 2-input AND gate, five 3-input AND gates, two 2-input OR gate, and eleven 2-input XOR gates). The L-RPT and the SHIP-RPT occupy 320KB and 3KB of additional space, respectively. The registers for performance counter use an additional 213B. HyDRA shows an area overhead of 7.1% compared to the total cache area in 22nm, of which L-RPT contributes 3.9%, 3.2% is from additional logic components, and 0.04% is from the SHIP RPT. 
+
+3) Energy Overhead. On average, HyDRA shows a 2% increase and a 8% decrease in energy consumption compared to FIFO-NB and ARP-CS-AS-D, respectively. On average, HyDRA contributes 3.7% to total energy consumption. VII. C ONCLUSION AND FUTURE WORK 
+
+We proposed and evaluated a deadline- and reuse-aware policy, HyDRA, for selective caching of memory accesses from processor cores and domain-specific accelerators in heterogeneous SoCs, to maximize system throughput while meeting the accelerators’ deadlines. The state-of-the-art bypass strategies focus solely on improving IPC by using reuse predictors trained on general-purpose applications and do not consider QoS requirements, such as deadlines. We showed that such predictors do not achieve optimal performance with accelerators and proposed a new reuse predictor, LERN, to predict reuse behavior for accelerator accesses. HyDRA uses this reuse predictor to enable efficient bypass and significantly improve IPC while meeting deadlines. HyDRA is an efficient and effective shared cache space management strategy in heterogeneous SoCs. The current infrastructure models a non-sliced LLC, similar to commercial SoCs such as the NXP LS2088A [47]. In many modern systems, LLCs are distributed across clusters where cores and accelerators share a local slice, and contention within each slice remains relevant under accelerator deadlines. HyDRA can therefore be applied at the cluster level to manage LLC contention, even in distributed-cache systems. As future work, we plan to evaluate HyDRA using the RUBY memory system in gem5 to model sliced LLC architectures. This work focuses on workloads where memory reuse remains largely stable across inputs. Workloads, such as GNNs, with varying access patterns and reuse across input sets can be investigated as future work. This work explored dynamic LLC space management between processor cores 20 
+
+and accelerators with static bandwidth partitioning. A natural extension of this work is to study the dynamic LLC bandwidth and space management between them. Bypassing strategies are also prone to increased off-chip memory contention and energy consumption. Dynamic space management strategies can also be explored to trade off system performance with off-chip memory energy consumption. REFERENCES [1] M. Subramony, D. Kramer, and I. Paul, “AMD Ryzen 7040 Series,” 
+
+IEEE Micro , vol. 44, no. 03, pp. 18–24, May 2024. [2] Qualcomm. (2020) Snapdragon 888 5G Mobile Platform. [Online]. Available: www.qualcomm.com/products/snapdragon-888-5g-mobile-platform [3] HiSilicon. (2020) Kirin 9000. [Online]. Available: https://www.hisilicon. com/en/products/Kirin/Kirin-flagship-chips/Kirin-9000 [4] N. Binkert, B. Beckmann, G. Black, S. K. Reinhardt, A. Saidi, and A. Basu et al., “The gem5 simulator,” SIGARCH Comput. Archit. News ,vol. 39, no. 2, p. 1–7, Aug. 2011. [5] A. Agarwal, P. Goel, P. Joseph, P. Ghosh, S. Roy, and P. R. Panda, “FLASH: Deadline-Aware Flexible LLC Arbitration and Scheduling for Hardware Accelerators,” ACM Trans. Embed. Comput. Syst. , vol. 24, no. 6, Oct. 2025. [6] M. K. Qureshi and Y. N. Patt, “Utility-Based Cache Partitioning: A Low-Overhead, High-Performance, Runtime Mechanism to Partition Shared Caches,” in 2006 39th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO’06) , 2006, pp. 423–432. [7] Intel. (2015) White Paper — Improving Real-Time Performance by Utilizing Cache Allocation Technology — Enhancing Performance via Allocation of the Processor’s Cache. [Online]. Avail-able: https://www.intel.com/content/dam/www/public/us/en/documents/ white-papers/cache-allocation-technology-white-paper.pdf [8] J. Fang, Z. Nie, and L. Zhao, “PACP: A Prefetch-aware Multi-core Shared Cache Partitioning Strategy,” in Proceedings of the 8th Interna-tional Conference on Computing and Artificial Intelligence , ser. ICCAI ’22. New York, NY, USA: ACM, 2022, p. 246–251. [9] J. Park, H. Yeom, and Y. Son, “Page Reusability-Based Cache Partition-ing for Multi-Core Systems,” IEEE Transactions on Computers , vol. 69, no. 6, pp. 812–818, 2020. [10] H. Wen and W. Zhang, “Heterogeneous Cache Hierarchy Management for Integrated CPU-GPU Architecture,” in IEEE High Performance Extreme Computing Conference (HPEC) , 2019, pp. 1–6. [11] J. Lee and H. Kim, “TAP: A TLP-aware cache management policy for a CPU-GPU heterogeneous architecture,” in IEEE International Symposium on High-Performance Comp Architecture , 2012, pp. 1–12. [12] J. Feliu, J. Sahuquillo, S. Petit, and J. Duato, “Perf&Fair: A Progress-Aware Scheduler to Enhance Performance and Fairness in SMT Multi-cores,” IEEE Transactions on Computers , vol. 66, no. 5, pp. 905–911, 2017. [13] S. Tiwari, S. Tuli, I. Ahmad, A. Agarwal, P. R. Panda, and S. Subra-money, “REAL: REquest Arbitration in Last Level Caches,” ACM Trans. Embed. Comput. Syst. , vol. 18, no. 6, Nov 2019. [14] L. Li, D. Tong, Z. Xie, J. Lu, and X. Cheng, “Optimal bypass monitor for high performance last-level caches,” in Proceedings of the 21st International Conference on Parallel Architectures and Compilation Techniques , ser. PACT ’12, 2012, p. 315–324. [15] C.-J. Wu, A. Jaleel, W. Hasenplaugh, M. Martonosi, S. C. Steely, and J. Emer, “SHiP: Signature-based Hit Predictor for high performance caching,” in 2011 44th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO) , 2011, pp. 430–441. [16] W. Lu, G. Yan, J. Li, S. Gong, Y. Han, and X. Li, “FlexFlow: A Flexible Dataflow Accelerator Architecture for Convolutional Neural Networks,” in 2017 IEEE International Symposium on High Performance Computer Architecture (HPCA) , 2017, pp. 553–564. [17] Y.-H. Chen, T. Krishna, J. S. Emer, and V. Sze, “Eyeriss: An Energy-Efficient Reconfigurable Accelerator for Deep Convolutional Neural Networks,” IEEE Journal of Solid-State Circuits , vol. 52, no. 1, pp. 127–138, 2017. [18] R. Li, S. Ma, K. Kavi, G. Mehta, N. J. Yadwadkar, and L. K. John, “CADOSys: Cache Aware Design Space Optimization for Spatial ML Accelerators,” in Proceedings of the Great Lakes Symposium on VLSI 2025 , ser. GLSVLSI ’25, 2025, p. 200–207. [19] A. Jaleel, K. B. Theobald, S. C. Steely, and J. Emer, “High performance cache replacement using re-reference interval prediction (RRIP),” in 
+
+Proceedings of the 37th Annual International Symposium on Computer Architecture , ser. ISCA’10. New York, NY, USA: ACM, 2010, p. 60–71. [20] D. Lee, J. Choi, J.-H. Kim, S. Noh, S. L. Min, Y. Cho, and C. S. Kim, “LRFU: a spectrum of policies that subsumes the least recently used and least frequently used policies,” IEEE Transactions on Computers ,vol. 50, no. 12, pp. 1352–1361, 2001. [21] J. J. K. Park, Y. Park, and S. Mahlke, “A bypass first policy for energy-efficient last level caches,” in 2016 International Conference on Embedded Computer Systems: Architectures, Modeling and Simulation (SAMOS) , 2016, pp. 63–70. [22] S. M. Khan, Y. Tian, and D. A. Jim´ enez, “Sampling Dead Block Prediction for Last-Level Caches,” in 2010 43rd Annual IEEE/ACM International Symposium on Microarchitecture , 2010, pp. 175–186. [23] Intel Corporation. (2025, May) Intel® 64 and IA-32 Architectures Software Developer’s Manual Combined Volumes 2A, 2B, 2C, and 2D: Instruction Set Reference, A- Z. [Online]. Available: https://cdrdv2.intel.com/v1/dl/getContent/671110 [24] Z. Wang, C. Fu, and J. Han, “Coupled data prefetch and cache partitioning scheme for cpu-accelerator system,” in 2023 IEEE 15th International Conference on ASIC (ASICON) , 2023, pp. 1–4, doi: 10.1109/ASICON58565.2023.10396658. [25] P. Li, Y. Guo, and Y. Gu, “Predicting Reuse Interval for Optimized Web Caching: An LSTM-Based Machine Learning Approach,” in SC22: International Conference for High Performance Computing, Networking, Storage and Analysis , 2022, pp. 1–15. [26] D. A. Jim´ enez and E. Teran, “Multiperspective reuse prediction,” in 
+
+Proceedings of the 50th Annual IEEE/ACM International Symposium on Microarchitecture , ser. MICRO-50. New York, NY, USA: ACM, 2017, p. 436–448. [27] E. Teran, Z. Wang, and D. A. Jim´ enez, “Perceptron learning for reuse prediction,” in 2016 49th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO) , 2016, pp. 1–12. [28] Z. Shi, X. Huang, A. Jain, and C. Lin, “Applying deep learning to the cache replacement problem,” in Proceedings of the 52nd Annual IEEE/ACM International Symposium on Microarchitecture , ser. MICRO-52. New York, NY, USA: ACM, 2019, p. 413–425. [29] S. Sethumurugan, J. Yin, and J. Sartori, “Designing a Cost-Effective Cache Replacement Policy using Machine Learning,” in IEEE Interna-tional Symposium on High-Performance Computer Architecture (HPCA) ,2021. [30] A. Jain and C. Lin, “Back to the Future: Leveraging Belady’s Algo-rithm for Improved Cache Replacement,” in ACM/IEEE 43rd Annual International Symposium on Computer Architecture (ISCA) , 2016, pp. 78–89. [31] I. Shah, A. Jain, and C. Lin, “Effective Mimicry of Belady’s MIN Policy,” in 2022 IEEE International Symposium on High-Performance Computer Architecture (HPCA) , 2022, pp. 558–572. [32] S. Mostofi, S. Gupta, A. Hassani, K. Tibrewala, E. Teran, P. V. Gratz, and D. A. Jim´ enez, “Light-weight Cache Replacement for Instruction Heavy Workloads,” in Proceedings of the 52nd Annual International Symposium on Computer Architecture , ser. ISCA’25. New York, NY, USA: ACM, 2025, p. 1005–1019. [33] E. Z. Liu, M. Hashemi, K. Swersky, P. Ranganathan, and J. Ahn, “An imitation learning approach for cache replacement,” in Proceedings of the 37th International Conference on Machine Learning , ser. ICML’20. JMLR.org, 2020. [34] H. J. Yoo, J. H. Kim, and T. H. Han, “RL-Based Cache Replacement: A Modern Interpretation of Belady’s Algorithm With Bypass Mechanism and Access Type Analysis,” IEEE Access , vol. 11, pp. 145 238–145 253, 2023. [35] J. Kim, E. Teran, P. V. Gratz, D. A. Jim´ enez, S. H. Pugsley, and C. Wilkerson, “Kill the Program Counter: Reconstructing Program Behavior in the Processor Cache Hierarchy,” SIGARCH Comput. Archit. News , vol. 45, no. 1, p. 737–749, Apr. 2017. [Online]. Available: https://doi.org/10.1145/3093337.3037701 [36] A. Sridharan and A. Seznec, “Discrete Cache Insertion Policies for Shared Last Level Cache Management on Large Multicores,” in 2016 IEEE International Parallel and Distributed Processing Symposium (IPDPS) , 2016, pp. 822–831. [37] M. Hashemi, K. Swersky, J. Smith, G. Ayers, H. Litz, J. Chang, C. Kozyrakis, and P. Ranganathan, “Learning memory access patterns,” in Proceedings of the 35th International Conference on Machine Learn-ing , vol. 80. PMLR, 10–15 Jul 2018, pp. 1919–1928. [38] N. P. Jouppi et al. , “In-Datacenter Performance Analysis of a Tensor Processing Unit,” in Proceedings of the 44th Annual International 21 
+
+Symposium on Computer Architecture , ser. ISCA’17. New York, NY, USA: ACM, 2017, p. 1–12. [39] A. Samajdar, J. M. Joseph, Y. Zhu, P. Whatmough, M. Mattina, and T. Krishna, “A Systematic Methodology for Characterizing Scalability of DNN Accelerators using SCALE-Sim,” in 2020 IEEE International Symposium on Performance Analysis of Systems and Software (ISPASS) ,2020, pp. 58–68. [40] Qualcomm. (2023) Kryo 585 application processor. [Online]. Available: https://docs.qualcomm.com/doc/80-PV086-5P/topic/processor.html [41] A. Cabrera, S. Hitefield, J. Kim, S. Lee, N. R. Miniskar, and J. S. Vetter, “Toward Performance Portable Programming for Heterogeneous Systems on a Chip: A Case Study with Qualcomm Snapdragon SoC,” in 
+
+2021 IEEE High Performance Extreme Computing Conference (HPEC) ,2021, pp. 1–7. [42] Qualcomm. (2023) Qualcomm Robotics RB5 Develop-ment Kit: Processor Data Sheet. [Online]. Avail-able: https://docs.qualcomm.com/doc/80-PV086-1/topic/80-PV086-1 REV E QRB5165 Data Sheet.pdf?product=1601111740013082 [43] ——. (2024) Qualcomm QCS8250 Processor. [Online]. Available: https://www.qualcomm.com/content/dam/qcomm-martech/ dm-assets/documents/qcs8250-soc-product-brief 87-pu792-1-c.pdf [44] M. Ditty, “NVIDIA ORIN System-On-Chip,” in 2022 IEEE Hot Chips 34 Symposium (HCS) , 2022, pp. 1–17. [45] L. James. (2025) MediaTek Goes All In on First All Big Core Chip for Smartphones . [Online]. Available: https://www.allaboutcircuits.com/ news/mediatek-goes-all-in-on-first-all-big-core-chip-for-smartphones/ [46] G. L. Steele, D. Lea, and C. H. Flood, “Fast splittable pseudorandom number generators,” SIGPLAN Not. , vol. 49, no. 10, p. 453–472, 2014. [47] NXP Semiconductors. (2024) Layerscape 2088A and 2048A Processors. [Online]. Available: https://www.nxp.com/products/LS2088A 
+
+Ayushi Agarwal received her B.Tech in Electron-ics and Communication Engineering from Motilal Nehru National Institute of Technology Allahabad, in 2014. She is a research scholar in the ANSK School of Information Technology at the Indian Institute of Technology Delhi. She has previously worked at Qualcomm and as a Research Associate with the GreenIC group at the National University of Singapore. Her research focuses on efficient sys-tem integration of domain-specific accelerators into multi-processor SoCs, emphasizing the optimization of shared cache and memory management for improved performance and energy efficiency. 
+
+Anannya Mathur received her Bachelor of Tech-nology degree with a minor in Computer Science and Engineering from the Indian Institute of Tech-nology, Delhi (IIT Delhi) in 2023. She is pursuing a Master’s by Research in the School of Information Technology at IIT Delhi, focusing on Computer Science and Engineering. Her research interests in-clude photonic computing, spiking neural networks, brain-inspired computing, time series prediction, and inverse design algorithms. 
+
+Preeti Ranjan Panda received his B. Tech. in Computer Science and Engineering from the IIT Madras in 1990 and his M.S. and Ph.D. from the University of California at Irvine in 1995 and 1998, respectively. He is currently a Professor in the Department of Computer Science and Engineering, with a joint appointment at the Khosla School of IT at IIT Delhi. He has previously worked at Texas Instruments and Synopsys, Inc., and as a visiting scholar at Stanford University. He is the author of two books and a recipient of the IBM Faculty Award, the IESA Techno Mentor Award, and the DST Young Scientist Award. He has served as the Editor-in-Chief of IEEE Embedded Systems Letters and on the editorial boards of several journals, including IEEE TCAD, ACM TODAES, and Springer IJPP. He has served as the Technical Program chair of CODES+ISSS and CASES, on the steering committee of ASPDAC, and on the Technical Program Committees of several major conferences, including DAC, ICCAD, and DATE.

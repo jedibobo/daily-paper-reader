@@ -6,82 +6,74 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-18
-- 运行时间：2026-05-18 20:32:15 UTC
+- 最新运行日期：2026-05-22
+- 运行时间：2026-05-22 20:59:17 UTC
 - 运行状态：成功
-- 本次总论文数：20
-- 精读区：9
+- 本次总论文数：17
+- 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日深度复盘 20 篇 AI 论文，聚焦 SNAC-Pack 领衔的神经架构搜索（NAS）与软硬协同设计新突破。
-满分神作 SNAC-Pack 重新定义了架构编码，而元学习预测器则显著提升了 NAS 从回归到推理的泛化能力。
-推荐优先研读 SNAC-Pack 框架，探索如何通过高效代理模型实现神经网络与底层硬件的最优适配。
-- 详情：[/202605/18/README](/202605/18/README)
+- 今日共生成 17 篇推荐（精读 6 篇，速读 11 篇）
+- 精读：《HyDRA: Deadline and Reuse-Aware Cacheability for Hardware Accelerators》（8.0/10）, 《TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling》（8.0/10）
+- 速读：《EnergyLens: Interpretable Closed-Form Energy Models for Multimodal LLM Inference Serving》（8.0/10）, 《EnergyLens: Interpretable Closed-Form Energy Models for Multimodal LLM Inference Serving》（8.0/10）, 《LLMs for Secure Hardware Design and Related Problems: Opportunities and Challenges》（8.0/10）
+- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
+- 详情：[/202605/22/README](/202605/22/README)
 
 ### 精读区论文标签
-1. [Surrogate Neural Architecture Codesign Package (SNAC-Pack)](/202605/18/2605.16138v1-surrogate-neural-architecture-codesign-package-snac-pack)  
-   标签：评分：10.0/10、query:hwnas
-   evidence：用于硬件感知神经架构协同设计和FPGA部署的AutoML框架
-2. [From Regression to Inference: Meta-Learning Predictors for Neural Architecture Search](/202605/18/2605.09290v1-from-regression-to-inference-meta-learning-predictors-for-neural-architecture-search)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：用于神经架构搜索的元学习预测器
-3. [DECO: Sparse Mixture-of-Experts with Dense-Comparable Performance on End-Side Devices](/202605/18/2605.10933v1-deco-sparse-mixture-of-experts-with-dense-comparable-performance-on-end-side-devices)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：专为高效端侧部署设计的MoE架构，具有较小的存储开销
-4. [Adapting AlphaEvolve to Optimize Fully Homomorphic Encryption on TPUs](/202605/18/2605.14718v1-adapting-alphaevolve-to-optimize-fully-homomorphic-encryption-on-tpus)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：内核与 TPU 硬件之间的协同优化
-5. [Hardware-Software Co-Design of Scalable, Energy-Efficient Analog Recurrent Computations](/202605/18/2605.15216v1-hardware-software-co-design-of-scalable-energy-efficient-analog-recurrent-computations)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：能效模拟循环计算的硬件软件协同设计
-6. [GQLA: Group-Query Latent Attention for Hardware-Adaptive Large Language Model Decoding](/202605/18/2605.15250v1-gqla-group-query-latent-attention-for-hardware-adaptive-large-language-model-decoding)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对不同GPU计算带宽比的硬件自适应解码路径
-7. [MR2-ByteTrack: CNN and Transformer-based Video Object Detection for AI-augmented Embedded Vision Sensor Nodes](/202605/18/2605.15423v1-mr2-bytetrack-cnn-and-transformer-based-video-object-detection-for-ai-augmented-embedded-vision-sensor-nodes)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对MCU嵌入式节点的高效视觉方法
-8. [Towards Code-Oriented LM Embeddings for Surrogate-Assisted Neural Architecture Search](/202605/18/2605.15649v1-towards-code-oriented-lm-embeddings-for-surrogate-assisted-neural-architecture-search)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：使用语言模型嵌入的代理辅助神经架构搜索
-9. [Going Beyond the Edge: Distributed Inference of Transformer Models on Ultra-Low-Power Wireless Devices](/202605/18/2605.15694v1-going-beyond-the-edge-distributed-inference-of-transformer-models-on-ultra-low-power-wireless-devices)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：跨分区和无线通信的协同设计
+1. [HyDRA: Deadline and Reuse-Aware Cacheability for Hardware Accelerators](/202605/22/2605.08908v1-hydra-deadline-and-reuse-aware-cacheability-for-hardware-accelerators)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：异构SoC中硬件加速器的缓存管理
+2. [TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling](/202605/22/2605.09281v1-tileq-efficient-low-rank-quantization-of-mixture-of-experts-with-2d-tiling)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：针对MoE的硬件友好量化与高效推理
+3. [Forcing-KV: Hybrid KV Cache Compression for Efficient Autoregressive Video Diffusion Models](/202605/22/2605.09681v1-forcing-kv-hybrid-kv-cache-compression-for-efficient-autoregressive-video-diffusion-models)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：通过KV缓存压缩减少内存开销
+4. [Pretraining large language models with MXFP4 on Native FP4 Hardware](/202605/22/2605.09825v3-pretraining-large-language-models-with-mxfp4-on-native-fp4-hardware)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：在原生FP4硬件上进行量化感知的大模型训练
+5. [Increasing the Efficiency of DETR for Maritime High-Resolution Images](/202605/22/2605.10269v1-increasing-the-efficiency-of-detr-for-maritime-high-resolution-images)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：针对海事检测的边缘计算限制和内存高效模型
+6. [Agent-X: Full Pipeline Acceleration of On-device AI Agents](/202605/22/2605.10380v1-agent-x-full-pipeline-acceleration-of-on-device-ai-agents)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：边缘设备上 AI 智能体的加速
 
 ### 速读区论文标签
-1. [TransDot: An Area-efficient Reconfigurable Floating-Point Unit for Trans-Precision Dot-Product Accumulation for FPGA AI Engines](/202605/18/2605.07245v1-transdot-an-area-efficient-reconfigurable-floating-point-unit-for-trans-precision-dot-product-accumulation-for-fpga-ai-engines)  
+1. [EnergyLens: Interpretable Closed-Form Energy Models for Multimodal LLM Inference Serving](/202605/22/2605.10556v1-energylens-interpretable-closed-form-energy-models-for-multimodal-llm-inference-serving)  
    标签：评分：8.0/10、query:hwnas
-   evidence：最大化FPGA AI引擎的计算利用率和带宽
-2. [Amortized-Precision Quantization for Early-Exit Vision Transformers](/202605/18/2605.07317v1-amortized-precision-quantization-for-early-exit-vision-transformers)  
+   evidence：在异构加速器上优化推理能耗
+2. [EnergyLens: Interpretable Closed-Form Energy Models for Multimodal LLM Inference Serving](/202605/22/2605.10556v2-energylens-interpretable-closed-form-energy-models-for-multimodal-llm-inference-serving)  
    标签：评分：8.0/10、query:hwnas
-   evidence：利用率感知的量化与位宽优化
-3. [Accelerating Precise End-to-End Simulation: Latency-Sensitive Many-core System Modeling](/202605/18/2605.07750v1-accelerating-precise-end-to-end-simulation-latency-sensitive-many-core-system-modeling)  
+   evidence：优化异构加速器上的推理能耗
+3. [LLMs for Secure Hardware Design and Related Problems: Opportunities and Challenges](/202605/22/2605.10807v2-llms-for-secure-hardware-design-and-related-problems-opportunities-and-challenges)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对大语言模型工作负载的多核加速器建模
-4. [AAAC: Activation-Aware Adaptive Codebooks for 4-bit LLM Weight Quantization](/202605/18/2605.08692v1-aaac-activation-aware-adaptive-codebooks-for-4-bit-llm-weight-quantization)  
+   evidence：用于自动化硬件设计和RTL生成的LLM
+4. [Closer in the Gap: Towards Portable Performance on RISC-V Vector Processors](/202605/22/2605.10860v1-closer-in-the-gap-towards-portable-performance-on-risc-v-vector-processors)  
    标签：评分：8.0/10、query:hwnas
-   evidence：激活感知的权重量化以减少内存和计算开销
-5. [ATLAS: Efficient Out-of-Core Inference for Billion-Scale Graph Neural Networks](/202605/18/2605.09402v1-atlas-efficient-out-of-core-inference-for-billion-scale-graph-neural-networks)  
-   标签：评分：7.0/10、query:hwnas
-   evidence：解决内存压力和I/O成本的核外推理
-6. [AnyDepth-DETR/-YOLO: Any-depth object detection with a single network](/202605/18/2605.09407v1-anydepth-detr-yolo-any-depth-object-detection-with-a-single-network)  
-   标签：评分：7.0/10、query:hwnas
-   evidence：通过在推理时控制深度来平衡准确性与效率
-7. [Not All Thoughts Need HBM: Semantics-Aware Memory Hierarchy for LLM Reasoning](/202605/18/2605.09490v1-not-all-thoughts-need-hbm-semantics-aware-memory-hierarchy-for-llm-reasoning)  
-   标签：评分：7.0/10、query:hwnas
-   evidence：针对KV缓存管理的语义感知内存层级结构
-8. [Adaptive DNN Partitioning and Offloading in Heterogeneous Edge-Cloud Continuum](/202605/18/2605.09623v1-adaptive-dnn-partitioning-and-offloading-in-heterogeneous-edge-cloud-continuum)  
-   标签：评分：7.0/10、query:hwnas
-   evidence：针对资源受限物联网和边缘设备的动态DNN分区
-9. [Sparsity Moves Computation: How FFN Architecture Reshapes Attention in Small Transformers](/202605/18/2605.09403v2-sparsity-moves-computation-how-ffn-architecture-reshapes-attention-in-small-transformers)  
-   标签：评分：6.0/10、query:hwnas
-   evidence：稀疏 MoE 路由转移计算以优化 Transformer 架构效率
-10. [Optimizing Server Placement for Vertical Federated Learning in Dynamic Edge/Fog Networks](/202605/18/2605.09813v1-optimizing-server-placement-for-vertical-federated-learning-in-dynamic-edgefog-networks)  
-   标签：评分：6.0/10、query:hwnas
-   evidence：联合优化边缘网络中的模型训练与资源消耗
-11. [Evolving Knowledge Distillation for Lightweight Neural Machine Translation](/202605/18/2605.09924v1-evolving-knowledge-distillation-for-lightweight-neural-machine-translation)  
-   标签：评分：6.0/10、query:hwnas
-   evidence：针对资源受限设备的轻量化模型
+   evidence：评估了RISC-V硬件上机器学习的编译器成本模型和自动向量化
+5. [CATS: Cascaded Adaptive Tree Speculation for Memory-Limited LLM Inference Acceleration](/202605/22/2605.11186v1-cats-cascaded-adaptive-tree-speculation-for-memory-limited-llm-inference-acceleration)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：边缘平台上的内存受限LLM推理加速
+6. [ChunkFlow: Communication-Aware Chunked Prefetching for Layerwise Offloading in Distributed Diffusion Transformer Inference](/202605/22/2605.11335v1-chunkflow-communication-aware-chunked-prefetching-for-layerwise-offloading-in-distributed-diffusion-transformer-inference)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：通信感知的预取与内存卸载
+7. [CR^2: Cost-Aware Risk-Controlled Routing for Wireless Device-Edge LLM Inference](/202605/22/2605.12001v1-cr2-cost-aware-risk-controlled-routing-for-wireless-device-edge-llm-inference)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：在移动边缘设备上平衡能耗和延迟的高效LLM服务
+8. [Rethink the Role of Neural Decoders in Quantum Error Correction](/202605/22/2605.12046v1-rethink-the-role-of-neural-decoders-in-quantum-error-correction)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：在明确的精度-延迟约束下重新设计神经解码器
+9. [SOAR: Scale Optimization for Accurate Reconstruction in NVFP4 Quantization](/202605/22/2605.12245v1-soar-scale-optimization-for-accurate-reconstruction-in-nvfp4-quantization)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：具有原生硬件支持的4位微缩放格式及比例优化
+10. [Search Your Block Floating Point Scales!](/202605/22/2605.12464v1-search-your-block-floating-point-scales)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：搜索最佳量化比例以平衡准确性和硬件性能
+11. [A detailed algorithmic study on a reuse-aware, near memory, all-digital Ising machine](/202605/22/2605.12959v1-a-detailed-algorithmic-study-on-a-reuse-aware-near-memory-all-digital-ising-machine)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：基于SRAM存内计算的全数字Ising架构
 
 
 <div class="dpr-home-promo-card">
