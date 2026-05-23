@@ -6,8 +6,8 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-22
-- 运行时间：2026-05-22 20:59:17 UTC
+- 最新运行日期：2026-05-23
+- 运行时间：2026-05-23 20:33:17 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
@@ -15,65 +15,65 @@
 
 ### 今日简报（AI）
 - 今日共生成 17 篇推荐（精读 6 篇，速读 11 篇）
-- 精读：《HyDRA: Deadline and Reuse-Aware Cacheability for Hardware Accelerators》（8.0/10）, 《TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling》（8.0/10）
-- 速读：《EnergyLens: Interpretable Closed-Form Energy Models for Multimodal LLM Inference Serving》（8.0/10）, 《EnergyLens: Interpretable Closed-Form Energy Models for Multimodal LLM Inference Serving》（8.0/10）, 《LLMs for Secure Hardware Design and Related Problems: Opportunities and Challenges》（8.0/10）
+- 精读：《N-vium: Mixture-of-Exits Transformer for Accelerated Exact Generation》（8.0/10）, 《Efficient Sensor Fusion for Gesture Recognition on Resource-Constrained Devices》（8.0/10）
+- 速读：《Analog RF Computing: A New Paradigm for Energy-Efficient Edge AI Over MU-MIMO Systems》（8.0/10）, 《Enjoy Your Layer Normalization with the Computational Efficiency of RMSNorm》（8.0/10）, 《GenAI for Energy-Efficient and Interference-Aware Compressed Sensing of GNSS Signals on a Google Edge TPU》（8.0/10）
 - 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202605/22/README](/202605/22/README)
+- 详情：[/202605/23/README](/202605/23/README)
 
 ### 精读区论文标签
-1. [HyDRA: Deadline and Reuse-Aware Cacheability for Hardware Accelerators](/202605/22/2605.08908v1-hydra-deadline-and-reuse-aware-cacheability-for-hardware-accelerators)  
+1. [N-vium: Mixture-of-Exits Transformer for Accelerated Exact Generation](/202605/23/2605.13190v1-n-vium-mixture-of-exits-transformer-for-accelerated-exact-generation)  
    标签：评分：8.0/10、query:hwnas
-   evidence：异构SoC中硬件加速器的缓存管理
-2. [TileQ: Efficient Low-Rank Quantization of Mixture-of-Experts with 2D Tiling](/202605/22/2605.09281v1-tileq-efficient-low-rank-quantization-of-mixture-of-experts-with-2d-tiling)  
+   evidence：提高标准硬件上的有效每秒浮点运算次数
+2. [Efficient Sensor Fusion for Gesture Recognition on Resource-Constrained Devices](/202605/23/2605.13462v1-efficient-sensor-fusion-for-gesture-recognition-on-resource-constrained-devices)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对MoE的硬件友好量化与高效推理
-3. [Forcing-KV: Hybrid KV Cache Compression for Efficient Autoregressive Video Diffusion Models](/202605/22/2605.09681v1-forcing-kv-hybrid-kv-cache-compression-for-efficient-autoregressive-video-diffusion-models)  
+   evidence：适用于资源受限嵌入式设备的高效神经网络
+3. [FlowCompile: An Optimizing Compiler for Structured LLM Workflows](/202605/23/2605.13647v1-flowcompile-an-optimizing-compiler-for-structured-llm-workflows)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通过KV缓存压缩减少内存开销
-4. [Pretraining large language models with MXFP4 on Native FP4 Hardware](/202605/22/2605.09825v3-pretraining-large-language-models-with-mxfp4-on-native-fp4-hardware)  
+   evidence：平衡准确性和延迟的LLM工作流优化编译器
+4. [Breaking Global Self-Attention Bottlenecks in Transformer-based Spiking Neural Networks with Local Structure-Aware Self-Attention](/202605/23/2605.13887v1-breaking-global-self-attention-bottlenecks-in-transformer-based-spiking-neural-networks-with-local-structure-aware-self-attention)  
    标签：评分：8.0/10、query:hwnas
-   evidence：在原生FP4硬件上进行量化感知的大模型训练
-5. [Increasing the Efficiency of DETR for Maritime High-Resolution Images](/202605/22/2605.10269v1-increasing-the-efficiency-of-detr-for-maritime-high-resolution-images)  
+   evidence：具有局部结构感知注意力的能效SNN架构
+5. [SToRe3D: Sparse Token Relevance in ViTs for Efficient Multi-View 3D Object Detection](/202605/23/2605.14110v1-store3d-sparse-token-relevance-in-vits-for-efficient-multi-view-3d-object-detection)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对海事检测的边缘计算限制和内存高效模型
-6. [Agent-X: Full Pipeline Acceleration of On-device AI Agents](/202605/22/2605.10380v1-agent-x-full-pipeline-acceleration-of-on-device-ai-agents)  
+   evidence：联合选择token和查询以实现3倍推理加速
+6. [EnergyLens: Predictive Energy-Aware Exploration for Multi-GPU LLM Inference Optimization](/202605/23/2605.14249v1-energylens-predictive-energy-aware-exploration-for-multi-gpu-llm-inference-optimization)  
    标签：评分：8.0/10、query:hwnas
-   evidence：边缘设备上 AI 智能体的加速
+   evidence：能源感知的LLM推理优化与预测性探索
 
 ### 速读区论文标签
-1. [EnergyLens: Interpretable Closed-Form Energy Models for Multimodal LLM Inference Serving](/202605/22/2605.10556v1-energylens-interpretable-closed-form-energy-models-for-multimodal-llm-inference-serving)  
+1. [Analog RF Computing: A New Paradigm for Energy-Efficient Edge AI Over MU-MIMO Systems](/202605/23/2605.14331v1-analog-rf-computing-a-new-paradigm-for-energy-efficient-edge-ai-over-mu-mimo-systems)  
    标签：评分：8.0/10、query:hwnas
-   evidence：在异构加速器上优化推理能耗
-2. [EnergyLens: Interpretable Closed-Form Energy Models for Multimodal LLM Inference Serving](/202605/22/2605.10556v2-energylens-interpretable-closed-form-energy-models-for-multimodal-llm-inference-serving)  
+   evidence：用于能效边缘AI协同设计的模拟射频计算
+2. [Enjoy Your Layer Normalization with the Computational Efficiency of RMSNorm](/202605/23/2605.14521v1-enjoy-your-layer-normalization-with-the-computational-efficiency-of-rmsnorm)  
    标签：评分：8.0/10、query:hwnas
-   evidence：优化异构加速器上的推理能耗
-3. [LLMs for Secure Hardware Design and Related Problems: Opportunities and Challenges](/202605/22/2605.10807v2-llms-for-secure-hardware-design-and-related-problems-opportunities-and-challenges)  
+   evidence：通过算子映射感知减少推理开销
+3. [GenAI for Energy-Efficient and Interference-Aware Compressed Sensing of GNSS Signals on a Google Edge TPU](/202605/23/2605.14839v1-genai-for-energy-efficient-and-interference-aware-compressed-sensing-of-gnss-signals-on-a-google-edge-tpu)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于自动化硬件设计和RTL生成的LLM
-4. [Closer in the Gap: Towards Portable Performance on RISC-V Vector Processors](/202605/22/2605.10860v1-closer-in-the-gap-towards-portable-performance-on-risc-v-vector-processors)  
+   evidence：在Google Edge TPU上进行能效压缩感知
+4. [HeatKV: Head-tuned KV-cache Compression for Visual Autoregressive Modeling](/202605/23/2605.14877v1-heatkv-head-tuned-kv-cache-compression-for-visual-autoregressive-modeling)  
    标签：评分：8.0/10、query:hwnas
-   evidence：评估了RISC-V硬件上机器学习的编译器成本模型和自动向量化
-5. [CATS: Cascaded Adaptive Tree Speculation for Memory-Limited LLM Inference Acceleration](/202605/22/2605.11186v1-cats-cascaded-adaptive-tree-speculation-for-memory-limited-llm-inference-acceleration)  
+   evidence：内存感知的KV缓存压缩与剪枝调度
+5. [A3D: Agentic AI flow for autonomous Accelerator Design](/202605/23/2605.15237v1-a3d-agentic-ai-flow-for-autonomous-accelerator-design)  
    标签：评分：8.0/10、query:hwnas
-   evidence：边缘平台上的内存受限LLM推理加速
-6. [ChunkFlow: Communication-Aware Chunked Prefetching for Layerwise Offloading in Distributed Diffusion Transformer Inference](/202605/22/2605.11335v1-chunkflow-communication-aware-chunked-prefetching-for-layerwise-offloading-in-distributed-diffusion-transformer-inference)  
+   evidence：用于自主硬件加速器设计和工作负载理解的智能体AI
+6. [Layer-wise Derivative Controlled Networks](/202605/23/2605.15463v1-layer-wise-derivative-controlled-networks)  
    标签：评分：8.0/10、query:hwnas
-   evidence：通信感知的预取与内存卸载
-7. [CR^2: Cost-Aware Risk-Controlled Routing for Wireless Device-Edge LLM Inference](/202605/22/2605.12001v1-cr2-cost-aware-risk-controlled-routing-for-wireless-device-edge-llm-inference)  
+   evidence：协调准确性与硬件效率
+7. [Perforated Neural Networks for Keyword Spotting](/202605/23/2605.15647v1-perforated-neural-networks-for-keyword-spotting)  
    标签：评分：8.0/10、query:hwnas
-   evidence：在移动边缘设备上平衡能耗和延迟的高效LLM服务
-8. [Rethink the Role of Neural Decoders in Quantum Error Correction](/202605/22/2605.12046v1-rethink-the-role-of-neural-decoders-in-quantum-error-correction)  
+   evidence：边缘约束与模型大小优化
+8. [ElasticDiT: Efficient Diffusion Transformers via Elastic Architecture and Sparse Attention for High-Resolution Image Generation on Mobile Devices](/202605/23/2605.15684v1-elasticdit-efficient-diffusion-transformers-via-elastic-architecture-and-sparse-attention-for-high-resolution-image-generation-on-mobile-devices)  
    标签：评分：8.0/10、query:hwnas
-   evidence：在明确的精度-延迟约束下重新设计神经解码器
-9. [SOAR: Scale Optimization for Accurate Reconstruction in NVFP4 Quantization](/202605/22/2605.12245v1-soar-scale-optimization-for-accurate-reconstruction-in-nvfp4-quantization)  
+   evidence：用于移动设备高分辨率图像生成的弹性架构
+9. [Ascend-RaBitQ: Heterogeneous NPU-CPU Acceleration of Billion-Scale Similarity Search with 1-bit Quantization](/202605/23/2605.16007v1-ascend-rabitq-heterogeneous-npu-cpu-acceleration-of-billion-scale-similarity-search-with-1-bit-quantization)  
    标签：评分：8.0/10、query:hwnas
-   evidence：具有原生硬件支持的4位微缩放格式及比例优化
-10. [Search Your Block Floating Point Scales!](/202605/22/2605.12464v1-search-your-block-floating-point-scales)  
+   evidence：异构NPU-CPU优化与硬件失配解决
+10. [Scalable neuromorphic computing from autonomous spiking dynamics in a clockless reconfigurable chip](/202605/23/2605.16114v1-scalable-neuromorphic-computing-from-autonomous-spiking-dynamics-in-a-clockless-reconfigurable-chip)  
    标签：评分：8.0/10、query:hwnas
-   evidence：搜索最佳量化比例以平衡准确性和硬件性能
-11. [A detailed algorithmic study on a reuse-aware, near memory, all-digital Ising machine](/202605/22/2605.12959v1-a-detailed-algorithmic-study-on-a-reuse-aware-near-memory-all-digital-ising-machine)  
+   evidence：基于FPGA的可扩展神经形态架构，具有低功耗特性
+11. [SRAM Based Digital Custom Compute Engine for Improved Area Efficiency of AI Hardware](/202605/23/2605.16161v1-sram-based-digital-custom-compute-engine-for-improved-area-efficiency-of-ai-hardware)  
    标签：评分：8.0/10、query:hwnas
-   evidence：基于SRAM存内计算的全数字Ising架构
+   evidence：针对二值神经网络优化的SRAM计算引擎
 
 
 <div class="dpr-home-promo-card">
