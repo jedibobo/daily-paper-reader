@@ -6,74 +6,71 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-28
-- 运行时间：2026-05-28 21:30:48 UTC
+- 最新运行日期：2026-05-29
+- 运行时间：2026-05-29 21:49:32 UTC
 - 运行状态：成功
-- 本次总论文数：17
+- 本次总论文数：16
 - 精读区：6
-- 速读区：11
+- 速读区：10
 
 ### 今日简报（AI）
-- 今日共生成 17 篇推荐（精读 6 篇，速读 11 篇）
-- 精读：《Neuromorphic Control of a Flapping-Wing Robot on Resource-Constrained Hardware》（8.0/10）, 《DAG-Based QoS-Aware Dynamic Task Placement for Networked Multi-Stage Control Pipelines》（8.0/10）
-- 速读：《Llamas on the Web: Memory-Efficient, Performance-Portable, and Multi-Precision LLM Inference with WebGPU》（8.0/10）, 《E-ReCON: An Energy- and Resource-Efficient Precision-Configurable Sparse nvCIM Macro for Conventional and Spiking Neural Edge Inference》（8.0/10）, 《SpineContextResUNet: A Computationally Efficient Residual UNet for Spine CT Segmentation》（8.0/10）
+- 今日共生成 16 篇推荐（精读 6 篇，速读 10 篇）
+- 精读：《ACALSim: A Scalable Parallel Simulation Framework for High-Performance System Design Space Exploration》（8.0/10）, 《ModeSwitch-LLM: A Lightweight Phase-Aware Controller for Cross-Mode LLM Inference on a Single GPU》（8.0/10）
+- 速读：《XL-HD: Extended Learning in Hyperdimensional Computing via Deterministic Projections for In-Memory Accelerators》（8.0/10）, 《Multiscale Real-Time Object Detection in the NMS-Free Era: A Comparative Performance Evaluation of YOLOv8 and YOLO26》（8.0/10）, 《Optimus: Elastic Decoding for Efficient Diffusion LLM Serving》（8.0/10）
 - 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202605/28/README](/202605/28/README)
+- 详情：[/202605/29/README](/202605/29/README)
 
 ### 精读区论文标签
-1. [Neuromorphic Control of a Flapping-Wing Robot on Resource-Constrained Hardware](/202605/28/2605.19430v1-neuromorphic-control-of-a-flapping-wing-robot-on-resource-constrained-hardware)  
+1. [ACALSim: A Scalable Parallel Simulation Framework for High-Performance System Design Space Exploration](/202605/29/2605.22936v1-acalsim-a-scalable-parallel-simulation-framework-for-high-performance-system-design-space-exploration)  
    标签：评分：8.0/10、query:hwnas
-   evidence：在资源受限的ESP32微控制器上实现类脑控制
-2. [DAG-Based QoS-Aware Dynamic Task Placement for Networked Multi-Stage Control Pipelines](/202605/28/2605.19887v1-dag-based-qos-aware-dynamic-task-placement-for-networked-multi-stage-control-pipelines)  
+   evidence：AI加速器设计空间探索的仿真框架
+2. [ModeSwitch-LLM: A Lightweight Phase-Aware Controller for Cross-Mode LLM Inference on a Single GPU](/202605/29/2605.23057v1-modeswitch-llm-a-lightweight-phase-aware-controller-for-cross-mode-llm-inference-on-a-single-gpu)  
    标签：评分：8.0/10、query:hwnas
-   evidence：边缘机器人的控制-通信-计算协同设计
-3. [GEM: GPU-Variability-Aware Expert to GPU Mapping for MoE Systems](/202605/28/2605.19945v1-gem-gpu-variability-aware-expert-to-gpu-mapping-for-moe-systems)  
+   evidence：利用量化模式和批处理提高大模型推理效率的软硬件协同设计
+3. [To Overlay or to Customize? Revisiting Architectural Choices in Heterogeneous Systems](/202605/29/2605.23630v1-to-overlay-or-to-customize-revisiting-architectural-choices-in-heterogeneous-systems)  
    标签：评分：8.0/10、query:hwnas
-   evidence：感知GPU差异的映射以最大化MoE系统的计算利用率
-4. [TIDE: Efficient and Lossless MoE Diffusion LLM Inference with I/O-aware Expert Offload](/202605/28/2605.20179v1-tide-efficient-and-lossless-moe-diffusion-llm-inference-with-io-aware-expert-offload)  
+   evidence：异构系统中的软硬件协同设计权衡
+4. [SA-Kura: An Energy-Efficient Systolic Array Accelerator for Locally-Coupled Kuramoto Drift in Diffusion Sampling](/202605/29/2605.24016v1-sa-kura-an-energy-efficient-systolic-array-accelerator-for-locally-coupled-kuramoto-drift-in-diffusion-sampling)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限设备部署的I/O感知专家卸载
-5. [Quant.npu: Enabling Efficient Mobile NPU Inference for on-device LLMs via Fully Static Quantization](/202605/28/2605.20295v1-quantnpu-enabling-efficient-mobile-npu-inference-for-on-device-llms-via-fully-static-quantization)  
+   evidence：针对特定扩散内核的高能效脉动阵列加速器设计
+5. [EVA: Accelerating LLM Decoding via an Efficient Vector Quantization Architecture](/202605/29/2605.24144v1-eva-accelerating-llm-decoding-via-an-efficient-vector-quantization-architecture)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对NPU硬件约束的全静态量化
-6. [Hybrid Edge-HPC Systems for Low-Latency Data-Driven Inference](/202605/28/2605.20532v1-hybrid-edge-hpc-systems-for-low-latency-data-driven-inference)  
+   evidence：加速受内存限制的解码过程并提高现代加速器的利用率
+6. [MX-SAFE: Versatile Inference- and Training-Proof Microscaling Format with On-the-Fly Exponent and Mantissa Bit Allocation](/202605/29/2605.24391v1-mx-safe-versatile-inference--and-training-proof-microscaling-format-with-on-the-fly-exponent-and-mantissa-bit-allocation)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于低延迟推理的混合边缘-HPC架构
+   evidence：深度学习的硬件友好型动态量化方案
 
 ### 速读区论文标签
-1. [Llamas on the Web: Memory-Efficient, Performance-Portable, and Multi-Precision LLM Inference with WebGPU](/202605/28/2605.20706v1-llamas-on-the-web-memory-efficient-performance-portable-and-multi-precision-llm-inference-with-webgpu)  
+1. [XL-HD: Extended Learning in Hyperdimensional Computing via Deterministic Projections for In-Memory Accelerators](/202605/29/2605.24788v1-xl-hd-extended-learning-in-hyperdimensional-computing-via-deterministic-projections-for-in-memory-accelerators)  
    标签：评分：8.0/10、query:hwnas
-   evidence：利用静态内存规划和 WebGPU 实现内存高效的 LLM 推理
-2. [E-ReCON: An Energy- and Resource-Efficient Precision-Configurable Sparse nvCIM Macro for Conventional and Spiking Neural Edge Inference](/202605/28/2605.20717v1-e-recon-an-energy--and-resource-efficient-precision-configurable-sparse-nvcim-macro-for-conventional-and-spiking-neural-edge-inference)  
+   evidence：专为边缘计算系统中的内存加速而定制
+2. [Multiscale Real-Time Object Detection in the NMS-Free Era: A Comparative Performance Evaluation of YOLOv8 and YOLO26](/202605/29/2605.24831v1-multiscale-real-time-object-detection-in-the-nms-free-era-a-comparative-performance-evaluation-of-yolov8-and-yolo26)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于边缘推理的高能效存内计算
-3. [SpineContextResUNet: A Computationally Efficient Residual UNet for Spine CT Segmentation](/202605/28/2605.20760v1-spinecontextresunet-a-computationally-efficient-residual-unet-for-spine-ct-segmentation)  
+   evidence：资源受限环境下的实时目标检测
+3. [Optimus: Elastic Decoding for Efficient Diffusion LLM Serving](/202605/29/2605.24832v1-optimus-elastic-decoding-for-efficient-diffusion-llm-serving)  
    标签：评分：8.0/10、query:hwnas
-   evidence：适用于边缘设备的高效计算架构
-4. [ELSA: An ELastic SNN Inference Architecture for Efficient Neuromorphic Computing](/202605/28/2605.20802v1-elsa-an-elastic-snn-inference-architecture-for-efficient-neuromorphic-computing)  
+   evidence：通过弹性解码提高硬件利用率
+4. [CSPMNet: Pareto-Efficient Automatic Modulation Classification With Learnable Complex Subband Phase Motion](/202605/29/2605.25099v1-cspmnet-pareto-efficient-automatic-modulation-classification-with-learnable-complex-subband-phase-motion)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对高效类脑计算的SNN专用加速器架构
-5. [LiteViLNet: Lightweight Vision-LiDAR Fusion Network for Efficient Road Segmentation](/202605/28/2605.21007v1-litevilnet-lightweight-vision-lidar-fusion-network-for-efficient-road-segmentation)  
+   evidence：针对资源受限接收器的帕累托高效且轻量级的模型设计
+5. [Neuromorphic LiDAR-based Bird's Eye View Object Detection using Energy-efficient Spiking Neural Networks](/202605/29/2605.25293v1-neuromorphic-lidar-based-birds-eye-view-object-detection-using-energy-efficient-spiking-neural-networks)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于嵌入式平台实时部署的轻量级多模态网络
-6. [Genetic Programming with Transformer-Based Mutation for Approximate Circuit Design](/202605/28/2605.21055v1-genetic-programming-with-transformer-based-mutation-for-approximate-circuit-design)  
+   evidence：适用于资源受限平台的能效脉冲神经网络
+6. [A general tensor-structured compression scheme for efficient large language models](/202605/29/2605.25344v1-a-general-tensor-structured-compression-scheme-for-efficient-large-language-models)  
    标签：评分：8.0/10、query:hwnas
-   evidence：近似算术电路的自动设计
-7. [FTerViT: Fully Ternary Vision Transformer](/202605/28/2605.21171v1-ftervit-fully-ternary-vision-transformer)  
+   evidence：原生可执行的张量结构压缩
+7. [Profiling-Driven Adaptive Distributed Transformer Inference on Embedded Edge Deployment](/202605/29/2605.25682v1-profiling-driven-adaptive-distributed-transformer-inference-on-embedded-edge-deployment)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限微控制器的三值化方法以减少内存占用
-8. [PALS: Power-Aware LLM Serving for Mixture-of-Experts Models](/202605/28/2605.21427v1-pals-power-aware-llm-serving-for-mixture-of-experts-models)  
+   evidence：嵌入式边缘部署与通信瓶颈的硬件原型研究
+8. [DiSC: Resolution-Scalable Acceleration of Diffusion Models by Exploiting Sparsity and Cached Token Reuse with Hash-based Distribution](/202605/29/2605.25798v1-disc-resolution-scalable-acceleration-of-diffusion-models-by-exploiting-sparsity-and-cached-token-reuse-with-hash-based-distribution)  
    标签：评分：8.0/10、query:hwnas
-   evidence：功耗感知运行时，通过优化GPU功耗限制和批处理大小提升能效
-9. [CompPow: A Case for Component-level GPU Power Management](/202605/28/2605.21847v1-comppow-a-case-for-component-level-gpu-power-management)  
+   evidence：稀疏感知硬件加速器与软件算法协同设计
+9. [OrpQuant: Geometric Orthogonal Residual Projection for Multiplier-Free Power-of-Two Transformer Quantization](/202605/29/2605.26092v1-orpquant-geometric-orthogonal-residual-projection-for-multiplier-free-power-of-two-transformer-quantization)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于提高能效的组件级GPU电源管理
-10. [Accelerating Vision Foundation Models with Drop-in Depthwise Convolution](/202605/28/2605.22132v1-accelerating-vision-foundation-models-with-drop-in-depthwise-convolution)  
+   evidence：面向边缘设备的硬件高效无乘法器量化
+10. [Verilog-Evolve: Feedback-Driven and Skill-Evolving Verilog Generation](/202605/29/2605.26498v1-verilog-evolve-feedback-driven-and-skill-evolving-verilog-generation)  
    标签：评分：8.0/10、query:hwnas
-   evidence：面向资源受限设备的高效架构设计
-11. [Slimmable ConvNeXt: Width-Adaptive Inference for Efficient Multi-Device Deployment](/202605/28/2605.22677v1-slimmable-convnext-width-adaptive-inference-for-efficient-multi-device-deployment)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：用于高效多设备部署的宽度自适应推理
+   evidence：针对硬件目标的反馈驱动Verilog生成
 
 
 <div class="dpr-home-promo-card">
