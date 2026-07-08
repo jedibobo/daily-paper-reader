@@ -1,0 +1,287 @@
+Title: Dynamic Ultrasound Beamforming Using Left-to-Right Arithmetic Adders on FPGA
+
+URL Source: https://arxiv.org/pdf/2606.31490v1
+
+Published Time: Wed, 01 Jul 2026 00:58:40 GMT
+
+Number of Pages: 10
+
+Markdown Content:
+# DYNAMIC ULTRASOUND BEAMFORMING USING 
+
+# LEFT -TO -R IGHT ARITHMETIC ADDERS ON FPGA 
+
+A P REPRINT 
+
+Muhammad Usman 1, Shujaat Khan 2, and Dorit Merhof 11Faculty of Informatics and Data Science, University of Regensburg, 93053 Regensburg, Germany 
+
+{muhammad.usman,dorit.merhof }@ur.de 
+
+> 2
+
+Department of Computer Engineering, College of Computing and Mathematics, KFUPM, Dhahran, 31261, Saudi Arabia 
+
+shujaat.khan@kfupm.edu.sa 
+
+## ABSTRACT 
+
+Adder trees are the computational backbone of delay-and-sum (DAS) ultrasound beamforming, where their implementation directly determines the energy, throughput, and area of a real-time imaging pipeline. Conventional parallel adder trees perform full-precision combinational reduc-tion on every sample, leading to wide critical paths, high LUT consumption, and timing failures on small FPGA devices. This paper presents an alternative adder tree architecture based on left-to-right (LR) or most significant digit first (MSDF) arithmetic . We implement the proposed and conven-tional adder trees on a Xilinx Zynq XC7Z010 FPGA and evaluate them for DAS beamforming of a 64-channel ultrasound dataset. The proposed design uses 2.5 × fewer LUTs than the smallest con-ventional tree, successfully meets the timing constraint, and consumes 23% less dynamic power than the most efficient conventional baseline. A key advantage of the proposed MSDF adder tree is that it can generate high-quality beamformed images without waiting for full-precision comple-tion. This naturally enables dynamic precision at runtime with negligible control overhead, since precision selection is achieved simply by stopping the computation clock after the desired number of cycles. Such quality–energy scalability is fundamentally unavailable in conventional fixed-cycle adder trees. Iso-area replication enables up to 15 parallel instances on the XC7Z010, achieving 67 FPS, which is 80% higher throughput than the best conventional design. 
+
+Keywords Left-to-right arithmetic, FPGA, adder tree, ultrasound beamforming, dynamic precision, energy efficiency. 
+
+## 1 Introduction 
+
+Ultrasound imaging is widely used in clinical practice because it provides real-time visualization, portability, and safe operation without ionizing radiation [1]. In a conventional B-mode system, a transducer array acquires raw radio-frequency (RF) channel data, which must then be beamformed to reconstruct the final image. Delay-and-sum (DAS) remains the most widely used beamforming method because of its simplicity, effectiveness, and suitability for real-time imaging. The full DAS receive pipeline encompasses delay calculation, sample interpolation, and coherent summation across all active channels. While adaptive beamformers and deep-learning-based reconstruction methods can improve image contrast and spatial resolution beyond conventional DAS [2–4], their substantially higher computa-tional complexity renders real-time deployment on compact embedded platforms impractical. DAS therefore remains the de facto standard beamforming kernel for portable and FPGA-based ultrasound systems, and its efficient hardware realization is a continuing research priority. As illustrated in Fig. 1, DAS beamforming forms each output pixel by first applying the appropriate focusing delays to the received channel samples and then summing the aligned values across the receive aperture. For an N -element 
+
+Accepted for publication at IEEE 39th International System-on-Chip Conference (SOCC) 
+
+> arXiv:2606.31490v1 [cs.AR] 30 Jun 2026
+
+Dynamic Ultrasound Beamforming Using Left-to-Right Arithmetic Adders on FPGA A P REPRINT 
+
+Figure 1: DAS beamforming pipeline, where channel samples are delay-aligned and summed to form beamformed pixels across scanlines array, the beamformed output at pixel m is given by: 
+
+y(m) =  
+
+> N−1
+
+X
+
+> n=0
+
+xn(m − ∆n(m)) , (1) where xn(·) denotes the RF signal acquired at channel n and ∆n(m) is the corresponding focusing delay. Since this accumulation must be repeated for every pixel, channel summation becomes the dominant arithmetic kernel in real-time ultrasound beamforming and a major source of performance and energy cost, particularly on compact FPGA-based systems [5]. For a 64-channel system producing over 240,000 pixel summations per frame, sustaining clinical frame rates of 30–60 FPS requires the adder tree to perform hundreds of millions of signed additions per second, placing tight demands on both area and power. FPGA-based beamformers are attractive because they provide deterministic latency, abundant parallelism, and design reconfigurability [6, 7]. In conventional implementations, the delayed channel samples are reduced by a parallel adder tree within a single clock cycle [8]. While this maximizes throughput per cycle, it also creates several challenges on resource-constrained FPGA devices: (i) the adder tree may occupy a substantial number of LUTs, (ii) the long combinational paths can reduce the maximum operating frequency and complicate timing closure [9], and (iii) the reduction is performed at fixed full precision even though downstream stages, such as envelope detection, may not require all least-significant bits. To address these limitations, we propose to use left-to-right (LR) arithmetic [10], for channel-sample accumulation in the DAS beamforming pipeline. In LR arithmetic, operands are consumed and results are produced from the most-significant digit (MSD), so the most informative part of the output becomes available first [11]. This MSD-first property enables early termination when full precision is unnecessary. The resulting left-to-right adder (LRA) tree replaces wide combinational accumulation with a compact registered digit-serial structure that is better suited to area-and timing-constrained FPGA implementations. This paper makes the following contributions: 1. We propose an MSD-first left-to-right adder-tree architecture for DAS beamforming, realized as a digit-serial reduction structure with an internal registered pipeline. 2. We conduct a comprehensive FPGA evaluation of exact, approximate, and proposed adder-tree architectures using switching-activity interchange format (SAIF)-based post-synthesis power analysis on a Xilinx Zynq XC7Z010 with a 64-channel ultrasound beamforming workload. 3. We show that the proposed architecture supports run-time dynamic precision through variable-K computa-tion, and we characterize the resulting PSNR, SSIM, and B-mode image quality versus energy trade-off. 4. We show through implementation and iso-area scaling analysis that the proposed design provides a more favorable area-throughput-timing trade-off than conventional adder trees on a resource-constrained FPGA platform. 
+
+2Dynamic Ultrasound Beamforming Using Left-to-Right Arithmetic Adders on FPGA A P REPRINT 
+
+Figure 2: Proposed LRA64 architecture. (a) Left-to-right adder (LRA) cell composed of two full adders and five pipeline registers, forming a two-stage SD-2 digit-serial pipeline with initial delay δ = 2 . (b) LRA64 adder tree formed by 63 LRA cells organized as a 6-level balanced binary tree for MSD-first accumulation. 
+
+## 2 Proposed Architecture 
+
+This section describes the baseline and proposed adder-tree organizations considered in this work. We first summarize the conventional reduction architecture and then present the proposed LRA64 design, including its cell structure, tree organization, output reconstruction, and support for run-time precision control. 
+
+2.1 LRA64 Adder Tree 2.1.1 LRA Cell 
+
+The left-to-right adder (LRA) cell in Fig. 2(a) performs digit-serial addition in a most-significant-digit-first fashion us-ing redundant signed-digit operands. Since the most-significant digit can be processed as soon as it becomes available, the cell naturally supports pipelined MSDF accumulation. Its operation follows a two-step addition scheme in which local logic and pipeline registers are used to suppress long carry propagation and generate intermediate results incrementally. As a result, the cell produces valid output digits with an initial delay of δ = 2 cycles while preserving a very small combinational depth. The implementation uses two full adders and five pipeline registers. Further derivation of the underlying MSDF-addition principle is given in [10]. 
+
+2.1.2 LRA Tree and Accumulation 
+
+As shown in Fig. 2(b), the complete LRA64 reduction network is constructed by arranging the LRA cells in a balanced binary hierarchy. This organization preserves a registered boundary at every level, thereby avoiding the long combina-tional paths of conventional adder trees. The redundant-digit outputs generated by the tree are finally converted back to a conventional binary sum by a shift-and-add accumulator. 
+
+2.1.3 MSD-First Encoding and Output Reconstruction 
+
+Before reduction, each signed 16-bit input is converted into an MSD-first digit stream for the LRA tree. The encoder emits the sign contribution first and then serializes the remaining magnitude bits across separate positive and negative channels. After the selected K bit planes have been processed, zeros are injected to flush the registered tree. This encoding step is what enables variable-K operation and keeps the internal computation in a narrow digit-serial form. The redundant-digit output stream produced by the LRA tree is converted to a conventional binary result by a shift-and-add accumulator: 
+
+St = 2 St−1 + zp(t) − zn(t), (2) where zp(t) and zn(t) are the positive and negative output bits generated at cycle t. Thus, each cycle shifts the current partial result by one position and incorporates the decoded signed digit. After the selected computation window has completed, the accumulator contains the final binary sum. When all input bit planes are processed, the result matches that of the corresponding full-precision conventional reduction. 
+
+3Dynamic Ultrasound Beamforming Using Left-to-Right Arithmetic Adders on FPGA A P REPRINT 64-Input    
+
+> Encoder
+> Adder-Tree
+> 722 LUTs
+> Core 0
+> 64-Input
+> Encoder
+> K Control
+> 722 LUTs
+> Core 1
+> 64-Input
+> Encoder
+> Adder-Tree
+> 722 LUTs
+> Core 2
+> 64-Input
+> Encoder
+> Adder-Tree
+> 722 LUTs
+> Core 3
+> 64-Input
+> Encoder
+> Adder-Tree
+> 722 LUTs
+> Core 4
+> 64-Input
+> Encoder
+> Adder-Tree
+> 722 LUTs
+> Core 5
+> Pixel Dispatcher (Round-Robin)
+> Distributes pixels to core in a round-robin fashion
+> Adder-Tree
+> Output Collector Beamformed Pixel
+> Collects results from all cores and assembles beamformed pixel output
+> Data Flow Control Signals
+
+Figure 3: System-level FPGA organization of the proposed LRA64 design. Parallel cores process independent pixel summations under shared precision control. The six illustrated cores use only 25% of the XC7Z010 LUT budget, while up to 15 instances can be accommodated on the device. 
+
+2.2 Dynamic Precision via Early Termination 
+
+The MSD-first operation of LRA64 enables dynamic precision control [12]. Since the most-significant digit of the result is formed first, the computation may be terminated after processing only the first K bit planes, with K < 16 .This reduces both cycle count and switching activity, and enables run-time, application-aware precision control on a per-frame or per-mode basis. Such flexibility is not available in conventional single-cycle adder trees. 
+
+2.3 Iso-Area Parallelism 
+
+Owing to its compact implementation, LRA64 can be replicated more aggressively on the XC7Z010 than any con-ventional adder tree. Under an iso-area scaling analysis, identical instances are instantiated until the FPGA resource budget is exhausted. LRA64 ( 722 LUTs, 2314 FFs) is limited by FF usage and supports up to 15 parallel instances, whereas all conventional baselines are limited by LUT capacity. This directly improves throughput: the projected performance of LRA64 reaches 66.9 FPS, compared with 38.0 FPS for the best exact conventional baseline (RCA) and 11.0 FPS for Kogge–Stone. The corresponding effective input rate is 1047.7 MSa/s for LRA64, versus 595.3 MSa/s for RCA, yielding a 80% advantage. The resulting multi-instance organization is illustrated in Fig. 3. 
+
+## 3 Evaluation Setup 
+
+This section discusses about the dataset used in this study, the evaluation framework, including the beamforming kernel, baseline architectures, the flow of FPGA synthesis its power-analysis and the corresponding metrics used to assess image quality and dynamic precision. 
+
+3.1 Dataset 
+
+The RF dataset used in this study was acquired using an E-CuBE R12 ultrasound system equipped with a linear probe operating at 8.5 MHz. Data collection was performed on an ATS-549 multipurpose tissue-mimicking phantom, which provides standardized targets for evaluating image quality in terms of resolution, contrast, and spatial accuracy [13]. 
+
+4Dynamic Ultrasound Beamforming Using Left-to-Right Arithmetic Adders on FPGA A P REPRINT 
+
+Figure 4: Proposed FPGA architecture of the N -channel MSD-first adder tree with FSM-based control and run-time precision control. 
+
+3.2 Beamforming Kernel and Workload 
+
+This work focuses on the channel-accumulation kernel of delay-and-sum (DAS) beamforming. In the considered setup, each beamformed pixel is obtained by summing the delay-compensated samples across all input channels: 
+
+S[p] = 
+
+> 63
+
+X
+
+> c=0
+
+xc[p], (3) where xc[p] denotes the aligned sample from channel c at pixel p. We evaluate this kernel using a 64-channel complex-valued ultrasound RF dataset with 122 304 pixels. Since the RF data is complex-valued, the real and imaginary com-ponents are processed separately, resulting in 244 608 real-valued channel-summation operations per frame. Figure 4 provides a high-level view of the corresponding FPGA architecture used to implement this reduction with run-time precision control. 
+
+3.3 Compared Architectures 
+
+The comparison includes seven exact adder-tree architectures, namely Ripple-Carry Adder (RCA), Carry-Lookahead Adder (CLA), Carry-Skip Adder (CSKA), Carry-Select Adder (CSLA) [14], Brent–Kung [15], Kogge–Stone [16], and Sklansky [17], together with EvoApprox [18] as an approximate baseline. Collectively, these designs span a broad range of conventional adder trade-offs. All baselines implement the same LUT-based reduction of signed 16-bit channel samples. The proposed LRA64 differs from these fixed-precision single-cycle architectures by employing an MSD-first digit-serial adder tree in a balanced binary structure. This organization enables run-time precision control through a config-urable parameter K ∈ { 1, . . . , 16 }, allowing lower-order bit planes to be omitted without modifying the datapath. 
+
+3.4 Synthesis and Power Measurement 
+
+All designs target the Xilinx Zynq XC7Z010 ( 17 600 LUTs, 35 200 FFs) in Vivado 2023.2 with a 100 MHz timing constraint. A common wrapper is used for all architectures to ensure a fair comparison, so that the adder-tree imple-mentation is the only varying component. Power is estimated using SAIF-based post-synthesis simulation. As summarized in Fig. 5, Vivado first generates the post-synthesis netlist, after which a testbench drives representative beamforming summations in XSIM to capture per-net switching activity in SAIF format. This activity is then back-annotated into the power analyzer to report dynamic power. 
+
+5Dynamic Ultrasound Beamforming Using Left-to-Right Arithmetic Adders on FPGA A P REPRINT 
+
+Table 1: Comparison of exact, approximate, and proposed adder-tree designs on Xilinx Zynq XC7Z010 (best results indicated in bold).                                                                                                       
+
+> Design Type LUTs ↓FFs ↓Fmax (MHz) ↑Dyn. (mW) ↓Energy (pJ/pixel) ↓Energy ( μJ/img) ↓FPS (1 inst.) ↑Max Inst. ↑FPS max ↑
+> RCA Exact 1823 1052 69.3 13 12577.2 3076.49 4.23 938.03 CLA Exact 2374 1052 66.0 14 14222.0 3478.80 4.02 728.17 CSKA Exact 2871 1056 56.0 14 16763.0 4100.36 3.41 620.49 CSLA Exact 4068 1049 60.2 17 18923.3 4628.80 3.67 414.69 Brent–Kung Exact 2374 1052 66.0 13 13206.1 3230.32 4.02 728.17 Kogge–Stone Exact 4454 1049 60.0 16 17857.4 4368.06 3.66 310.99 Sklansky Exact 2374 1052 66.0 13 13206.1 3230.32 4.02 728.17 EvoApprox Approximate 2903 1052 62.2 14 15084.9 3689.89 3.79 622.76 LRA64 (Proposed) MSDF 722 2314 100.4 10 9166.9 2242.29 4.46 15 66.90
+
+3.5 Quality Metrics 
+
+Image fidelity is evaluated relative to a 64-bit floating-point reference using normalized mean squared error (NMSE), peak signal-to-noise ratio (PSNR), and structural similarity index (SSIM) [19]. All exact adder-tree baselines and LRA64 at full precision ( K=16 ) produce identical 16-bit-quantized outputs. For the dataset used in this study, the approximate baselines likewise introduce no observable difference in the final quantized images, indicating that their deviations are confined to low-order intermediate bits. 
+
+3.6 Dynamic Precision Sweep 
+
+To evaluate the run-time precision capability of LRA64, we sweep K from 1 to 16 and measure the resulting energy and image quality. For a given setting, the compute phase requires K+12 cycles, while the total latency per result is 
+
+K+76 cycles including the 64-cycle load phase. 
+
+## 4 Results and Discussion 
+
+4.1 Overall FPGA Comparison 
+
+The evaluated adder-tree designs exhibit clear trade-offs among area, timing, energy, and throughput, with the pro-posed LRA64 providing the most favorable overall balance on the target FPGA, as summarized in Table 1. The comparison includes exact, approximate, and proposed MSDF-based designs, and reports resource usage, achievable clock frequency, power, energy, and throughput under both single-instance and iso-area multi-instance deployment. LRA64 achieves the smallest LUT footprint, the highest operating frequency, and the lowest power and energy per pixel among all evaluated architectures. It consumes 10 mW dynamic power (23% below RCA, 41% below CSLA) since digit-serial processing switches only one bit plane per cycle. The per-image energy of 2242 .29 μJ is highly competitive, achieving 27% lower energy than RCA, 14% lower than Kogge–Stone, and 19% lower than CSLA. As shown in Fig. 6, the area–energy tradeoff places LRA64 at the Pareto-optimal low-area corner. RTL Design Vivado  
+
+> Synthesis
+> Post-Synth
+> Netlist
+> SAIF File
+> (toggle count)
+> XSIM
+> Functional Sim
+> Testbench
+> (1000 sums)
+> Power Report
+> Pdyn ,Pstat
+> Vivado Power
+> Analyzer
+> Design Flow
+> Simulation Flow
+> Power
+> Analysis
+
+Figure 5: SAIF-based post-synthesis power analysis flow. RTL is synthesised in Vivado, then a testbench drives the post-synthesis netlist in XSIM to produce a SAIF file with per-net toggle counts. Vivado’s power analyzer combines the SAIF data with the netlist to compute accurate dynamic power at high confidence. 
+
+6Dynamic Ultrasound Beamforming Using Left-to-Right Arithmetic Adders on FPGA A P REPRINT 
+
+Figure 6: Area–energy scatter plot for all nine designs. LRA64 (green diamond) occupies the low-area corner at 722 LUTs while delivering competitive per-image energy ( 2242 .29 μJ), making it the Pareto-optimal choice for resource-constrained FPGA targets. 
+
+4.2 Dynamic Precision Trade-off and B-Mode Quality 
+
+A key capability of LRA64 is its support for dynamic precision control. Because computation proceeds MSD-first, accumulation can be terminated once sufficient output fidelity has been reached, discarding only the least-significant bits. This is fundamentally different from conventional adder trees, which must complete the full combinational reduction regardless of the required output quality. The quality trend across the precision range is shown in Fig. 7, which reports PSNR and SSIM versus K for a simulated point-scatterer phantom relative to a float64 DAS reference. Image fidelity improves steadily as K increases, with the most pronounced gain appearing between K=8 and K=12 . Selected operating points are listed in Table 2. At K=14 ,LRA64 achieves PSNR = 36.30 dB and SSIM = 0.992, while still saving 2.2% energy relative to K=16 . At K=12 ,the design reaches SSIM = 0.960 with 4.3% energy savings. Below K=10 , however, image quality degrades rapidly, making such settings more suitable for preview-quality or strongly energy-constrained modes. This trend is also evident in the reconstructed B-mode images shown in Fig. 8. At low precision, the image is dom-inated by noise and lacks coherent structure, whereas scatterer features begin to emerge at intermediate K. High structural fidelity is recovered for K ≥ 12 , and the reconstruction at K=14 is visually almost identical to the full-precision output. These results demonstrate that LRA64 provides a continuous run-time precision knob, enabling the trade-off between image quality and implementation efficiency without hardware reconfiguration. 
+
+7Dynamic Ultrasound Beamforming Using Left-to-Right Arithmetic Adders on FPGA A P REPRINT 2 4 6 8 10 12 14 16 
+
+Precision K (bits) 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+> SSIM
+
+SSIM=0.95 K=12 
+
+K=14 
+
+K=16 
+
+SSIM 
+
+PSNR 
+
+0
+
+5
+
+10 
+
+15 
+
+20 
+
+25 
+
+30 
+
+35 
+
+40 
+
+> PSNR (dB)
+
+Figure 7: PSNR and SSIM as functions of precision K, obtained by applying LRA64-computed sums to a simulated point-scatterer phantom and comparing the reconstructed B-mode images against a float64 DAS reference. Table 2: LRA64 dynamic-precision sweep. Energy savings are relative to full precision ( K=16 ).                                         
+
+> KComp. cyc Total cyc PSNR (dB) SSIM Saving (%) 113 77 7.30 0.050 16.3 416 80 7.49 0.054 13.0 820 84 15.83 0.266 8.7 10 22 86 22.72 0.721 6.5 12 24 88 31.08 0.960 4.3 14 26 90 36.30 0.992 2.2 16 28 92 36.67 0.993 0.0
+
+## 5 Conclusion 
+
+This paper presented a comprehensive comparison of adder-tree architectures for the DAS ultrasound beamforming kernel on a Xilinx Zynq XC7Z010. All designs implement the same core operation, namely the accumulation of 64 signed 16-bit channel samples, thereby isolating the effect of the underlying adder-tree architecture on area, timing, energy, and throughput. The results show that the proposed left-to-right adder tree provides the most favorable overall trade-off on this resource-constrained FPGA platform. It achieves the smallest area at 722 LUTs, is the only design that satisfies the 100 MHz timing target, and maintains per-image energy comparable to the best exact conventional alternatives at full precision. More importantly, unlike conventional fixed-precision trees, LRA64 enables run-time dynamic precision control, allowing a continuous quality-energy trade-off with near-lossless image quality at K =12 and further energy reduction at lower precision settings. Under iso-area scaling, this efficiency translates into 
+
+8Dynamic Ultrasound Beamforming Using Left-to-Right Arithmetic Adders on FPGA A P REPRINT 
+
+Figure 8: B-mode image quality at six precision levels (point-scatterer phantom). Row 1: Float64 reference, K = 8 
+
+(noise-dominated, SSIM = 0.107), K = 10 (preview quality, SSIM = 0.721). Row 2: K = 12 (SSIM = 0.960, above 0.95 threshold), K = 14 (near-reference, SSIM = 0.992), K = 16 full precision (SSIM = 0.993). higher achievable throughput through multi-instance parallelism. These results highlight LR arithmetic as a promising direction for real-time and energy-aware ultrasound beamforming on compact FPGA devices. Future work will extend the approach to volumetric beamforming, include post-implementation power analysis, and investigate adaptive per-pixel precision control. 
+
+## Acknowledgement 
+
+This work was supported by the German Research Foundation (Deutsche Forschungsgemeinschaft, DFG) under project number ‘573796083’. 
+
+## References 
+
+[1] T. L. Szabo, Diagnostic ultrasound imaging: inside out . Academic press, 2013. [2] B. Luijten, N. Chennakeshava, Y. C. Eldar, M. Mischi, and R. J. van Sloun, “Ultrasound signal processing: From models to deep learning,” Ultrasound in medicine & biology , vol. 49, no. 3, pp. 677–698, 2023. [3] J. Yan, B. Wang, K. Riemer, J. Hansen-Shearer, M. Lerendegui, M. Toulemonde, C. J. Rowlands, P. D. Wein-berg, and M.-X. Tang, “Fast 3d super-resolution ultrasound with adaptive weight-based beamforming,” IEEE Transactions on Biomedical Engineering , vol. 70, no. 9, pp. 2752–2761, 2023. [4] G. Malamal and M. R. Panicker, “Fpga based adaptive receive apodization design for diagnostic ultrasound imaging,” in 2024 IEEE International Symposium on Circuits and Systems (ISCAS) . IEEE, 2024, pp. 1–4. [5] W. Wang and Z. Feng, “Portable and cost-effective handheld ultrasound system utilizing FPGA-based synthetic aperture imaging,” IEEE Open Journal of Nanotechnology , vol. 5, pp. 245–255, 2024. 
+
+9Dynamic Ultrasound Beamforming Using Left-to-Right Arithmetic Adders on FPGA A P REPRINT 
+
+[6] Z. Kou, Q. You, J. Kim, Z. Dong, M. R. Lowerison, N. V. C. Sekaran, D. A. Llano, P. Song, and M. L. Oelze, “High-level synthesis design of scalable ultrafast ultrasound beamformer with single fpga,” IEEE transactions on biomedical circuits and systems , vol. 17, no. 3, pp. 446–457, 2023. [7] X. Zhang, S. Qi, Y. Li, L. Xu, and J. Ma, “Ultrafast ultrasound imaging system with beamforming on single fpga,” IEEE Transactions on Instrumentation and Measurement , 2025. [8] J. U. Kidav et al. , “An fpga-accelerated parallel digital beamforming core for medical ultrasound sector imaging,” 
+
+IEEE Transactions on Ultrasonics, Ferroelectrics, and Frequency Control , vol. 69, no. 2, pp. 553–564, 2021. [9] V. Meacci, A. Dallai, S. Ricci, and E. Boni, “Hardware description language versus high-level synthesis for the FPGA implementation of ultrasound beamformers: A comparative analysis,” in 2024 IEEE International Ultrasonics Symposium (IUS) . IEEE, 2024, pp. 1–4. [10] M. D. Ercegovac and T. Lang, Digital Arithmetic . Morgan Kaufmann, 2004. [11] M. Usman, M. D. Ercegovac, and J.-A. Lee, “Low-latency online multiplier with reduced activities and mini-mized interconnect for inner product arrays,” Journal of Signal Processing Systems , vol. 95, no. 7, pp. 777–796, 2023. [12] M. S. Ibrahim, M. Usman, M. Z. Nisar, and J.-A. Lee, “Dslot-nn: Digit-serial left-to-right neural network accel-erator,” in 2023 26th Euromicro Conference on Digital System Design (DSD) . IEEE, 2023, pp. 686–692. [13] S. Khan, J. Huh, and J. C. Ye, “Adaptive and compressive beamforming using deep learning for medical ultra-sound,” IEEE transactions on ultrasonics, ferroelectrics, and frequency control , vol. 67, no. 8, pp. 1558–1572, 2020. [14] J. M. Rabaey, A. P. Chandrakasan, and B. Nikoli´ c, Digital integrated circuits: a design perspective . Pearson Education, Incorporated., 2003. [15] Brent and Kung, “A regular layout for parallel adders,” IEEE transactions on Computers , vol. 100, no. 3, pp. 260–264, 1982. [16] U. Penchalaiah and S. K. Vg, “Design of high-speed and energy-efficient parallel prefix kogge stone adder,” in 
+
+2018 IEEE International Conference on System, Computation, Automation and Networking (ICSCA) . IEEE, 2018, pp. 1–7. [17] J. Sklansky, “An evaluation of several two-summand binary adders,” IRE Transactions on Electronic Computers ,no. 2, pp. 213–226, 2009. [18] V. Mrazek, R. Hrbacek, Z. Vasicek, and L. Sekanina, “Evoapprox8b: Library of approximate adders and multi-pliers for circuit design and benchmarking of approximation methods,” in Design, Automation & Test in Europe Conference & Exhibition (DATE), 2017 . IEEE, 2017, pp. 258–261. [19] Z. Wang, A. C. Bovik, H. R. Sheikh, and E. P. Simoncelli, “Image quality assessment: from error visibility to structural similarity,” IEEE transactions on image processing , vol. 13, no. 4, pp. 600–612, 2004. 
+
+10

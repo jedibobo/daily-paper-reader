@@ -1,0 +1,1745 @@
+Title: A Multi-Dimensional, Per-Pass Empirical Study of the LLVM Optimization Pipeline
+
+URL Source: https://arxiv.org/pdf/2606.31238v1
+
+Published Time: Wed, 01 Jul 2026 00:40:53 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# A Multi-Dimensional, Per-Pass Empirical Study of the LLVM Optimization Pipeline 
+
+Federico Bruzzone 
+
+Università degli Studi di Milano Computer Science Department, Milan, IT 
+
+federico.bruzzone@unimi.it 
+
+Walter Cazzola 
+
+Università degli Studi di Milano Computer Science Department, Milan, IT 
+
+cazzola@di.unimi.it 
+
+Abstract —Quantifying the marginal impact of individual op-timization passes underpins phase ordering, pass selection, opti-mization design, and analysis of pass/hardware interactions. In LLVM—the standard backend for C/C++, Rust, and ML stacks via MLIR—interactions among optimization passes, measure-ment noise, and pipeline scale make this difficult. We present a systematic, empirical study of the LLVM -O3 optimization pipeline. We decompose the pipeline into cumulative per-pass prefixes. We then measure execution time, compile time, binary size, hardware counters, and RAPL energy across 84,750 mea-surements covering 113 cumulative prefixes of the -O3 pipeline evaluated on 30 PolyBench/C kernels under rigorous noise mitigation. On these compute-bound affine kernels, the pipeline is non-monotone (6.6–9.7% of transitions regress) and strongly back-loaded (the median non-regressing kernel needs 84.8% of the pipeline for 80% of its speedup). Most gains are driven by a small Pareto-dominant core of passes, while the final -O3 
+
+configuration is Pareto-dominated on (size, speedup) for 29 of 30 kernels. We further show that IR instruction count is an unreliable predictor of runtime, that runtime-targeted passes are de facto energy-targeted (30–60% savings), and that the search-free idealized-additive upper bound on losses due to phase interference is 46.35%. These findings enable more informed pass pruning, cost-model calibration, and autotuning. 
+
+Index Terms —Compiler optimizations, Optimizing Compilers, LLVM, Multi-dimensional Empirical study 
+
+I. I NTRODUCTION 
+
+Since the dawn of computing, compiler optimizations have long bridged high-level abstractions and efficient machine code [1]–[6]. Optimizing compilers [7], [8] use analysis passes to guide transformations [9]–[11] that enhance performance without altering observable behavior [12]–[14]. Modern ar-chitectures make this a delicate interplay of interdependent passes [9]. LLVM [15] exemplifies this complexity, serving as the standard backend for C/C++, Rust [16], Julia [17], and—via MLIR [18]—for machine learning (ML) and deep learning (DL) stacks [19], [20] that rely on ML/DL optimiz-ing compilers [21]–[24] (e.g., OpenXLA 1, TVM [25]) and automotive pipelines. 2 Quantifying individual pass impact is therefore critical across these domains. 
+
+The Phase-Ordering Problem. The optimal sequence of optimizations is known to be program-specific [26]–[28]. However, the phase-ordering problem [29]–[31]—finding the 
+
+> 1
+
+openxla.org 
+
+> 2
+
+Tesla Full Self-Driving v14.3: stats.tessie.com/versions/2026.2.9.6 
+
+optimal pass order, which is undecidable in general [32]– [34]—and the complexity of optimization selection [35]–[37] continue to hinder the identification of such ideal config-urations. Compiler autotuning [38]–[44] searches this large space [45]–[47], but effectiveness depends on accurately esti-mating pass impact—complicated by inter-pass dependencies, noisy measurements, and scale [48]. Some transformations even degrade performance [49], [50]. Despite this, both in-dustry practice and academic research still rely on predefined, 
+
+one-size-fits-all pipelines (e.g., -O3 ) due to efficiency and limited user knowledge of the optimization process [51]–[53]. 
+
+Motivation. Quantifying the impact of individual optimiza-tion passes is critical for compiler engineers and end users [54]–[56] as it enables: (i) more effective phase ordering, (ii) improved pass-selection heuristics, (iii) informed optimiza-tion design, and (iv) analysis of optimization-pass interactions with hardware [33]. However, existing work evaluates LLVM optimizations in isolation or focuses mainly on execution time [57], overlooking trade-offs across optimization objec-tives: a pass that improves runtime may increase binary size or degrade cache locality, effects rarely captured in a unified framework. Quantifying pass contributions is also important because the effectiveness of modern optimization pipelines remains under scrutiny. In particular, the debate over hand-written versus compiler-optimized kernels remains open [58]. 3
+
+Our Study. Despite LLVM’s widespread adoption, contribu-tion of individual optimization passes to overall optimization outcomes remains poorly understood [57]. We address this gap with a systematic empirical study of the LLVM -O3 
+
+pipeline, quantifying the effect of individual passes across multiple metrics. Beyond runtime, we measure compile time, binary size, and a broad set of hardware performance counters 4
+
+following a methodology similar to that of Chen et al. [62]. We formulate the following research questions (RQs): 
+
+RQ 1. What is the marginal impact of individual optimiza-tion passes within the LLVM -O3 pipeline? 
+
+RQ 2. To what extent do optimization passes trade off exe-cution speed, compilation overhead, and binary footprint? 
+
+> 3
+
+octoml-optimizes-apache-tvm-for-apples-m1-beats-core-ml-4-by-29 
+
+> 4
+
+E.g., x86 MSR counters for cache misses and cycles/instruction , plus energy measurements via running average power limit (RAPL) [59]–[61]. 
+
+> arXiv:2606.31238v1 [cs.SE] 30 Jun 2026
+
+RQ 3. How do optimization passes affect hardware-level behavior as reflected by performance counters? 
+
+RQ 4. What fraction of achievable speedup is lost to phase interference within the pipeline, and which passes con-tribute most to that loss? 
+
+To support this study, we built an infrastructure that decom-poses an optimization pipeline into its constituent passes and builds a sequence of cumulative prefixes, each extending the previous one by a single pass. For every prefix, we measure the marginal impact of the newly added pass relative to both the preceding prefix (delta) and the -O0 baseline. This enables both a differential analysis of per-pass deltas and a cumulative 
+
+analysis of the progressive evolution of the pipeline. The in-frastructure is platform-independent and configuration-driven. 
+
+Contributions. The paper contributions are:  
+
+> •
+
+a systematic empirical characterization of the LLVM 
+
+-O3 pipeline, jointly quantifying the per-pass impacts of optimization passes on intermediate representation 
+
+(IR) transformations, runtime, microarchitectural behav-ior, and RAPL energy, extending prior studies focused primarily on runtime [57], [62];  
+
+> •
+
+a quantitative analysis of pass interactions and optimiza-tion dynamics, revealing key performance patterns and pitfalls, introducing an idealized-additive upper bound on phase-interference loss, and showing that IR instruction count is an unreliable predictor of runtime; and  
+
+> •
+
+a reusable and extensible infrastructure for automatic pipeline decomposition and multi-metric measurement across optimization pipelines. The rest of the paper is organized as follows. §II provides background, §III describes the methodology, §IV presents the results, §V discusses their implications, §VI addresses threats to validity, §VII reviews related work, and §VIII concludes. II. T HE LLVM O PTIMIZATION PIPELINE 
+
+LLVM is a modular SSA-based compilation frame-work [63]–[65]. Its opt tool applies sequences of analysis and transformation passes that constitute the optimization pipeline. The new pass manager 5 organizes the pipeline hierarchically through nested pass managers operating at different IR gran-ularities: module , function , cgscc , loop , and loop-mssa .Passes may therefore appear multiple times within the pipeline at different levels of the hierarchy. At the top level, the 
+
+module manager coordinates module-wide optimizations (e.g., 
+
+called-value-propagation [66], [67]) and invokes nested managers. The remaining managers apply passes that oper-ate respectively on (i) individual functions (e.g., mem2reg 
+
+which promotes stack allocations to virtual registers [68], [69], and sroa which performs scalar replacement of aggre-gates [70], [71]), (ii) strongly connected components of the call graph (e.g., interprocedural inline [72]), (iii) loops (e.g., 
+
+loop-unroll [73], [74]), and (iv) loops in memory SSA form (e.g., licm which performs loop-invariant code motion [75], 
+
+> 5llvm.org/docs/NewPassManager.html
+
+[76]). Passes execute sequentially over an evolving IR. Con-sequently, the effect of a pass depends on the transforma-tions that precede it, making optimization pipelines inherently 
+
+order-dependent , non-commutative , and non-additive .III. E XPERIMENTAL METHODOLOGY 
+
+We develop an infrastructure that decomposes LLVM pipelines into passes and measures their marginal impacts. The four RQs introduced in §I are operationalized as follows. 
+
+RQ 1. We quantify the marginal impact of each optimization pass by measuring the delta of its performance relative to both the preceding pipeline state and the -O0 baseline. 
+
+RQ 2. We quantify pass-level trade-offs across execution time, compile time, and binary size. 
+
+RQ 3. We characterize the effect of optimization passes on hardware behavior by tracking the evolution of performance counters across the pipeline. 
+
+RQ 4. We estimate bounded phase-interference loss L from the sequence of per-pass speedup deltas, quantifying the fraction of achievable speedup lost to pipeline interference and identifying the pass positions that contribute most to the loss. 
+
+Evaluation Infrastructure. An orchestrator coordinates pipeline construction, execution, and metric collection. Bench-marks, metrics, and experimental parameters are specified in TOML, allowing new studies without modifying the core implementation. Although pipeline-agnostic, in this study the infrastructure targets LLVM’s -O3 pipeline. It first extracts and flattens the pipeline into an ordered sequence of passes 
+
+p0, p 1, . . . , p n, then constructs cumulative prefixes Pi = p0 →· · · → pi, preserving the original execution order and pass dependencies. Each prefix is applied independently to the same unoptimized IR I0, producing an optimized IR Ii and executable binary Bi. Comparing consecutive binaries Bi and 
+
+Bi−1 yields the marginal impact of pass pi within its execution context. 
+
+Benchmark Selection. We use the 30 kernels of PolyBench/C 4.2.1 6 in default mode. To keep the 95% confidence interval below 1% of the mean, benchmarks must be self-contained (single translation unit, libm only), deterministic (single-threaded), and execution-time tractable. PolyBench satisfies these requirements, whereas larger suites (e.g., SPEC or MultiSource) would either mask single-pass effects or exceed our repetition budget. Despite its modest size, PolyBench covers a heterogeneous set of workloads [77]. Its six cate-gories span the computation patterns most targeted by -O3 ,including loop nests, affine accesses, reductions, stencils, and triangular solvers. PolyBench is also the de facto benchmark suite for autotuning and ML-based pass-selection studies [40], facilitating comparison with prior work. We use the default dataset configuration, which maximizes level-1 cache (L1) utilization while keeping working sets within the last-level cache (LLC), thereby exposing optimization effects without being dominated by memory bottlenecks. PolyBench is also relevant to the MLIR-based argument of §I. Modern ML stacks 
+
+> 6github.com/MatthiasJReisinger/PolyBenchC-4.2.1/polybench.pdf
+
+lower tensor operations to LLVM IR through MLIR, where code generation is ultimately driven by the same -O3 pipeline studied here. Many MLIR-generated kernels are structurally similar to PolyBench kernels: matrix multiplications and con-volutions map naturally to gemm , 2mm , and 3mm ; attention and reduction patterns resemble atax , bicg , gesummv , and 
+
+mvt ; normalization workloads resemble correlation and 
+
+covariance ; and iterative PDE-style computations resemble 
+
+jacobi-1d , jacobi-2d , heat-3d , seidel-2d , and fdtd-2d .These structural correspondences suggest that our findings may transfer to MLIR-based ML pipelines, although direct validation remains future work. 
+
+Metric Collection. For each pipeline variant, we measure execution time, binary size, and end-to-end compilation time (wall-clock time for clang + opt + llc , excluding linking). Hardware behavior is characterized using perf stat and nine validated events [78], including L1 data-cache (D1), L1 instruction-cache (L1-I), and last-level cache (LLC) misses, cycles, instructions, branch misses, and package energy mea-sured via RAPL (power/energy-pkg/ , DRAM/GPU ex-cluded). Cache references, peak RSS, page faults, and context switches are collected as confound checks. 
+
+Experimental Setup. All experiments ran on Intel Core i9-12900KF (Alder Lake, 8P+8E cores, 5.2 GHz max), 128 GB RAM, Fedora Linux 43 (kernel 6.19), with cache hierarchy: 640 KiB D1, 768 KiB L1-I, 14 MiB L2, 30 MiB L3. We used LLVM 21.1.8 (release, no assertions, no PGO). The -O3 pass sequence was extracted via opt –print-pipeline-passes -O3 and flattened. The pipeline has 113 distinct invo-cations (including repeats of instcombine , simplifycfg ,
+
+early-cse ). Our protocol entails 84 ,750 measurements (50 ,850 runtime, 33 ,900 hardware-counter runs). Runtime measurements use hyperfine (3 warmup, 15 timed runs), while hardware counters are collected with perf stat (2 warmup, 10 timed runs) in a separate batch. Ten runs are sufficient to keep the 95% confidence interval below 1% of the mean for all counter metrics. 
+
+Noise Mitigation. To reduce measurement variability, bench-marks are pinned to a dedicated P-core using taskset , exe-cuted under real-time FIFO scheduling ( chrt ), run with the CPU governor set to performance (cpupower ), and evaluated with address-space layout randomization (ASLR) disabled (setarch -R ). Hardware performance counters are collected in separate runs to avoid instrumentation overhead. Artifacts, including the enumerated pass sequences, are available on GitHub 7.IV. R ESULTS 
+
+We report median statistics as recommended in [79], [80], and mean statistics with a 95% confidence interval. All multi-benchmark figures use the following legend (unique color, 
+
+> 7
+
+github.com/FedericoBruzzone/llvm-passview 0 20 40 60 80 100 
+
+> Pass Index
+> 0
+> 10
+> 20
+> 30
+> 40
+> Mean Execution Time (s)
+
+(a) runtime evolution with 95% confidence interval. 0.5      
+
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> 3.0
+> 3.5
+> 4.0
+> Speedup vs O0 (Median)
+> 020 40 60 80 100
+> Pass Index
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Fraction of Total Speedup Recovered (%)
+> 80% of gain
+> Median 80%-point = pass 95
+> IQR: 87–95
+
+(b) cumulative speedup Si (top ) and normalized gain Gb(i) (bottom ). 
+
+Fig. 1: Runtime evolution and optimization saturation. marker, line style per kernel): correlation 
+
+> covariance
+> gemm
+> gemver
+> gesummv
+> symm
+> syr2k
+> syrk
+> trmm
+> 2mm
+> 3mm
+> atax
+> bicg
+> doitgen
+> mvt
+> cholesky
+> durbin
+> gramschmidt
+> lu
+> ludcmp
+> trisolv
+> deriche
+> floyd-warshall
+> nussinov
+> adi
+> fdtd-2d
+> heat-3d
+> jacobi-1d
+> jacobi-2d
+> seidel-2d
+
+A. RQ 1: Marginal Performance Impact 
+
+Fig. 1a plots execution time against the pipeline prefix index 
+
+i ∈ [0 , 112] (i = −1 denotes unoptimized -O0 ). Measurement uncertainty is negligible: 95% confidence intervals remain below 1% of the mean throughout. Three findings emerge. First, the pipeline is strongly non-monotone : 159/1643 infor-mative transitions (9.7%, mean) and 108/1633 (6.6%, median) degrade performance, providing direct evidence of phase-ordering interference within a single optimization pipeline. Second, speedup is strongly back-loaded. For each benchmark, the normalized gain Gib = ( Sib −1) /(S∗ 
+
+> b
+
+−1) ∈ [0 , 1] measures the fraction of the final speedup achieved at prefix i. Across the 27 non-regressing benchmarks, the median prefix required to reach 80% of the final speedup contains 84.8% of the passes (middle 50% range: 77.7%–84.8%). Thus, removing the final ∼ 15% of the pipeline sacrifices roughly 20% of the attainable speedup, contradicting the intuition that most gains occur early. Third, Fig. 1b reveals a characteristic S-0 20 40 60 80 100 
+
+> Pass Index
+> −10000
+> −8000
+> −6000
+> −4000
+> −2000
+> 0
+> 2000
+> 4000
+> Δ Median Runtime (ms)
+
+(a) marginal-utility plot of ∆Ti along the pipeline. 0 100 200 300 400 500 600 700 
+
+> Mean |Δ Runtime| across benchmarks (ms)
+> [103] instsimplify
+> [106] simplifycfg
+> [99] instcombine
+> [100] licm
+> [7] simplifycfg
+> [73] deadargelim
+> [90] instcombine
+> [55] gvn
+> [27] early-cse
+> [46] instcombine
+> [12] ipsccp
+> [48] indvars
+> [8] sroa
+> [17] simplifycfg
+> [95] loop-unroll
+> [42] loop-rotate
+> [87] loop-vectorize
+> [16] instcombine
+> [41] licm
+> [9] early-cse
+> Pass
+> |Δ runtime mean| (ms)
+> |Δ runtime median| (ms)
+
+(b) top-20 passes ranked by mean of |∆Ti|; median ranking overlaid. 
+
+Fig. 2: Marginal impact analysis and top-20 passes ranking. shaped profile: an initial canonicalization phase, a steep growth region dominated by loop vectorization, and a final asymptote. Several curves temporarily exceed Gb = 1 , indicating inter-mediate pipeline states that outperform the final variant. These overshoots coincide with the regressions observed in Fig. 1a, confirming that phase interference is systematic. The largest gains concentrate on dense-matrix and stencil kernels: gemm 
+
+(3.86 ×), jacobi-2d (3.72 ×), heat-3d (3.37 ×), fdtd-2d 
+
+(3.02 ×), syrk (2.51 ×), floyd-warshall (2.29 ×), nussinov 
+
+(2.18 ×). Three finish slower than -O0 : correlation (0.96 ×), 
+
+covariance (0.98 ×), seidel-2d (0.98 ×); -O3 generates op-portunities mid-pipeline that subsequent passes undo (§IV-D). At ∼25% of the pipeline almost all benchmarks remain at 
+
+S ≈ 1; by ∼50% , 70% have crossed 1.2×; at the end, 80% reach 1.5× or higher. Decomposing the cumulative trajectory into per-pass deltas 
+
+∆Ti = Ti−1 − Ti (Fig. 2a) reveals most lines cluster on zero, with outsize spikes in two bursts (pass indices 8–18 and 41–48)—direct evidence for an “80/20” Pareto-dominated 
+
+regime. Simultaneous spikes across many lines identify uni-versal optimizations, whereas isolated deviations identify 
+
+program-specific ones. Aggregating marginal contributions across benchmarks yields a cross-benchmark mean-absolute-impact ranking (Fig. 2b). The distribution is severely Pareto-skewed: the top decile accounts for the majority of impact, while the bottom half is indistinguishable from zero. The rank-ing is dominated by licm , instcombine , loop-vectorize ,
+
+loop-rotate , loop-unroll , simplifycfg , sroa , indvars .Top spot is occupied by early-cse (27 out of 30 benchmarks), which canonically eliminates common sub-expressions [81], [82]. loop-vectorize ranks 4th despite large impact on only ∼6 benchmarks, confirming the ranking captures both universal and program-specific passes. Some passes ( licm ,
+
+instcombine , simplifycfg , early-cse ) appear at multiple pipeline positions, reflecting LLVM’s interleaved scheduling. The ranking is per-occurrence : each position of instcombine 
+
+receives its own entry, preserving position-specific context. We complement the impact ranking with a per-benchmark, per-pass Cohen’s d analysis (Fig. 3, clipped to [−3, +3] ; ‡:
+
+|d| > 3, ∗: Wilcoxon p < 0.05 ). The heatmap is dominated by ‡ cells, requiring careful reading: extreme d arises from genuinely large mean deltas and , more frequently, from near-zero variance that mechanically inflates the formula; ‡ signals 
+
+out of scale , not large absolute effect . Cells with negligible effect ( |d| < 0.2) appear for lower-ranked passes, consistent with the long-tail picture of Fig. 2b. The defensible core ,simultaneously large and reliable effects, is identified by joint 
+
+‡ (or high |d|) and ∗, whereas practical magnitude should be read jointly from Figs. 2a and 2b. Across categories the speedup spread is substantial: blas 
+
+and stencils see dramatic late-pipeline gains (medians cross-ing 1.5× and 2.0×), while datamining remains near 1.0×
+
+(memory-bound reductions are vulnerable to ill-timed transfor-mations). Solvers and medley improve near-monotonically. 
+
+Finding 1 (RQ 1)
+
+The -O3 pipeline is empirically non-monotone : 6.6% (me-dian estimator) to 9.7% (mean) of pass-to-pass transi-tions induce runtime regressions. A small subset of passes (early-cse , licm , instcombine , loop-vectorize , and 
+
+loop-rotate ) accounts for the dominant share of re-alized speedup, while the long tail produces near-zero marginal impact. Contrary to the common “front-loaded” intuition, the realized gain is in fact back-loaded : across the 27 non-regressing kernels, 24 cross Gb=0 .8 at one of two specific late-pipeline transitions—immediately after 
+
+loop-vectorize (pass 87, 10 kernels) or loop-unroll 
+
+(pass 95, 14 kernels)—driving the median crossing to 84.8% of the pipeline. 
+
+B. RQ 2: Multi-Dimensional Trade-offs 
+
+RQ 2 asks whether runtime improvements are bought at the price of compile-time or footprint regressions. Fig. 4 shows compile time (near-monotonic, accelerating where loop/inlin-ing passes fire) and binary size ( non-monotone : early passes shrink it, late inlining/unrolling inflate it), foreshadowing dom-inated configurations. Fig. 5 unifies the trade-off picture. The compile-time-vs-speedup frontier is L-shaped: most speedup is attained at the pipeline tail ( ∼variant 80) for modest additional compile cost. The binary-size-vs-speedup frontier is two-step: an initial wave of speedups is essentially free in size, while final jumps coincide with abrupt size increases. In 29 out correlation                                                                                                                                                                                                                                                                                                   
+
+> covariance
+> gemm
+> gemver
+> gesummv
+> symm
+> syr2k
+> syrk
+> trmm
+> 2mm
+> 3mm
+> atax
+> bicg
+> doitgen
+> mvt
+> cholesky
+> durbin
+> gramschmidt
+> lu
+> ludcmp
+> trisolv
+> deriche
+> floyd-warshall
+> nussinov
+> adi
+> fdtd-2d
+> heat-3d
+> jacobi-1d
+> jacobi-2d
+> seidel-2d
+> Benchmark
+> [9] early-cse
+> [87] loop-vectorize
+> [17] simplifycfg
+> [41] licm
+> [95] loop-unroll
+> [42] loop-rotate
+> [16] instcombine
+> [8] sroa
+> [55] gvn
+> [27] early-cse
+> Pass Index  (top-10 by max |d|)
+> -10.3‡* -32.0‡* 33.4‡* 1.5* -0.1 7.2‡* 22.4‡* 22.8‡* 2.7* 23.5‡* 25.3‡* 1.4* 0.4 0.7* 0.5 122.0‡* 1.4* 49.3‡* 71.0‡* 86.4‡* 0.0 39.1‡* 247.2‡* 324.0‡* 37.4‡* 169.1‡* 821.0‡* 1.3* 137.2‡* 21.3‡*
+> 3.2‡* 0.2 338.8‡* 12.0‡* 33.9‡* 1.4* 62.5‡* 245.5‡* 5.3‡* 1.6* 3.3‡* 27.9‡* 15.2‡* 39.8‡* 11.2‡* 53.4‡* 3.6‡* 48.6‡* 96.6‡* 29.5‡* 15.1‡* 38.4‡* 26.6‡* -2.2* 0.6 392.8‡* 588.3‡* 2.6* 64.7‡* 1.8*
+> 1.4* 0.8* 0.8* 0.3 0.4 0.4 1.5* 2.4* -0.5 -1.2* 0.3 -0.2 -0.0 1.7* -0.5 -0.5 -0.7 -3.5‡* -0.2 -3.7‡* -0.3 1.0* 560.9‡* 61.4‡* -0.2 -0.6 6.3‡* -2.5* -0.6 -0.3
+> -231.1‡* -241.9‡* 140.5‡* -8.8‡* 0.0 -2.9* 54.1‡* 9.2‡* -1.2* -358.4‡* -525.1‡* -11.9‡* 0.6 -0.1 -9.6‡* 215.6‡* 0.5 -111.5‡* 67.6‡* 66.8‡* 0.9* 2.7* 338.2‡* -0.7* 3.4‡* 53.9‡* 153.8‡* -0.4 21.4‡* 9.8‡*
+> -3.6‡* -3.5‡* -0.9* 4.9‡* -0.6 17.0‡* -0.6 -0.5 235.0‡* 21.8‡* 460.5‡* 9.7‡* 0.5 364.9‡* 4.8‡* 23.5‡* 9.2‡* 53.9‡* 36.1‡* 57.9‡* 3.2‡* 3.1‡* 151.6‡* 64.7‡* 59.8‡* 1.2* 16.1‡* 0.5 2.1* 4.5‡*
+> 27.2‡* 328.8‡* 63.1‡* 11.1‡* -0.2 112.4‡* -2.5* 90.5‡* -14.9‡* 337.7‡* 439.2‡* 8.7‡* 0.0 3.3‡* 7.8‡* -19.3‡* 17.6‡* 97.1‡* -19.5‡* 125.5‡* -1.0* 47.7‡* 56.1‡* -6.9‡* 0.2 26.5‡* 14.3‡* 0.7 21.7‡* 1.5*
+> -6.5‡* -1.4* -121.9‡* -0.9* 0.2 -9.7‡* -42.9‡* -75.5‡* -23.2‡* -8.9‡* -14.0‡* -1.1* 0.1 -7.6‡* 0.3 -43.8‡* -1.2* -6.9‡* -85.8‡* -152.5‡* 5.7‡* -3.0* -83.5‡* -55.0‡* -25.5‡* -78.5‡* -327.2‡* 3.2‡* -81.3‡* -9.1‡*
+> 9.1‡* 26.4‡* 28.6‡* 3.6‡* 2.4* -36.4‡* 57.0‡* 55.8‡* 63.4‡* 3.7‡* -2.1* 1.2* 1.9* 11.4‡* 0.7* 217.1‡* -10.6‡* 28.3‡* 112.7‡* -58.3‡* 0.0 -39.5‡* -4.2‡* -35.8‡* 4.0‡* 35.1‡* -86.0‡* 3.6‡* 25.3‡* 2.3*
+> 16.1‡* 16.1‡* -0.3 0.1 -0.1 -14.9‡* 2.2* 0.2 -42.3‡* 0.1 0.0 1.1* 0.1 -2.8* -0.3 -4.2‡* -12.6‡* 1.5* -3.5‡* -21.1‡* -0.3 -0.1 -0.4 0.4 0.8* -4.4‡* 0.1 -0.7 -0.5 -142.3‡*
+> 0.0 1.1* -0.1 0.2 -0.2 0.3 -0.2 0.4 -0.2 0.4 0.6 0.1 -0.5 -1.0* 0.1 0.6 0.4 0.6 -0.1 0.3 0.1 -0.5 -0.2 134.8‡* 1.3* 10.5‡* 41.6‡* 0.4 35.3‡* 2.2*
+> −3
+> −2
+> −1
+> 0
+> 1
+> 2
+> 3
+> Cohen's d  (clipped to ±3)
+
+Fig. 3: Cohen’s d between consecutive variants for the top-10 passes, clipped to [−3, +3] . ‡: |d| > 3. ∗: Wilcoxon p < 0.05 .0 20 40 60 80 100 
+
+Pass Index 
+
+14 
+
+15 
+
+16 
+
+17 
+
+> Binary Size (KB)
+
+50 
+
+55 
+
+60 
+
+65 
+
+70 
+
+75 
+
+> Compile Time (ms)
+
+Fig. 4: Compile time and binary size trajectories. 0.058 0.060 0.062 0.064 0.066 
+
+Median Compile Time (s) 
+
+1.0 
+
+1.1 
+
+1.2 
+
+1.3 
+
+1.4 
+
+1.5 
+
+> Median speedup vs. O0
+> #0
+> #112 (final)
+> Pareto front
+> O0 baseline
+
+13.5 14.0 14.5 15.0 15.5 16.0 16.5 17.0 17.5 
+
+Median Binary Size (KB) 
+
+1.0 
+
+1.1 
+
+1.2 
+
+1.3 
+
+1.4 
+
+1.5 
+
+> Median speedup vs. O0
+> #0
+> #112 (final)
+> Pareto front
+> O0 baseline
+
+Fig. 5: Pareto views of the multi-objective trade-off, each point aggregating all benchmarks at one variant index. of 30 benchmarks, the -O3 endpoint is dominated : an earlier checkpoint achieves higher speedup at no larger binary size. The mechanism differs by kernel class: for BLAS/linear-algebra kernels ( ∼29% binary expansion vs. -O0 ), regressions arrive after size has plateaued, while for stencils, the pattern is pure speedup regression at constant size. Stopping at peak speedup yields a point that is simultaneously no larger and strictly faster—a per-benchmark signature of phase-ordering interference. Fig. 6 shows that static IR-instruction count cannot serve as a proxy for dynamic runtime. The left panel (IR count vs. median runtime, one fitted trend per benchmark) yields a cross-benchmark Spearman ρ = 0 .31 , only a weak aggregate relationship. The right panel makes the within-benchmark picture explicit: 27 out of 30 benchmarks exhibit negative ρ
+
+(more IR implies faster runtime), reflecting that passes which expand the IR (i.e., loop unrolling, vectorization) simulta-neously reduce execution time. Only nussinov , bicg , and 
+
+floyd-warshall show positive ρ. The majority of bars fall within the |ρ| < 0.5 unreliable zone regardless of sign. 0.1 0.2 0.3 0.4 0.5 0.6 
+
+IR instruction count (×10³) 
+
+0
+
+10 
+
+20 
+
+30 
+
+40 
+
+> Runtime (median, seconds)
+> Cross-benchmark ρ = 0.31
+
+−1.00 −0.75 −0.50 −0.25 0.00 0.25 0.50 0.75 1.00 
+
+Within-benchmark Spearman ρ (IR count vs. runtime)    
+
+> doitgen
+> 2mm
+> 3mm
+> gramschmidt
+> gemver
+> trmm
+> symm
+> mvt
+> trisolv
+> atax
+> seidel-2d
+> lu
+> cholesky
+> correlation
+> fdtd-2d
+> syr2k
+> ludcmp
+> gemm
+> durbin
+> covariance
+> heat-3d
+> jacobi-1d
+> gesummv
+> jacobi-2d
+> adi
+> syrk
+> deriche
+> floyd-warshall
+> bicg
+> nussinov
+> Negative ρ (more IR → faster)
+> Positive ρ (more IR → slower)
+> |ρ| < 0.5 (unreliable zone)
+
+Fig. 6: Left: IR instruction vs. median runtime by bench-mark; cross-benchmark Spearman ρ = 0 .31 . Right: within-benchmark Spearman ρ for all 30 benchmarks. 
+
+Finding 2 (RQ 2)
+
+Compile time grows near-monotonically; binary size is non-monotone—early passes shrink it via dead-code elimina-tion, late inlining and unrolling inflate it. In 29 out of 30 benchmarks the final -O3 configuration is Pareto-dominated 
+
+on (binary size, speedup) by an earlier pipeline checkpoint. The opt stage accounts for less than half of total compile time and its share is essentially benchmark-independent: pass-budget decisions can be made per pipeline, not per program. Static IR-instruction count is not a reliable proxy for dynamic runtime under pipeline-prefix variations. 
+
+C. RQ 3: Hardware-Level Insights 
+
+RQ 3 asks how IR-level transformations propagate to hard-ware behavior. Fig. 7 reports the percentage change relative to -O0 across nine counters for the top-10 pass indices, faceted by benchmark. The colormap is anchored at the 95th-percentile magnitude to prevent outliers from flattening remaining cells; blue encodes improvement, and red encodes regression. The top-10 positions cluster into three groups. Scalar-canonicalization (16 instcombine , 17 simplifycfg ,8 sroa , 9 early-cse ) produces the most uniform instructions per cycle (IPC) gain (median +11 –14% , 26–28/30 bench-marks) at the cost of transient instruction inflation (+5 –
+
+13% ), whereas cycles nonetheless fall −3–4% , confirming net throughput gain. Propagation (12 ipsccp ) reduces instructions (−6–7% ), cycles ( −5% ), and energy ( −4–6% ) consistently (19–28/30 benchmarks). The LLC cell at pass 9 is the most heterogeneous in the early pipeline ( −56% to +262% ), reflecting program-specific working-set changes induced sroa [8] 
+
+early-cse [9] 
+
+ipsccp [12] 
+
+instcombine [16] 
+
+simplifycfg [17] 
+
+licm [41] 
+
+loop-rotate [42] 
+
+indvars [48] 
+
+loop-vectorize [87] 
+
+loop-unroll [95] 
+
+-6 -11 -6 14 -3 18 -15 -0 1
+
+-6 -8 -13 -21 -1 -21 26 -0 4
+
+-7 -12 -8 -25 -4 -21 27 -1 -4 
+
+-5 -11 -7 0 -3 3 -3 -0 -2 
+
+-5 -10 -4 0 -3 3 -3 -0 -2 
+
+11 6 28 11 34 -18 21 -0 28 
+
+3 -5 -1 -7 5 -12 13 -0 9
+
+0 -8 -4 -11 8 -17 21 0 10 
+
+-6 -11 -10 -4 1 -5 5 -0 4
+
+2 -11 -20 -18 -0 -17 21 -0 3
+
+correlation 
+
+-3 -5 -7 14 -3 18 -16 -0 -1 
+
+2 0 1 -21 -0 -21 26 0 1
+
+-2 -5 -5 -25 -3 -22 29 0 -1 
+
+79 15 136 0 -2 2 -2 1 3
+
+14 5 15 0 -2 3 -2 0 -2 
+
+7 18 17 11 34 -17 21 1 26 
+
+6 -7 4 -7 7 -13 15 0 9
+
+3 -1 3 -11 6 -16 19 0 10 
+
+-1 -2 -6 -4 1 -5 5 0 2
+
+6 -7 -15 -18 -0 -18 22 0 2
+
+covariance 
+
+-7 -6 -20 14 -5 20 -17 -0 0
+
+-11 -1 -20 4 -13 20 -16 -0 -6 
+
+-16 -10 -18 0 -18 22 -18 0 -12 
+
+-2 10 -6 28 4 22 -18 0 7
+
+-5 2 -13 28 4 22 -18 0 10 
+
+-11 -2 -23 4 -14 20 -17 0 -8 
+
+-14 -12 -20 -7 -21 18 -15 1 -15 
+
+-4 -9 -13 -7 -21 18 -15 0 -15 
+
+-21 -31 13 -69 -72 12 -11 -4 -68 
+
+-40 -46 27 -68 -71 12 -10 -0 -67 
+
+gemm 
+
+2 59 9 10 -4 14 -13 0 -2 
+
+3 0 9 -2 -6 3 -3 -1 -6 
+
+3 44 9 -5 -7 1 -1 -1 -6 
+
+5 2 15 4 -6 10 -9 1 -6 
+
+4 1 10 5 -6 12 -11 -1 -5 
+
+1 1 -5 5 11 -5 6 -1 10 
+
+3 47 6 -7 -5 -2 2 -0 -5 
+
+3 1 2 -9 -5 -5 5 -0 -4 
+
+10 -4 5 -22 -27 6 -6 -0 -23 
+
+14 -5 30 -28 -35 11 -10 -1 -32 
+
+gemver 
+
+3 -2 -2 6 -3 9 -8 -0 -3 
+
+3 -2 -3 -3 -3 -0 0 -2 -0 
+
+7 -1 -5 -3 -4 1 -1 0 -3 
+
+4 -2 -2 4 -5 9 -9 1 -2 
+
+5 -1 -2 4 -4 9 -8 -0 -3 
+
+5 -2 -4 5 -5 10 -9 -1 -4 
+
+5 -0 -3 1 -4 5 -5 -0 -3 
+
+6 -1 -3 1 -4 5 -5 -1 -2 
+
+4 -7 -4 -9 -33 36 -27 -2 -30 
+
+4 -6 -0 -8 -33 37 -27 -1 -29 
+
+gesummv 
+
+sroa [8] 
+
+early-cse [9] 
+
+ipsccp [12] 
+
+instcombine [16] 
+
+simplifycfg [17] 
+
+licm [41] 
+
+loop-rotate [42] 
+
+indvars [48] 
+
+loop-vectorize [87] 
+
+loop-unroll [95] 
+
+9 2 11 13 8 5 -4 0 6
+
+12 8 22 -9 6 -14 16 -0 3
+
+11 9 16 -9 6 -14 16 -0 3
+
+11 10 8 18 8 9 -8 0 6
+
+10 -0 11 18 8 9 -8 0 6
+
+20 12 27 20 10 9 -9 0 8
+
+-4 -7 -0 9 -15 28 -22 -8 -13 
+
+-1 -10 -1 -11 -17 7 -7 -8 -16 
+
+1 -10 -0 -11 -17 7 -7 0 -17 
+
+-2 -7 -6 -11 -17 8 -7 -9 -15 
+
+symm 
+
+2 -4 15 10 -15 29 -22 -5 -12 
+
+-9 -19 13 -7 -23 21 -17 -3 -19 
+
+-14 -25 3 -7 -23 21 -17 0 -22 
+
+-10 -6 -12 24 -11 40 -28 0 -9 
+
+2 -10 7 24 -11 40 -28 0 -9 
+
+-18 -16 -6 -5 -22 22 -18 0 -19 
+
+-11 -18 6 -12 -21 12 -11 -10 -16 
+
+-14 -15 4 -12 -21 12 -11 -10 -17 
+
+-13 -14 0 -46 -33 -19 23 -20 -31 
+
+-4 -19 19 -42 -33 -14 17 -17 -31 
+
+syr2k 
+
+-3 -5 2 14 -15 34 -26 0 -11 
+
+-5 -10 -9 4 -22 33 -25 0 -16 
+
+-5 -12 -6 4 -22 33 -25 0 -16 
+
+2 -8 15 31 -3 35 -26 1 1
+
+1 -1 5 31 -3 35 -26 1 1
+
+3 1 14 4 -4 8 -7 0 -2 
+
+-6 -13 -6 -7 -23 21 -18 -11 -15 
+
+-7 -9 -14 -7 -23 22 -18 -10 -16 
+
+-29 -37 -62 -67 -61 -17 20 -7 -57 
+
+-34 -31 -72 -54 -59 13 -11 -37 -55 
+
+syrk 
+
+-4 -12 -3 14 -8 24 -19 -0 -5 
+
+-5 -6 -5 4 -8 13 -11 -0 -5 
+
+-8 -10 -11 0 -11 12 -11 -0 -8 
+
+-4 3 -5 28 -9 41 -29 0 -4 
+
+-4 -6 -5 28 -9 41 -29 0 -3 
+
+-6 -3 -9 28 -9 40 -29 0 -3 
+
+2 -1 2 18 -7 26 -21 -6 -5 
+
+-8 -1 -6 -11 -6 -5 5 -11 -4 
+
+3 3 6 -4 -2 -2 2 -12 0
+
+18 -15 -29 -18 -28 14 -12 -18 -24 
+
+trmm 
+
+6 4 12 14 -0 14 -13 0 2
+
+4 7 12 -10 -3 -8 9 0 2
+
+-0 1 11 -14 -3 -12 13 0 -3 
+
+0 7 12 4 -2 5 -5 0 -3 
+
+3 9 13 4 -2 5 -5 0 2
+
+37 45 28 14 70 -33 49 0 56 
+
+0 11 16 -3 4 -7 8 0 5
+
+2 6 14 -7 4 -10 12 0 3
+
+1 1 12 -7 3 -10 11 -0 4
+
+-11 -10 -10 -19 -30 15 -13 0 -26 
+
+2mm 
+
+sroa [8] 
+
+early-cse [9] 
+
+ipsccp [12] 
+
+instcombine [16] 
+
+simplifycfg [17] 
+
+licm [41] 
+
+loop-rotate [42] 
+
+indvars [48] 
+
+loop-vectorize [87] 
+
+loop-unroll [95] 
+
+0 -4 11 14 0 14 -12 0 2
+
+-1 -2 4 -11 -3 -8 8 0 -1 
+
+-4 -3 4 -14 -4 -11 12 0 -2 
+
+-0 0 22 4 -3 7 -6 0 -1 
+
+-2 -1 19 4 -3 7 -6 -0 0
+
+38 35 15 14 67 -32 46 1 56 
+
+-1 -1 7 -4 3 -6 7 -0 4
+
+2 2 4 -7 3 -10 11 0 5
+
+2 2 3 -7 3 -10 11 0 5
+
+-18 -27 -23 -20 -34 21 -17 -0 -30 
+
+3mm 
+
+1 0 0 12 -2 13 -12 -2 0
+
+0 1 2 3 -3 6 -6 -1 -3 
+
+-1 1 -6 -2 -5 3 -3 -2 -5 
+
+0 1 -0 8 -4 13 -11 -1 -3 
+
+1 1 -1 11 -4 15 -13 -1 -3 
+
+-8 1 3 11 9 1 -1 -0 8
+
+0 1 -3 -1 -3 2 -2 -1 -3 
+
+0 0 -1 -3 -3 0 -0 0 -3 
+
+-2 -4 -2 -25 -34 13 -12 -1 -31 
+
+5 -6 2 -36 -43 13 -11 -2 -40 
+
+atax 
+
+0 1 2 7 -6 13 -12 -2 -3 
+
+2 3 10 -7 -5 -2 2 -0 -4 
+
+-0 0 2 -9 -5 -4 4 -2 -5 
+
+-0 2 0 -3 -5 2 -2 -2 -3 
+
+0 3 3 -3 -5 2 -2 -1 -4 
+
+1 3 4 -2 -6 4 -3 -2 -5 
+
+0 2 0 -9 -5 -4 4 -1 -5 
+
+-0 2 1 -11 -6 -6 6 -1 -4 
+
+-0 -3 -0 -12 -30 26 -20 -1 -24 
+
+-1 -4 -1 -12 -30 26 -20 -1 -25 
+
+bicg 
+
+-0 14 -3 18 -2 20 -17 -0 1
+
+-1 6 -4 7 -4 12 -11 -0 -1 
+
+-1 14 -5 7 -4 12 -11 -0 -1 
+
+-1 -3 -4 32 -2 35 -26 -0 1
+
+-1 -2 -6 32 -2 35 -26 0 1
+
+-2 14 -8 32 -2 35 -26 -0 2
+
+-1 -8 -10 21 -3 25 -20 -1 0
+
+-2 11 -10 7 4 3 -3 -1 9
+
+-2 29 -13 7 2 5 -5 -0 3
+
+-1 -23 -15 4 -33 54 -35 -1 -26 
+
+doitgen 
+
+-2 4 3 11 -3 14 -12 -0 -2 
+
+-2 3 3 3 -3 6 -6 -1 -3 
+
+-2 3 5 0 -3 3 -3 -1 -3 
+
+-1 4 5 9 -3 12 -11 -1 -4 
+
+-2 1 3 11 -3 14 -12 0 -3 
+
+-5 4 5 13 17 -3 4 2 16 
+
+-2 3 6 -1 -2 1 -1 -0 -1 
+
+-2 4 5 -3 -2 -2 2 1 -1 
+
+-2 -1 5 -4 -22 23 -19 -1 -18 
+
+3 -3 5 -12 -31 27 -22 -1 -28 
+
+mvt 
+
+sroa [8] 
+
+early-cse [9] 
+
+ipsccp [12] 
+
+instcombine [16] 
+
+simplifycfg [17] 
+
+licm [41] 
+
+loop-rotate [42] 
+
+indvars [48] 
+
+loop-vectorize [87] 
+
+loop-unroll [95] 
+
+6 -10 78 14 -15 33 -25 -0 -10 
+
+9 -17 262 2 -21 29 -22 -0 -15 
+
+10 -15 150 -1 -21 26 -20 -0 -17 
+
+4 -2 37 28 -11 44 -31 0 -7 
+
+4 -1 33 28 -11 45 -31 -0 -6 
+
+13 -13 295 5 -22 34 -25 -0 -17 
+
+10 -9 110 -6 -19 17 -14 -0 -14 
+
+12 -2 109 -10 -19 12 -10 -0 -14 
+
+27 -10 2002 -58 -26 -43 77 -0 -25 
+
+37 -5 955 -47 -34 -19 24 8 -29 
+
+cholesky 
+
+2 1 19 8 14 -5 5 0 15 
+
+3 2 22 6 13 -6 7 -0 14 
+
+-11 0 1 6 12 -6 6 -1 12 
+
+-20 2 7 8 13 -5 5 -1 12 
+
+-2 1 20 11 14 -3 4 0 14 
+
+6 1 26 9 14 -4 4 -0 15 
+
+1 -3 30 -5 -5 -0 0 -1 -8 
+
+1 -3 34 -19 -9 -11 12 -14 -10 
+
+1 -3 26 -34 -14 -23 30 -0 -15 
+
+-4 -3 20 -41 -25 -21 27 -3 -25 
+
+durbin 
+
+8 -8 -10 12 -7 20 -17 -0 -5 
+
+18 -15 -18 -17 -15 -2 2 -0 -13 
+
+24 -9 -19 -20 -16 -5 5 -0 -13 
+
+13 -8 -17 -8 -14 7 -7 -0 -10 
+
+15 -8 -16 -5 -13 10 -9 -0 -10 
+
+26 10 2 -3 10 -12 13 -0 8
+
+9 -11 -13 -15 -13 -3 3 -0 -11 
+
+13 -5 -17 -18 -14 -5 6 -0 -11 
+
+42 -12 -33 -38 -17 -25 33 -0 -13 
+
+45 -16 -41 -39 -25 -19 23 -0 -19 
+
+gramschmidt 
+
+7 -7 17 14 -12 30 -23 0 -9 
+
+10 -15 59 1 -18 23 -19 -1 -14 
+
+9 -11 39 -2 -19 21 -18 -1 -15 
+
+3 1 8 28 -10 42 -30 0 -7 
+
+3 -3 10 28 -9 42 -29 -0 -7 
+
+14 -9 59 8 -19 33 -25 -0 -12 
+
+11 -6 21 -3 -17 17 -14 -2 -12 
+
+13 0 27 -9 -16 8 -7 -3 -12 
+
+24 -9 360 -51 -21 -37 60 -3 -22 
+
+25 -21 140 -41 -32 -13 15 2 -30 
+
+lu 
+
+5 4 45 16 4 11 -10 0 5
+
+10 -1 93 3 -2 5 -4 -0 1
+
+9 -3 69 0 -3 3 -3 -2 0
+
+2 1 41 29 7 20 -17 0 7
+
+2 1 45 29 7 21 -17 0 8
+
+13 4 99 8 -2 10 -9 0 3
+
+10 -7 23 -4 -15 14 -12 -2 -10 
+
+8 -12 19 -5 -17 15 -13 -3 -11 
+
+23 -13 348 -49 -24 -34 51 -3 -21 
+
+23 -19 129 -39 -31 -11 13 -1 -31 
+
+ludcmp 
+
+sroa [8] 
+
+early-cse [9] 
+
+ipsccp [12] 
+
+instcombine [16] 
+
+simplifycfg [17] 
+
+licm [41] 
+
+loop-rotate [42] 
+
+indvars [48] 
+
+loop-vectorize [87] 
+
+loop-unroll [95] 
+
+1 -1 2 6 0 6 -6 -1 2
+
+1 -1 3 3 0 3 -3 -2 1
+
+-0 -0 -1 2 -1 3 -3 -2 1
+
+1 -2 -1 5 -6 12 -11 -2 -3 
+
+0 -2 -3 5 -6 12 -11 -2 -2 
+
+1 -1 5 5 -6 12 -10 -1 -2 
+
+-1 -2 -3 -1 -6 5 -5 -1 -3 
+
+3 -2 6 -1 -5 4 -4 -1 -1 
+
+-1 -5 1 -9 -25 21 -17 4 -23 
+
+2 -5 7 -11 -30 28 -22 8 -26 
+
+trisolv 
+
+-0 6 -22 17 12 5 -5 -0 15 
+
+0 -1 -55 -1 -2 1 -1 -1 1
+
+3 -1 -51 -3 -2 -1 1 -1 -4 
+
+-2 1 -53 10 -1 11 -10 -0 3
+
+1 0 -52 10 -0 11 -10 -0 0
+
+-1 13 -52 6 -2 8 -7 -1 2
+
+2 -1 -16 -11 -20 10 -9 6 -14 
+
+2 13 -16 -11 -19 10 -9 2 -16 
+
+9 -5 -2 -31 -32 2 -2 4 -29 
+
+10 1 18 -36 -34 -4 4 -3 -32 
+
+deriche 
+
+-1 3 -2 19 3 16 -14 15 4
+
+-3 -20 -15 -8 -20 15 -13 6 -17 
+
+-4 -20 -9 -11 -22 14 -12 19 -19 
+
+-2 -6 -18 8 -10 19 -16 6 -7 
+
+-5 -27 -18 -11 -30 28 -22 -99 -33 
+
+-5 -43 -58 -27 -45 33 -25 -99 -45 
+
+-9 -41 -57 -34 -48 27 -21 -99 -45 
+
+-10 -46 -60 -37 -50 26 -21 -99 -47 
+
+-6 -45 -55 -37 -50 27 -21 -99 -46 
+
+-8 -51 -59 -45 -56 26 -21 -98 -54 
+
+floyd-warshall 
+
+4 6 10 18 4 13 -12 -6 3
+
+-20 -26 10 -7 -28 29 -22 -6 -23 
+
+-24 -18 6 -5 -28 32 -24 -12 -22 
+
+-16 -19 -3 9 -20 37 -27 -9 -16 
+
+-22 -26 -10 -11 -28 23 -19 -14 -28 
+
+-34 -41 -17 -30 -47 32 -24 -14 -41 
+
+-34 -38 -19 -36 -46 17 -15 -15 -42 
+
+-33 -39 -19 -36 -49 25 -20 -15 -44 
+
+-33 -38 -16 -34 -48 26 -21 -14 -44 
+
+-27 -43 -35 -45 -54 19 -16 -10 -52 
+
+nussinov 
+
+-1 -1 4 1 -0 1 -1 -0 -4 
+
+-1 -6 11 -37 -3 -35 54 -0 -9 
+
+1 -9 -0 -43 -3 -41 71 -0 -9 
+
+-1 -6 13 -13 -1 -12 14 0 -5 
+
+1 -8 15 -13 -1 -12 14 0 -5 
+
+2 -5 22 -21 -2 -20 25 0 -7 
+
+2 -7 15 -26 -2 -24 32 -0 -7 
+
+2 -6 9 -27 -2 -25 33 0 -7 
+
+2 -6 10 -29 -2 -27 37 0 -7 
+
+3 -3 2 -38 -6 -34 52 -0 -11 
+
+adi 
+
+> d1_misses
+> l1_i_misses
+> ll_misses
+> instructions
+> cycles
+> ipc
+> cpi
+> branch_misses
+> energy_joules
+
+sroa [8] 
+
+early-cse [9] 
+
+ipsccp [12] 
+
+instcombine [16] 
+
+simplifycfg [17] 
+
+licm [41] 
+
+loop-rotate [42] 
+
+indvars [48] 
+
+loop-vectorize [87] 
+
+loop-unroll [95] 
+
+-2 -3 18 6 -10 18 -15 0 -9 
+
+-5 -24 136 -23 -35 18 -15 -0 -29 
+
+-7 -26 152 -27 -38 18 -15 -0 -32 
+
+-3 -13 7 -1 -19 23 -19 0 -17 
+
+-4 -9 14 -1 -19 23 -19 0 -17 
+
+-6 -20 34 -10 -26 21 -17 0 -22 
+
+-4 -20 55 -18 -29 16 -14 0 -25 
+
+-5 -8 72 -13 -26 17 -15 -0 -21 
+
+-13 -46 1536 -71 -67 -11 12 -0 -64 
+
+-15 -46 1714 -71 -67 -11 12 -0 -64 
+
+fdtd-2d 
+
+> d1_misses
+> l1_i_misses
+> ll_misses
+> instructions
+> cycles
+> ipc
+> cpi
+> branch_misses
+> energy_joules
+
+-4 9 -10 2 8 -5 5 -26 2
+
+-9 -37 -16 -40 -40 0 -0 -0 -41 
+
+-11 -37 -14 -41 -44 5 -5 -0 -43 
+
+-6 -12 -9 -13 -16 3 -3 -0 -19 
+
+-6 -15 -16 -13 -16 3 -3 0 -19 
+
+-6 -21 -12 -25 -28 5 -4 -15 -28 
+
+-4 -20 -12 -27 -29 3 -3 -39 -27 
+
+-9 -24 -11 -28 -29 2 -2 -84 -27 
+
+-8 -55 32 -70 -70 -0 0 -41 -67 
+
+-16 -56 34 -70 -70 2 -2 -80 -67 
+
+heat-3d 
+
+> d1_misses
+> l1_i_misses
+> ll_misses
+> instructions
+> cycles
+> ipc
+> cpi
+> branch_misses
+> energy_joules
+
+-6 -1 -12 -2 -3 2 -2 -2 1
+
+-7 -1 -10 -7 -5 -2 2 -3 0
+
+-3 -2 -14 -10 -7 -4 4 -2 -1 
+
+-2 -2 -6 -13 -7 -7 7 -1 -6 
+
+-5 -3 -3 -12 -6 -6 6 -3 0
+
+-1 -2 -11 -15 -7 -8 9 -2 -3 
+
+-1 -2 -16 -20 -9 -12 14 -2 -7 
+
+5 -1 5 -22 -9 -14 16 -2 -5 
+
+-5 -4 -10 -35 -14 -24 32 -3 -15 
+
+-4 -3 -14 -35 -14 -25 33 -2 -12 
+
+jacobi-1d 
+
+> d1_misses
+> l1_i_misses
+> ll_misses
+> instructions
+> cycles
+> ipc
+> cpi
+> branch_misses
+> energy_joules
+
+3 1 9 4 -5 9 -8 0 -7 
+
+1 -20 15 -25 -31 8 -7 -0 -29 
+
+0 -22 55 -27 -35 12 -11 -0 -32 
+
+2 2 -0 -2 -12 11 -10 -0 -13 
+
+5 3 22 -2 -12 11 -10 1 -13 
+
+-1 -11 2 -18 -26 11 -10 -0 -24 
+
+3 -13 19 -24 -31 10 -9 3 -26 
+
+1 -14 39 -25 -32 9 -9 2 -26 
+
+-8 -51 1523 -81 -75 -26 35 -1 -72 
+
+-2 -52 1599 -81 -74 -26 35 -1 -72 
+
+jacobi-2d 
+
+> d1_misses
+> l1_i_misses
+> ll_misses
+> instructions
+> cycles
+> ipc
+> cpi
+> branch_misses
+> energy_joules
+
+2 1 -18 2 -0 2 -2 0 -2 
+
+-1 3 -23 -56 -1 -55 124 -0 -8 
+
+-4 6 -16 -57 -1 -56 130 0 -9 
+
+-2 7 -14 -42 -0 -42 72 -0 -7 
+
+-0 4 -14 -42 -0 -42 72 -0 -7 
+
+1 6 -9 -50 -1 -50 100 -0 -9 
+
+1 4 -14 -54 -1 -53 114 -0 -9 
+
+1 0 -10 -57 -1 -56 130 -1 -8 
+
+-4 7 -19 -50 2 -52 107 2 -2 
+
+-5 3 -27 -50 2 -52 107 0 -3 
+
+seidel-2d 
+
+−40 
+
+−20 
+
+0
+
+20 
+
+40 
+
+> % change vs O0  (clipped at ±46%)
+
+Hardware Metric 
+
+> Pass (Top-10 by mean |Δ runtime| across benchmarks) + index
+
+Fig. 7: Per-benchmark 5×6 grid of hardware-counter signatures at the top-10 most impactful pass positions. by redundancy elimination. Loop-transformation/vectorization (41 licm , 42 loop-rotate , 48 indvars , 87 loop-vectorize ,95 loop-unroll ) span the widest range: pass 41 is the most variable (cycles −47% to +70% ; LLC +295% ), while passes 42 and 48 are uniformly beneficial (instructions −7–
+
+11% , energy −8–9% , 25–28 benchmarks). Branch misses at passes 17 ( simplifycfg ), 41, 42, and 48 show isolated −98% 
+
+cells for several benchmarks, as loop transforms virtually eliminate loop-closing mispredictions for statically predictable loops. Pass 95 yields the deepest suite-wide reductions (in-structions −37% median, 29/30; cycles −33% ; L1-I misses 
+
+−11% ; energy −29% ) but splits the LLC column: deep blue for most benchmarks, deep red for the lu /ludcmp /cholesky 
+
+triad due to working-set expansion from aggressive unrolling on dense triangular kernels—the same pass producing qual-itatively different microarchitectural signatures across bench-marks. Fig. 8 presents per-pass ∆-trajectories for six metrics. All six panels share the same structure: for the vast majority of passes every benchmark sits on a flat baseline (median ∆ ≈ 0), and activity concentrates in a few vertical bands at passes 8– 9, 16–17, 41–42, 87, 90, and 95. Most peaks are transients— a spike at pass p is largely undone at pass p+1 —yielding near-symmetric ± distributions ( ≈49/51%), while each band −4                
+
+> −2
+> 0
+> 2
+> 4
+> Δ D1 Misses
+> 1e7
+> −1.5
+> −1.0
+> −0.5
+> 0.0
+> 0.5
+> 1.0
+> Δ L1i Misses
+> 1e6
+> −1.0
+> −0.5
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> Δ LLC Misses
+> 1e7
+> 020 40 60 80 100
+> Pass Index
+> −2.0
+> −1.5
+> −1.0
+> −0.5
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> Δ IPC
+> 020 40 60 80 100
+> Pass Index
+> −0.2
+> −0.1
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> Δ CPI
+> 020 40 60 80 100
+> Pass Index
+> −400
+> −300
+> −200
+> −100
+> 0
+> 100
+> 200
+> 300
+> Δ Energy (J)
+
+Fig. 8: Per-pass ∆-trajectories for runtime, IPC, D1 misses, LLC misses, CPU cycles, and energy along the full -O3 pipeline (median estimator). is driven by a handful of benchmarks. D1 is dominated by the dense linear-algebra solvers: cholesky spikes +4 .6 × 10 7 at pass 72 and reverses ( −4.8 × 10 7) at pass 73, while ludcmp 
+
+adds +4 .2 × 10 7 at pass 87. L1-I ( ≤0.17 × 10 7) is dominated by floyd_warshall , with deepest reductions at passes 9and 17. LLC is almost entirely driven by cholesky /ludcmp /lu ,peaking at pass 87 ( +16 .0–17 .0 × 10 6), partially reversing at pass 90 ( −8.8 to −10 .1 × 10 6). IPC and cycles per instruction 
+
+(CPI) move in anti-phase and oscillate almost suite-wide across consecutive passes; it goes up at pass 8 (28/30), down at pass 9 (27/30), up at pass 16 (27/30), down at pass 41 (25/30). The largest IPC gains are at pass 95 ( doitgen , +1 .69 )and pass 8 ( syrk , +1 .33 ), and the deepest degradation at pass 87 ( cholesky , −1.86 ; jacobi_2d , −1.82 )—pass 87 is uniquely multi-dimensionally disruptive (simultaneously de-grades IPC, inflates LLC, increases D1). Energy is dominated by floyd_warshall (−440 J at pass 17, −354 J at pass 9) and seidel_2d (symmetric ±270 J at passes 2–3, negligible end-to-end). Fig. 9 presents a unified 2 × 3 view of microarchitectural co-evolution. In the cache and energy panels, the cross-benchmark spread dwarfs the median—the -O0 interquartile range (IQR) spans nearly two orders of magnitude (D1: 0.89 –
+
+48 .9 × 10 6)—so a near-flat median hugs the floor while the solver kernels ( cholesky /lu /ludcmp ) and floyd_warshall 
+
+float far above. The first pass ( -O0 →pass 0) is inert in all six panels, and each median advances as a plateau broken only by steps at the recurring hot passes 8–9, 16, 41–42, 87, 95, and 106 ( simplifycfg ) and 112 ( globaldce ). D1 median is nearly flat ( 2.78 –3.18 × 10 6, +2 .6% end-to-end); the spread is dominated by cholesky /lu /ludcmp , peaking at 
+
+327 –366 × 10 6. L1-I declines −36 .8% (7.22 → 4.56 × 10 5)through two drops at passes 9 ( −18% ) and 87 ( −25% ). LLC rises +35 .6% (3.86 → 5.23 × 10 5), with the dominant inflection at pass 87 ( +41% ); the lu triad forms an outlier cluster at ∼2 × 10 7. IPC/CPI open at 2.96 /0.338 , peak at 
+
+3.50 /0.286 (pass 8), collapse to 2.55 /0.393 at pass 41, recover partially, then end at 2.44 /0.409 —a −17 .4% IPC degradation consistent with large wall-clock speedups, since single instruc-tion multiple data (SIMD) reduces instruction count far more than latency increases penalize throughput. Energy (RAPL 
+
+power/energy-pkg/ ) decreases −40 .9% (92 .2 → 54 .5 J), with the dominant step at pass 87 ( −35% , −30 .7 J)—to our knowl-edge the first per-pass energy profile of the LLVM pipeline. L1-I and energy are the only metrics that genuinely converge: their IQRs contract end-to-end (1.44 → 0.87 × 10 6 and 
+
+221 → 113 J), whereas the D1 spread stays essentially fixed. The cross-cutting insight: the binary-bloat trade-off (§IV-B) does not translate into instruction-cache pressure—L1-I misses fall with the instruction count—and its only microarchitectural cost is data-side: late-pipeline unrolling inflates LLC misses on the dense solvers, while the suite-wide speedup comes from fewer instructions rather than from higher IPC .
+
+Finding 3 (RQ 3)
+
+Runtime gains come from large reductions in instruction count and cycles— not from higher throughput: IPC falls 
+
+(−17 .4% ) as vectorization trades many cheap instructions for fewer, longer-latency SIMD operations, while the D1 miss rate stays essentially flat. Energy savings track run-time savings (30–60% suite-wide median): runtime-targeted passes are de facto energy-targeted for compute-bound 0 20 40 60 80 100 112 
+
+Pass Index       
+
+> 0
+> 1
+> 2
+> 3
+> 4
+> D1 Misses
+> 1e8
+> IQR
+> median
+> 020 40 60 80 100 112
+
+Pass Index       
+
+> 0
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+> L1i Misses
+> 1e6
+> 020 40 60 80 100 112
+
+Pass Index       
+
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> LL Misses
+> 1e7
+> 020 40 60 80 100 112
+
+Pass Index       
+
+> 2
+> 3
+> 4
+> 5
+> 6
+> IPC
+> 020 40 60 80 100 112
+
+Pass Index       
+
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> CPI
+> 020 40 60 80 100 112
+
+Pass Index 
+
+> 0
+> 250
+> 500
+> 750
+> 1000
+> 1250
+> 1500
+> 1750
+> Energy (J)
+
+Fig. 9: Per-pass evolution of D1, LLC, and L1-I miss rates, IPC, CPI, and energy. 1.0 1.5 2.0 2.5 3.0 3.5 4.0 
+
+> Speedup vs -O0
+> correlation
+> seidel-2d
+> covariance
+> adi
+> jacobi-1d
+> symm
+> gramschmidt
+> durbin
+> trmm
+> bicg
+> 2mm
+> trisolv
+> syr2k
+> mvt
+> doitgen
+> lu
+> deriche
+> gesummv
+> 3mm
+> ludcmp
+> cholesky
+> gemver
+> atax
+> nussinov
+> floyd-warshall
+> syrk
+> fdtd-2d
+> heat-3d
+> jacobi-2d
+> gemm
+> Δ = 0.063×
+> Δ = 0.031×
+> Δ = 0.050×
+> Δ = 0.007×
+> Δ = 0.035×
+> Δ = 0.015×
+> Δ = 0.011×
+> Δ = 0.013×
+> Δ = 0.010×
+> Δ = 0.017×
+> Δ = 0.025×
+> Δ = 0.011×
+> Δ = 0.006×
+> Δ = 0.005×
+> Δ = 0.003×
+> Δ = 0.009×
+> Δ = 0.006×
+> Δ = 0.006×
+> Δ = 0.037×
+> Δ = 0.051×
+> Δ = 0.006×
+> Δ = 0.219×
+> Δ = 0.015×
+> -O0
+> Median loss = 0.010×
+> Negligible (≤0.01×): 15/30
+> Large (>0.05×): 3/30
+> Category
+> Data Mining
+> LA · BLAS
+> LA · Kernels
+> LA · Solvers
+> Medley
+> Stencils
+> Phase-interference loss
+
+Fig. 10: Bounded phase-interference loss L per benchmark. kernels. Conversely, loop-vectorize and loop-unroll 
+
+lower L1-I misses (fewer instructions fetched); the binary-bloat trade-off of §IV-B surfaces instead as data working-set expansion, inflating LLC misses on the dense solvers (lu /ludcmp /cholesky ). Branch-misprediction behavior is essentially flat: control-flow optimization is not on the critical path for PolyBench. 
+
+D. RQ 4: Phase-Interference Loss 
+
+The non-monotonic trajectories raise the question of how much speedup is lost to phase interference. We define the optimistic additive bound: 
+
+Sopt = X
+
+i
+
+max(∆ Si, 0) , L = Sopt − [Sactual ]Sopt 
+
+0
+
+Sopt 
+
+,
+
+where [x]Sopt 
+
+0 = min(max( x, 0) , S opt ) and Sactual =
+
+Sfinal − 1. Fig. 10 reports L: mean 46.35% (median 39.3%, IQR [30.4%, 54.2%]); L measures the gap from the ide-alized additive ceiling Sopt , not from a recoverable tar-get. Three benchmarks finish below -O0 : correlation 
+
+(0.96 ×), covariance , seidel-2d (0.98 ×). The worst case is correlation (L=100% , Sopt =46 .9% neutered to 
+
+Sactual =−3.9% ), with the dominant regression pinned to pass 41 ( licm , ∆S=−25 .98% , +173 ,637 L1-I misses), most of which is recovered in situ by the immediately-following pass 42 ( loop-rotate , ∆S=+24 .59% ). Critically, L is cu-mulative: |∆Si| of order 0.2–0.3% across 113 passes can accumulate Sopt ≈9% while erasing 6% , yielding L≈67% 
+
+with no single catastrophic pass—the waterfall localizes the regression, L quantifies the discarded opportunity. Unlike prior phase-ordering work, which measures loss relative to an alternative ordering discovered by search [32], [49], [83], [84], L is—to our knowledge—the first search-free, per-pass-attributed quantification of the speedup lost to destructive phase interactions [37], [85] within the default -O3 pipeline of a production compiler. 0     
+
+> 100
+> 200
+> 300
+> 400
+> Stddev (ms)
+> 020 40 60 80 100
+> Pass Index
+> 0
+> 100
+> 200
+> 300
+> 400
+> 500
+> CI95 Width (ms)
+
+Fig. 11: Per-pass runtime standard deviation (top) and 95% confidence-interval width (bottom). Both remain below 1% of the mean and under 1 ms. 
+
+Finding 4 (RQ 4)
+
+The mean idealized-additive upper bound on phase-interference loss is L=46 .35% (median 39.3%, IQR [30.4%, 54.2%]); L ceilings the speedup that could be recovered from intra-pipeline interference, but the non-commutative composition of passes (§II) makes the additive ceiling itself unrealizable. Three benchmarks finish below 
+
+-O0 (correlation 0.96 ×, covariance and seidel-2d 
+
+0.98 ×); on correlation (L=100% ), the worst transi-tion is pass 41 ( loop-rotate , ∆S=−25 .98% , +173 ,637 
+
+L1-I misses) and the immediately-following pass 42 (licm ⟨allowspeculation ⟩, ∆S=+24 .59% ) recovers most of it: the pipeline self-corrects in situ (§V). V. D ISCUSSION & I MPLICATIONS 
+
+Pipeline Surgery. The bounded phase-interference loss 
+
+L = 46 .35% (§IV-D) is, to our knowledge, the first search-free , reproducible bound on speedup lost to intra-pipeline in-terference, complementing prior search-based phase-ordering estimates [83], [85]. We stress that Sopt is an idealized additive 
+
+ceiling: because passes are non-commutative and non-additive (§II), L upper-bounds , rather than estimates, the recoverable speedup. The attainable fraction is likely much smaller, and closing it is a search problem, not a free subtraction. In the worst case correlation (L = 100% , §IV-D), the dominant regression at pass 41 is largely repaired in situ by the imme-diately following pass 42 rather than by an external guard, suggesting that the residual −3.9% accumulates across later non-canonical interactions rather than at this single transition. Three concrete edits are suggested by the data: 1) the Pareto plots of Fig. 5 show that the final -O3 variant is dominated by an earlier checkpoint in 29 of 30 bench-marks, while a “stop at trajectory-best” flag removes late-pipeline binary bloat with no runtime regression; 2) near-zero in-context marginal impact (measured in the canonical order) does not imply global dispensability: a pass that is inert at its current position may create IR structures exploited by later passes or be critical in a reordered pipeline. Pruning decisions should therefore be validated by re-running the modified pipeline end-to-end, not by marginal impact alone; 3) phase-interference data (Fig. 10) localize the responsible pass at single-index resolution, enabling targeted “do not run pi on IR matching signature X” guards, which are strictly less invasive than full phase-ordering search. The unsupervised top-10 ranking recovers exactly the ex-isting hand-tuned core (early-cse , licm , instcombine ,
+
+loop-vectorize , loop-rotate , . . . ) that any pruning effort must treat as load-bearing. 
+
+Implications for Cost Models and MLIR. Fig. 6 high-lights the sharpest negative result of our study: IR-instruction count and dynamic runtime are essentially uncorrelated both cross-benchmark and within-benchmark. Any cost model that uses IR count as a dominant runtime proxy will system-atically misrank pipeline variants and must be augmented with dynamic or microarchitectural signals (cycles, IPC, D1 misses) [40], [56]. The pass-impact ranking is robust to estimator choice at the top (mid-rank passes re-order under the median), making the median-based ranking the conser-vative baseline for pass-pruning heuristics. Conversely, the near-determinism of counters such as instructions-retired 
+
+and cycles is an autotuning-useful signal: per-pass IR-transformation deltas on PolyBench are reproducible well be-low measurement noise, so Bayesian-optimization priors built over these counters can treat per-pass effects as essentially deterministic. For compute-bound numerical kernels, passes reducing runtime also reduce energy 30–60% (Fig. 9); -O3 
+
+is a free-lunch energy intervention for this class, though transfer to memory-bound/batched/accelerator-hosted ML re-quires validation (§VI). On the dense solvers late-pipeline 
+
+loop-vectorize and loop-unroll expand the data working set, inflating LLC misses (L1-I misses fall with instruction count); an MLIR lowering pipeline gating these behind a work-ing-set/LLC-capacity predicate would exploit this mechanism. 
+
+Methodology Recommendations and Limits. Reporting mean and median jointly caught estimator-driven artifacts at negligible cost—we recommend it as a default for pass-level studies. The robustness diagnostics (Fig. 11) were specified 
+
+a priori , making per-pass confidence-interval widths a core component of the experimental design. All recommendations are conditioned on PolyBench (default-dataset), LLVM 21.1.8, 
+
+-O3 , single-threaded, Intel Alder Lake. The energy co-benefit and the working-set/LLC mechanism depend on the host’s RAPL domain and cache hierarchy. The pass-impact ranking is version-locked to LLVM 21.1.8, though the dominance of instcombine , licm , and early-cse is expected to be stable across versions and optimization levels, as they are the core of the hand-tuned pipeline. Re-validation on SPEC CPU, 
+
+-Os /-Oz , or different platforms is required before generalizing. VI. T HREATS TO VALIDITY 
+
+The discussion follows the Wohlin et al. ’s taxonomy [86]. Conclusion Validity. We keep the 95% confidence interval under 1% of the mean for every metric (Fig. 11) and report median and mean jointly [79], [80], so estimator-driven arti-facts surface rather than hide. The Cohen’s d heatmap (Fig. 3) is dominated by near-deterministic counters whose vanishing variance mechanically inflates |d|; we therefore read effect size with Wilcoxon significance and the magnitude views of Figs. 2a and 2b, never promoting a pass on d alone. We apply no family-wise correction across the 113 × 30 grid: our claims rest on consistent cross-benchmark patterns, not isolated p-values. Finally, L is an idealized additive upper bound (§IV-D), not an estimate of recoverable speedup. 
+
+Internal Validity. The differential design ascribes the Bi−1 →
+
+Bi delta to pi, but this delta is context- and order-dependent: a pass inert in the canonical -O3 order may be load-bearing for later passes or in a reordered pipeline. We thus refrain from inferring global dispensability and require end-to-end revali-dation before pruning (§V). System confounds are controlled as in §III (core pinning, RT-FIFO scheduling, performance 
+
+governor, disabled ASLR), with cache references, RSS, page faults, and context switches as checks. Runtime and counters are collected separatly to avoid instrumentation overhead. 
+
+Construct Validity. “Marginal pass impact” is operational-ized as the in-context prefix delta, measuring contribu-tion within the canonical order—aligned with how -O3 de-ploys passes, not a standalone-effect measurement. Runtime, 
+
+clang+opt+llc compile time, and binary size are direct mea-sures; RAPL package energy excludes the DRAM and GPU domains, under-capturing full-system energy for memory-bound workloads. IR-instruction count is treated as a candidate runtime proxy and found inadequate (Fig. 6)—a reported negative result, not an unaddressed threat. Flattening the hi-erarchical pass managers abstracts away nesting but preserves execution order and dependencies, so each prefix is a faithful, replayable -O3 sub-pipeline. 
+
+External Validity. The findings are conditioned on Poly-Bench/C 4.2.1 (default dataset), LLVM 21.1.8, -O3 , single-threaded, on one Intel Alder Lake host. PolyBench’s regular affine loop nests isolate single-pass effects but do not represent irregular, pointer-heavy, or multi-threaded code; larger suites would mask those effects or exceed our repetition budget (§III), so cross-suite replication is required before generaliz-ing. The ranking is version-locked, though the dominance of 
+
+instcombine , licm , and early-cse —the hand-tuned core— is expected to be stable; the energy and LLC/working-set ef-fects depend on the host’s RAPL domain and cache hierarchy. The MLIR transfer argument rests on structural isomorphism (§III) and is an unvalidated hypothesis; direct MLIR measure-ment, -Os /-Oz , and memory-bound or accelerator are future work. VII. R ELATED WORK 
+
+We are not aware of any systematic study quantifying individual LLVM pass impact across multiple performance dimensions; we review the relevant strands below. 
+
+Search-Based and Learning-Based Optimization. Iterative compilation [26], [27], [87] explores the optimization space by evaluating compiler configurations: small search budgets can outperform -O3 [26], [49] with program-dependent optimal configurations [45], [47], [88], while heuristic [42]–[44] and ML [36], [46], [89] approaches, collaborative filtering [90], and graph-based models [35] address the combinatorial space. Autotuning [40] adds Bayesian optimization [91], neural pre-dictors [32], [46], and reinforcement learning (AutoPhase [84], CompilerGym [92]), with recent work reducing search cost via multi-phase learning [39], sub-sequence modeling [38], and proxy metrics [31]; a recurring limitation is reliance on expensive or inaccurate performance signals. More broadly, ML links hardware counters to optimization decisions [56] or uses deep learning for vectorization [93] and phase order-ing [84], yet surveys [40] highlight the lack of fine-grained training data and difficulty isolating pass-level effects. Our work is orthogonal and complementary: we quantify each pass’s marginal contribution across runtime, binary size, and counters, producing fine-grained data for supervision, surro-gate targets, or priors while filling this pass-level data gap. 
+
+Compiler Fuzzing and Testing. Csmith [94], EMI [95], YARPGen [96], and CLsmith [97] target correctness, not performance. Our work is complementary: correctness enables reliable measurement, while performance characterization can guide fuzzing toward less understood optimizations. 
+
+Performance Analysis of Compiler Optimizations. De La Torre et al. [57] study LLVM passes but only execution time on a limited set. Chen et al. [62] quantify per-pass contributions in GCC/ICC, showing Pareto-skewed impact consistent with our findings—suggesting this is a property of optimization structure rather than a compiler-specific artifact. Cavazos et al. [56] use counters to predict benefits; Demertzi et al. [55] analyze reliability; Popescu and Lopes [54] study un-defined behavior; Tan et al. [53] identify missed optimizations. None provides a systematic, cumulative, multi-dimensional evaluation of the full LLVM -O3 pipeline. 
+
+Superoptimization and Peephole Verification. Our ranking, dominated by instcombine and early-cse , is consistent with superoptimization [98], [99]: peephole algebraic simpli-fications account for a disproportionate share of achievable optimizations. Our empirical ranking provides data-driven corroboration that these rewrites are load-bearing in LLVM 
+
+-O3 .
+
+Profile-Guided Optimization. Finding 2 (§IV-B) concludes that pass-budget decisions can be made per pipeline based on the benchmark-independence of the opt /total compile-time ra-tio. This is in tension with PGO/FDO literature [100] showing per-program profiling is essential for optimal pass selection, but the tension is not a contradiction: our finding concerns 
+
+compile-time budget allocation , while PGO concerns which transformations to apply —both can simultaneously hold. VIII. C ONCLUSION 
+
+We presented a systematic, multi-dimensional study of the LLVM -O3 pipeline, decomposing it into cumulative per-pass prefixes across 84 ,750 measurements over 113 variants of 30 PolyBench/C kernels. The pipeline is non-monotone (6.6–9.7% of transitions regress) and back-loaded, with a small Pareto-dominant core driving the gains. The final -O3 
+
+variant is Pareto-dominated on (size, speedup) in 29/30 ker-nels. IR-instruction count is an unreliable runtime proxy; runtime-targeted passes are de facto energy-targeted (30– 60%). The search-free, idealized-additive upper bound on phase-interference loss is L = 46 .35% (a ceiling, not a re-coverable target). With our infrastructure, these results inform pass pruning, cost-model calibration, and autotuning. Future work targets SPEC CPU, -Os /-Oz , more platforms, and MLIR-lowered ML kernels. REFERENCES [1] A. P. Ershov, “On Programming of Arithmetic Operations,” Communica-tions of the ACM , vol. 1, no. 8, pp. 3–6, Aug. 1958. [2] J. Heller, “Sequencing Aspects of Multiprogramming,” Journal of ACM ,vol. 8, no. 3, pp. 426–439, Jul. 1961. [3] W. M. McKeeman, “Peephole Optimization,” Communications of the ACM , vol. 8, no. 7, pp. 443–444, Jul. 1965. [4] C. W. Gear, “High Speed Compilation of Efficient Object Code,” Com-munications of the ACM , vol. 8, no. 8, pp. 483–488, Aug. 1965. [5] E. S. Lowry and C. W. Medlock, “Object Code Optimization,” Commu-nications of the ACM , vol. 12, no. 1, pp. 13–22, Jan. 1969. [6] V. A. Busam and D. E. Englund, “Optimization of Expressions in For-tran,” Commu. of the ACM , vol. 12, no. 12, pp. 666–674, Dec. 1969. [7] F. E. Allen, “Program Optimization,” in Annual Review of Automatic Programming . Pergamon Press, 1969, vol. 5, pp. 239–307. [8] W. A. Wulf, The Design of an Optimizing Compiler . CMU, Dec. 1973. [9] K. D. Cooper and L. Torczon, Engineering a Compiler , Nov. 2022. [10] K. Kennedy and J. R. Allen, Optimizing Compilers for Modern Architec-tures: A Dependence-Based Approach . Morgan Kaufmann, Oct. 2001. [11] R. Paige, “Future Directions in Program Transformations,” ACM Com-puting Surveys , vol. 28, no. 4, pp. 170–174, Dec. 1996. [12] D. F. Bacon, S. L. Graham, and O. J. Sharp, “Compiler Transformations for High-Performance Computing,” ACM Computing Surveys , vol. 26, no. 4, pp. 345–420, Dec. 1994. [13] M. Dodds, M. Batty, and A. Gotsman, “Compositional Verification of Compiler Optimisations on Relaxed Memory,” in Proc. ESOP’18 ,LNCS 10801, Thessaloniki, Greece: Springer, Apr. 2018, pp. 1027–1055. [14] A. V. Aho, M. S. Lam, R. Sethi, and J. D. Ullman, Compilers: Principles, Techniques, and Tools , 2nd ed. Addison-Wesley, 2006. [15] C. Lattner and V. Adve, “LLVM: A Compilation Framework for Lifelong Program Analysis and Transformation,” in Proc. CGO’04 , San José, CA, USA: IEEE, Mar. 2004, pp. 75–86. [16] N. D. Matsakis and F. S. Klock, “The Rust Language,” ACM SIGAda Letters , vol. 34, no. 3, pp. 103–104, Oct. 2014. [17] J. Bezanson, S. Karpinski, V. B. Shah, and A. Edelman, “Julia: AFast Dynamic Language for Technical Computing,” arXiv e-prints ,arXiv:1209.5145, pp. 1–27, Sep. 2012. [18] C. Lattner, M. Amini, U. Bondhugula, A. Cohen, A. Davis, J. Pienaar, R. Riddle, T. Shpeisman, N. Vasilache, and O. Zinenko, “MLIR: Scal-ing Compiler Infrastructure for Domain Specific Computation,” in 
+
+Proc. CGO’21 . Virtual: IEEE, Feb./Mar. 2021, pp. 2–14. [19] A. Paszke, S. Gross, F. Massa, A. Lerer, J. Bradbury, G. Chanan, T. Killeen, Z. Lin, N. Gimelshein, L. Antiga, A. Desmaison, A. Köpf, E. Yang, Z. DeVito, M. Raison, A. Tejani, S. Chilamkurthy, B. Steiner, L. Fang, J. Bai, and S. Chintala, “PyTorch: An Imperative Style, High-Performance Deep Learning Library,” in Proc. NeurIPS’19 . Vancouver, Canada: Curran Associates, Inc., Dec. 2019, pp. 8026–8037. [20] M. Abadi, P. Barham, J. Chen, Z. Chen, A. Davis, J. Dean, M. Devin, S. Ghemawat, G. Irving, M. Isard, M. Kudlur, J. Levenberg, R. Monga, S. Moore, D. G. Murray, B. Steiner, P. Tucker, V. Vasudevan, P. Warden, M. Wicke, Y. Yu, and X. Zheng, “TensorFlow: A System for Large-Scale Machine Learning,” in Proc. OSDI’16 . Savannah, GA, USA: USENIX, Nov. 2016, pp. 265–283. [21] M. Li, Y. Liu, X. Liu, Q. Sun, X. You, H. Yang, Z. Luan, L. Gan, G. Yang, and D. Qian, “The Deep Learning Compiler: A Comprehensive Survey,” 
+
+IEEE Trans. Par. and Distr. Syst. , vol. 32, no. 3, pp. 708–727, Mar. 2021. [22] Y. Xing, J. Weng, Y. Wang, L. Sui, Y. Shan, and Y. Wang, “An In-Depth Comparison of Compilers for Deep Neural Networks on Hardware,” in 
+
+Proc. ICESS’19 . Las Vegas, NV, USA: IEEE, Jun. 2019, pp. 1–8. [23] R. Zhao, S. Liu, H.-C. Ng, E. Wang, J. J. Davis, X. Niu, X. Wang, H. Shi, G. A. Constantinides, P. Y. K. Cheung, and W. Luk, “Hardware Compi-lation of Deep Neural Networks: An Overview,” in Proc. ASAP’18 .Milan, Italy: IEEE, Jul. 2018, pp. 1–8. [24] H.-I. C. Liu, M. Brehler, M. Ravishankar, N. Vasilache, B. Vanik, and S. Laurenzo, “TinyIREE: An ML Execution Environment for Embedded Systems from Compilation to Deployment,” IEEE Micro , vol. 42, no. 5, pp. 9–16, Sep. 2022. [25] T. Chen, T. Moreau, Z. Jiang, H. Shen, E. Q. Yan, L. Wang, Y. Hu, L. Ceze, C. Guestrin, and A. Krishnamurthy, “TVM: An Automated End-to-End Optimizing Compiler for Deep Learning,” arXiv e-prints ,arXiv:1802.04799, pp. 1–16, Oct. 2018. [26] K. D. Cooper, P. J. Schielke, and D. Subramanian, “Optimizing for Re-duced Code Space Using Genetic Algorithms,” in Proc. LCTES’99 ,Atlanta, GA, USA: ACM, May 1999, pp. 1–9. [27] K. D. Cooper, D. Subramanian, and L. Torczon, “Adaptive Optimizing Compilers for the 21st Century,” J. Supercomputing , vol. 23, no. 1, pp. 7– 22, Aug. 2002. [28] S. Triantafyllis, M. Vachharajani, N. Vachharajani, and D. I. August, “Compiler Optimization-Space Exploration,” in Proc. CGO’03 , San Francisco, CA, USA: IEEE, Mar. 2003, pp. 204–215. [29] S.-A.-A. Touati and D. Barthou, “On the Decidability of Phase Ordering Problem in Optimizing Compilation,” in Proc. CF’06 , Ischia, Italy: ACM, May 2006, pp. 147–156. [30] S. M. Freudenberger and J. C. Ruttenberg, “Phase Ordering of Register Allocation and Instruction Scheduling,” in Proc. WoCC’92 . Daghstul, Germany: Springer, May 1991, pp. 146–170. [31] J. Zhao, C. Xia, and Z. Wang, “Leveraging Compilation Statistics for Compiler Phase Ordering,” in Proc. IPDPS’25 . Milan, Italy: IEEE, Jun. 2025, pp. 533–545. [32] A. H. Ashouri, A. Bignoli, G. Palermo, C. Silvano, S. Kulkarni, and J. Cavazos, “MiCOMP: Mitigating the Compiler Phase-Ordering Prob-lem Using Optimization Sub-Sequences and Machine Learning,” ACM Trans. Arch. Code Opt. , vol. 14, no. 3, pp. 29:1–29:28, Sep. 2017. [33] J. W. Davidson, G. S. Tyson, D. B. Whalley, and P. A. Kulkarni, “Eval-uating Heuristic Optimization Phase Order Search Algorithms,” in 
+
+Proc. CGO’07 . San José, CA, USA: IEEE, Mar. 2007, pp. 157–169. [34] S. R. Vegdahl, “Phase Coupling and Constant Generation in an Optimiz-ing Microcode Compiler,” in Proc. MICRO’82 , Oct. 1982, pp. 125–133. [35] R. Nobre, L. G. A. Martins, and J. a. M. P. Cardoso, “A Graph-Based Iterative Compiler Pass Selection and Phase Ordering Approach,” in 
+
+Proc. LCTES’16 . Santa Barbara, USA: ACM, Jun. 2016, pp. 21–30. [36] F. Agakov, E. V. Bonilla, J. Cavazos, B. Franke, G. Fursin, M. F. P. O’Boyle, J. Thomson, M. Toussaint, and C. K. I. Williams, “Using Machine Learning to Focus Iterative Optimization,” in 
+
+Proc. CGO’06 , New York, NY, USA: IEEE, Mar. 2006, pp. 305–315. [37] D. L. Whitfield and M. L. Soffa, “An Approach to Ordering Optimizing Transformations,” in Proc. PPoPP’90 , ACM, Mar. 1990, pp. 137–146. [38] H. Pan, Y. Wei, M. Xing, Y. Wu, and C. Zhao, “Towards Efficient Compiler Auto-tuning: Leveraging Synergistic Search Spaces,” in 
+
+Proc. CGO’25 . Las VEgas, NV, USA: IEEE, Mar. 2025, pp. 614–627. [39] M. Zhu, D. Hao, and J. Chen, “Compiler Autotuning through Multiple-phase Learning,” ACM Transactions on Software Engineering and Methodology , vol. 33, no. 4, pp. 1–38, May 2024. [40] A. H. Ashouri, W. Killian, J. Cavazos, G. Palermo, and C. Silvano, “A Survey on Compiler Autotuning using Machine Learning,” ACM Com-puting Surveys , vol. 51, no. 5, pp. 96:1–96:42, Sep. 2018. [41] A. Tiwari, C. Chen, J. Chame, M. Hall, and J. K. Hollingsworth, “A Scalable Auto-Tuning Framework for Compiler Optimization,” in 
+
+Proc. IPDPS’09 , Rome, Italy: IEEE, May 2009, pp. 1–12. [42] Z. Pan and R. Eigenmann, “PEAK—A Fast and Effective Perfor-mance Tuning System via Compiler Optimization Orchestration,” ACM Transactions on Programming Languages and Systems , vol. 30, no. 3, pp. 17:1–17:43, May 2008. [43] ——, “Fast and Effective Orchestration of Compiler Optimizations for Automatic Performance Tuning,” in Proc. CGO’06 , 2006, pp. 319–332. [44] P. Kulkarni, S. Hines, J. Hiser, D. Whalley, J. Davidson, and D. Jones, “Fast Searches for Effective Optimization Phase Sequences,” in 
+
+Proc. PLDI’04 , Washington, DC, USA: ACM, Jun. 2004, pp. 171–182. [45] S. Purini and L. Jain, “Finding Good Optimization Sequences Covering Program Space,” ACM Trans. Arch. Code Opt. , vol. 9, no. 4, Jan. 2013. [46] S. Kulkarni and J. Cavazos, “Mitigating the Compiler Optimization Phase-Ordering Problem Using Machine Learning,” in Proc. OOP-SLA’12 . Tucson, AZ, USA: ACM, Oct. 2012, pp. 147–162. [47] P. Kulkarni, W. Zhao, H. Moon, K. Cho, D. Whalley, J. Davidson, M. Bailey, Y. Paek, and K. Gallivan, “Finding Effective Optimization Phase Sequences,” in Proc. LCTES’03 , ACM, Jun. 2003, pp. 12–23. [48] D. L. Whitfield and M. L. Soffa, “An Approach for Exploring Code Improving Transformations,” ACM Transactions on Programming Lan-guages and Systems , vol. 19, no. 6, pp. 1053–1084, Nov. 1997. [49] L. Almagor, K. Cooper, A. Grosul, T. Harvey, S. Reeves, D. Subramanian, L. Torczon, and T. Waterman, “Finding Effective Compilation Se-quences,” in Proc. LCTES’04 , ACM, Jun. 2004, pp. 231–239. [50] M. Zhao, B. R. Childers, and M. L. Soffa, “An Approach Toward Profit-Driven Optimization,” ACM Transactions on Architecture and Code Optimization , vol. 3, no. 3, pp. 231–262, Sep. 2006. [51] J. Liu, J. Fang, T. Wang, J. Xie, C. Huang, and Z. Wang, “Efficient Com-piler Optimization by Modeling Passes Dependence,” CCF Transactions on High Performance Computing , vol. 6, no. 6, pp. 588–607, Dec. 2024. [52] K. Georgiou, C. Blackmore, S. Xavier-de Souza, and K. Eder, “Less is More: Exploiting the Standard Compiler Optimization Levels for Better Performance and Energy Consumption,” in Proc. SCOPES’18 , Sankt Goar, Germany: ACM, May 2018, pp. 35–42. [53] J. Tan, S. Jiao, M. Chabbi, and X. Liu, “What Every Scientific Program-mer Should Know about Compiler Optimizations?” in Proc. ICS’20 .Barcelona, Spain: ACM, Jun./Jul. 2020, pp. 1–12. [54] L. Popescu and N. P. Lopes, “Exploiting Undefined Behavior in C/C++ Programs for Optimization: A Study on the Performance Impact,” in 
+
+Proc. PLDI’25 , Seoul, South Korea: ACM, Jun. 2025, pp. 348–371. [55] M. Demertzi, M. Annavaram, and M. Hall, “Analyzing the Effects of Compiler Optimizations on Application Reliability,” in Proc. IISWC’11 ,Austin, TX, USA: IEEE, Nov. 2011, pp. 184–193. [56] J. Cavazos, G. Fursin, F. Agakov, E. Bonilla, M. F. P. O’Boyle, and O. Temam, “Rapidly Selecting Good Compiler Optimizations using Performance Counters,” in Proc. CGO’07 , Mar. 2007, pp. 185–197. [57] J. C. de la Torre, P. Ruiz, B. Dorronsoro, and P. L. Galindo, “Analyzing the Influence of LLVM Code Optimization Passes on Software Perfor-mance,” in Proc. IPMU’18 , CCIS 855. Springer, Jun. 2018, pp. 272–283. [58] S. Palkar, J. Thomas, D. Narayanan, P. Thaker, R. Palamuttam, P. Negi, A. Shanbhag, M. Schwarzkopf, H. Pirk, S. Amarasinghe, S. Madden, and M. Zaharia, “Evaluating End-to-End Optimization for Data Analytics Applications in Weld,” in Proc. VLDB’18 , May 2018, pp. 1002–1015. [59] N. van Kempen, H.-J. Kwon, D. T. Nguyen, and E. D. Berger, “It’s Not Easy Being Green: On the Energy Efficiency of Programming Lan-guages,” in Proc. ASE’25 , IEEE, Nov. 2025, pp. 1553–1565. [60] S. U. Lee, N. Fernando, K. Lee, and J.-G. Schneider, “A Survey of Energy Concerns for Software Engineering,” J. Syst. Soft. , vol. 210, Apr. 2024. [61] R. Pereira, M. Couto, F. Ribeiro, R. Rua, J. Cunha, J. P. Fernandes, and J. Saraiva, “Energy Efficiency Across Programming Languages,” in 
+
+Proc. SLE’17 . Vancouver, BC, Canada: ACM, Oct. 2017, pp. 256–267. [62] Y. Chen, S. Fang, Y. Huang, L. Eeckhout, G. Fursin, O. Temam, and C. Wu, “Deconstructing Iterative Optimization,” ACM Trans. Arch. Code Opt. , vol. 9, no. 3, pp. 21:1–21:30, Oct. 2012. [63] B. K. Rosen, M. N. Wegman, and F. K. Zadeck, “Global Value Numbers and Redundant Computations,” in Proc. PoPL’88 , Jan. 1988, pp. 12–27. [64] B. Alpern, M. N. Wegman, and F. K. Zadeck, “Detecting Equality of Variables in Programs,” in Proc. PoPL’88 , ACM, Jan. 1988, pp. 1–11. [65] R. Cytron, J. Ferrante, B. K. Rosen, M. N. Wegman, and F. K. Zadeck, “An Efficient Method of Computing Static Single Assignment Form,” in Proc. POPL’89 , Austin, TX, USA: ACM, Jan. 1989, pp. 25–35. [66] D. Callahan, K. D. Cooper, K. Kennedy, and L. Torczon, “Interprocedural Constant Propagation,” in Proc. SCC’86 , ACM, Jun. 1986, pp. 152–161. [67] M. N. Wegman and F. K. Zadeck, “Constant Propagation with Condi-tional Branches,” ACM Transactions on Programming Languages and Systems , vol. 13, no. 2, pp. 181–210, Apr. 1991. [68] R. Cytron, J. Ferrante, B. K. Rosen, M. N. Wegman, and F. K. Zadeck, “Efficiently Computing Static Single Assignment Form and the Control Dependence Graph,” ACM Transactions on Programming Languages and Systems , vol. 13, no. 4, pp. 451–490, Oct. 1991. [69] S. S. Muchnick, Advanced Compiler Design and Implementation , 1st ed. Morgan Kaufmann, Aug. 1997. [70] S. Carr and K. Kennedy, “Scalar Replacement in the Presence of Condi-tional Control Flow,” Software—Practice and Experience , vol. 24, no. 1, pp. 51–77, Jan. 1994. [71] J. Lu and K. D. Cooper, “Register Promotion in C Programs,” in 
+
+Proc. PLDI’97 , Las Vegas, NV, USA: ACM, Jun. 1997, pp. 308–319. [72] P. P. Chang and W.-W. Hwu, “Inline Function Expansion for Compiling C Programs,” in Proc. PLDI’89 , Portland, USA: Jun. 1989, pp. 246–257. [73] J. J. Dongarra and A. R. Hinds, “Unrolling loops in Fortran,” Software— Practice and Experience , vol. 9, no. 3, pp. 219–226, Mar. 1979. [74] J. W. Davidson and S. Jinturkar, “An Aggressive Approach to Loop Unrolling,” University of Virginia, VA, USA, TR-CS-95-26, Jan. 1995. [75] J. Knoop, O. Rüthing, and B. Steffen, “Partial Dead Code Elimination,” in Proc. PLDI’94 , Orlando, FL, USA: ACM, Jun. 1994, pp. 147–158. [76] F. E. Allen and J. Cocke, “A Catalogue of Optimizing Transformations,” in Design and Optimization of Compilers , Prentice-Hall, 1972, pp. 1–30. [77] T. Yuki, “Understanding PolyBench/C 3.2 Kernels,” in Proc. IM-PACT’14 , Wien, Austria, Jan. 2014, pp. 1–5. [78] V. M. Weaver and S. A. McKee, “Can Hardware Performance Counters Be Trusted?” in Proc. IISWC’08 , IEEE, Sep. 2008, pp. 141–150. [79] A. Georges, D. Buytaert, and L. Eeckhout, “Statistically Rigorous Java Performance Evaluation,” in Proc. OOPSLA’07 , Montréal, Canada: ACM, Oct. 2007, pp. 57–76. [80] T. Mytkowicz, A. Diwan, M. Hauswirth, and P. F. Sweeney, “Produc-ing Wrong Data Without Doing Anything Obviously Wrong!” in 
+
+Proc. ASPLOS’09 , Washington, USA: ACM, Mar. 2009, pp. 265–276. [81] J. Cocke, “Global Common Subexpression Elimination,” in Proc. SCO’70 , Urbana-Champaign, USA: ACM, Jul. 1970, pp. 20–24. [82] J. D. Ullman, “Fast Algorithms for the Elimination of Common Subex-pressions,” Acta Informatica , vol. 2, no. 3, pp. 191–213, Sep. 1973. [83] P. A. Kulkarni, D. B. Whalley, G. S. Tyson, and J. W. Davidson, “Exhaus-tive Optimization Phase Order Space Exploration,” in Proc. CGO’06 ,New York, NY, USA: IEEE, Mar. 2006, pp. 306–318. [84] A. Haj-Ali, Q. Huang, J. Xiang, W. Moses, K. Asanovic, J. Wawrzynek, and I. Stoica, “AutoPhase: Juggling HLS Phase Orderings in Ran-dom Forests with Deep Reinforcement Learning,” in Proc. MLSys’20 ,Austin, TX, USA: Curran, Mar. 2020, pp. 70–81. [85] M. R. Jantz and P. A. Kulkarni, “Analyzing and Addressing False In-teractions During Compiler Optimization Phase Ordering,” Software— Practice and Experience , vol. 44, no. 6, pp. 643–679, Jun. 2014. [86] C. Wohlin, P. Runeson, M. Höst, M. C. Ohlsson, B. Regnell, and A. Wesslén, Experimentation in Software Engineering . Springer, 2012. [87] F. Bodin, T. Kisuki, P. Knijnenburg, M. O’Boyle, and E. Rohou, “Iterative Compilation in a Non-linear Optimisation Space,” in Proc. PFDC’98 ,Paris, France, Oct. 1998. [88] L. Eeckhout, H. Vandierendonck, and K. De Bosschere, “Quantifying the Impact of Input Data Sets on Program Behavior and Its Applica-tions,” Journal of Instruction-Level Parallelism , vol. 5, no. 1, pp. 1–33, Feb. 2003. [89] G. Fursin, Y. Kashnikov, A. W. Memon, Z. Chamski, O. Temam, M. Namolaru, E. Yom-Tov, B. Mendelson, A. Zaks, E. Courtois, F. Bodin, P. Barnard, E. Ashton, E. Bonilla, J. Thomson, C. K. I. Williams, and M. O’Boyle, “Milepost GCC: Machine Learning Enabled Self-Tuning Compiler,” International Journal of Parallel Programming , vol. 39, no. 3, pp. 296–327, Jan. 2011. [90] H. Liu, J. Luo, Y. Li, and Z. Wu, “Iterative Compilation Optimization Based on Metric Learning and Collaborative Filtering,” ACM Transac-tions on Architecture and Code Optimization , vol. 19, no. 1, pp. 2:1–2:25, Mar. 2021. [91] A. H. Ashouri, G. Mariani, G. Palermo, E. Park, J. Cavazos, and C. Silvano, “COBAYN: Compiler Autotuning Framework Using Bayesian Networks,” ACM Transactions on Architecture and Code Optimization , vol. 13, no. 2, pp. 21:1–21:25, Jun. 2016. [92] C. Cummins, B. Wasti, J. Guo, B. Cui, J. Ansel, S. Gomez, S. Jain, J. Liu, O. Teytaud, B. Steiner, Y. Tian, and H. Leather, “CompilerGym: Robust, Performant Compiler Optimization Environments for AI Research,” in 
+
+Proc. CGO’22 , Seoul, South Korea: IEEE, Apr. 2022, pp. 92–105. [93] A. Haj-Ali, N. K. Ahmed, T. Willke, Y. S. Shao, K. Asanovic, and I. Stoica, “NeuroVectorizer: End-to-End Vectorization with Deep Rein-forcement Learning,” in Proc. CGO’20 , San Diego, CA, USA: IEEE, Feb. 2020, pp. 242–255. [94] X. Yang, Y. Chen, E. Eide, and J. Regehr, “Finding and Understanding Bugs in C Compilers,” in Proc. PLDI’11 , San Josè, CA, USA: ACM, Jun. 2011, pp. 283–294. [95] V. Le, M. Afshari, and Z. Su, “Compiler Validation via Equivalence Modulo Inputs,” in Proc. PLDI’14 , Edinburgh, United Kingdom: ACM, Jun. 2014, pp. 216–226. [96] V. Livinskii, D. Babokin, and J. Regehr, “Random Testing for C and C++ Compilers with YARPGen,” in Proc. OOPSLA’20 , Chicago, IL, USA: ACM, Nov. 2020, pp. 1–25. [97] C. Lidbury, A. Lascu, N. Chong, and A. F. Donaldson, “Many-Core Com-piler Fuzzing,” in Proc. PLDI’15 , Portland, OR, USA: ACM, Jun. 2015, pp. 65–76. [98] H. Massalin, “Superoptimizer: A Look at the Smallest Program,” in 
+
+Proc. ASPLOS’87 , Palo Alto, CA, USA: ACM, Oct. 1987, pp. 122–126. [99] S. Bansal and A. Aiken, “Automatic Generation of Peephole Superopti-mizers,” in Proc. ASPLOS’06 , ACM, Oct. 2006, pp. 394–403. [100] D. Chen, T. Moseley, and D. X. Li, “AutoFDO: Automatic Feedback-Directed Optimization for Warehouse-Scale Applications,” in Proc. CGO’16 , Barcelona, Spain: IEEE, Mar. 2016, pp. 12–23.

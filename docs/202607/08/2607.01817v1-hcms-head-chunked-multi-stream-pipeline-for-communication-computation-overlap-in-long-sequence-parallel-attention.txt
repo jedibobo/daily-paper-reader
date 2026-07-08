@@ -1,0 +1,560 @@
+Title: HCMS: Head-Chunked Multi-Stream Pipeline for Communication-Computation Overlap in Long-Sequence Parallel Attention
+
+URL Source: https://arxiv.org/pdf/2607.01817v1
+
+Published Time: Fri, 03 Jul 2026 00:40:06 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# HCMS: Head-Chunked Multi-Stream Pipeline for Communication-Computation Overlap in Long-Sequence Parallel Attention 
+
+Chao Yuan 1, Pan Li 1, Yingnan Sun 1, Jing Liu 11Bilibili Inc., Shanghai, China 
+
+{yuanchao, lipan02, sunyingnan, liujing04 }@bilibili.com 
+
+# Abstract 
+
+All-to-all based sequence parallelism methods execute communication and computation strictly in serial when processing medium-long sequences, resulting in hard-ware resource underutilization. This paper proposes Head-Chunked Multi-Stream Pipeline (HCMS), which exploits the computational independence of multi-head attention by partitioning attention heads into multi-ple chunks and achieving fine-grained communication-computation overlap through dual CUDA streams. HCMS is orthogonally compatible with existing opti-mizations such as FlashAttention and SDPA, requires no modification to underlying kernels, supports uneven partitioning while maintaining numerical equivalence. Experiments validate the effectiveness across four GPU platforms at 2-8 GPU scales: for typical video gen-eration sequence lengths of 31K-56K tokens, HCMS achieves 10%-17.5% speedup over the Ulysses baseline and 5%-14.5% speedup over Ring Attention; end-to-end acceleration of 6.8% is achieved on the Wan2.2 model. Theoretical analysis shows that HCMS benefits are pos-itively correlated with communication ratio ρ, and its use is recommended when ρ > 20%. 
+
+Keywords: Sequence Parallelism; Communication-Computation Overlap; Distributed Attention; CUDA Streams; Long Sequence Processing 
+
+# 1 Introduction 
+
+Large-scale Transformer models [35] have achieved breakthrough advances in natural language process-ing [6, 3], computer vision [8], and multimodal gen-eration. Video generation represents one of the most prominent application scenarios [12, 2, 33, 11]. Tak-ing models such as Sora [25] and Wan2.2 as examples, generating 2-4 second videos at 720P resolution corre-sponds to sequence lengths of approximately 31K-56K tokens in latent space. This medium-long sequence pro-cessing requirement makes sequence parallelism a crit-ical technique—distributing sequences across multiple GPUs to accelerate computation. However, all-to-all based sequence parallelism schemes, represented by DeepSpeed Ulysses [14], exhibit significant efficiency issues: communication and computation execute strictly in serial, caus-ing hardware resource underutilization. We ob-serve that under typical configurations of 4-8 GPUs with PCIe interconnect and 31K-100K token sequence lengths, the communication ratio ρ typically ranges from 15% to 40%. This characteristic provides substantial room for communication optimization— through communication-computation overlap, a the-oretical speedup upper bound of 1 /(1 − ρ) can be achieved. Existing sequence parallelism methods each have their limitations. Ring Attention [19] employs aring communication pattern where overlap depends on block-level pipelined execution; when the number of blocks is small, overlap effectiveness is limited, and 
+
+P − 1 rounds of serial communication are required. Al-though DeepSpeed Ulysses requires fewer communica-tion rounds, its original implementation executes com-munication and computation completely in serial, fail-ing to exploit overlap optimization. A fundamental property of multi-head attention is that computations across different heads are mutually independent. This independence implies that the serial dependency of “communication → computation” can be relaxed at the head granularity—rather than wait-ing for all heads’ input data to complete communica-tion before starting computation, computation for any head can begin immediately once its data is ready. This property provides the theoretical foundation for achiev-ing fine-grained communication-computation overlap at the head dimension. Based on this insight, we propose the Head-Chunked Multi-Stream Pipeline (HCMS) method, which parti-tions attention heads into multiple independent chunks and achieves fine-grained pipelining through dual CUDA streams. HCMS supports uneven chunk par-titioning with performance variance less than 1%, and is orthogonally compatible with existing attention op-timizations such as FlashAttention and SDPA without requiring kernel modifications. Experiments demon-strate that HCMS achieves significant speedups across four GPU platforms at 2-8 GPU scales: for typical video generation sequence lengths of 31K-56K tokens, 4-GPU configurations achieve 17.5% speedup and 8-1
+
+> arXiv:2607.01817v1 [cs.DC] 2 Jul 2026
+
+GPU configurations achieve 16.4% speedup, outper-forming Ring Attention by 5%-14.5%. In end-to-end validation on the Wan2.2 video generation model, at-tention layers achieve 18.3% speedup and the complete pipeline achieves 6.8% speedup. The main contributions of this paper are as follows: 
+
+• Head Chunking Partitioning Strategy: We leverage the computational independence of multi-head attention to partition attention heads into 
+
+C chunks, thereby decoupling the originally se-rial communication-computation dependency into 
+
+C independently schedulable subtasks, achieving fine-grained parallelism without altering computa-tional semantics. This method supports uneven partitioning (when H mod C̸ = 0), and experi-ments show that performance variance compared to even partitioning is less than 1%. 
+
+• Theoretical Modeling and Applicability Analysis: We establish a performance model for HCMS and derive the optimal chunk count C∗ =pTcomm /β , clearly defining its applicability: sig-nificant benefits can be achieved when communi-cation ratio ρ > 20%, while benefits are limited when ρ < 10%. 
+
+• Cross-Platform Experimental Validation: 
+
+Across four GPU platforms with 2–8 GPU config-urations, for sequence lengths of 31K–56K tokens, HCMS achieves 5%–14 .5% speedup over Ring At-tention and 10%–17 .5% speedup over the Ulysses baseline. Furthermore, the method is fully com-patible with PyTorch autograd and can be directly used for distributed training, achieving 3 .5% train-ing speedup while maintaining numerical equiva-lence. 
+
+# 2 Related Work 
+
+2.1 Sequence Parallelism Methods 
+
+Sequence parallelism distributes the sequence dimen-sion across multiple devices [18, 17], primarily includ-ing ring communication-based methods and all-to-all based methods. The computations of different heads in multi-head attention are mutually independent, and this computational independence forms the theoretical foundation of our method. Ring Attention [19] employs a ring communica-tion pattern, partitioning sequences into P blocks and achieving distributed attention computation through 
+
+P − 1 rounds of KV block passing. Its advantage lies in high memory efficiency, enabling processing of ar-bitrarily long sequences. However, Ring Attention’s communication-computation overlap is limited by block granularity: overlap is only effective when computation time exceeds communication time. Furthermore, P − 1rounds of serial communication make total latency pro-portional to P . Subsequent work such as Striped Atten-tion [20] optimized for causal attention, but the video generation scenarios we focus on use bidirectional at-tention, making these optimizations not directly appli-cable. DeepSpeed Ulysses [14] employs an all-to-all com-munication pattern: the input all-to-all rearranges data from “sequence-sharded, heads-complete” to “sequence-complete, heads-sharded”, and after atten-tion computation, the output all-to-all performs the in-verse transformation. Compared to Ring Attention’s 
+
+P − 1 communication rounds, Ulysses requires only 2 rounds of all-to-all, with fewer communication rounds and better compatibility with FlashAttention [5, 4]. However, in Ulysses’ original implementation, commu-nication and computation execute completely in serial, which is precisely the optimization target of this paper. Megatron Context Parallelism [32, 23] provides both ring communication and all-gather modes. USP [9] unifies Ring and Ulysses into a single framework and proposes tile-based communication overlap techniques; LoongTrain [36] employs 2D parallelism across sequence and head dimensions to support million-scale token training; DistFlashAttn [10] extends FlashAttention to distributed scenarios; Colossal-AI [1] and LightSeq [17] provide unified distributed training frameworks. These works focus on the combination and scheduling of par-allelism strategies, while HCMS focuses on the under-lying communication-computation overlap implementa-tion based on Ulysses; the two are orthogonal and com-posable. In summary, existing sequence parallelism meth-ods have the following limitations in communication-computation overlap: (1) Ring Attention’s overlap granularity is constrained by block size, and requires 
+
+P −1 communication rounds; (2) Ulysses achieves fewer communication rounds but lacks overlap mechanisms in its original implementation; (3) Tile-based overlap methods require modifications to underlying attention kernels, limiting their compatibility. HCMS addresses these gaps by introducing head-level chunking that enables fine-grained overlap while maintaining native compatibility with existing attention implementations. 
+
+2.2 Communication-Computation Overlap 
+
+Communication-computation overlap is a classical tech-nique in distributed optimization [16, 15], widely ap-plied in gradient synchronization [31, 39], ZeRO [29] parameter prefetching, and pipeline parallelism [13, 22, 28]. In the domain of distributed attention, tile-based methods [40, 38] achieve communication-computation overlap at the matrix level but require modifications to underlying attention kernels. In contrast, HCMS operates at a higher abstraction level—the attention head dimension—and is natively compatible with ex-isting attention optimizations such as FlashAttention and SDPA, enabling orthogonal composition. 23 Method 
+
+3.1 Problem Formulation 
+
+Consider all-to-all based sequence parallel atten-tion [14]. Input X ∈ RB×(L/P )×D is distributed across 
+
+P GPUs, with the forward pass consisting of: QKV pro-jection → RoPE [34] positional encoding → input all-to-all → attention computation → output all-to-all →
+
+output projection. The input all-to-all rearranges data from sequence-sharded to head-sharded, and the out-put all-to-all performs the inverse transformation. In the baseline implementation, communication and com-putation execute strictly in serial, with total execution time: 
+
+Tbaseline = Tcomm +Tattn +Tother , Tcomm = Tin +Tout 
+
+(1) where Tother represents fixed overhead such as QKV projection and positional encoding. Defining the com-munication ratio ρ = Tcomm /T baseline , under 4-8 GPU PCIe configurations ρ typically ranges from 15% to 40%, making communication-computation overlap asubstantial optimization opportunity. 
+
+3.2 Method Overview 
+
+The core idea of HCMS is to partition attention heads into multiple chunks and achieve pipelined overlap be-tween communication and computation through dual CUDA streams. Figure 1 illustrates the overall archi-tecture. As shown in the figure, HCMS comprises three key components: (1) Head Chunking partitions attention heads into C independent chunks; (2) the dual-stream pipeline uses communication stream Scomm and com-pute stream Scomp for overlapped execution; (3) CUDA Event synchronization ensures correctness of data de-pendencies. We detail each component below. 
+
+3.3 Head Chunking Strategy 
+
+Property 1 (Computational Independence of Multi– Head Attention) . In multi-head attention, given a total of H attention heads, for any two distinct heads hi and 
+
+hj (i̸ = j): 
+
+Ohi = f (Qhi , Khi , Vhi ) (2) 
+
+The output of head hi depends only on head hi’s own inputs and is independent of other heads. 
+
+Based on Property 1, we can partition H attention heads into C chunks, with each chunk independently completing communication and computation. Let the 
+
+c-th chunk contain Hc heads: 
+
+H =
+
+> C−1
+
+X
+
+> c=0
+
+Hc, Hc =
+
+ HC
+
+
+
++ ⊮c<H mod C (3) After partitioning, the QKV tensors are correspond-ingly decomposed: 
+
+Q = [ Q0∥Q1∥ · · · ∥ QC−1] (4) where ∥ denotes concatenation along the head dimen-sion, and Qc ∈ RB×(L/P )×Hc×D .
+
+Lemma 1 (No Data Dependency Between Chunks) .
+
+For any two chunks i and j (i̸ = j), the computation of chunk i does not depend on the communication results of chunk j:
+
+Oi = g(AllToAll (Qi, Ki, Vi)) (5) 
+
+which is independent of Qj , Kj , Vj and their commu-nication results. 
+
+Lemma 1 indicates that communication and com-putation of different chunks can be scheduled inde-pendently, providing the theoretical foundation for pipelined overlap. 
+
+3.4 Dual-Stream Pipeline Architecture 
+
+Based on Head Chunking, we design a dual CUDA stream pipeline architecture: 
+
+• Communication stream Scomm : dedicated to exe-cuting all-to-all collective communication 
+
+• Compute stream Scomp : dedicated to executing at-tention computation Pipeline execution consists of three phases, as shown in Figure 2: Phase 1 - Input Communication: The communication stream sequentially initiates input all-to-all for each chunk, recording event Ecomm c upon completion of each chunk’s communication. Phase 2 - Attention Computation: The compute stream monitors Ecomm c events; once chunk c’s input data is ready, computation begins immediately. Event 
+
+Ecomp c is recorded upon completion. Phase 3 - Output Communication: The communi-cation stream monitors Ecomp c events; once chunk c’s computation completes, output all-to-all is initiated im-mediately. 
+
+3.5 CUDA Event Synchronization Mechanism 
+
+Pipeline correctness depends on precise dependency management. We define two types of CUDA Events: 
+
+• Ecomm c : recorded when chunk c’s input all-to-all completes 
+
+• Ecomp c : recorded when chunk c’s attention compu-tation completes Dependencies are expressed as: Attn c ← wait( Ecomm c ) (6) 
+
+Aout c ← wait( Ecomp c ) (7) Key observation: Due to Lemma 1, Ain c+1 does not need to wait for Attn c or Aout c to complete. This means: 
+
+Ain c+1 ∥ Attn c ∥ Aout c (8) All three can execute in parallel, subject to hardware resource constraints. 3Figure 1: HCMS method overview. (a) Baseline executes communication and computation serially; (b) HCMS de-composes operations into C chunks, with dual streams executing in parallel to achieve communication-computation overlap. 
+
+Figure 2: HCMS pipeline execution timeline. Communication stream Scomm and compute stream Scomp execute in parallel, with dashed lines indicating CUDA Event synchronization dependencies. 
+
+3.6 Algorithm Description 
+
+Algorithm 1 provides the complete pseudocode for HCMS. 
+
+3.7 Theoretical Analysis 
+
+We establish a theoretical performance model for HCMS, deriving the optimal chunk count and speedup upper bound; detailed derivations are provided in Ap-pendix A. Let communication time be Tcomm , per-chunk overhead be β, and communication ratio ρ =
+
+Tcomm /T total . The core conclusions are: 
+
+Theorem 1 (Optimal Chunk Count) . The chunk count that minimizes HCMS execution time is C∗ =pTcomm /β .
+
+Theorem 2 (Speedup Upper Bound) . When β → 0
+
+and C → ∞ , the theoretical upper bound of HCMS speedup is Smax = 1 /(1 − ρ).
+
+Applicability: HCMS benefits are positively cor-related with communication ratio ρ. When ρ >
+
+20%, HCMS is recommended and can achieve 3%-24% speedup; when ρ < 10%, benefits are limited to less than 1%. Factors affecting ρ include GPU count, se-quence length, and interconnect type, with PCIe in-terconnect scenarios typically having higher ρ than NVLink, making HCMS benefits more pronounced. 
+
+3.8 Comparison with Ring Attention and Ulysses 
+
+Table 1 compares HCMS with existing methods across multiple dimensions. Comparison with Ring Attention: Ring Attention’s overlap occurs at the block level, communicating one complete KV block per round, while HCMS’s overlap occurs at the head level with finer granularity. Regard-ing communication rounds, Ring Attention requires 
+
+P − 1 rounds of serial communication, while HCMS 4Algorithm 1 Head-Chunked Multi-Stream Pipeline (HCMS) 
+
+Input: Input X, num chunks C
+
+Output: Output Y 
+
+> 1:
+
+// Main Stream  
+
+> 2:
+
+Q, K, V ← QKVProjection( X) 
+
+> 3:
+
+Q, K ← ApplyRoPE( Q, K) 
+
+> 4:
+
+{Qc, Kc, Vc}C−1 
+
+> c=0
+
+← SplitByHeads( C) 
+
+> 5:
+
+Record Emain  
+
+> 6:
+
+// Communication Stream: Input A2A  
+
+> 7:
+
+Scomm .wait( Emain ) 
+
+> 8:
+
+for c = 0 to C − 1 do  
+
+> 9:
+
+Q′
+
+> c
+
+, K′
+
+> c
+
+, V ′ 
+
+> c
+
+← AllToAll( Qc, Kc, Vc) 
+
+> 10:
+
+Record Ecomm c on Scomm  
+
+> 11:
+
+end for  
+
+> 12:
+
+// Compute Stream: Attention  
+
+> 13:
+
+Scomp .wait( Emain ) 
+
+> 14:
+
+for c = 0 to C − 1 do  
+
+> 15:
+
+Scomp .wait( Ecomm c ) 
+
+> 16:
+
+O′ 
+
+> c
+
+← Attention( Q′
+
+> c
+
+, K′
+
+> c
+
+, V ′ 
+
+> c
+
+) {FlashAttention or SDPA } 
+
+> 17:
+
+Record Ecomp c on Scomp  
+
+> 18:
+
+end for  
+
+> 19:
+
+// Communication Stream: Output A2A  
+
+> 20:
+
+for c = 0 to C − 1 do  
+
+> 21:
+
+Scomm .wait( Ecomp c ) 
+
+> 22:
+
+Oc ← AllToAll( O′
+
+> c
+
+) 
+
+> 23:
+
+end for  
+
+> 24:
+
+// Main Stream: Merge & Project  
+
+> 25:
+
+Synchronize( Scomm , Scomp ) 
+
+> 26:
+
+O ← Concat( {Oc}C−1 
+
+> c=0
+
+) 
+
+> 27:
+
+Y ← OutputProjection( O) 
+
+> 28:
+
+return Y
+
+Table 1: Comparison of HCMS with existing methods                               
+
+> Property Ring Attn Ulysses HCMS Comm. Pattern P2P Ring All-to-All All-to-All Comm. Rounds P−122Comm. Volume O(LD )O(LD )O(LD )Overlap Block-level None Chunk-level Granularity Block -Head FlashAttn Requires mod. Native Native Causal Mask Native Native Native Optimal Long seq. Med-long High ρ
+
+requires only 2 rounds. The two have different optimal scenarios: Ring Attention excels in very long sequence, memory-constrained scenarios, while HCMS performs better in medium-long sequence scenarios with high communication ratio. Comparison with Ulysses: The two differ funda-mentally in their optimization dimensions. Ulysses focuses on the choice between all-to-all and P2P communication patterns, treating communication and computation as atomic operations executed serially; HCMS introduces Head Chunking as a new partition-ing abstraction, leveraging the computational indepen-dence of multi-head attention (Property 1) to decom-pose atomic operations into independently schedula-ble subtasks, thereby achieving fine-grained pipelin-ing at the head dimension. This concept is general: any all-to-all based sequence parallelism scheme can in-troduce communication-computation overlap through Head Chunking, with HCMS’s application to Ulysses being just one instance. 
+
+# 4 Experiments 
+
+This section validates the effectiveness of HCMS. The core claims are: 
+
+• Performance improvement: HCMS achieves 10%-17.5% speedup over Ulysses and 5%-14.5% over Ring Attention for typical video generation sequence lengths of 31K-56K tokens, validated across four GPU platforms at 2-8 GPU scales. 
+
+• End-to-end benefits: In the Wan2.2 video generation model, attention layers achieve 18.3% speedup and the complete pipeline achieves 6.8% speedup. 
+
+• No accuracy loss: HCMS output is identical to base-line across all configurations, supports training sce-narios with 3.5% speedup, and reduces peak memory by 8.7%. Appendix C contains complete experimental data and supplementary analysis. 
+
+4.1 Experimental Setup 
+
+Hardware environment: To validate generalization, we conduct experiments on four GPU platforms with con-figurations shown in Table 2. Software environment is PyTorch [26] 2.9.1, CUDA 12.8, collective communica-tion via NCCL [24], with BF16 [21] numerical precision. Table 2: Experimental platform configurations                     
+
+> Platform GPU Mem Interconn. Attention A4×L20 46GB PCIe 4.0 FlashAttn-2 B4×4090 24GB PCIe 4.0 SDPA C4×A10 22GB PCIe 4.0 SDPA D8×5090 32GB PCIe 5.0 SDPA
+
+Model configuration: We use typical parameters from video generation models [7, 30], shown in Table 3. 5Table 3: Model configuration             
+
+> Parameter Value Hidden dim. Dmodel 5120 Attention heads H40 Head dimension D128 Latent resolution 60 ×104 Frames 9 / 21 / 33 / 45 Sequence length 56K / 131K / 206K / 281K
+
+Evaluation metrics: We use end-to-end latency, throughput, and speedup ratio for performance eval-uation, while verifying numerical consistency through maximum/mean error. Baseline method: We use the standard implementa-tion of DeepSpeed Ulysses [14] as the baseline. Ulysses is the mainstream sequence parallelism approach, with communication pattern consisting of input all-to-all, attention computation, and output all-to-all in three stages. In the original Ulysses implementation, com-munication and computation execute strictly in serial, which is precisely the optimization target of HCMS. Implementation details: HCMS employs device-level stream caching to avoid frequent creation overhead, and KV Cache uses a chunk-organized list structure to sup-port chunked computation. When H is not divisible by 
+
+C, a “more-first-less-later” uneven partitioning strat-egy is used; experiments show performance variance is less than 1%. 
+
+4.2 Main Results 
+
+Table 4 shows performance across different GPU con-figurations on each platform. Table 4: Performance across different GPU counts, 131K tokens, C = 4                            
+
+> Platform GPUs Ulysses HCMS Speedup L20+FA 21896.8ms 1828.6ms 1.037 ×
+> 4996.2ms 945.3ms 1.054 ×
+> A10+SDPA 23424.1ms 3007.0ms 1.139 ×
+> 41643.2ms 1458.8ms 1.126 ×
+> 5090+SDPA 2988.4ms 981.5ms 1.007 ×
+> 4502.3ms 500.5ms 1.004 ×
+> 8288.3ms 276.1ms 1.044 ×
+
+From the GPU scaling perspective, speedup corre-lates positively with communication ratio ρ: the A10 platform with higher ρ achieves 12.6%-13.9% speedup; the L20 platform achieves 3.7%-5.4% speedup; the RTX 5090 8-GPU configuration achieves 4.4% speedup, val-idating HCMS effectiveness in large-scale parallel sce-narios. Table 5 shows performance comparison across differ-ent sequence lengths. Experimental results show clear sequence length de-pendency: shorter sequences yield higher speedups. The 56K sequence achieves 17.5% speedup on 4090 4-GPU configuration and 16.4% speedup on 5090 8-GPU configuration. The 4090 platform achieves over-all higher speedups than L20 because both platforms Table 5: Performance comparison across different se-quence lengths, C = 4                                 
+
+> Seq. L20+FA 4-GPU 4090+SDPA 4-GPU 5090 8-GPU Ulysses Spdup Ulysses Spdup Ulysses Spdup 56K 234.5ms 1.10 ×182.8ms 1.18 ×73.3ms 1.16 ×
+> 131K 996.4ms 1.06 ×725.9ms 1.07 ×288.3ms 1.05 ×
+> 206K 2262.2ms 1.04 ×1617.3ms 1.06 ×631.0ms 1.05 ×
+> 281K 4046.3ms 1.03 ×2868.1ms 1.04 ×1112.9ms 1.01 ×
+
+use PCIe 4.0 interconnect with similar communica-tion time, while 4090 has shorter total execution time (182.8ms vs 234.5ms), resulting in higher communica-tion ratio ρ and thus greater HCMS benefits. The A10 platform achieves 12.6%-13.9% speedup at 131K tokens, further validating the “higher communication ratio, greater benefits” principle. For 8-GPU scala-bility, the 5090 platform still achieves 16.4% speedup at 56K tokens, while benefits decrease to 0.9% at 281K tokens, consistent with theoretical expectations. All four platforms (L20, 4090, A10, 5090) at 2-8 GPU scales validate HCMS effectiveness, demonstrat-ing cross-hardware, cross-scale generalization. Reason analysis: Attention computation complex-ity is O(L2), while communication complexity is O(L). As sequences grow longer, computation time increases much faster than communication time, causing commu-nication ratio ρ to decrease and HCMS overlap benefits to diminish. Figure 3 visualizes this trend. 56 131 206 281 11.04 1.08 1.12 1.18 Sequence Length (K tokens) Speedup L20 4-GPU 4090 4-GPU 5090 8-GPU Baseline Figure 3: Speedup versus sequence length. All three configurations show greater HCMS benefits for shorter sequences. The 5090 8-GPU configuration validates ef-fectiveness in large-scale parallel scenarios. Comparison with Ring Attention: Table 6 presents a three-way comparison of HCMS, Ring Attention, and Ulysses. For typical video generation sequence lengths of 31K-56K tokens, HCMS leads comprehen-sively: 14.5% faster than Ring at 31K tokens, 5.0% faster at 56K. For longer sequences above 131K, Ring is slightly better by 1.7%, with the crossover point at approximately 60-80K tokens. 
+
+4.3 Ablation Studies 
+
+Table 7 shows the effect of different chunk counts on performance, with experimental configuration of 4 6Table 6: Three-way comparison: HCMS vs Ring At-tention vs Ulysses, L20+FA 4-GPU                 
+
+> Seq. Ulysses Ring HCMS Best 31K 95.5ms 95.4ms 83.3ms HCMS (+14.5%) 56K 234.7ms 223.3ms 212.7ms HCMS (+5.0%) 131K 996.9ms 929.4ms 945.4ms Ring (+1.7%)
+
+GPUs and 131K tokens. Table 7: Performance with different chunk counts                      
+
+> Chunks Latency (ms) Speedup Rel. to Best 1 (Ulysses) 996.2 1.000 ×-5.2% 2951.5 1.047 ×-0.7% 4945.3 1.054 ×-0.1% 5944.5 1.055 ×Best 8963.8 1.034 ×-2.0% 10 970.9 1.026 ×-2.7%
+
+Results show that as C increases from 1 to 5, speedup continuously improves because more chunks enable finer-grained communication-computation over-lap. However, performance begins to decline when C
+
+exceeds 5, due to accumulated Event synchronization overhead and efficiency loss from overly fine compu-tation granularity. In this configuration, the optimal point is C = 5, but C = 4 is already near-optimal and simpler to implement. Uneven partitioning robustness: When H is not di-visible by C, a “more-first-less-later” strategy is used. Table 8 shows partitioning schemes and performance for different C values, with configuration H = 40, 4 GPUs, Hper rank = 10. Table 8: Uneven chunk partitioning performance                         
+
+> CType Chunk Sizes Imbal. Speedup 2Even [5, 5] 0% 1.049 ×
+> 3Uneven [4, 3, 3] 30% 1.056 ×
+> 4Uneven [3, 3, 2, 2] 40% 1.055 ×
+> 5Even [2, 2, 2, 2, 2] 0% 1.055 ×
+> 6Uneven [2, 2, 2, 2, 1, 1] 60% 1.052 ×
+
+Even partitioning achieves average speedup of 1.044 ×, while uneven partitioning achieves 1.048 ×,with only 0.4% difference. This indicates that load im-balance effects are masked by pipelined execution, and the optimal C value need not satisfy divisibility. Correctness and training support: HCMS output is identical to baseline across all configurations, with max-imum error of 0. HCMS is compatible with PyTorch au-tograd, achieving 3.5% speedup for forward+backward combined execution and 8.7% reduction in peak mem-ory; see Appendix C for details. 
+
+4.4 End-to-End Video Generation Val-idation 
+
+To validate HCMS effectiveness in real applications, we integrate it into the Wan2.2 video generation model [37] for end-to-end experiments. Experimental setup: We use the Wan2.2 TI2V-5B model (Text-Image-to-Video 5B parameters) with 24 attention heads, 128 head dimension, 30-layer DiT [27], resolution 1280 ×704, and 4 GPUs with Ulysses se-quence parallelism. Attention layer benchmark: Table 9 shows attention layer performance for the TI2V-5B configuration with 24 heads and 4 GPUs across different sequence lengths. Table 9: Wan2.2 TI2V-5B attention layer performance, 24 heads, 4 GPUs, C = 6                 
+
+> Frames Seq. Length Ulysses HCMS Speedup 17 frames 17.6K 16.35ms 13.36ms +18.3% 49 frames 43.2K 72.61ms 61.87ms +14.8% 81 frames 70.4K 167.56ms 152.91ms +8.7%
+
+End-to-end performance: Table 10 shows end-to-end performance for the complete video generation pipeline. Table 10: Wan2.2 TI2V-5B end-to-end performance, 4 GPUs, C = 6             
+
+> Frames Video Duration Ulysses HCMS Speedup 17 frames 0.7s 1.69s/it 1.67s/it +1.2% 49 frames 2.0s 2.34s/it 2.18s/it +6.8%
+
+For attention layer performance, the 17-frame short video configuration achieves 18.3% speedup, and the 49-frame medium-length video configuration achieves 14.8% speedup. For end-to-end performance, 49-frame video per-step inference time decreases from 2.34s to 2.18s, achieving measured speedup of 6.8%. In this con-figuration, the optimal chunk count is C = 6, i.e., 24 heads partitioned into 6 chunks with 4 heads per chunk, where more chunks provide better pipeline overlap. End-to-end benefit analysis: Attention layers achieve 14.8% speedup, but end-to-end is only 6.8%, because the video generation pipeline includes other compo-nents such as T5 text encoding and VAE decoding. For pure DiT inference scenarios, HCMS end-to-end bene-fits will be closer to attention layer speedup. 
+
+# 5 Conclusion 
+
+This paper proposes Head-Chunked Multi-Stream Pipeline (HCMS), optimizing communication-computation overlap for sequence parallel attention in medium-long sequence scenarios of 31K-100K tokens such as video generation. By partitioning attention heads into independent chunks through the Head Chunking strategy and achieving fine-grained pipelin-ing via dual CUDA streams, efficient parallelization of communication and computation is achieved without changing computational semantics. Theoretical analy-sis shows HCMS benefits are positively correlated with communication ratio ρ, and its use is recommended when ρ > 20%. Experiments validate effectiveness across four GPU platforms at 2-8 GPU scales: for typical video gen-eration sequence lengths of 31K-56K tokens, HCMS achieves 10%-17.5% speedup over the Ulysses baseline 7and 5%-14.5% over Ring Attention; in Wan2.2 end-to-end validation, attention layers achieve 18.3% speedup and the complete pipeline achieves 6.8% speedup. HCMS supports uneven partitioning with performance variance less than 1%, is compatible with PyTorch au-tograd with 3.5% training speedup, and is orthogonally composable with frameworks such as USP and Loong-Train. 
+
+# 6 Discussion 
+
+Limitations: HCMS benefits are limited in compute-dominated scenarios where ρ < 10%, such as 281K to-ken long sequences achieving only 3.0% speedup. Ad-ditionally, when chunk count C is too large, Event synchronization overhead accumulates noticeably, and implementation introduces multi-stream management complexity. Future work: This paper validates up to 8-GPU sce-narios; future work will extend to 16-GPU and cross-node scenarios. Other directions include: applying HCMS to backward pass gradient communication over-lap, and implementing adaptive scheduling mechanisms that dynamically select C based on runtime profiling. 
+
+# References 
+
+[1] Zhengda Bian, Hongxin Liu, et al. Colossal-ai: A unified deep learning system for large-scale paral-lel training. In 52nd International Conference on Parallel Processing (ICPP) , pages 1–10, Salt Lake City, UT, USA, 2023. ACM. [2] Andreas Blattmann, Tim Dockhorn, Sumith Ku-lal, Daniel Mendelevitch, Maciej Kilian, Dominik Lorenz, Yam Levi, Zion English, Vikram Voleti, Adam Letts, Varun Jampani, and Robin Rom-bach. Stable video diffusion: Scaling latent video diffusion models to large datasets. arXiv preprint arXiv:2311.15127 , November 2023. [3] Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared Kaplan, Prafulla Dhari-wal, Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, Sandhini Agarwal, Ariel Herbert-Voss, Gretchen Krueger, Tom Henighan, Rewon Child, Aditya Ramesh, Daniel M. Ziegler, Jeffrey Wu, Clemens Winter, Christopher Hesse, Mark Chen, Eric Sigler, Mateusz Litwin, Scott Gray, Benjamin Chess, Jack Clark, Christo-pher Berner, Sam McCandlish, Alec Radford, Ilya Sutskever, and Dario Amodei. Language models are few-shot learners. arXiv preprint arXiv:2005.14165 , May 2020. [4] Tri Dao. Flashattention-2: Faster attention with better parallelism and work partitioning. In 
+
+The Twelfth International Conference on Learning Representations , 2024. [5] Tri Dao, Daniel Y Fu, Stefano Ermon, Atri Rudra, and Christopher R´ e. Flashattention: Fast and memory-efficient exact attention with io-awareness. In Advances in Neural Informa-tion Processing Systems , volume 35, pages 16377– 16390, 2022. [6] Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. Bert: Pre-training of deep bidirectional transformers for language un-derstanding. In Proceedings of the 2019 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies, Volume 1 (Long and Short Papers) ,pages 4171–4186, Minneapolis, Minnesota, June 2019. Association for Computational Linguistics. [7] Prafulla Dhariwal and Alex Nichol. Diffusion mod-els beat gans on image synthesis. arXiv preprint arXiv:2105.05233 , 2021. [8] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai, Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Sylvain Gelly, Jakob Uszkoreit, and Neil Houlsby. An image is worth 16x16 words: Transformers for image recognition at scale. In International Conference on Learning Representations (ICLR) , 2021. [9] Jiarui Fang and Shangchun Zhao. Usp: A uni-fied sequence parallelism approach for long context generative ai, 2024. [10] Jiarui Fang, Zilin Zhu, Yang Yu, and Xin Liu. Distflashattn: Distributed memory-efficient atten-tion for long-context llms training. arXiv preprint arXiv:2401.07248 , 2024. [11] Jonathan Ho, William Chan, et al. Imagen video: High definition video generation with diffusion models. arXiv preprint arXiv:2210.02303 , 2022. [12] Wenyi Hong, Ming Ding, Wendi Zheng, Xinghan Liu, and Jie Tang. Cogvideo: Large-scale pretrain-ing for text-to-video generation via transformers, 2022. [13] Yanping Huang, Youlong Cheng, Ankur Bapna, Orhan Firat, Mia Xu Chen, Dehao Chen, Hy-oukJoong Lee, Jiquan Ngiam, Quoc V Le, Yonghui Wu, and Zhifeng Chen. Gpipe: Efficient training of giant neural networks using pipeline parallelism. In Advances in Neural Information Processing Sys-tems , volume 32, 2019. [14] Sam Ade Jacobs, Masahiro Tanaka, Chengming Zhang, Minjia Zhang, Shuaiwen Leon Song, Samyam Rajbhandari, and Yuxiong He. Deep-speed ulysses: System optimizations for enabling training of extreme long sequence transformer models, 2023. 8[15] Abhinav Jangda, Jun Huang, Guodong Liu, Amir Hossein Nodehi Sabet, Saeed Maleki, Youshan Miao, Madanlal Musuvathi, Todd Mytkowicz, and Olli Saarikivi. Coconet: Co-optimizing computa-tion and communication for distributed machine learning. In Proceedings of Machine Learning and Systems (MLSys) , volume 3, pages 1–14, 2021. [16] Abhinav Jangda, Jun Huang, Guodong Liu, Amir Hossein Nodehi Sabet, Saeed Maleki, Youshan Miao, Madanlal Musuvathi, Todd Mytkowicz, and Olli Saarikivi. Breaking the computation and com-munication abstraction barrier in distributed ma-chine learning workloads. In Proceedings of the 27th ACM International Conference on Architec-tural Support for Programming Languages and Op-erating Systems (ASPLOS) , pages 819–834. ACM, 2022. [17] Dacheng Li, Rulin Shao, Anze Xie, Eric P. Xing, Joseph E. Gonzalez, Ion Stoica, Xuezhe Ma, and Hao Zhang. Lightseq: Sequence level parallelism for distributed training of long context transform-ers. In International Conference on Learning Rep-resentations (ICLR) , 2024. [18] Shenggui Li, Fuzhao Xue, Yongbin Li, and Yang You. Sequence parallelism: Making 4d parallelism possible. arXiv preprint arXiv:2105.13120 , 2021. [19] Hao Liu, Matei Zaharia, and Pieter Abbeel. Ring attention with blockwise transformers for near-infinite context, 2023. [20] Yuliang Liu, Zhen Wang, Yizheng Zhang, Dong Li, and Kai Chen. Striped attention: Faster ring attention for causal transformers. arXiv preprint arXiv:2311.09431 , 2023. [21] Paulius Micikevicius et al. Mixed precision train-ing. In International Conference on Learning Rep-resentations (ICLR) , 2018. [22] Deepak Narayanan, Aaron Harlap, Amar Phan-ishayee, Vivek Seshadri, Nikhil R. Devanur, Gre-gory R. Ganger, Phillip B. Gibbons, and Matei Zaharia. Pipedream: Generalized pipeline paral-lelism for dnn training. In Proceedings of the 27th ACM Symposium on Operating Systems Principles (SOSP) , pages 1–15, Huntsville, Ontario, Canada, October 2019. ACM. [23] Deepak Narayanan, Mohammad Shoeybi, Jared Casper, Patrick LeGresley, Mostofa Patwary, Vi-jay Anand Korthikanti, Dmitri Vainbrand, Prethvi Kashinkunti, Julie Bernauer, Bryan Catanzaro, Amar Phanishayee, and Matei Zaharia. Efficient large-scale language model training on gpu clusters using megatron-lm. In Proceedings of the Interna-tional Conference for High Performance Comput-ing, Networking, Storage and Analysis , 2021. [24] NVIDIA. Nccl: Accelerated multi-gpu collective communications. Technical report, NVIDIA, 2015. [25] OpenAI. Video generation models as world simu-lators. Technical report, OpenAI, February 2024. [26] Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory Chanan, Trevor Killeen, Zeming Lin, Natalia Gimelshein, Luca Antiga, Alban Desmaison, Andreas K¨ opf, Ed-ward Yang, Zach DeVito, Martin Raison, Alykhan Tejani, Sasank Chilamkurthy, Benoit Steiner, Lu Fang, Junjie Bai, and Soumith Chintala. Py-torch: An imperative style, high-performance deep learning library. In Advances in Neural Informa-tion Processing Systems , volume 32, 2019. [27] William Peebles and Saining Xie. Scalable dif-fusion models with transformers. arXiv preprint arXiv:2212.09748 , 2023. [28] Penghui Qi, Xinyi Wan, Guangxing Huang, and Min Lin. Zero bubble (almost) pipeline paral-lelism. In International Conference on Learning Representations (ICLR) , 2024. [29] Samyam Rajbhandari, Jeff Rasley, Olatunji Ruwase, and Yuxiong He. Zero: Memory opti-mizations toward training trillion parameter mod-els. arXiv preprint arXiv:1910.02054 , 2020. [30] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj¨ orn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF Confer-ence on Computer Vision and Pattern Recognition (CVPR) , pages 10684–10695, 2022. [31] Alexander Sergeev and Mike Del Balso. Horovod: fast and easy distributed deep learning in Tensor-Flow. arXiv preprint arXiv:1802.05799 , February 2018. [32] Mohammad Shoeybi, Mostofa Patwary, Raul Puri, Patrick LeGresley, Jared Casper, and Bryan Catanzaro. Megatron-lm: Training multi-billion parameter language models using model paral-lelism. In Proceedings of the International Confer-ence for High Performance Computing, Network-ing, Storage and Analysis , pages 1–15, 2019. [33] Uriel Singer et al. Make-a-video: Text-to-video generation without text-video data. arXiv preprint arXiv:2209.14792 , 2022. [34] Jianlin Su, Yu Lu, Shengfeng Pan, Ahmed Mur-tadha, Bo Wen, and Yunfeng Liu. Roformer: En-hanced transformer with rotary position embed-ding. arXiv preprint arXiv:2104.09864 , 2024. [35] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and Illia Polosukhin. Attention is all you need. In Advances in Neural Information Processing Systems , volume 30, pages 5998–6008, 2017. 9[36] Minzheng Wang, Longze Chen, Cheng Fu, Shengyi Liao, Xinghua Zhang, Bingli Wu, Haiyang Yu, Nan Xu, Lei Zhang, Run Luo, Yunshui Li, Min Yang, Fei Huang, and Yongbin Li. Loongtrain: Efficient training of long-sequence llms with head-context parallelism. arXiv preprint arXiv:2406.18485 ,2024. [37] Zhaoyang Wang et al. Open-sora: Democratiz-ing end-to-end video generation with transformers. 
+
+arXiv preprint arXiv:2403.17349 , 2024. [38] Zhen Zhang, Shuai Zheng, Yida Wang, Xiaohan Li, and Kai Chen. Overlap communication with dependent computation via decomposition in large deep learning models. In Proceedings of the 29th International Conference on Architectural Support for Programming Languages and Operating Sys-tems (ASPLOS) , pages 1–16, 2024. [39] Yanli Zhao, Andrew Gu, Rohan Varma, Liang Luo, Chien-Chin Huang, Min Xu, Less Wright, Hamid Shojanazeri, Myle Ott, Sam Shleifer, Alban Des-maison, Can Balioglu, Pritam Damania, Bernard Nguyen, Geeta Chauhan, Yuchen Hao, Ajit Math-ews, and Shen Li. Pytorch fsdp: Experiences on scaling fully sharded data parallel. Proceedings of the VLDB Endowment , 16(12):3848–3860, August 2023. [40] Zheng Zhong et al. Overlapattention: Tile-based overlap-driven efficient attention for distributed llm. arXiv preprint arXiv:2501.01005 , 2025. 
+
+# A Detailed Theoretical Deriva-tions 
+
+This section provides complete derivations for the HCMS theoretical performance model. 
+
+A.1 Notation 
+
+For convenience of analysis, we define the notation shown in Table 11: Table 11: Notation for theoretical analysis                
+
+> Symbol Meaning
+> Tcomm Total comm. time, Tcomm =Ta2a,in +Ta2a,out
+> Tattn Total attention computation time
+> T0Fixed overhead (QKV proj., output proj.)
+> CNumber of chunks
+> βPer-chunk overhead (Event sync, kernel launch)
+> ρCommunication ratio, ρ=Tcomm /T total
+
+A.2 HCMS Time Model 
+
+Baseline execution time. In serial execution mode, total time is the sum of all stages: 
+
+Tbase = T0 + Tcomm + Tattn (9) HCMS execution time. In pipeline mode, H atten-tion heads are partitioned into C chunks. Due to no data dependency between chunks (Lemma 1), compu-tation of chunk i can execute in parallel with commu-nication of chunk i + 1. Let per-chunk overhead be β,then: 
+
+Thcms (C) = T0 + Tcomm 
+
+C + Tattn + C · β (10) 
+
+A.3 Optimal Chunk Count Derivation 
+
+Taking the derivative of Equation (10) with respect to 
+
+C and setting it to zero yields C∗ = pTcomm /β . The second-order condition confirms this is a minimum. 
+
+A.4 Speedup Analysis 
+
+Let communication ratio ρ = Tcomm /T total , the speedup is: 
+
+S(C) = 11 − ρ · C−1 
+
+> C
+
++ C·βTtotal 
+
+(11) When β → 0 and C → ∞ , the speedup upper bound is Smax = 1 /(1 − ρ). 
+
+A.5 Theoretical Predictions vs. Exper-imental Validation 
+
+Table 12 shows comparison of theoretical predictions with measurements on the RTX 5090 platform. Time model prediction errors are all less than 1.4%. Table 12: Theoretical predictions vs. measurements, RTX 5090 8-GPU                                   
+
+> HSeq ρβC∗Error Speedup (ms) Pred. Meas. 40 56K 39.6% 1.41 550.58% 24.0% 40 131K 22.1% 6.83 150.52% 4.2% 24 56K 38.1% 1.23 331.38% 16.0% 24 131K 21.7% 5.52 331.15% 2.9%
+
+A.6 Applicability Guidelines 
+
+Table 13 summarizes applicability for different commu-nication ratios ρ.Table 13: Relationship between communication ratio and speedup                       
+
+> Comm. Ratio ρTheor. Smax Meas. Spdup Recomm.
+> >35% >1.54 ×16%-24% Highly rec. 20%-35% 1.25 ×-1.54 ×3%-6% Recommended 10%-20% 1.11 ×-1.25 ×1%-3% Optional
+> <10% <1.11 ×<1% Limited
+
+# B System Architecture 
+
+Figure 4 shows the complete system architecture of HCMS. 10 Input X    
+
+> [B, L/P, D ]
+> QKV Proj + RoPE
+> Head Chunking
+> H→C
+> Scomm Scomp
+> Input A2A
+> Flash Attention
+> Output A2A
+> Merge
+> Output Proj
+> Output Y
+> KV Cache
+> Ecomm
+> Ecomp
+
+Figure 4: HCMS system architecture 
+
+# C Detailed Experimental Data 
+
+C.1 Correctness and Training Valida-tion 
+
+HCMS output is identical to baseline across all con-figurations, as shown in Table 14. Forward+backward combined execution achieves 3.5% speedup (Table 15), with 8.7% reduction in peak memory (Table 16). Table 14: Numerical correctness validation, BF16 pre-cision 
+
+GPU Rank Max Diff Mean Diff Status 0 0.0 0.0 PASS 1 0.0 0.0 PASS 2 0.0 0.0 PASS 3 0.0 0.0 PASS 
+
+Table 15: Forward+backward combined performance, 4 GPUs, 131K tokens 
+
+Method Time (ms) Speedup Ulysses 3292.5 1.000 ×
+
+HCMS ( C=5) 3181.4 1.035 ×
+
+C.2 Complete Experimental Results 
+
+Table 17 summarizes complete results for all experi-mental configurations. Table 16: GPU peak memory comparison, 4 GPUs, 131K tokens 
+
+Method Peak Memory (GB) Relative Change Ulysses 6.767 —HCMS 6.178 -8.7% 
+
+Table 17: Complete experimental results 
+
+Platform GPU Seq C Ulysses HCMS Spdup L20+FA 4 56K 4 234.5 212.6 1.10 ×
+
+4 131K 4 996.2 945.3 1.05 ×
+
+4 206K 4 2262.2 2182.1 1.04 ×
+
+4 281K 4 4046.3 3928.4 1.03 ×
+
+2 131K 4 1896.8 1828.6 1.04 ×
+
+4090+SDPA 4 56K 4 182.8 155.6 1.18 ×
+
+4 131K 4 725.9 677.8 1.07 ×
+
+4 206K 4 1617.3 1525.8 1.06 ×
+
+4 281K 4 2868.1 2755.1 1.04 ×
+
+A10+SDPA 2 131K 4 3424.1 3007.0 1.14 ×
+
+4 131K 4 1643.2 1458.8 1.13 ×
+
+5090+SDPA 2 131K 4 988.4 981.5 1.01 ×
+
+4 131K 4 502.3 500.5 1.00 ×
+
+8 131K 4 288.3 276.1 1.04 ×
+
+8 56K 4 73.3 63.0 1.16 ×
+
+8 206K 4 631.0 603.3 1.05 ×
+
+8 281K 4 1112.9 1102.4 1.01 ×
+
+11
