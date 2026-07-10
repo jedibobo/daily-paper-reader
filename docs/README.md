@@ -6,79 +6,76 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-09
-- 运行时间：2026-07-09 20:28:56 UTC
+- 最新运行日期：2026-07-10
+- 运行时间：2026-07-10 20:13:08 UTC
 - 运行状态：成功
-- 本次总论文数：19
-- 精读区：8
+- 本次总论文数：18
+- 精读区：7
 - 速读区：11
 
 ### 今日简报（AI）
-今日深度复盘 19 篇 AI 硬件与架构论文，重点攻克了嵌入式事件视觉下的 GNN 剪枝及 FPGA 动态容错难题。
-满分论文提出的硬件感知剪枝方案与 SNN 稳定性新突破，标志着端侧高效能计算正迈向软硬协同的新高度。
-推荐优先研读 GNN 硬件优化与脉冲 Transformer 相关成果，掌握低功耗智能处理的前沿范式。
-- 详情：[/202607/09/README](/202607/09/README)
+今日深度研读 18 篇论文，核心突破集中在大模型推理效率提升与端侧视觉感知。
+重点推荐 Akashic 的低开销推理架构与 MiLSD 微型检测器，两者在性能与资源平衡上表现卓越。
+建议关注 Apple Silicon 原生加速及 Sub-1-bit KV 缓存量化技术，探索极致的端侧部署可能。
+- 详情：[/202607/10/README](/202607/10/README)
 
 ### 精读区论文标签
-1. [Hardware-aware Graph Neural Networks prunning for embedded event-based vision](/202607/09/2607.06739v1-hardware-aware-graph-neural-networks-prunning-for-embedded-event-based-vision)  
-   标签：评分：10.0/10、query:hwnas
-   evidence：嵌入式FPGA平台上GNN的硬件感知剪枝与量化
-2. [ProWAFT: A ROMA-LPD Instance for Workload-Aware and Dynamic Fault Tolerance in FPGA-Based CNN Accelerators](/202607/09/2607.01602v1-prowaft-a-roma-lpd-instance-for-workload-aware-and-dynamic-fault-tolerance-in-fpga-based-cnn-accelerators)  
+1. [Akashic: A Low-Overhead LLM Inference Service with MemAttention](/202607/10/2607.05708v1-akashic-a-low-overhead-llm-inference-service-with-memattention)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对FPGA端CNN加速器的负载感知容错技术
-3. [Efficient Perception in Automotive Detection and Tracking Using Neuromorphic Computing](/202607/09/2607.04921v1-efficient-perception-in-automotive-detection-and-tracking-using-neuromorphic-computing)  
+   evidence：针对大模型推理的软硬件协同设计内存布局
+2. [MiLSD: A Micro Line-Segment Detector for Resource-Constrained Devices](/202607/10/2607.06600v1-milsd-a-micro-line-segment-detector-for-resource-constrained-devices)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对边缘设备的能效神经形态计算
-4. [LEMUR 2: Unlocking Neural Network Diversity for AI](/202607/09/2607.06839v1-lemur-2-unlocking-neural-network-diversity-for-ai)  
+   evidence：针对亚MB级MCU内存约束的微型检测器自动化设计
+3. [Smart Scissor: Coupling Spatial Redundancy Reduction and CNN Compression for Embedded Hardware](/202607/10/2607.06915v1-smart-scissor-coupling-spatial-redundancy-reduction-and-cnn-compression-for-embedded-hardware)  
    标签：评分：9.0/10、query:hwnas
-   evidence：包含部署感知评估的NAS基准测试
-5. [Latency-Constrained DNN Architecture Learning for Edge Systems using Zerorized Batch Normalization](/202607/09/2607.06922v1-latency-constrained-dnn-architecture-learning-for-edge-systems-using-zerorized-batch-normalization)  
+   evidence：针对嵌入式硬件的CNN压缩与空间冗余减少
+4. [CRIMP: Compact & Reliable DNN Inference on In-Memory Processing via Crossbar-Aligned Compression and Non-ideality Adaptation](/202607/10/2607.08015v1-crimp-compact--reliable-dnn-inference-on-in-memory-processing-via-crossbar-aligned-compression-and-non-ideality-adaptation)  
    标签：评分：9.0/10、query:hwnas
-   evidence：面向延迟的神经网络学习，结合硬件定制的延迟预测器
-6. [EdgeCompress: Coupling Multidimensional Model Compression and Dynamic Inference for EdgeAI](/202607/09/2607.06982v1-edgecompress-coupling-multidimensional-model-compression-and-dynamic-inference-for-edgeai)  
+   evidence：针对内存处理的硬件友好型DNN自动设计
+5. [Rethinking Small VLM Quantization: From Component-Wise Analysis to Hardware-Aware Edge Deployment](/202607/10/2607.08029v1-rethinking-small-vlm-quantization-from-component-wise-analysis-to-hardware-aware-edge-deployment)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对资源受限嵌入式设备的多维模型压缩与动态推理
-7. [ThermoDSE: A Thermal-Aware and Comprehensive Design Space Exploration for Chiplet-Based DNN Accelerators](/202607/09/2607.07096v1-thermodse-a-thermal-aware-and-comprehensive-design-space-exploration-for-chiplet-based-dnn-accelerators)  
+   evidence：针对VLM的硬件感知边缘部署和组件级量化分析
+6. [FPGN: Redefining Ultra-Fast Programmable Gate-based Neural Acceleration with Differentiable LUTs](/202607/10/2607.08427v1-fpgn-redefining-ultra-fast-programmable-gate-based-neural-acceleration-with-differentiable-luts)  
    标签：评分：9.0/10、query:hwnas
-   evidence：DNN加速器的热感知设计空间探索
-8. [ATLAS: Automated HLS for DL-Optimized FPGAs](/202607/09/2607.07643v1-atlas-automated-hls-for-dl-optimized-fpgas)  
+   evidence：针对FPGA加速器的可微分查找表神经架构搜索
+7. [ZipDepth: Bringing Lightweight Zero-Shot Monocular Depth Anywhere, on Any Device](/202607/10/2607.08771v1-zipdepth-bringing-lightweight-zero-shot-monocular-depth-anywhere-on-any-device)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对深度学习优化FPGA的自动高层次综合及硬件微架构感知
+   evidence：适用于移动设备的高效可重参数化编解码器
 
 ### 速读区论文标签
-1. [Intrinsically Stable Spiking Neural Networks: Overcoming the Performance Barrier in the Absence of Batch Normalization](/202607/09/2606.31695v1-intrinsically-stable-spiking-neural-networks-overcoming-the-performance-barrier-in-the-absence-of-batch-normalization)  
+1. [BaseRT: Best-in-Class LLM Inference on Apple Silicon via Native Metal](/202607/10/2607.00501v1-basert-best-in-class-llm-inference-on-apple-silicon-via-native-metal)  
    标签：评分：8.0/10、query:hwnas
-   evidence：SNN的硬件效率动机与拓扑感知架构
-2. [SpikeLogBERT: Energy-Efficient Log Parsing Using Spiking Transformer Networks](/202607/09/2606.31781v1-spikelogbert-energy-efficient-log-parsing-using-spiking-transformer-networks)  
+   evidence：针对Apple Silicon的统一内存感知优化
+2. [MosaicKV: Serving Long-Context LLM with Dynamic Two-D KV Cache Compression](/202607/10/2607.00760v1-mosaickv-serving-long-context-llm-with-dynamic-two-d-kv-cache-compression)  
    标签：评分：8.0/10、query:hwnas
-   evidence：高能效脉冲Transformer架构
-3. [Lazy-Move Compilation for Neutral-Atom Quantum Computers via a Buffer-Relay Fabric](/202607/09/2606.31833v1-lazy-move-compilation-for-neutral-atom-quantum-computers-via-a-buffer-relay-fabric)  
+   evidence：动态KV缓存压缩以减少GPU显存耗尽
+3. [GSRQ: Gain-Shape Residual Quantization for Sub-1-bit KV Cache](/202607/10/2607.01065v1-gsrq-gain-shape-residual-quantization-for-sub-1-bit-kv-cache)  
    标签：评分：8.0/10、query:hwnas
-   evidence：量子计算中硬件结构与编译器的协同设计
-4. [Scaling Up Thermodynamic AI Models](/202607/09/2607.00170v1-scaling-up-thermodynamic-ai-models)  
+   evidence：用于sub-1-bit KV缓存内存减少的残差量化
+4. [Physically-Aware Preemptive Virtual Channels for Deadlock-Free AXI Networks-on-Chip](/202607/10/2607.01430v1-physically-aware-preemptive-virtual-channels-for-deadlock-free-axi-networks-on-chip)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对热力学伊辛机硬件训练深度网络
-5. [EO-VGGT: Orbital Ray-Conditioned 3D Foundation Models for Satellite Multi-View Reconstruction](/202607/09/2607.00417v1-eo-vggt-orbital-ray-conditioned-3d-foundation-models-for-satellite-multi-view-reconstruction)  
+   evidence：维持日益增长的高内存带宽
+5. [Mixture-of-Parallelisms: Towards Memory-Efficient Training Stack for Mixture-of-Experts Models](/202607/10/2607.01844v1-mixture-of-parallelisms-towards-memory-efficient-training-stack-for-mixture-of-experts-models)  
    标签：评分：7.0/10、query:hwnas
-   evidence：轨道观测与卫星遥感
-6. [Towards Robust Driving Perception: A Flexible Scale-Driven Family for Self-Supervised Monocular Depth Estimation](/202607/09/2607.00736v2-towards-robust-driving-perception-a-flexible-scale-driven-family-for-self-supervised-monocular-depth-estimation)  
+   evidence：最大化GPU显存和通信带宽利用率的内存高效训练栈
+6. [LiZAD: A Lightweight Zero-Shot Anomaly Detection Framework for Industrial Manufacturing](/202607/10/2607.01949v1-lizad-a-lightweight-zero-shot-anomaly-detection-framework-for-industrial-manufacturing)  
    标签：评分：7.0/10、query:hwnas
-   evidence：专为资源受限的汽车边缘设备定制
-7. [Modeling and Chasing the Energy-Efficiency Sweet Spots in Modern GPUs](/202607/09/2607.00819v1-modeling-and-chasing-the-energy-efficiency-sweet-spots-in-modern-gpus)  
+   evidence：资源受限边缘设备上的实时异常检测轻量级框架
+7. [Towards Load-Aware Prefill Deflection for Disaggregated LLM Serving](/202607/10/2607.02043v1-towards-load-aware-prefill-deflection-for-disaggregated-llm-serving)  
    标签：评分：7.0/10、query:hwnas
-   evidence：在真实工作负载下建模现代GPU的能效甜点
-8. [Constrained Bayesian Optimisation with Multiple Information Sources](/202607/09/2607.00865v1-constrained-bayesian-optimisation-with-multiple-information-sources)  
+   evidence：最大化LLM推理集群的计算利用率
+8. [Electronic Bursting Neuron: design, equations and hardware implementation](/202607/10/2607.02122v1-electronic-bursting-neuron-design-equations-and-hardware-implementation)  
    标签：评分：7.0/10、query:hwnas
-   evidence：用于设计空间探索的有约束贝叶斯优化
-9. [EVOTS: Evolutionary Transformer Search for Time Series Forecasting](/202607/09/2607.00154v1-evots-evolutionary-transformer-search-for-time-series-forecasting)  
+   evidence：脉冲神经网络电子神经元的硬件实现
+9. [SCAPE: Accurate and Efficient LLM Training with Extreme Sparse Communication](/202607/10/2607.01678v1-scape-accurate-and-efficient-llm-training-with-extreme-sparse-communication)  
    标签：评分：6.0/10、query:hwnas
-   evidence：进化神经架构搜索框架
-10. [VOCA: Visual Odometry with Codec Awareness](/202607/09/2607.00189v1-voca-visual-odometry-with-codec-awareness)  
+   evidence：用于大语言模型训练的通信高效分布式优化器
+10. [CamoNAS: Neural Architecture Search for Enhanced Camouflaged Object Detection](/202607/10/2607.01870v1-camonas-neural-architecture-search-for-enhanced-camouflaged-object-detection)  
    标签：评分：6.0/10、query:hwnas
-   evidence：利用硬件编解码器信息处理视觉任务
-11. [DroneFINE: Domain-Aware Parameter-Efficient Fine-Tuning of Vision-Language Detectors for Drone Images](/202607/09/2607.00338v1-dronefine-domain-aware-parameter-efficient-fine-tuning-of-vision-language-detectors-for-drone-images)  
+   evidence：针对特定视觉任务的神经网络架构搜索框架
+11. [RadiomicNet: A Hybrid Radiomics-Guided Lightweight Architecture for Interpretable Medical Image Segmentation](/202607/10/2607.02185v1-radiomicnet-a-hybrid-radiomics-guided-lightweight-architecture-for-interpretable-medical-image-segmentation)  
    标签：评分：6.0/10、query:hwnas
-   evidence：针对无人机图像和航空影像特征的领域感知微调
+   evidence：基于MobileNetV2的轻量级架构以减少参数需求
 
 
 <div class="dpr-home-promo-card">
