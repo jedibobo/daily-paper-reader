@@ -6,76 +6,74 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-10
-- 运行时间：2026-07-10 20:13:08 UTC
+- 最新运行日期：2026-07-11
+- 运行时间：2026-07-11 21:13:20 UTC
 - 运行状态：成功
-- 本次总论文数：18
-- 精读区：7
+- 本次总论文数：17
+- 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日深度研读 18 篇论文，核心突破集中在大模型推理效率提升与端侧视觉感知。
-重点推荐 Akashic 的低开销推理架构与 MiLSD 微型检测器，两者在性能与资源平衡上表现卓越。
-建议关注 Apple Silicon 原生加速及 Sub-1-bit KV 缓存量化技术，探索极致的端侧部署可能。
-- 详情：[/202607/10/README](/202607/10/README)
+- 今日共生成 17 篇推荐（精读 6 篇，速读 11 篇）
+- 精读：《Latency-Constrained Hardware-Aware Quantum Error Correction Co-Design with Adaptive Confidence-Gated Neural Decoding for the Rotated Surface Code》（9.0/10）, 《OmniPilot: An Uncertainty-Aware LLM Inference Advisor for Heterogeneous GPU Clusters》（8.0/10）
+- 速读：《RT-Tango: Real-Time Distributed Binaural Speech Enhancement for Low-Power Hearing Aid Devices》（8.0/10）, 《SAB-LVLM: Significance-Aware Binarization for Large Vision-Language Models》（8.0/10）, 《WBMM: Windowed Batch Matrix Multiplication for Efficient Large Receptive Field Convolution》（8.0/10）
+- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
+- 详情：[/202607/11/README](/202607/11/README)
 
 ### 精读区论文标签
-1. [Akashic: A Low-Overhead LLM Inference Service with MemAttention](/202607/10/2607.05708v1-akashic-a-low-overhead-llm-inference-service-with-memattention)  
+1. [Latency-Constrained Hardware-Aware Quantum Error Correction Co-Design with Adaptive Confidence-Gated Neural Decoding for the Rotated Surface Code](/202607/11/2607.05814v1-latency-constrained-hardware-aware-quantum-error-correction-co-design-with-adaptive-confidence-gated-neural-decoding-for-the-rotated-surface-code)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对大模型推理的软硬件协同设计内存布局
-2. [MiLSD: A Micro Line-Segment Detector for Resource-Constrained Devices](/202607/10/2607.06600v1-milsd-a-micro-line-segment-detector-for-resource-constrained-devices)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对亚MB级MCU内存约束的微型检测器自动化设计
-3. [Smart Scissor: Coupling Spatial Redundancy Reduction and CNN Compression for Embedded Hardware](/202607/10/2607.06915v1-smart-scissor-coupling-spatial-redundancy-reduction-and-cnn-compression-for-embedded-hardware)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对嵌入式硬件的CNN压缩与空间冗余减少
-4. [CRIMP: Compact & Reliable DNN Inference on In-Memory Processing via Crossbar-Aligned Compression and Non-ideality Adaptation](/202607/10/2607.08015v1-crimp-compact--reliable-dnn-inference-on-in-memory-processing-via-crossbar-aligned-compression-and-non-ideality-adaptation)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对内存处理的硬件友好型DNN自动设计
-5. [Rethinking Small VLM Quantization: From Component-Wise Analysis to Hardware-Aware Edge Deployment](/202607/10/2607.08029v1-rethinking-small-vlm-quantization-from-component-wise-analysis-to-hardware-aware-edge-deployment)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对VLM的硬件感知边缘部署和组件级量化分析
-6. [FPGN: Redefining Ultra-Fast Programmable Gate-based Neural Acceleration with Differentiable LUTs](/202607/10/2607.08427v1-fpgn-redefining-ultra-fast-programmable-gate-based-neural-acceleration-with-differentiable-luts)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对FPGA加速器的可微分查找表神经架构搜索
-7. [ZipDepth: Bringing Lightweight Zero-Shot Monocular Depth Anywhere, on Any Device](/202607/10/2607.08771v1-zipdepth-bringing-lightweight-zero-shot-monocular-depth-anywhere-on-any-device)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：适用于移动设备的高效可重参数化编解码器
+   evidence：延迟约束的硬件感知协同设计
+2. [OmniPilot: An Uncertainty-Aware LLM Inference Advisor for Heterogeneous GPU Clusters](/202607/11/2607.01579v1-omnipilot-an-uncertainty-aware-llm-inference-advisor-for-heterogeneous-gpu-clusters)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：异构集群下硬件感知的LLM推理配置
+3. [3DLS: A 3D Logic-Stacked Architecture for Disaggregated LLM Serving](/202607/11/2607.01617v1-3dls-a-3d-logic-stacked-architecture-for-disaggregated-llm-serving)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：用于LLM服务的3D堆叠芯粒架构
+4. [Gemma 4 Technical Report](/202607/11/2607.02770v1-gemma-4-technical-report)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：多模态模型中针对计算效率、内存和推理速度的设计选择
+5. [STELLA: Efficient Sensor-to-LLM Translation for On-Device Human Activity Recognition](/202607/11/2607.03089v1-stella-efficient-sensor-to-llm-translation-for-on-device-human-activity-recognition)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：边缘设备上高效的端侧HAR与传感器标记化
+6. [Bridging the Semantic Gap in 6G: Tiny Language Models Under the Latency-Accuracy-Size Trilemma](/202607/11/2607.03246v1-bridging-the-semantic-gap-in-6g-tiny-language-models-under-the-latency-accuracy-size-trilemma)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：针对受限物联网和边缘设备的微焦耳能耗预算微型语言模型
 
 ### 速读区论文标签
-1. [BaseRT: Best-in-Class LLM Inference on Apple Silicon via Native Metal](/202607/10/2607.00501v1-basert-best-in-class-llm-inference-on-apple-silicon-via-native-metal)  
+1. [RT-Tango: Real-Time Distributed Binaural Speech Enhancement for Low-Power Hearing Aid Devices](/202607/11/2607.01834v1-rt-tango-real-time-distributed-binaural-speech-enhancement-for-low-power-hearing-aid-devices)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对Apple Silicon的统一内存感知优化
-2. [MosaicKV: Serving Long-Context LLM with Dynamic Two-D KV Cache Compression](/202607/10/2607.00760v1-mosaickv-serving-long-context-llm-with-dynamic-two-d-kv-cache-compression)  
+   evidence：针对资源受限助听器设备的高效语音增强
+2. [SAB-LVLM: Significance-Aware Binarization for Large Vision-Language Models](/202607/11/2607.01876v1-sab-lvlm-significance-aware-binarization-for-large-vision-language-models)  
    标签：评分：8.0/10、query:hwnas
-   evidence：动态KV缓存压缩以减少GPU显存耗尽
-3. [GSRQ: Gain-Shape Residual Quantization for Sub-1-bit KV Cache](/202607/10/2607.01065v1-gsrq-gain-shape-residual-quantization-for-sub-1-bit-kv-cache)  
+   evidence：用于减少资源受限设备内存和延迟的二值化技术
+3. [WBMM: Windowed Batch Matrix Multiplication for Efficient Large Receptive Field Convolution](/202607/11/2607.02097v1-wbmm-windowed-batch-matrix-multiplication-for-efficient-large-receptive-field-convolution)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于sub-1-bit KV缓存内存减少的残差量化
-4. [Physically-Aware Preemptive Virtual Channels for Deadlock-Free AXI Networks-on-Chip](/202607/10/2607.01430v1-physically-aware-preemptive-virtual-channels-for-deadlock-free-axi-networks-on-chip)  
+   evidence：优化大感受野的内存访问和吞吐量
+4. [Efficient PEFT Methods with Adaptive Checkpointing for Vision Models and VLMs on Resource Constrained Consumer-GPUs](/202607/11/2607.02158v1-efficient-peft-methods-with-adaptive-checkpointing-for-vision-models-and-vlms-on-resource-constrained-consumer-gpus)  
    标签：评分：8.0/10、query:hwnas
-   evidence：维持日益增长的高内存带宽
-5. [Mixture-of-Parallelisms: Towards Memory-Efficient Training Stack for Mixture-of-Experts Models](/202607/10/2607.01844v1-mixture-of-parallelisms-towards-memory-efficient-training-stack-for-mixture-of-experts-models)  
+   evidence：针对资源受限GPU的内存预算感知自适应算法
+5. [Variable Bit-width Quantization: Learning Per-Group Precision for "Bigger-but-Smaller" Language Models](/202607/11/2607.02893v1-variable-bit-width-quantization-learning-per-group-precision-for-bigger-but-smaller-language-models)  
    标签：评分：7.0/10、query:hwnas
-   evidence：最大化GPU显存和通信带宽利用率的内存高效训练栈
-6. [LiZAD: A Lightweight Zero-Shot Anomaly Detection Framework for Industrial Manufacturing](/202607/10/2607.01949v1-lizad-a-lightweight-zero-shot-anomaly-detection-framework-for-industrial-manufacturing)  
+   evidence：用于硬件友好型模型缩减的可变位宽量化
+6. [Pooling-Based Context Modeling for Convolution-Free Deep Image Prior](/202607/11/2607.02952v1-pooling-based-context-modeling-for-convolution-free-deep-image-prior)  
    标签：评分：7.0/10、query:hwnas
-   evidence：资源受限边缘设备上的实时异常检测轻量级框架
-7. [Towards Load-Aware Prefill Deflection for Disaggregated LLM Serving](/202607/10/2607.02043v1-towards-load-aware-prefill-deflection-for-disaggregated-llm-serving)  
+   evidence：减少参数和计算复杂度以实现高效架构
+7. [HyperVAttention: Efficient Sparse Attention with Spatio-Temporal Clustering for Video Diffusion](/202607/11/2607.03012v1-hypervattention-efficient-sparse-attention-with-spatio-temporal-clustering-for-video-diffusion)  
    标签：评分：7.0/10、query:hwnas
-   evidence：最大化LLM推理集群的计算利用率
-8. [Electronic Bursting Neuron: design, equations and hardware implementation](/202607/10/2607.02122v1-electronic-bursting-neuron-design-equations-and-hardware-implementation)  
+   evidence：解决低CTA利用率和聚类开销问题
+8. [MambaLIE: Scene Light Intensity-Boosted Low-Light Image Enhancement with State Space Model](/202607/11/2607.03013v2-mambalie-scene-light-intensity-boosted-low-light-image-enhancement-with-state-space-model)  
    标签：评分：7.0/10、query:hwnas
-   evidence：脉冲神经网络电子神经元的硬件实现
-9. [SCAPE: Accurate and Efficient LLM Training with Extreme Sparse Communication](/202607/10/2607.01678v1-scape-accurate-and-efficient-llm-training-with-extreme-sparse-communication)  
+   evidence：针对移动和消费级设备的高效图像增强
+9. [Cross-device Collaborative Test-time Adaptation with Zeroth-order Optimization and Model Merging](/202607/11/2607.02988v1-cross-device-collaborative-test-time-adaptation-with-zeroth-order-optimization-and-model-merging)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于大语言模型训练的通信高效分布式优化器
-10. [CamoNAS: Neural Architecture Search for Enhanced Camouflaged Object Detection](/202607/10/2607.01870v1-camonas-neural-architecture-search-for-enhanced-camouflaged-object-detection)  
+   evidence：资源受限的边缘设备和内存密集型更新
+10. [Rethinking Neural Nonlinearity as Gating](/202607/11/2607.03148v1-rethinking-neural-nonlinearity-as-gating)  
    标签：评分：6.0/10、query:hwnas
-   evidence：针对特定视觉任务的神经网络架构搜索框架
-11. [RadiomicNet: A Hybrid Radiomics-Guided Lightweight Architecture for Interpretable Medical Image Segmentation](/202607/10/2607.02185v1-radiomicnet-a-hybrid-radiomics-guided-lightweight-architecture-for-interpretable-medical-image-segmentation)  
+   evidence：将架构转换为阈值门控原语以实现硬件友好执行
+11. [LBTCap: A Lightweight Bilateral Transformer for Real-Time Remote Sensing Image Change Captioning](/202607/11/2607.03320v1-lbtcap-a-lightweight-bilateral-transformer-for-real-time-remote-sensing-image-change-captioning)  
    标签：评分：6.0/10、query:hwnas
-   evidence：基于MobileNetV2的轻量级架构以减少参数需求
+   evidence：用于实时遥感图像处理的轻量级框架
 
 
 <div class="dpr-home-promo-card">

@@ -1,0 +1,937 @@
+Title: Cross-device Collaborative Test-time Adaptation with Zeroth-order Optimization and Model Merging
+
+URL Source: https://arxiv.org/pdf/2607.02988v1
+
+Published Time: Tue, 07 Jul 2026 00:31:09 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# Cross-device Collaborative Test-time Adaptation with Zeroth-order Optimization and Model Merging 
+
+## Yu Mitsuzumi 1*, Akisato Kimura 1, Yasuhiro Fujiwara 1, Hisashi Kashima 2
+
+> 1
+
+## NTT, Inc. 2Kyoto University 
+
+## Abstract 
+
+Test-time adaptation (TTA) mitigates domain shifts by us-ing incoming test data to update a model on the fly. The majority of TTA methods require resource-intensive back-propagation (BP) for model updates, particularly demand-ing large memory sizes, which makes it infeasible to deploy them on resource-limited devices (e.g., edge devices). To address this issue, we integrate two different techniques, zeroth-order optimization (ZOO) and model merging, un-der the recently established cross-device collaborative TTA (CDC-TTA) framework, where the system is composed of a mixture of resource-abundant and resource-limited devices, and the model information (e.g., model weights obtained on each device) is shared across the devices. Our method is ex-ecutable on resource-limited devices by introducing ZOO, which requires only forward processing and bypasses the resource-intensive BP optimization. Concurrently, to miti-gate the high-dimensional optimization difficulty caused by the side effect of ZOO, we incorporate model merging of the shared multiple models and set the merge coefficients as the optimization objective, which successfully reduces the optimization dimension. In addition, to enhance the syner-gistic combination of ZOO and model merging, we propose a unique preprocessing strategy that trims intra-model non-influential weights and reduces the inter-model information redundancy. We empirically confirmed the effectiveness of our method using common corruption and style-transferred image benchmarks. 
+
+## 1. Introduction 
+
+Deep neural networks (DNNs) are powerful tools that have brought remarkable achievements in various fields. How-ever, they often suffer from the domain shift problem, where DNNs degrade their accuracy significantly when training and test data have a large domain gap. This issue is nearly impossible to circumvent, given the sheer variety of deploy-ment environments, especially for edge devices in the field. 
+
+> *Corresponding Author: Yu Mitsuzumi (yu.mitsuzumi@ntt.com)
+
+It is particularly critical in real-world applications, such as automated surveillance systems, quality assurance in man-ufacturing, and personalized healthcare with wearable de-vices [2, 3, 52]. Researchers have long been tackling this problem in the form of domain adaptation and generaliza-tion [53, 75]. Recently, test-time adaptation (TTA) [41] has attracted significant attention. In contrast to the domain adaptation and generalization approaches that update the model via offline training, TTA updates the model on the fly using only input test data, which are aligned with real-world de-ployments. The pioneering approach of TTA is Tent [60], which updates parts of the model weights so as to mini-mize the entropy of the model’s predictions on test data. Following this, there have been various attempts to ex-tend the applicability of TTA to real-world environments, such as addressing the continual and non-stationary domain shifts [12, 20, 44, 50, 61, 70], detecting and removing the noisy samples in the input data stream [16, 21], and de-veloping TTA methods tailored for vision-language models (VLMs) [1, 14, 42, 54, 68]. However, most previous TTA methods share a critical limitation: they depend on resource-intensive backpropa-gation (BP), for which a large amount of memory is par-ticularly indispensable (Fig. 1 (a)). Specifically, updating the model via BP requires significantly more memory space than simple forward inference, due to the need to store a computational graph, the activations of the middle layers, the loss gradients of the parameters, etc. This presents a significant limitation in resource-limited scenarios, i.e., de-ployment on edge devices like mobile phones and IoT sen-sors. These devices frequently encounter domain shift prob-lems due to the uncertain nature of the deployment environ-ments, thus leading to the high demand for solutions with TTA. Yet, the computational resources of those edge de-vices are often limited, and thus, existing BP-based algo-rithms become infeasible . The primary research focus of this paper is to develop a resource-friendly TTA method that is executable on resource-limited devices, especially with small memory capacity. This work tackles the aforementioned problem based 1
+
+> arXiv:2607.02988v1 [cs.CV] 3 Jul 2026 Fewer
+> Params
+> Resource Friendly
+> RAM
+> Model
+> Parameters
+> Zeroth-order Optimization
+
+RAM 
+
+> Resource Intensive
+> RAM
+> Loss Gradients
+> Computation Graph
+> Many Params
+> Loss
+
+(a) Conventional Test-time Adaptation (b) Our Method 
+
+> Preprocess
+> Model
+> Merging
+> Backpropagation
+> Model Strage
+
+Memory 
+
+Usage 
+
+> Loss
+> Intermediate Activations
+> Model Parameters
+> 9.37 GB
+> 1.84 GB
+
+(c) Figure 1. (a) Conventional test-time adaptation (TTA) methods usually update the model parameters through the backpropagation (BP) pro-cess. However, this can be disadvantageous because BP requires large memory resources, which limit its applicability to resource-limited scenarios, such as edge computing or low-end smartphones. (b) In this work, we connect model-merging and zeroth-order optimization (ZOO) with a cross-device collaborative TTA framework to simultaneously reduce the memory usage and mitigate the high-dimensional optimization difficulty. 
+
+on the recently established cross-device collaborative TTA (CDC-TTA) framework [7]. CDC-TTA allows the sharing of the model information among a mixture of resource-abundant and resource-limited devices through a central server, thereby enhancing the overall effectiveness of the service. CDC-TTA is a feasible framework because, in the real-world deployment scenario of TTA, models are usually provided across multiple devices, each of which has differ-ent computational resources. On this framework, we build a novel TTA method designed for resource-limited devices (Fig. 1 (b)), which incorporates the following three pillars. The first pillar is to switch from the standard BP-based op-timization strategy to zeroth-order optimization [19]. Dif-ferent from BP-based approaches, ZOO can perform opti-mization only with forward inferences, making it feasible for resource-limited devices that can barely afford inference processing. Unfortunately, ZOO has a drawback in terms of high-dimensional optimization. TTA methods usually opti-mize a large number of model weights, so simply replacing BP with ZOO results in slow convergence speed and little performance improvement. To mitigate this, we incorporate a model-merging strategy [32] as our second pillar. Thanks to the CDC-TTA framework, we can utilize model informa-tion from multiple devices, so we build a target model by merging these models. The core insight is to optimize only the merging coefficients, which act as a low-dimensional recipe for how the models are combined. By optimizing this small number of coefficients instead of a vast num-ber of model weights directly, we drastically reduce the di-mensionality of the optimization problem, leveraging the benefits of ZOO. Moreover, the integration of ZOO and model merging, unlike the ad-hoc model construction of existing CDC-TTA methods, can yield a higher accuracy model through training-based model construction. The fi-nal pillar is model weight preprocessing. Directly merging raw model weights may hinder the potential of our method due to uninformative weight values contained in each model and redundant weights overlapping across multiple models. We therefore designed a unique preprocessing to remove these uninformative weights and reduce inter-model redun-dancy through low-rank approximation. Our experimen-tal validation of the proposed method on three corruption datasets (CIFAR10-C, CIFAR100-C, and ImageNet-C) and a style transfer dataset (Stylized-ImageNet) confirmed its effectiveness. Notably, the memory usage of the proposed method was confirmed to be significantly lower than that of existing BP-based TTA (Fig. 1 (c)). Additionally, we inves-tigate the applicability of our method to quantized models, where the BP is inherently inexecutable, and we empirically confirmed that our method can improve the prediction accu-racy of the quantized models. Our main contributions in this work are as follows. • Motivated by the synergy between ZOO and model merg-ing, we propose a new TTA method feasible on resource-limited devices, which optimizes a reasonably small num-ber of merging coefficients via resource-friendly ZOO. • We propose a unique preprocessing technique that re-duces the interference by suppressing the uninformative model weights in each model and mitigates inter-model weight redundancy by using low-rank approximation, leading to more precise and resource-friendly adaptation. 
+
+## 2. Related Work 
+
+Test-time adaptation (TTA) is an approach that improves a model’s inference accuracy by using the input test data. Tent [60], a pioneering TTA method, achieved annotation-free adaptation to test data by updating the affine parame-ters of normalization layers [4, 30] within the model, uti-lizing the entropy of the test data predictions as a loss 2function. Many subsequent TTA methods have been pro-posed as improvements upon Tent, one direction of which is the extension to more realistic problem settings. [61] focuses on adapting to continually changing test distribu-tions. [12, 20, 44, 50, 70] further extend this problem to handle temporally correlated or dynamic distribution shifts. [16, 21] are designed to detect out-of-distribution data and exclude them from the adaptation process, and [49, 56] aims to reduce the computational cost for adaptation. With the recent advancement of Vision-Language Models (VLMs), numerous TTA methods have also been proposed specifi-cally for VLMs [1, 14, 29, 42, 54, 63, 64, 68]. While these techniques significantly improve a model’s recognition per-formance in the test domain, they require resource-intensive BP to update model weights. This poses a significant draw-back, as it makes them infeasible for resource-limited envi-ronments. A few TTA methods can perform without BP. Early approaches often focused on modifying the statistics of batch normalization layers [5, 36, 46, 47, 74], and there are prototype-based methods [31, 33, 73] that update class pro-totypes in the feature space, rather than the model weights themselves. More recent studies [51, 62] have introduced BP-free optimization algorithms into TTA for Vision Trans-former with prompt tuning [34]. Among TTA for VLMs, several BP-free approaches have been proposed, including feature cache methods [9, 37], an iterative score optimiza-tion based on multiple augmented images [72], and oth-ers [8, 59]. Diffusion models [15, 22] reduce the distri-bution gap by target-to-source image translation. While these methods seem suitable for resource-limited devices, we found they have several limitations, such as limited per-formance improvement due to the rigidity of the frozen model weights, restrictions on applicable model architec-tures, or a computationally expensive denoising process. In this work, we build a TTA method that is executable on resource-limited devices and agnostic to the network architectures based on the cross-device collaborative TTA (CDC-TTA) framework [7]. The most relevant prior work is CoLA [7], which combines multiple models based on the feature distribution similarity. In contrast to such an ad-hoc merging strategy, our method is a training-based approach and yields more precise predictions. 
+
+Zeroth-order Optimization (ZOO) , also known as derivative-free optimization, is an approach that optimizes an objective function without using derivative informa-tion [39]. Its advantage is that it can be applied even when the derivative of the objective function is very difficult or impossible to calculate, or when the function is a black box. These derivative-free approaches also meet the de-mand of the TTA scenarios that need to avoid resource-intensive BP computations due to device limitations. Sev-eral types of ZOO algorithms have been proposed, includ-ing direct search (e.g., pattern search [26], Nelder-Mead method [48]), model-based search (e.g., Bayesian opti-mization [17]), and stochastic/heuristic methods (e.g., Evo-lution Strategies (ES) [55], Particle Swarm Optimization (PSO) [6], Zeroth-order SGD (ZO-SGD) [19]). However, ZOO has the weaknesses of slow convergence speed under high-dimensional optimization problems, posing challenges for its direct application to TTA. To address this, we focus on the synergic combination of ZOO and model merging to reduce the dimensionality and develop a TTA method effec-tive even under short adaptation periods. 
+
+Model Merging constructs a strong model by combining the weights of multiple pre-trained models. The most pop-ular approach is to simply average the parameters of the models [32]. Several subsequent methods have improved this approach by introducing constraints during the merg-ing process [35, 45]. Task arithmetic [28] introduced the concept of the “task vector”, which is the difference be-tween the weights of a base model and the weights of the same model after fine-tuning. It demonstrated that acquir-ing and forgetting tasks can be achieved through the addi-tion and subtraction of these task vectors. Other methods have subsequently been proposed, such as mitigating pa-rameter interference between tasks [10, 66, 69] or apply-ing task arithmetic to LoRA models [58]. A data-driven method for obtaining merging coefficients has also been proposed [67]. In this work, we conceptualize the frame-work of cross-device collaborative TTA [7], where models are shared among multiple devices, from the perspective of model merging, and leverage the benefit of model merging to overcome the weaknesses of ZOO in high-dimensional optimization. 
+
+## 3. Preliminaries 
+
+Problem Setup. We follow the problem setup of CDC-TTA [7]. It is a framework that enables a heterogeneous group of devices, comprising both resource-limited and resource-abundant devices, to collaboratively achieve TTA by sharing model weights. While resource-abundant de-vices can leverage BP to execute an off-the-shelf TTA method and obtain adapted models, the remaining challenge is how to perform TTA on resource-limited devices with the assistance of models from other devices. We focus on ad-dressing the latter challenge. The formal setup is described below. We are given a base pretrained model Fθ0 , several fine-tuned models on different devices {Fθm }Mm=1 , and unlabeled test data 
+
+xTk′ ∼ PT (x). Fθ0 is trained on the source data set 
+
+D0 = {x0k , y 0k }K0
+
+> k=1
+
+, where K0 is the source data set size, 
+
+x0k ∼ P0(x) and PT (x)̸ = P0(x). Each fine-tuned model 
+
+Fθm is obtained by using an off-the-shelf TTA algorithm and unlabeled data Dm = {xmk }Km
+
+> k=1
+
+, where Km is the 3number of unlabeled data, xmk ∼ Pm(x). Note that we are given data only from the test distribution PT (x), but we cannot access the other data, which reflects some real-world limitations (e.g., data privacy). The goal is to min-imize the prediction error for the test data. Since we have only unlabeled test data, we usually design an unsupervised loss L (e.g., prediction entropy) for the model updates. To be more specific, we update the model based on the ob-jective min θl L(θf , θl, B) with given test data mini-batch 
+
+B = {xTk }Bk=1 , where B denotes a batch size, θf denotes the frozen weights and θl denotes the learnable weights, i.e., θ = [ θf ; θl]. In this work, we focus on the TTA prob-lem for resource-limited devices, and thus, we assume that we cannot use resource-intensive BP for model updates. 
+
+Zeroth-order Optimization (ZOO). Our method employs zeroth-order SGD (ZO-SGD) [19], one of the ZOO algo-rithms, due to its simplicity and ease of implementation. In ZO-SGD, we obtain pseudo-gradients by Simultaneous Per-turbation Stochastic Approximation (SPSA) [57]. Specifi-cally, SPSA first calculates the loss difference between the two forward passes with positive and negative perturbations as 
+
+S = L(ϕ+; B) − L (ϕ−; B)2δ , (1) where δ is the perturbation size, B is a mini-batch, and ϕ+
+
+and ϕ− are obtained by applying positive and negative per-turbations to the original parameter ϕ using a random per-turbation vector z ∼ N (0 , I d). Then, we update the param-eters as 
+
+ϕ ← ϕ − ηS z, (2) where η is the learning rate parameter. 
+
+Model Merging. We basically follow one of the most popular model merging approaches, task arithmetic [28]. It defines the weight difference between the base model and the fine-tuned model as a “task vector” represented as 
+
+τ m = θm − θ0 where θm and θ0 are the model weights of the fine-tuned model and the base model, respectively. Uti-lizing the task vectors from the multiple trained models, we obtain the merged model weights as 
+
+θMerge = θ0 + X
+
+> m
+
+wmτ m, (3) where wm denotes the merging coefficients. Since different model weights within a DNN (e.g., differ-ent layers) learn different information, assigning the same coefficient to all weights of the model could reduce the ef-ficacy of the model merging. Referring to AdaMerge [67], we prepare a different merging coefficient for each model weight group. Specifically, when the m-th model has N
+
+model weight groups as {θ(n) 
+
+> m
+
+}Nn=1 , we assign merging co-efficients w(n) 
+
+> m
+
+for the n-th model weight group in the m-th model, and the merging procedure is represented as 
+
+θ(n) 
+
+> Merge
+
+= θ(n)0 + X
+
+> m
+
+w(n) 
+
+> m
+
+τ (n) 
+
+> m
+
+, (4) where θ(n)0 is the n-th model weight group of the base model and τ (n) 
+
+> m
+
+is the task vector calculated as τ (n) 
+
+> m
+
+=
+
+θ(n) 
+
+> m
+
+− θ(n)0 .
+
+## 4. Method 
+
+Fig. 2 presents the overview of our method. It is built upon the CDC-TTA framework, where the trained models are shared across multiple devices. We construct the tar-get model via model merging using the shared model and achieve TTA on the target device by optimizing the merg-ing coefficients with ZOO. Our method is mainly composed of 1) server-side preprocessing before providing the model weights, and 2) device-side test-time adaptation to adapt the model to the target domain. 
+
+4.1. Server-side Preprocessing 
+
+Before providing the model weights to each resource-limited device, we apply the unique preprocessing tech-nique with the following three sub-components to trim the intra-model non-influential weights and to reduce the inter-model information redundancy. 
+
+1. Non-influential Weight Suppression (NWS). We first preprocess the task vectors τ (n) 
+
+> m
+
+to retain only the task-influential values. As reported in [10, 66], each task vector contains values that do not have effects on merging and may in fact interfere with other task vectors. To mitigate this is-sue, we apply top-k% filtering for each task vector, setting less influential elements to zero. Formally, the top-k% fil-tering is represented as 
+
+ˆτ (n) 
+
+> mi
+
+=
+
+ τ (n) 
+
+> mi
+
+(|τ (n) 
+
+> mi
+
+| ≥ τ (n) 
+
+> mtop-k%
+
+),
+
+0 (otherwise ). (5) We denote this process as ˆτ (n) 
+
+> m
+
+= top k(τ (n) 
+
+> m
+
+).
+
+2. Redundancy Reduction (RR) through Low-rank Ap-proximation. Next, we focus on the redundancy among the processed task vectors. Intuitively, task vectors that come from similar domains will also be similar, so assigning dif-ferent coefficients to these task vectors is redundant; it is more efficient to assign a coefficient to the common ele-ment between these vectors. Based on this observation, we reduce such redundancy by applying a low-rank approxima-tion. The detailed description of the redundancy reduction process is as follows. We re-formulate Eq. (4) 1 as 
+
+θ(n) 
+
+> lMerge
+
+= θ(n) 
+
+> l0
+
++ w(n) ˆT (n), (6)    
+
+> 1The subscript lis used to explicitly indicate that this process needs only to be applied to the learnable weights θl.
+
+4}
+
+Test Data (Unlabeled) 
+
+Model Storage 1. Non-influential 
+
+Weight Supression 
+
+2. Redundancy Reduction 
+
+through Low-rank Approximation 
+
+(i) Inference with Model Merging 
+
+Update 
+
+Merging Coefficeints 
+
+(ii) Test-time Adaptation 
+
+with Zeroth-order Merging Coefficient Optimization 
+
+Calculate 
+
+Loss Difference 
+
+Task Matrix 
+
+SVD 
+
+## Server-side Preprocessing 
+
+## Device-side Test-time Adaptation 
+
+-+
+
+3. Adaptive Rank 
+
+Selection 
+
+where 
+
+Original 
+
+Coefficients 
+
+Reduced Coefficients Reduced Task Matrix 
+
+(iii) Perturbation with 
+
+Random Seed Trick Figure 2. Overview of Our Method. On the server side, before providing the model weights to each device, preprocessing procedures are applied to reduce the non-influential values and redundancy in the model weights. On the device side, we build the merged model based on the provided initial merging coefficients and task matrices, and we update the coefficients via ZO-SGD. 
+
+where w(n) ∈ RM is the coefficient vector, ˆT (n) ∈ RM ×D
+
+is the task matrix obtained by concatenating the task vectors 
+
+{ˆτ (n) 
+
+> m
+
+}Mm=1 , and D is the size of each task vector. Then, we apply singular value decomposition (SVD) to the task matrix ˆT (n) and obtain a low-rank approximated version 
+
+ˆT (n) 
+
+> r
+
+= U (n) 
+
+> r
+
+Σ(n) 
+
+> r
+
+V (n) 
+
+> r
+
+, (7) where U (n) 
+
+> r
+
+∈ RM ×r , Σ(n) 
+
+> r
+
+∈ Diag (Rr ), and V (n) 
+
+> r
+
+∈
+
+Rr×D. Finally, our model-merging procedure is repre-sented as 
+
+θ(n) 
+
+> lMerge
+
+= θ(n) 
+
+> l0
+
++ w(n)U (n) 
+
+> r
+
+Σ(n) 
+
+> r
+
+V (n) 
+
+> r
+
+, (8) 
+
+= θ(n) 
+
+> l0
+
++ w(n) 
+
+> r
+
+V (n) 
+
+> r
+
+, (9) where w(n) 
+
+> r
+
+= w(n)U (n) 
+
+> r
+
+Σ(n) 
+
+> r
+
+∈ Rr .
+
+3. Adaptive Rank Selection (ARS). As mentioned previ-ously, each model weight in a neural network learns differ-ent information. Consequently, the similarity trend of the task vector varies for each model weight, and the appropri-ate rank for the above low-rank approximation procedure also differs for each. To be more specific, if the weights are similar across models, an unnecessarily high rank will undermine the effectiveness of redundancy reduction. Con-versely, if the weights differ significantly between models, setting the rank too low will result in a loss of information in the task matrix. To address this, we introduce a technique to automatically select the rank for each model weight, fur-ther reducing the total number of merging coefficients to be optimized. In this technique, we focus on the recovery error of the original task matrix. The recovery error between the original task matrix and the low-rank approximated one is defined as 
+
+R( ˆT (n), r ) = 
+
+ˆT (n) − ˆT (n)
+
+> r
+> 2
+> F
+
+∥ ˆT (n)∥2
+
+> F
+
+. (10) By adjusting the rank so that the recovery error is small enough, we can select the appropriate rank for each model weight. Specifically, the minimum necessary rank is set based on the following equation: 
+
+r(n) = min 
+
+> r
+
+n
+
+r|R( ˆT (n), r ) < ϵ × D
+
+o
+
+, (11) where ϵ is a parameter to tune the recovery error. In ad-dition, we limit the maximum size of the rank as r(n) ←
+
+min( r(n), r max ).The combination of RR and ARS offers another impor-tant advantage; we can reduce the dimensionality of the optimization. As discussed earlier, ZOO methods usually struggle with the difficulty of a high-dimensional optimiza-tion. Our method mitigates this by introducing a model-merging strategy instead of directly optimizing the model 5weights. However, as the number of merging models in-creases, the number of merging coefficients also increases linearly, which re-ignites the aforementioned issue. Our ap-proach contributes to reducing the optimization dimension-ality by grouping similar task vectors together, thereby vir-tually decreasing the number of merging models. Specifi-cally, our method can reduce the number of merging coeffi-cients by r/M .The overall preprocessing procedure is outlined in Al-gorithm 1 in the supplementary material. Note that this is entirely conducted on the high-power server-side systems, so there is no need for concerns regarding the high compu-tational costs of SVD, and it can be reduced by employing randomized SVD [23]. 
+
+4.2. Device-side Test-time Adaptation 
+
+Even when training a subset of the model weights, BP re-quires significant memory to store activations of the inter-mediate layers and the whole computational graph, making it difficult to perform on resource-limited devices. On the other hand, the direct application of ZO-SGD causes poor convergence under high-dimensional optimization prob-lems. Nevertheless, our method successfully reduces the di-mensional size by introducing model merging and the pre-processing in Sec. 4.1, taking full advantage of ZO-SGD. The concrete procedure of our device-side test-time adapta-tion is as follows. 
+
+(i) Inference with Model Merging. Given reduced merg-ing coefficients {w(n) 
+
+> r
+
+}Nn=1 and reduced task matrices 
+
+{V (n) 
+
+> r
+
+}Nn=1 , we calculate the merged model weights as 
+
+θ(n) 
+
+> lMerge
+
+= θ(n) 
+
+> l0
+
++ w(n) 
+
+> r
+
+V (n) 
+
+> r
+
+. (12) 
+
+(ii) Zeroth-order Merging Coefficient Optimization. We first calculate the loss difference between the positively and negatively perturbed merging coefficients. When we ob-tain perturbations z(n) ∼ N (0 , I r(n) ), we add and subtract them from the merging coefficients w(n) 
+
+> r
+
+and get perturbed model weights θ(n) 
+
+> l+
+
+and θ(n) 
+
+> l−
+
+based on Eq. (12), respec-tively. Then, we calculate the loss difference as 
+
+S = clamp [−cclamp ,c clamp ]
+
+ L (θf0 , θl+ , B) − L (θf0 , θl− , B)2δ
+
+
+
+,
+
+(13) where we apply the clamp function to the original differ-ence in order to reduce the impact of overly large loss dif-ferences. Finally, we calculate a pseudo-gradient and utilize it to update the merging coefficients, as 
+
+w(n) 
+
+> r
+
+← w(n) 
+
+> r
+
+− ηS z(n). (14) 
+
+(iii) Random Seed Trick for Memory Usage Suppres-sion. We reduce the memory usage of the merge coefficient optimization process by using the random seed trick [43]. Specifically, instead of storing the random perturbations 
+
+{z(n)}Nn=1 , we sample a random seed s for each iteration and resample the random perturbations. This trick makes the memory cost required for the optimization process al-most equivalent to the normal inference process, which makes our method suitable for TTA on resource-limited de-vices. The detailed procedure is described in Algorithm 2 in the supplementary material. 
+
+## 5. Experiments 
+
+We experimentally validated our method on common cor-ruption benchmarks and style transfer benchmarks and con-ducted comprehensive analyses of our method. 
+
+5.1. Setups 
+
+Datasets. We utilized three datasets for common corruption benchmarks: CIFAR10-C, CIFAR100-C, and ImageNet-C [25]. They were generated by applying corruptions to the original CIFAR-10, CIFAR-100 [38], and ImageNet-1k [11] datasets, respectively. Specifically, 15 types of cor-ruption categorized into four groups (noise, blur, weather, and digital) were applied to the validation split of each orig-inal dataset. In the TTA evaluation, a model pre-trained on the original training split is updated and tested on the cor-rupted validation data. We conducted a benchmark evaluation on style-transferred images to assess performance under other types of domain shifts. The style-transferred images were generated following Stylized-ImageNet [18]. Specifi-cally, the ImageNet validation data was transformed by a style-transferring method [27] according to various style-providing images. For our experiments, we prepared a total of 50 different style-transferred datasets. To evaluate the performance across a varying number of domains, we set up five experimental conditions with 10, 20, 30, 40, and 50 domains, conducting evaluations for each. 
+
+Comparison Methods. We compared our method with the following three existing methods that do not use BP: 1) BN stats [47], which reduces the domain shifts by us-ing the mean and variance of the testing mini-batch for the batch-normalization procedure, instead of relying on the stored statistics (i.e., running mean and running variance), 2) T3A [31], which performs inference based on class pro-totypes in the feature space and updates these prototypes according to the test data on-the-fly, 3) CoLA [7], which is the fairest competitor to ours, as it also builds a target model from multiple models. CoLA combines the models based on the similarities of the image feature statistics. 
+
+Evaluation Protocol. We first prepared the sharing model weights using existing TTA methods. Specifically, for each domain shift, we performed one epoch of adaptation using 6Table 1. Experimental results on CIFAR10-C and CIFAR100-C. The evaluation results are presented in terms of error rate [%]. The best are highlighted in bold .
+
+CIFAR10-C Noise Blur Weather Digital Avg. Method Gaus. Shot Impu. Defo. Glas. Moti. Zoom Snow Fros. Fog Brig. Cont. Elas. Pixe. Jpeg No Adapt 72.3 65.7 72.9 46.9 54.3 34.8 42.0 25.1 41.3 26.0 9.3 46.7 26.6 58.5 30.3 43.5 BN stats 28.3 26.0 36.2 12.6 34.9 13.9 12.0 17.5 17.6 14.9 8.2 13.0 23.5 19.5 27.2 20.3 T3A 61.7 56.5 67.4 41.0 47.5 31.7 36.2 24.2 37.1 24.2 9.4 42.4 25.3 49.0 29.5 38.9 CoLA (DeYO) 25.3 22.9 33.2 11.8 32.4 13.0 11.5 15.9 15.6 13.7 7.8 11.1 21.8 17.4 24.4 18.5 
+
+Ours (DeYO) 24.8 22.2 32.8 11.8 32.0 13.0 11.5 15.6 15.3 13.7 7.8 10.9 21.7 17.1 23.9 18.3 CoLA (ROID) 22.9 20.5 29.8 11.1 29.4 12.3 10.5 14.9 14.8 13.2 7.6 11.3 19.8 15.4 21.7 17.0 
+
+Ours (ROID) 20.7 18.7 27.4 11.2 27.9 12.7 10.6 14.8 14.6 12.8 7.9 11.3 19.3 14.4 19.7 16.3 
+
+CIFAR100-C Noise Blur Weather Digital Avg. Method Gaus. Shot Impu. Defo. Glas. Moti. Zoom Snow Fros. Fog Brig. Cont. Elas. Pixe. Jpeg No Adapt 73.0 68.0 39.4 29.4 54.1 30.8 28.8 39.5 45.8 50.3 29.5 55.1 37.2 74.7 41.2 46.4 BN stats 42.3 40.8 43.3 27.8 42.0 29.8 27.9 35.1 35.0 41.7 26.3 30.3 35.6 33.4 41.3 35.5 T3A 72.1 66.8 39.3 29.1 50.7 30.8 28.2 39.8 45.0 49.2 29.6 51.5 36.3 70.7 41.2 45.3 CoLA (DeYO) 35.4 33.8 37.5 24.7 35.6 26.5 24.3 30.6 29.7 35.3 23.8 26.7 31.0 28.0 36.8 30.7 
+
+Ours (DeYO) 35.4 33.9 37.2 25.0 35.6 26.9 24.9 31.2 30.3 35.1 24.2 27.2 31.2 28.1 37.1 30.9 CoLA (ROID) 37.1 35.4 38.4 25.0 37.1 27.1 24.9 31.1 30.8 37.3 24.0 27.5 31.8 29.0 37.5 31.6 
+
+Ours (ROID) 35.2 34.1 35.7 24.6 35.7 26.5 24.6 30.6 30.1 35.3 23.7 27.1 31.1 27.4 35.7 30.5 
+
+Table 2. Experimental results on ImageNet-C. The evaluation results are presented in terms of error rate [%]. The best are highlighted in bold .
+
+ImageNet-C (ResNet-50) Noise Blur Weather Digital Avg. Method Gaus. Shot Impu. Defo. Glas. Moti. Zoom Snow Fros. Fog Brig. Cont. Elas. Pixe. Jpeg No Adapt 97.8 97.1 98.2 81.7 89.8 85.2 78.0 83.5 77.1 75.9 41.3 94.6 82.5 79.3 68.6 82.0 BN stats 85.0 84.2 85.0 85.2 84.4 73.2 61.2 65.9 68.1 51.9 34.8 83.1 55.9 51.3 59.9 68.6 T3A 98.4 98.0 98.9 83.7 91.7 87.4 80.4 86.0 79.6 79.4 41.9 95.7 86.0 82.4 71.9 84.1 CoLA (DeYO) 74.3 73.5 73.6 76.8 74.8 65.5 56.0 60.5 62.4 49.3 35.6 72.3 49.9 46.0 53.0 61.6 
+
+Ours (DeYO) 72.4 71.3 71.9 76.6 74.0 66.1 56.6 61.0 62.5 50.7 37.2 72.1 49.9 46.3 52.6 61.4 CoLA (ROID) 74.8 74.5 74.1 77.0 76.0 65.0 55.2 59.3 61.8 47.4 34.2 72.3 50.2 44.9 52.1 61.3 
+
+Ours (ROID) 70.4 69.7 69.8 74.4 72.8 63.5 54.9 58.9 61.1 47.5 35.8 69.2 49.0 44.2 50.2 59.4 
+
+ImageNet-C (ViT B/16) Noise Blur Weather Digital Avg. Method Gaus. Shot Impu. Defo. Glas. Moti. Zoom Snow Fros. Fog Brig. Cont. Elas. Pixe. Jpeg No Adapt 65.8 67.3 65.3 68.8 74.4 64.3 66.6 56.8 45.2 48.6 29.2 81.8 57.1 60.8 50.2 60.2 BN stats 65.8 67.3 65.3 68.8 74.4 64.3 66.6 56.8 45.2 48.6 29.2 81.8 57.1 60.8 50.2 60.2 T3A 65.8 67.4 65.3 68.8 74.2 64.4 66.3 56.7 45.4 48.6 29.2 89.5 56.9 60.8 50.1 60.6 CoLA (DeYO) 62.1 62.8 61.5 64.7 69.9 60.2 62.6 54.6 45.6 45.2 28.0 73.5 54.8 56.0 47.0 56.6 
+
+Ours (DeYO) 60.3 61.5 60.3 64.2 68.3 58.6 61.2 54.4 47.1 46.1 27.9 75.4 53.8 53.3 45.4 55.9 CoLA (ROID) 63.6 64.8 62.2 64.6 70.7 61.4 64.6 55.3 44.8 50.7 27.9 78.4 54.2 56.2 47.1 57.8 
+
+Ours (ROID) 62.0 61.3 60.6 59.5 61.8 55.0 62.2 54.4 46.6 44.8 28.5 74.2 50.5 51.5 42.2 54.3 
+
+a TTA method, and the resulting model weights were uti-lized as the source of model merging. In this work, we used two TTA methods to obtain these source model weights: DeYO [40] and ROID [44]. In the evaluation, we measured the classification error rate on each domain shift and assessed the overall perfor-mance by the average error rate of all shifts. Note that we excluded the model that was adapted to the target do-main from the merging model pool. For example, when evaluating performance on the “Gaussian noise” data in the common corruption benchmark, we built the merged model from the other 14 models, each adapted to a different cor-ruption. We use WideResNet-28 [71] for CIFAR10-C, ResNeXt-29 [65] for CIFAR100-C, ResNet-50 [24] for ImageNet-C, and ViT-B/16 [13] for ImageNet-C and Stylized-ImageNet, 7Table 3. Experimental results on Style Transferred bench-marks. The evaluation results are presented in terms of error [%]. The best are highlighted in bold .                         
+
+> Number of Domains Method 10 20 30 40 50 No Adapt 81.1 78.8 80.0 80.4 80.2 T3A 81.0 78.7 79.8 80.3 80.0 CoLA 77.0 73.1 75.0 75.5 75.2
+> Ours 71.8 66.4 67.9 69.4 69.2
+
+Table 4. Ablation Study. We evaluate the effectiveness of each component using ImageNet-C and ViT-B/16.                  
+
+> Preprocessing Method NWS RR ARS Error Rate [%] No Adapt 60.2 Model Merging 55.4
+> ✓55.1
+> ✓54.8 Model Merging ✓✓54.4 + ZO-SGD ✓✓54.7
+> ✓✓✓54.3
+
+following [44]. The other implementation details, including the hyperparameter settings, are described in Sec. B in the supplementary material. 
+
+5.2. Results 
+
+We evaluated the performance of our method by taking the average score of three different runs for all benchmarks. 
+
+Common Corruption Benchmarks (Tab. 1 and Tab. 2). 
+
+The superiority of our method was consistently confirmed across all three datasets. Comparing the methods with and without model merging, we found that the former achieved higher accuracy with large margins. These results sup-port our central hypothesis that model merging is an ef-fective technique for TTA. Comparing our method with CoLA, ours outperformed in most cases. This indicates that it is more effective to optimize the merging coefficient in the training loss-based approach than the non-optimization-based methods, demonstrating the validity of introducing ZOO to TTA. Finally, we investigated the effect of the dif-ference in the TTA methods used for preparing the shar-ing models (DeYO and ROID). As our algorithm design is agnostic to such selection, the experimental results showed that those differences did not hinder the effectiveness of our method. 
+
+Style-Transferred Benchmarks (Tab. 3). Similar to the results on the common corruption benchmark, our method demonstrated its superiority. The performance trend was also consistent with the common corruption benchmark result: specifically, methods utilizing the multiple model weights outperformed those without them. We confirmed that the number of domains used for evaluation did not af-fect the performance of our method. 10 3
+
+> 10 4
+> Number of Dimensions
+> 0.0
+> 1.0
+> 2.0
+> 3.0
+> 4.0
+> 5.0
+> Accuracy Gain with ZO-SGD
+> Full Params
+> Model Merge (MM)
+> MM+RR
+> MM+RR+ARS
+
+Figure 3. Dimension Reduction Analysis. We examined how much our proposed techniques can reduce dimensionality and the resulting performance gain with ZO-SGD. 0
+
+> 2
+> 4
+> 6
+> 8
+> 10
+> Memory Usage [GB]  No Adapt.
+> CoLA
+> Ours
+> ROID
+> DeYO
+
+Figure 4. Memory Usage Analysis. We compared the memory usage of CDC-TTA methods (CoLA and Ours), and the conven-tional BP-based methods (ROID and DeYO). 
+
+Discussion. Compared to CoLA, our method incurs higher computational costs. Specifically, while CoLA requires a single forward pass, our approach necessitates two addi-tional forward passes (or more, depending on the loss de-sign) for the update process, resulting in the higher com-putational overhead. Although this represents a limitation of our method, it does not constitute a critical drawback. Once the adaptation to the target domain has sufficiently progressed, we can recover inference speed by halting the further update process (until another drastic domain shift occurs). While how to implement this may be an important consideration in practical deployments, the optimal solution varies widely depending on application-specific demands. We view this primarily as an engineering challenge rather than the core research problem of this study, i.e, address-ing the device resource constraint for optimization process-ing; therefore, we reserve its detailed investigation for fu-ture work. 
+
+5.3. Analysis 
+
+Ablation Study. Our method consists of three components: model merging, ZO-SGD, and pre-processing of the model weights. We conducted an ablation study to verify the ef-fectiveness of each component. We also examined the ef-fectiveness of each sub-component utilized in our prepro-cessing of the model weights (NWS, RR, ARS). The results using the ImageNet-C dataset and ViT-B/16 are shown in Tab. 4. We found that model merging significantly improves the performance compared to No Adapt, demonstrating its usefulness. We succeeded in further improving the recogni-tion performance by introducing ZO-SGD-based TTA. Re-8Table 5. Analysis of Application to Quantized Model. The results are presented in error rate [%]. The best are highlighted in bold .                                                       
+
+> Noise Blur Weather Digital Avg. Method Gaus. Shot Impu.Defo. Glas. Moti.ZoomSnow Fros. Fog Brig. Cont. Elas. Pixe. Jpeg No Adapt 70.6 70.5 69.2 65.9 70.7 64.5 69.1 62.7 49.4 57.4 30.2 88.3 61.8 60.7 48.8 62.7 CoLA 69.3 68.6 67.6 63.1 62.9 59.3 66.6 61.3 51.7 50.2 31.2 81.0 58.5 56.7 45.3 59.6
+> Ours 68.5 67.1 66.3 62.6 62.8 57.4 65.9 60.0 51.2 49.8 31.3 82.1 56.0 55.4 45.3 58.8
+
+garding the effectiveness of each sub-component in our pre-processing, all of them succeeded in showing their effec-tiveness. The result that NWS improved the performance aligns with findings from previous research on model merg-ing [10, 66]. Among the sub-components, RR was found to contribute the most to performance. Although the impact of ARS on performance was smaller compared to the other two, it was confirmed to be consistently effective. 
+
+Dimension Reduction Analysis. Our method incorporates a model merging strategy and model weights preprocess-ing to overcome the difficulties in high-dimensional opti-mization of ZOO. We examined whether these factors are effective in reducing the optimization dimensionality and enhancing ZOO. We used the CIFAR100-C dataset for this analysis. The results are shown in Fig. 3. First, model merg-ing succeeded in a dramatic reduction of the dimensionality, which significantly reduces the high-dimensionalility diffi-culty of ZOO. RR also contributed to reducing the dimen-sionality down to the rank out of the number of the merging models. Finally, ARS allowed us to reduce the dimensional-ity even further. We also examined how much these dimen-sionality reduction techniques enhanced the effectiveness of ZOO and found that while a naive application of ZOO yielded negligible performance improvements, we achieved larger improvements as the dimensionality was reduced by the proposed techniques. 
+
+Memory Usage Analysis. We examined whether our method can actually reduce the memory usage compared to the conventional BP-based TTA methods (ROID and DeYO). To ensure fairness, the batch size was kept the same for all methods. The results are shown in Fig. 4. ROID and DeYO required many times more memory usage than the normal inference. In contrast, CoLA and ours, which do not depend on BP, were executable with only a fraction of ad-ditional memory usage. These results demonstrate that our method is memory-efficient and more suitable for resource-limited devices than the conventional BP-based TTA meth-ods. 
+
+Applicability to Quantized Models. On resource-limited devices, model quantization techniques are often used to re-duce the computational requirements. Since it is difficult to build the computational graph on the quantized models and calculate loss gradients, BP-based TTA methods are not ap-plicable. In contrast, our proposed method does not depend on BP, making it effective for such models. Here, we exper-imentally verify the effectiveness of our proposed method on these quantized models using a dynamic-quantized ViT-B/16 and ImageNet-C dataset. As shown in Tab. 5, we con-firmed in practice that our method is effective even for quan-tized models, and compared our method with a stronger baseline, CoLA, our method achieved superior performance improvements. 
+
+## 6. Conclusion 
+
+In this paper, we proposed a novel test-time adaptation (TTA) method for resource-limited devices based on the cross-device collaborative TTA (CDC-TTA) framework. We associated zeroth-order optimization and model merg-ing with the CDC-TTA framework and efficiently addressed two issues: avoiding the resource-intensive BP process by introducing the forward-only zeroth-order optimization (ZOO) and mitigating the high-dimensional difficulty in ZOO by reducing the number of optimization parameters based on the model merging of the models from multiple other devices. In addition, we proposed a unique prepro-cessing technique to further enhance the synergic combina-tion of ZOO and model merging for TTA. We empirically demonstrated the superiority of our methods on predic-tion accuracy over the existing CDC-TTA method on com-mon corruption benchmarks and style-transferred bench-marks, and confirmed the validity of our method for quan-tized models where gradient computation is unavailable. We hope our work will foster the research of TTA toward resource-limited scenarios. 
+
+Limitations. One limitation of the proposed method is that its accuracy does not yet reach the level of BP-based methods. We assume that it is attributed to two main fac-tors. First, the precision of gradient calculation is lower compared to BP. Second, because we restrict the number of parameters to overcome the high dimensionality diffi-culty of ZOO, the degrees of freedom for adaptation are inherently limited. A promising strategy to overcome the dilemma between memory capacity and predictive accuracy is a hybrid approach that partially incorporates BP. Our fu-ture research direction involves exploring methods to dy-namically balance BP-updated components with those up-dated by our proposed method, tailored to the specific mem-ory constraints of the device. 
+
+## References 
+
+> [1] Jameel Abdul Samadh, Mohammad Hanan Gani, Noor Hus-sein, Muhammad Uzair Khattak, Muhammad Muzammal
+
+9Naseer, Fahad Shahbaz Khan, and Salman H Khan. Align your prompts: Test-time prompting with distribution align-ment for zero-shot generalization. NeurIPS , 36:80396– 80413, 2023. [2] Ali Akbari and Roozbeh Jafari. Transferring activity recog-nition models for new wearable sensors with deep generative domain adaptation. In IPSN , pages 85–96, 2019. [3] Moslem Azamfar, Xiang Li, and Jay Lee. Deep learning-based domain adaptation method for fault diagnosis in semi-conductor manufacturing. IEEE TSM , 33(3):445–453, 2020. [4] Jimmy Lei Ba, Jamie Ryan Kiros, and Geoffrey E Hin-ton. Layer normalization. arXiv preprint arXiv:1607.06450 ,2016. [5] Philipp Benz, Chaoning Zhang, Adil Karjauv, and In So Kweon. Revisiting batch normalization for improving cor-ruption robustness. In WACV , pages 494–503, 2021. [6] Mohammad Reza Bonyadi and Zbigniew Michalewicz. Par-ticle swarm optimization for single objective continuous space problems: a review. Evolutionary computation , 25(1): 1–54, 2017. [7] Guohao Chen, Shuaicheng Niu, Deyu Chen, Shuhai Zhang, Changsheng Li, Yuanqing Li, and Mingkui Tan. Cross-device collaborative test-time adaptation. NeurIPS , 37: 122917–122951, 2024. [8] Qiyuan Dai and Sibei Yang. Free on the fly: Enhancing flexi-bility in test-time adaptation with online em. In CVPR , pages 9538–9548, 2025. [9] Hamidreza Dastmalchi, Aijun An, et al. Etta: Efficient test-time adaptation for vision-language models through dynamic embedding updates. In BMVC , 2025. [10] MohammadReza Davari and Eugene Belilovsky. Model breadcrumbs: Scaling multi-task model merging with sparse masks. In ECCV , pages 270–287, 2024. [11] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. Imagenet: A large-scale hierarchical image database. In CVPR , pages 248–255, 2009. [12] Mario D¨ obler, Robert A Marsden, and Bin Yang. Robust mean teacher for continual and gradual test-time adaptation. In CVPR , pages 7704–7714, 2023. [13] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai, Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Syl-vain Gelly, et al. An image is worth 16x16 words: Trans-formers for image recognition at scale. In ICLR , 2021. [14] Chun-Mei Feng, Kai Yu, Yong Liu, Salman Khan, and Wangmeng Zuo. Diverse data augmentation with diffusions for effective test-time prompt tuning. In CVPR , pages 2704– 2714, 2023. [15] Jin Gao, Jialing Zhang, Xihui Liu, Trevor Darrell, Evan Shel-hamer, and Dequan Wang. Back to the source: Diffusion-driven adaptation to test-time corruption. In CVPR , pages 11786–11796, 2023. [16] Zhengqing Gao, Xu-Yao Zhang, and Cheng-Lin Liu. Unified entropy optimization for open-set test-time adaptation. In 
+
+CVPR , pages 23975–23984, 2024. [17] Roman Garnett. Bayesian Optimization . Cambridge Univer-sity Press, 2023. [18] Robert Geirhos, Patricia Rubisch, Claudio Michaelis, Matthias Bethge, Felix A Wichmann, and Wieland Brendel. Imagenet-trained cnns are biased towards texture; increasing shape bias improves accuracy and robustness. In ICLR , 2018. [19] Saeed Ghadimi and Guanghui Lan. Stochastic first-and zeroth-order methods for nonconvex stochastic program-ming. SIAM journal on optimization , 23(4):2341–2368, 2013. [20] Taesik Gong, Jongheon Jeong, Taewon Kim, Yewon Kim, Jinwoo Shin, and Sung-Ju Lee. Note: Robust continual test-time adaptation against temporal correlation. NeurIPS , 35: 27253–27266, 2022. [21] Taesik Gong, Yewon Kim, Taeckyung Lee, Sorn Chottana-nurak, and Sung-Ju Lee. Sotta: Robust test-time adaptation on noisy data streams. NeurIPS , 36:14070–14093, 2023. [22] Jiayi Guo, Junhao Zhao, Chaoqun Du, Yulin Wang, Chun-jiang Ge, Zanlin Ni, Shiji Song, Humphrey Shi, and Gao Huang. Everything to the synthetic: Diffusion-driven test-time adaptation via synthetic-domain alignment. In CVPR ,pages 30503–30513, 2025. [23] Nathan Halko, Per-Gunnar Martinsson, and Joel A Tropp. Finding structure with randomness: Probabilistic algorithms for constructing approximate matrix decompositions. SIAM review , 53(2):217–288, 2011. [24] Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun. Deep residual learning for image recognition. In CVPR ,pages 770–778, 2016. [25] Dan Hendrycks and Thomas Dietterich. Benchmarking neu-ral network robustness to common corruptions and perturba-tions. In ICLR , 2019. [26] Robert Hooke and Terry A Jeeves. “direct search”solution of numerical and statistical problems. Journal of the ACM (JACM) , 8(2):212–229, 1961. [27] Xun Huang and Serge Belongie. Arbitrary style transfer in real-time with adaptive instance normalization. In CVPR ,pages 1501–1510, 2017. [28] Gabriel Ilharco, Marco Tulio Ribeiro, Mitchell Wortsman, Ludwig Schmidt, Hannaneh Hajishirzi, and Ali Farhadi. Editing models with task arithmetic. In ICLR , 2023. [29] Raza Imam, Hanan Gani, Muhammad Huzaifa, and Karthik Nandakumar. Test-time low rank adaptation via confi-dence maximization for zero-shot generalization of vision-language models. In WACV , pages 5449–5459, 2025. [30] Sergey Ioffe and Christian Szegedy. Batch normalization: Accelerating deep network training by reducing internal co-variate shift. In ICML , pages 448–456, 2015. [31] Yusuke Iwasawa and Yutaka Matsuo. Test-time classifier ad-justment module for model-agnostic domain generalization. 
+
+NeurIPS , 34:2427–2440, 2021. [32] P Izmailov, AG Wilson, D Podoprikhin, D Vetrov, and T Garipov. Averaging weights leads to wider optima and better generalization. In UAI , pages 876–885, 2018. [33] Minguk Jang, Sae-Young Chung, and Hye Won Chung. Test-time adaptation via self-training with nearest neighbor infor-mation. In ICLR , 2023. [34] Menglin Jia, Luming Tang, Bor-Chun Chen, Claire Cardie, Serge Belongie, Bharath Hariharan, and Ser-Nam Lim. Vi-sual prompt tuning. In ECCV , pages 709–727, 2022. 
+
+10 [35] Xisen Jin, Xiang Ren, Daniel Preotiuc-Pietro, and Pengxiang Cheng. Dataless knowledge fusion by merging weights of language models. In ICLR , 2023. [36] Juwon Kang, Nayeong Kim, Jungseul Ok, and Suha Kwak. Membn: Robust test-time adaptation via batch norm with statistics memory. In ECCV , pages 467–483, 2024. [37] Adilbek Karmanov, Dayan Guan, Shijian Lu, Abdulmotaleb El Saddik, and Eric Xing. Efficient test-time adaptation of vision-language models. In CVPR , pages 14162–14171, 2024. [38] Alex Krizhevsky, Geoffrey Hinton, et al. Learning multiple layers of features from tiny images. 2009. [39] Jeffrey Larson, Matt Menickelly, and Stefan M. Wild. Derivative-free optimization methods. Acta Numerica , 28: 287–404, 2019. [40] Jonghyun Lee, Dahuin Jung, Saehyung Lee, Junsung Park, Juhyeon Shin, Uiwon Hwang, and Sungroh Yoon. Entropy is not enough for test-time adaptation: From the perspective of disentangled factors. In ICLR , 2024. [41] Jian Liang, Ran He, and Tieniu Tan. A comprehensive survey on test-time adaptation under distribution shifts. IJCV , 133 (1):31–64, 2025. [42] Xiaosong Ma, Jie Zhang, Song Guo, and Wenchao Xu. Swapprompt: Test-time prompt adaptation for vision-language models. NeurIPS , 36:65252–65264, 2023. [43] Sadhika Malladi, Tianyu Gao, Eshaan Nichani, Alex Damian, Jason D Lee, Danqi Chen, and Sanjeev Arora. Fine-tuning language models with just forward passes. NeurIPS ,36:53038–53075, 2023. [44] Robert A Marsden, Mario D¨ obler, and Bin Yang. Univer-sal test-time adaptation through weight ensembling, diversity weighting, and prior correction. In WACV , pages 2555–2565, 2024. [45] Michael S Matena and Colin A Raffel. Merging models with fisher-weighted averaging. NeurIPS , 35:17703–17716, 2022. [46] M Jehanzeb Mirza, Jakub Micorek, Horst Possegger, and Horst Bischof. The norm must go on: Dynamic unsuper-vised domain adaptation by normalization. In CVPR , pages 14765–14775, 2022. [47] Zachary Nado, Shreyas Padhy, D Sculley, Alexander D’Amour, Balaji Lakshminarayanan, and Jasper Snoek. Evaluating prediction-time batch normalization for robust-ness under covariate shift. In ICML Workshops , 2020. [48] John A Nelder and Roger Mead. A simplex method for function minimization. The computer journal , 7(4):308–313, 1965. [49] Shuaicheng Niu, Jiaxiang Wu, Yifan Zhang, Yaofo Chen, Shijian Zheng, Peilin Zhao, and Mingkui Tan. Efficient test-time model adaptation without forgetting. In ICML , pages 16888–16905, 2022. [50] Shuaicheng Niu, Jiaxiang Wu, Yifan Zhang, Zhiquan Wen, Yaofo Chen, Peilin Zhao, and Mingkui Tan. Towards stable test-time adaptation in dynamic wild world. In ICLR , 2023. [51] Shuaicheng Niu, Chunyan Miao, Guohao Chen, Pengcheng Wu, and Peilin Zhao. Test-time model adaptation with only forward passes. In ICML , pages 38298–38315, 2024. [52] S´ ebastien Pi´ erard, Anthony Cioppa, Ana¨ ıs Halin, Renaud Vandeghen, Maxime Zanella, Benoˆ ıt Macq, Sa¨ ıd Mahmoudi, and Marc Van Droogenbroeck. Mixture domain adaptation to improve semantic segmentation in real-world surveillance. In WACV , pages 22–31, 2023. [53] Kate Saenko, Brian Kulis, Mario Fritz, and Trevor Darrell. Adapting visual category models to new domains. In ECCV ,pages 213–226, 2010. [54] Manli Shu, Weili Nie, De-An Huang, Zhiding Yu, Tom Goldstein, Anima Anandkumar, and Chaowei Xiao. Test-time prompt tuning for zero-shot generalization in vision-language models. NeurIPS , 35:14274–14289, 2022. [55] Adam Slowik and Halina Kwasnicka. Evolutionary al-gorithms and their applications to engineering problems. 
+
+Neural Computing and Applications , 32(16):12363–12379, 2020. [56] Junha Song, Jungsoo Lee, In So Kweon, and Sungha Choi. Ecotta: Memory-efficient continual test-time adaptation via self-distilled regularization. In CVPR , pages 11920–11929, 2023. [57] James C Spall. Multivariate stochastic approximation using a simultaneous perturbation gradient approximation. IEEE transactions on automatic control , 37(3):332–341, 2002. [58] George Stoica, Pratik Ramesh, Boglarka Ecsedi, Leshem Choshen, and Judy Hoffman. Model merging with svd to tie the knots. In ICLR , 2025. [59] Elaine Sui, Xiaohan Wang, and Serena Yeung-Levy. Just shift it: Test-time prototype shifting for zero-shot generaliza-tion with vision-language models. In WACV , pages 825–835, 2025. [60] Dequan Wang, Evan Shelhamer, Shaoteng Liu, Bruno Ol-shausen, and Trevor Darrell. Tent: Fully test-time adaptation by entropy minimization. In ICLR , 2021. [61] Qin Wang, Olga Fink, Luc Van Gool, and Dengxin Dai. Con-tinual test-time domain adaptation. In CVPR , pages 7201– 7211, 2022. [62] Xingyu Wang and Tao Wang. Fozo: Forward-only zeroth-order prompt optimization for test-time adaptation. In CVPR ,2026. [63] Xin Wang, Kai Chen, Jiaming Zhang, Jingjing Chen, and Xingjun Ma. Tapt: Test-time adversarial prompt tuning for robust inference in vision-language models. In CVPR , pages 19910–19920, 2025. [64] Zehao Xiao, Shilin Yan, Jack Hong, Jiayin Cai, Xiaolong Jiang, Yao Hu, Jiayi Shen, Cheems Wang, and Cees GM Snoek. Dynaprompt: Dynamic test-time prompt tuning. In 
+
+ICLR , 2025. [65] Saining Xie, Ross Girshick, Piotr Doll´ ar, Zhuowen Tu, and Kaiming He. Aggregated residual transformations for deep neural networks. In CVPR , pages 1492–1500, 2017. [66] Prateek Yadav, Derek Tam, Leshem Choshen, Colin A Raf-fel, and Mohit Bansal. Ties-merging: Resolving interference when merging models. NeurIPS , 36:7093–7115, 2023. [67] Enneng Yang, Zhenyi Wang, Li Shen, Shiwei Liu, Guibing Guo, Xingwei Wang, and Dacheng Tao. Adamerging: Adap-tive model merging for multi-task learning. In ICLR , 2024. 
+
+11 [68] Hee Suk Yoon, Eunseop Yoon, Joshua Tian Jin Tee, Mark A Hasegawa-Johnson, Yingzhen Li, and Chang D Yoo. C-tpt: Calibrated test-time prompt tuning for vision-language mod-els via text feature dispersion. In ICLR , 2024. [69] Le Yu, Bowen Yu, Haiyang Yu, Fei Huang, and Yongbin Li. Language models are super mario: Absorbing abilities from homologous models as a free lunch. In ICML , 2024. [70] Longhui Yuan, Binhui Xie, and Shuang Li. Robust test-time adaptation in dynamic scenarios. In CVPR , pages 15922– 15932, 2023. [71] Sergey Zagoruyko and Nikos Komodakis. Wide residual net-works. In BMVC , 2016. [72] Maxime Zanella and Ismail Ben Ayed. On the test-time zero-shot generalization of vision-language models: Do we really need prompt learning? In CVPR , pages 23783–23793, 2024. [73] Yifan Zhang, Xue Wang, Kexin Jin, Kun Yuan, Zhang Zhang, Liang Wang, Rong Jin, and Tieniu Tan. Adanpc: Exploring non-parametric classifier for test-time adaptation. In ICML , pages 41647–41676, 2023. [74] Bowen Zhao, Chen Chen, and Shu-Tao Xia. Delta: Degradation-free fully test-time adaptation. In ICLR , 2023. [75] Kaiyang Zhou, Ziwei Liu, Yu Qiao, Tao Xiang, and Chen Change Loy. Domain generalization: A survey. IEEE TPAMI , 45(4):4396–4415, 2022. 
+
+12 Table 6. Merge Model Training Setting.                                                                          
+
+> ROID Optimizer Settings WideResNet-20 Nesterov SGD η= 1e −3,μ= 0 .9,λ= 0 .0,bs = 200
+> ResNeXt-29 Adam η= 1e −3,β= 0 .9,λ= 0 .0,bs = 200
+> ResNet-50 Nesterov SGD η= 5e −4,μ= 0 .9,λ= 0 .0,bs = 64
+> ViT-B/16 Nesterov SGD η= 1e −3,μ= 0 .9,λ= 0 .0,bs = 64
+> DeYO Optimizer Settings WideResNet-20 Adam η= 1e −3,β= 0 .9,λ= 0 .0,bs = 200
+> ResNeXt-29 Adam η= 1e −3,β= 0 .9,λ= 0 .0,bs = 200
+> ResNet-50 Nesterov SGD η= 2 .5e −4,μ= 0 .9,λ= 0 .0,bs = 64
+> ViT-B/16 Nesterov SGD η= 2 .5e −4,μ= 0 .9,λ= 0 .0,bs = 64
+
+## A. Algorithm Procedures 
+
+Our method is separated into 1) server-side preprocessing and 2) device-side test-time adaptation. As described in Sec. 4, these two procedures are executable independently. In this section, we provide the details of these procedures. We first use the model weights {θ(n) 
+
+> m
+
+}M,N m=0 ,n =1 , the initial merging coefficients {w(n)}Nn=1 in Algorithm 1, and ob-tain the reduced merging coefficients {w(n) 
+
+> r
+
+}Nn=1 and the reduced task matrices {V (n) 
+
+> r
+
+}Nn=1 . The outputs of Algo-rithm 1 are then utilized in Algorithm 2 and the merging coefficients {w(n) 
+
+> r
+
+}Nn=1 are updated. As we can see, the procedures performed on the server side and device side are completely independent, and therefore, resource-intensive computations like singular value decomposition are fully handled by the computationally powerful server-side pro-cessing, causing no adverse effects whatsoever on the de-vice side. We describe the details of the random seed trick. Typ-ically, in ZO-SGD, we need to prepare perturbation vec-tors of the same size as the parameters. Then, we perform inferences on positively and negatively perturbed models and estimate pseudo-gradients from those calculated losses. However, this procedure requires storing the perturbations, which necessitates memory usage equivalent to the model size and can potentially cause resource constraint problems. The “random seed trick” proposed by Hoge et al. [43] sets the same random seed before generating the perturbations instead of storing the perturbations. Specifically, as de-scribed in lines 1, 8, and 16 of Algorithm 2, we fix the ran-dom seed (e.g., torch.random.seed(s) ) before sam-pling the perturbations. Then, the perturbations sampled in lines 3, 10, and 18 are ensured to be identical to each other. In this process, we only need to store the seed value 
+
+s, thereby avoiding the memory usage problem associated with storing the perturbation. 
+
+Algorithm 1 Preprocessing for merge coefficients 
+
+Input: Model weights {θ(n) 
+
+> m
+
+}M,N m=0 ,n =1 , initial coefficients 
+
+{w(n)}Nn=1 , parameters k, ϵ, rmax .
+
+Output: Merging coefficients {w(n) 
+
+> r
+
+}Nn=1 , refined task ma-trices {V (n) 
+
+> r
+
+}Nn=1 . 
+
+> 1:
+
+for n = 1 · · · N do  
+
+> 2:
+
+for m = 1 · · · M do  
+
+> 3:
+
+τ (n) 
+
+> m
+
+← θ(n) 
+
+> lm
+
+− θ(n) 
+
+> l0
+> 4:
+
+ˆτ nm ← top k(τ nm) ▷ Remove insignificant values.  
+
+> 5:
+
+end for  
+
+> 6:
+
+Concatenate {τ nm}Mm=1 to get ˆT n. 
+
+> 7:
+
+Get the rank size r by Eq. (11).  
+
+> 8:
+
+Apply SVD to ˆT (n) and get U (n) 
+
+> r
+
+, Σ(n) 
+
+> r
+
+, and V (n) 
+
+> r
+
+. 
+
+> 9:
+
+w(n) 
+
+> r
+
+← w(n)U (n) 
+
+> r
+
+Σ(n) 
+
+> r
+> 10:
+
+end for Algorithm 2 ZO-SGD for merge coefficients. 
+
+Input: Merge coefficients {w(n) 
+
+> r
+
+}Nn=1 , task matrices 
+
+{V (n) 
+
+> r
+
+}Nn=1 , frozen base model weights θf0 , learnable base model weights θl0 , random seed s, algorithm pa-rameters d, η.
+
+Output: Updated merging coefficients {w(n) 
+
+> r
+
+}Nn=1 . 
+
+> 1:
+
+Set random seed to s. 
+
+> 2:
+
+for n = 1 · · · N do  
+
+> 3:
+
+Sample perturbation z(n) ∼ N (0 , I r(n) ). 
+
+> 4:
+
+w(n) 
+
+> r
+
+← w(n) 
+
+> r
+
++ δz(n) 
+
+> 5:
+
+θ(n) 
+
+> l+
+
+← θ(n) 
+
+> l0
+
++ w(n) 
+
+> r
+
+V (n) 
+
+> r
+> 6:
+
+end for  
+
+> 7:
+
+L+ ← L (θf0 , θl+ , B) 
+
+> 8:
+
+Set random seed to s. 
+
+> 9:
+
+for n = 1 · · · N do  
+
+> 10:
+
+Sample perturbation z(n) ∼ N (0 , I r(n) ). 
+
+> 11:
+
+w(n) 
+
+> r
+
+← w(n) 
+
+> r
+
+− 2δz(n) 
+
+> 12:
+
+θ(n) 
+
+> l−
+
+← θ(n) 
+
+> l0
+
++ w(n) 
+
+> r
+
+V (n) 
+
+> r
+> 13:
+
+end for  
+
+> 14:
+
+L− ← L (θf0 , θl− , B) 
+
+> 15:
+
+∆ ← (L+ − L −)/2δ 
+
+> 16:
+
+Set random seed to s. 
+
+> 17:
+
+for n = 1 · · · N do  
+
+> 18:
+
+Sample perturbation z(n) ∼ N (0 , I r(n) ). 
+
+> 19:
+
+w(n) 
+
+> r
+
+← w(n) 
+
+> r
+
++ δz(n) − η∆z(n) 
+
+> 20:
+
+θ(n) 
+
+> l
+
+← θ(n) 
+
+> l0
+
++ w(n) 
+
+> r
+
+V (n) 
+
+> r
+> 21:
+
+end for 
+
+## B. Implementation Details 
+
+In this work, we selected the affine parameters of the nor-malization layers (e.g., batch normalization layer normal-ization) as the trainable parameters θl, while the other 13 Table 7. Hyperparameter Settings. We set the learning rate η,the perturbation size δ, the filtering threshold k, the clamp size 
+
+cclamp , the maximum size of the matrix rank rmax , the matrix re-covery error parameter ϵ, and the batch-size bs for each network architecture. We also set the size of initial merging coefficients 
+
+cinit for each benchmark setting.                                                        
+
+> ηδcclamp krmax ϵbs
+> WideResNet-20 5e −31.0 5.0 40% 51e −2200
+> ResNeXt-29 5e −30.25 5.0 40% 51e −3200
+> ResNet-50 5e −30.25 5.0 40% 51e −264
+> ViT-B/16 2.5e −3 1e −45.0 40% 51e −464
+> ViT-B/16 (Quantized) 2.5e −3 1e −15.0 40% 51e −464
+> Common Corruption Style Transferred Benchmarks Benchmarks #Domains 10 20 30 40 50
+> cinit 0.10 0.35 0.15 0.10 0.10 0.05 20 40 60 80
+> Filtering Rate [%]
+> 54.0
+> 54.2
+> 54.4
+> 54.6
+> 54.8
+> 55.0
+> Error Rate [%]
+
+(a) 3 5 7 10 12 14  
+
+> Max Rank
+> 54.0
+> 54.2
+> 54.4
+> 54.6
+> 54.8
+> 55.0
+> Error Rate [%]
+
+(b) 10 6 10 5    
+
+> 10 410 3
+> Threshold
+> 54.0
+> 54.2
+> 54.4
+> 54.6
+> 54.8
+> 55.0
+> Error Rate [%]
+
+(c) 
+
+Figure 5. Sensitivity to hyperparameters. We analyzed (a) filter-ing ratio k, (b) max rank value rmax , and (c) matrix recovery error threshold ϵ.
+
+model weights were treated as fixed parameters θf . When training the merge source models, θl were optimized us-ing existing TTA algorithms, DeYO [40] and ROID [44]. The hyperparameters utilized in these trainings were set as Tab. 6. Note that the other hyperparameters were set to the default values of their respective algorithms. In the device-side test time adaptation, we configured the initial merging coefficients to be uniform across all models. That is, we set the initial coefficients as w(n) = cinit × 1,where 1 denotes an all-ones vector. Since the value of cinit 
+
+needed to be adjusted according to the number of models to be merged (= #Domains), we configured them for each benchmark. The other algorithm hyperparameters were configured for each network architecture. These hyperpa-rameter settings are summarized in Tab. 7. We excluded the merging coefficients of the last block of WideResNet-20, ResNeXt-29, and ResNet-50, and those of the last three blocks of ViT-B/16, from the optimization target. We uti-lize the same loss function L as used in the merge source models. 
+
+Analysis. We analyzed the setting of the three key hyperpa-rameters introduced in our method. The results are shown in Fig. 5. In Fig. 5a, we can see that setting the filtering rate k to excessive or insufficient values results in degraded results, but as long as the value is set within a reasonably appropriate range, the performance difference within that range is not so significant. In Fig. 5b, the setting of maxi-mum rank rmax to 5 is optimal, and under the other settings, the performance was degraded to some extent. We consider this is because a rank setting that is too small deteriorates the precision of the low-rank approximation, while a larger rank adversely affects the convergence of ZOO. In Fig. 5c, the small matrix recovery error ϵ resulted in a slight increase in the error rate, but increasing ϵ caused relatively large per-formance drops. Setting ϵ to larger values leads to a reduc-tion in the rank size, which results in the same configuration as setting a small rmax .14
