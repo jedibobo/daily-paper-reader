@@ -1,0 +1,37 @@
+# 日报 · 2026-07-13
+
+- 生成时间：2026-07-13 21:14:19 UTC
+- 当次推荐总数：19
+- 精读区：8
+- 速读区：11
+
+## 今日简报（AI）
+今日精选19篇前沿论文，深度聚焦视觉语言模型的高效架构与大模型绿色发展。
+重点推荐MOSAIC自适应层间组合技术及大模型绿色开发综述，揭示了从硬件协同到算法优化的全栈节能路径。
+建议关注FP4全栈量化与KV缓存压缩技术，这是提升端侧推理性能的关键突破口。
+
+## 精读区
+1. [MOSAIC: Adaptive Inter-layer Composition for Efficient Heterogeneous Vision-Language Models](/202607/13/2607.09029v1-mosaic-adaptive-inter-layer-composition-for-efficient-heterogeneous-vision-language-models) （10.0/10）
+2. [A Survey on the Green Development of Large Models: From Resource-Efficient Architectures to Hardware-Software Co-Design](/202607/13/2607.09084v1-a-survey-on-the-green-development-of-large-models-from-resource-efficient-architectures-to-hardware-software-co-design) （10.0/10）
+3. [Lyapunov-Guided Training for Hardware-Safe Neural Networks Under Fixed-Point Arithmetic](/202607/13/2607.04531v1-lyapunov-guided-training-for-hardware-safe-neural-networks-under-fixed-point-arithmetic) （9.0/10）
+4. [MobileWan: Closing the Quality Gap for Mobile Video Diffusion](/202607/13/2607.06173v1-mobilewan-closing-the-quality-gap-for-mobile-video-diffusion) （9.0/10）
+5. [A Quantized Native Runtime for On-Device Semantic Audio Generation](/202607/13/2607.08526v1-a-quantized-native-runtime-for-on-device-semantic-audio-generation) （9.0/10）
+6. [StreamDQ: Near-Memory Weight DeQuantization in Custom HBM for Scalable AI Inference Acceleration](/202607/13/2607.08993v1-streamdq-near-memory-weight-dequantization-in-custom-hbm-for-scalable-ai-inference-acceleration) （9.0/10）
+7. [Commissioning and Low Latency Operation of the Graph Neural Network Electromagnetic Calorimeter Trigger at the Belle II Experiment](/202607/13/2607.09347v1-commissioning-and-low-latency-operation-of-the-graph-neural-network-electromagnetic-calorimeter-trigger-at-the-belle-ii-experiment) （9.0/10）
+8. [STEEL: Sparsity-Aware Fused Attention for Energy-Efficient Long-Sequence Inference on AMD's XDNA NPU](/202607/13/2607.09385v1-steel-sparsity-aware-fused-attention-for-energy-efficient-long-sequence-inference-on-amds-xdna-npu) （9.0/10）
+
+## 速读区
+1. [Quantize the Target, Quantize the Drafter: Efficient Inference with Qwen3.5-4B](/202607/13/2607.04244v1-quantize-the-target-quantize-the-drafter-efficient-inference-with-qwen35-4b) （8.0/10）
+2. [Full-Stack FP4: Stable LLM Pretraining with Quantized Projections, Optimizers, and Attention](/202607/13/2607.04422v1-full-stack-fp4-stable-llm-pretraining-with-quantized-projections-optimizers-and-attention) （8.0/10）
+3. [KVpop -- Key-Value Cache Compression with Predictive Online Pruning](/202607/13/2607.05061v2-kvpop----key-value-cache-compression-with-predictive-online-pruning) （8.0/10）
+4. [FAST: A Holistic Framework for Optimizing Memory-I/O, Computation, and Sampling in Temporal GNN Training](/202607/13/2607.05095v1-fast-a-holistic-framework-for-optimizing-memory-io-computation-and-sampling-in-temporal-gnn-training) （8.0/10）
+5. [Correct but Slow: An Empirical Study of the GPU Kernel Evaluation Gap in Modern Domain-Specific Languages](/202607/13/2607.04454v2-correct-but-slow-an-empirical-study-of-the-gpu-kernel-evaluation-gap-in-modern-domain-specific-languages) （7.0/10）
+6. [Lights, Camera, Carbon: Architectural Scaling Laws for Video Generation Energy Consumption](/202607/13/2607.04553v1-lights-camera-carbon-architectural-scaling-laws-for-video-generation-energy-consumption) （7.0/10）
+7. [Beyond the Need for Speed: Energy-Aware Code Generation via Simulation-Guided Reinforcement Learning](/202607/13/2607.04577v1-beyond-the-need-for-speed-energy-aware-code-generation-via-simulation-guided-reinforcement-learning) （7.0/10）
+8. [HunyuanOCR-1.5: Making Lightweight OCR VLMs Faster and Better](/202607/13/2607.04884v1-hunyuanocr-15-making-lightweight-ocr-vlms-faster-and-better) （7.0/10）
+9. [SOGRAND decoding of LDPC codes](/202607/13/2607.04045v1-sogrand-decoding-of-ldpc-codes) （6.0/10）
+10. [FRFDet: Efficient UAV Small Object Detection with Symmetric Sampling and Scalable Fusion](/202607/13/2607.04125v1-frfdet-efficient-uav-small-object-detection-with-symmetric-sampling-and-scalable-fusion) （6.0/10）
+11. [Toward the Right Analytical Model and System Software for Autonomous Driving Systems: Open Problems and Research Directions](/202607/13/2607.04129v1-toward-the-right-analytical-model-and-system-software-for-autonomous-driving-systems-open-problems-and-research-directions) （6.0/10）
+
+---
+使用键盘方向键可在日报/论文之间快速切换。

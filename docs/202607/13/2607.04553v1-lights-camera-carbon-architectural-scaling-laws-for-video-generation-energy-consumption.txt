@@ -1,0 +1,391 @@
+Title: Lights, Camera, Carbon: Architectural Scaling Laws for Video Generation Energy Consumption
+
+URL Source: https://arxiv.org/pdf/2607.04553v1
+
+Published Time: Tue, 07 Jul 2026 02:37:46 GMT
+
+Number of Pages: 17
+
+Markdown Content:
+# Lights, Camera, Carbon: Architectural Scaling Laws for Video Generation Energy Consumption 
+
+Nidhal Jegham 
+
+University of Rhode Island, Sustainable AI Group Rhode Island, United States 
+
+nidhal@sustainableaigroup.com 
+
+Boris Gamazaychikov 
+
+Sustainable AI Group Paris, France 
+
+Sasha Luccioni 
+
+Sustainable AI Group Montreal, Canada 
+
+Figure 1: Measured open-model energy consumption versus estimated proprietary-model energy consumption for an 8-second 720p generation. 
+
+## Abstract 
+
+We present a bidirectional framework for estimating the energy consumption of text-to-video (T2V) and text-to-video-audio (T2VA) models from architectural first principles and observable generation parameters such as resolution and duration, requiring no access to weights, model size, or implementation details. Forward , it predicts energy from generation parameters and architectural principles; backward ,it recovers architectural scaling behavior from observed inference times, with accuracy serving as a criterion for architectural validity. Building on the estab-lished compute-bound nature of video diffusion models, we demonstrate that each model’s energy profile obeys theoretically derived scaling laws, decomposing into quadratic and linear terms whose coefficients directly reflect the underlying archi-tectural complexity. Validated across six open-source models spanning 8.3B–27B parameters and three GPU configurations, this decomposition achieves below 3% MAPE across all architectures. This approach offers a standardized, empirically and theoretically grounded framework for sustainability benchmarking across T2V models and architectures. 
+
+> Preprint.
+> arXiv:2607.04553v1 [cs.MM] 5 Jul 2026
+
+## 1 Introduction 
+
+Recent years have seen a rise in the widescale deployment of machine learning (ML) systems in a variety of user-facing applications and tasks, generating responses to user queries in modalities ranging from text [ 1 ] to audio [ 2] and images [ 3 ]. However, the rapidly growing environmental impacts associated with this growth are an increasingly important topic to examine and factor into the development and deployment of ML systems [ 4 ]. As such, the sustainability and, more specifically, the energy demands of different ML systems have become a nascent but rapidly developing field of study. Starting with the seminal work of Strubell et al in 2019 [ 5], the subsequent years of scholarship have shed more light on different ML tasks, the relative contribution of the different stages of the ML life cycle, as well as the factors that influence them, mainly focusing on text-based models [ 6 , 7, 8, 9, 10 , 11 ]. Most recently, the topic has been broadened to also include other modalities such as image generation and speech-to-text [12, 13]. Given that text-to-video (T2V) generation is a relatively novel ML task, its energy consumption has yet to be analyzed in depth in an empirical way. The few existing studies that examine this modality have focused on specific models [ 14 ] or a few open model families [ 15 ] – these studies have found that video generation is not simply a scaled-up version of image generation, mainly because it requires iterative denoising across both spatial and temporal dimensions, which generate hundreds of frames per output (as opposed to a single image, in the case of image generation). The most complete study to date, by Delavande et al. [ 15 ], found that AI video generation operates in a compute-bound regime , with its energy requirements and latency scaling near-quadratically as the resolution and length of output videos increases. Comparing video generation with other modalities, they found that generating a single short video can consume approximately 90 W h of energy, making it 30 times more costly than image generation and over 2,000 times more costly than text generation. In the current study, we go beyond previous analyses to theoretically derive and empirically validate the scaling laws governing energy consumption of video generation models from architectural first principles across a broader set of architectures, hardware configurations, and experimental conditions. Building on the established compute-bound nature of video diffusion models, we develop a bidirectional framework that predicts energy from observable generation parameters – such as resolution, video duration, and batch size – and recovers architectural scaling behavior from inference times, requiring no access to weights, model size, or implementation details. We additionally characterize the role of architectural decisions over parameter count and model size, the scaling laws of audio generation overhead, and the energy implications of multi-GPU inference. As a case study demonstrating the framework’s broader applicability, we apply it to estimate energy consumption for eight proprietary T2V systems for which direct measurement is infeasible. In order to present these findings, we first start with background information regarding video generation (Sec. 2), then present both the theoretical foundations and empirical methodology of our scientific approach (Sec. 3). We then present the results of different factors that we tested in our experiments and their influence on GPU energy consumption in Sec. 4. Finally, we discuss the significance of our findings and propose future work in Sec 5. 
+
+## 2 Background 
+
+Video generation diffusion models are characterized by three main computational components: a Variational Autoencoder (VAE) encoder, a denoising network, and a VAE decoder. The encoder maps the input into a compressed latent space; the denoising network iteratively refines the latent representation over a specified number of steps; and the decoder maps the latent back to pixel space. 
+
+Notations Let W and H denote the width and height of the generation video in pixels and F the number of frames defined as F = L × F P S + 1 , where L is the duration of the video in seconds and FPS refers to Frames Per Second. B denotes batch size (or how many videos are being generated at the same time), Ltext denotes the input prompt length in tokens, and S denotes the number of denoising steps during the denoising stage. We define the spatiotemporal volume, or the total number of pixels in the video as T = (H×W ×F )1000 (presented over 1000 for numerical stability). 22.1 Architectural Decomposition 
+
+The denoising network constitutes the dominant computational cost of the T2V pipeline. At each of the S steps, it processes a compressed latent tensor derived from T pixels through a sequence of operations repeated across transformer blocks. Self-attention, in which every token attends to every other token across space and time, scales as O(T 2). Cross-attention, where each spatio-temporal token attends to text tokens to condition the generation on the input prompt, scales as O(T · Ltext )
+
+with Ltext being the input length in tokens . The feed-forward network (FFN), which applies linear projections and non-linear activations independently to each token, also scales as O(T ). 1
+
+Additionally, models that support native audio generation either concatenate audio and video tokens into a joint sequence of size T + Taudio , processed through shared self-attention and scaling as 
+
+O(( T + Taudio )2), or maintain separate streams that interact via cross-attention between modalities, scaling as O(T · Taudio ), in addition to cross-attention with the input prompt. Finally, the VAE decoder reconstructs the full-resolution video from the final latent, mapping it back to pixel space. Both encoder and decoder rely primarily on 3D causal convolutions, which scale as O(T ), where each frame can only attend to previous frames, ensuring temporal order. 2
+
+2.2 Compute-bound Nature of Diffusion Models 
+
+A key property of GPU workloads is that they can be either compute-bound , memory-bound , both, or neither in poorly optimized kernels. In memory-bound workloads, power draw fluctuates with memory access patterns, decoupling inference time from computational complexity. In compute-bound workloads, arithmetic units are saturated, driving power to near the hardware’s theoretical maximum – referred to as Thermal Design Power (TDP) – and maintaining it approximately constant throughout inference, such that Energy (E) = P ×t where P ≈ 80 −100% of the TDP. Unlike LLMs, which are memory-bound due to the sequential nature of autoregressive decoding [ 17 ], diffusion models have previously been shown to be predominantly compute-bound, as the denoising network processes the full latent tensor in parallel at each step [ 15 ]. However, the VAE decoding phase in video generation can also be memory-bound [ 18 ] due to the large intermediate feature maps produced when decoding high-resolution, long-duration latent tensors. However, denoising is still the primary driver of energy consumption; thus, video generation is predominantly compute-bound [15]. 
+
+## 3 Scientific Approach 
+
+The objective of our study is to examine and formalize the energy consumption scaling laws for AI video generation across different models and configurations. By deriving scaling laws from architectural first principles, we develop a framework that operates bidirectionally: forward , deriving energy consumption from architectural first principles and observable generation parameters; and 
+
+backward , recovering architectural scaling behavior from observed inference time. This correct recovery is only possible when the assumed scaling law reflects the true architectural complexity, making fit quality itself a validation of the architectural assumptions. As such, Section 3.1 derives the general energy formula from architectural complexity analysis, establishing the functional form and physical interpretation of each term. Consequently, Section 3.2 describes the measurement setup, experimental design, and fitting procedure used to identify model-specific coefficients and validate the framework across open models. Crucially, this backward capability also enables energy estimation for black-box, proprietary video generation models employed by the majority of users. 
+
+3.1 Theoretical Foundation 
+
+Section 2 established that diffusion models are predominantly compute-bound, with arithmetic units saturated throughout inference. Two consequences follow. First, power draw remains approximately at TDP, independent of parameter count or model size. Second, under fixed hardware, inference time is proportional to the number of floating-point operations performed, which is itself a deterministic function of generation parameters such as resolution, frame count, and number of denoising steps.              
+
+> 1Some architectures implement full spatio-temporal self-attention, while others decouple it into spatial self-attention, scaling as O(F·(HW )2), and temporal self-attention, scaling as O(HW ·F2), to reduce the O(T2)cost.
+> 2Attention can additionally be employed during the decoding phase for video consistency, scaling as O(T2), as in the case of the VAE decoder of HunyuanVideo [16]
+
+3Together, these imply that energy consumption is a deterministic function of the same parameters (up to the constant p), and that any predictor of generation time is equivalently a predictor of energy. 3 We accordingly decompose total energy per generation as E = Edenoise + EVAE .At each of the S denoising steps, the network processes T tokens through self-attention scaling as O(T 2), cross-attention to text conditioning scaling as O(T · Ltext ), and the FFN scaling as 
+
+O(T ). Since input prompts are typically padded to maximum length [ 16 , 19 ], Ltext is a constant and therefore absorbed by the FFN term. For models with joint audio generation, three additional terms arise: audio self-attention scaling as O(F 2), audio-visual cross-attention scaling as O(T · F ), and audio FFN scaling as O(F ) with the text input cross-attention absorbed by the FFN. Since videos in a batch are generated independently without attending to one another, denoising steps are sequential and independent, and the total denoising energy scales linearly with both B and S, giving: 
+
+Edenoise = S · B ·
+
+
+
+Nv · T 2
+
+| {z }
+
+> video self-attn
+
++ Mv · T
+
+| {z } 
+
+> video FFN
+
++ Na · F 2
+
+| {z }
+
+> audio self-attn
+
++ Ma · F
+
+| {z }
+
+> audio FFN
+
++ Cav · T · F
+
+| {z }
+
+> audio-video cross-attn
+
+
+
++ G · B| {z } 
+
+> overhead
+
+where Nv captures the quadratic video self-attention cost, Mv the linear FFN cost over video tokens and text cross-attention, Na the quadratic audio self-attention cost, Ma the linear FFN cost over audio tokens and text cross-attention, Cav the audio-video cross-attention cost, and G a fixed overhead. The VAE relies on causal convolutions, where each output depends only on current and previous frames, scaling as O(T ). It can employ attention mechanisms that scale as O(T 2) for temporal consistency, as discussed previously. As with the denoising phase, batch independence yields linear scaling with B, giving: EVAE = B ·
+
+
+
+N · T 2
+
+| {z } 
+
+> self-attn
+
++ M · T| {z } 
+
+> convolutions
+
++ G|{z} 
+
+> overhead
+
+
+
+where N captures the attention cost, M the 3D convolution networks cost, and G the fixed overhead. In order to empirically validate these theoretical derivations, we measure the energy consumption of multiple models on different generation parameters and fit these scaling laws’ terms to the energy consumption profile of these models. 
+
+3.2 Experimental Methodology 
+
+In order to measure energy consumption during the process of video generation, we run a series of experimentswhile using the pyNVML package to gather real-time energy measurements 4. To ensure consistent testing, we used a fixed list of prompts from ArtificialAnalysis across all models [ 20 ] – the full prompt list can be found in Appendix C. During each video generation, we log the power draw, GPU utilization, and memory utilization every 100 milliseconds. We conduct the experiments on 3 different GPU configurations in order to test the impact of hardware choice on energy consumption: a DGX H200 equipped with 8 Nvidia H200 SXM GPUs, denoted as 8H2 in Table 1; a single H200 SXM (H2); and a single B200 (B2). During experimentation, we separate generation phases such as denoising and VAE decoding to ensure phase-level analysis, and temporal tiling was enabled for HunyuanVideo, HunyuanVideo 1.5, and LTX-2, where VAE decoding exceeded GPU memory capacity at the tested resolutions. Each generation is preceded by two warm up runs to stabilize operating conditions, with a 5-second idle period between runs to dissipate residual thermal load. Rather than exhaustively testing every combination across all models, we designed the experiments to target specific terms in the derived formulas (e.g., varying number of frames while holding other parameters constant) described in Section 3.1. While all models are tested across varying frame counts and denoising steps as the primary isolation dimensions, resolution is varied for HunyuanVideo and LTX-2 Pro to study the robustness of the scaling laws across different spatial configurations. 
+
+Batch size is varied for HunyuanVideo to study its linearity; GPU type and count are varied for HunyuanVideo 1.5, Wan 2.1, Wan 2.2, and LTX-2 to characterize hardware scaling. Finally, LTX-2 is tested with and without audio by decoupling the audio module to isolate its energy cost. The full list and characteristics of the models that were tested are presented in Table 1.   
+
+> 3The VAE decoding phase may be memory-bound, introducing a lower average power draw Pvthat partially contaminates the first observation. However, the denoising phase dominates total generation time and energy [ 15 ], so these deviations are second-order effects and energy consumption remains a predominantly deterministic function of generation parameters.
+> 4We only account for GPU energy consumption in our experiments, since this accounts for the majority of the energy footprint in predominantly compute-bound processes.
+
+4Model Size Modalities Count GPU types FPS 
+
+HunyuanVideo [21] 13B T2V 67 8H2 24 HunyuanVideo-1.5 [22] 8.3B T2V 15 B2, H2, 8H2 24 LTX-2 [23] 19B T2VA T2V 80 B2, H2 24 Wan 2.2 [24] 27B T2V 23 B2, H2, 8H2 16 Wan 2.1 [25] 14B T2V 18 B2, H2, 8H2 16 Table 1: List of models tested Energy consumption across our tested configurations spans nearly three orders of magnitude, from 2.95 W h for a 3-second LTX-2-T2V generation at 1024p on B2 to 3,364.6 W h for a 23-second Wan 2.2 generation at 720p with 50 steps on 8H2. LTX-2 is the most energy-efficient model tested;Wan variants were the least. At a fixed workload of a 5-second output with 40 steps, per-generation cost varies by an order of magnitude across models. LTX-2-T2V at 1024p consumes 9.1 W h on B2,while at 720p HunyuanVideo-1.5 consumes 57.5 W h and Wan 2.1/2.2 consume 113.9/114.8 W h –equivalent to running a 1,200W air fryer for 27 secs, 2.9 mins, and 5.7 mins [26]. The per-generation footprint is striking even relative to text generation: an 8-second 720p Wan 2.2 generation at 40 steps on H2 (390 W h ) consumes 1,625 × more energy than a Google Gemini text prompt (0.24 W h ) [ 27 ], and an 8-second HunyuanVideo-1.5 generation on 8H2 (478.5 W h ) nearly 1,990 × more. Scaling to 100 million such generations (a number reached by Google in 2025 [ 28 ]) corresponds to 39 GW h for Wan 2.2 and 47.9 GW h for HunyuanVideo-1.5 – the annual electricity consumption of 3,645 and 4,477 average US households [ 29 ]. Our experiments required 17 GPU hours of total inference, requiring 61.9 kW h while emitting approximately 1.83 kgCO 2e [30 ]), equivalent to the use of a microwave for 51 hours [ 26 ] in terms of energy consumption or the carbon emissions of a 7.25 km drive in a gasoline car [31]. 
+
+## 4 Results 
+
+Having derived the functional form of the energy scaling laws from architectural first principles, our experimental methodology serves to systematically validate and extend this theoretical approach across a comprehensive set of experiments, presented in Table 1. Our results analysis pursues two goals: validating the compute-bound nature of video diffusion models across diverse architectures and generation pipelines – spanning different model sizes, batch sizes, and GPU configurations – and confirming that the scaling laws derived from the architectural principles in Section 3.1 hold empirically. We also disentangle the quadratic and linear decomposition of the models tested, demonstrating the bidirectionality of the framework: forward , by showing that architecture-derived scaling laws predict energy consumption for open models (in Sec. 4.2); and backward , by showing that this accuracy is only achieved when the scaling law correctly reflects the underlying architecture (in Sec. 4.3). Finally, by leveraging the derived properties of video generation models from our analysis, we estimate the energy consumption of proprietary models like Sora and Veo (in Sec. 4.4). Our experimental design is therefore directly motivated by the formula structure; each configuration (resolution, frame count, batch size, denoising steps) is leveraged specifically to isolate and identify individual terms in the formula, rather than to exhaustively benchmark model performance. 
+
+4.1 The Compute-Bound Nature of Diffusion Models 
+
+Our experiments confirm the compute-bound nature of video generation models: all tested models (Table 1), ranging from 8.3 to 27B parameters, sustain near-TDP power draw across the full generation pipeline, with total average power reaching 80.9–98.7% of TDP depending on model and hardware. LTX-2 variants warrant separate treatment. They follow a two-stage pipeline: a primary denoising stage at half the target resolution, followed by three denoising steps at full resolution, which reduces token count and improves efficiency at the cost of temporal consistency and fine detail relative to models that denoise at full resolution. However, because the second denoising stage is fused with VAE decoding, the two cannot be separated for phase-level analysis. The overall pipeline nonetheless reaches 80.9–81.1% ± 9–12% of TDP on B2 and 86.2–92.1% ± 2–3% on H2, with a lower percentage for reduced resolutions and frame counts. 5Breaking down energy use by phase, we find the denoising stage is particularly compute-bound: non-LTX models sustained 98.8–98.9% of TDP on B2 GPUs, 98.5–98.6% on H2 GPUs, and 97.8–98.1% on the 8H2 station. In fact, significant deviations from TDP were confined to the VAE decoding for models where temporal tiling was enabled due to memory constraints (e.g., HunyuanVideo, HunyuanVideo-1.5, LTX-2), dropping VAE-phase power to as low as 71.6% of TDP for HunyuanVideo with low resolution and reduced FPS and 83.5–89.5% for HunyuanVideo-1.5, depending on hardware type. However, for Wan 2.1 and Wan 2.2, where tiling was not required due to architectural efficiencies, VAE decoding reaches 90.4–96.1% of TDP and contributes only 0.83–3.43% of total generation energy, rendering its overall contribution to energy usage negligible. For HunyuanVideo, the VAE fraction was more pronounced, ranging from 4.2–25.8% of total energy, with the upper end occurring at low frame counts and resolutions (480 H, 640 W , 30 S, 121 F ) where the VAE cost is least amortized by denoising. Overall, the denoising phase dominates total time and energy across all models, and the total average power draw per model still runs near or at TDP. 
+
+Property 1. Video generation is a predominantly compute-bound process, with models sustaining power draw near TDP regardless of model size or architecture. Consequently, energy consumption differences across models are driven predominantly by inference time, and consequently, the number of floating-point operations executed. Therefore, any predictor of inference time is equivalently a predictor of energy consumption.    
+
+> HunyuanVideo HunyuanVideo-1.5 Wan2.1 Wan2.2
+> 0
+> 500
+> 1,000
+> 1,500
+> 186
+> 213
+> 383
+> 383
+> 411
+> 479
+> 855
+> 856
+> 609
+> 706
+> 1,270
+> 1,275
+> Total energy consumption (Wh)  121 frames
+> 193 frames
+> 241 frames
+
+Figure 2: Total energy consumption per model and frame count. All measurements use 8H2 at 720 ×1280 resolution, 40 denoising steps, and batch size 1. Testing multiple models sharing the same architecture but differing in parameter count allowed us to isolate the effect of model size on energy consumption, which we show in Figure 2. It reveals three important findings: (1) HunyuanVideo-1.5 (8.3 B) consistently consumes more energy than HunyuanVideo (13B) despite having a fewer number of parameters, whereas (2) Wan 2.1 (14B) and Wan 2.2 (27B [14B active via MoE]) are nearly indistinguishable at all configurations. (3) Despite having a comparable active parameter count, Wan 2.1 consumes, on average, roughly twice the energy of HunyuanVideo, underscoring that architectural design choices, not parameter count, determine computational cost. 
+
+Property 2. Total or active parameter count is not a consistent predictor of energy consumption or generation time. Consequently, estimating the model size of closed models is neither necessary nor sufficient to estimate the energy consumption. Our analysis reveals that energy consumption per video remains nearly constant across all batch sizes (as seen in Appendix D), confirming that energy consumption scales linearly with batch size due to the predominantly compute-bound nature of diffusion models. For instance, generating a 720 H,1280 W , 30 S, and 121 F HunyuanVideo video consumes 146.1 W h at batch size 1, 141.3 W h at 6batch size 2, and 144.2 W h at batch size 4 with a maximum deviation of less than 3.3%, with minor variations attributable to temporal tiling effects. Total generation energy thus scales linearly with batch size for video generation models, unlike for text generation models. 
+
+Property 3. Total generation energy for T2V models scales linearly with batch size due to its compute-bound nature, with batching yielding no per-video efficiency gains. 
+
+4.2 Architectural Decomposition & Forward Validation 
+
+Based on the theoretical foundation and empirical observations above, we develop the formulas based on the architectural first principles of each model. Using these coefficients, we showcase the forward direction of our framework by fitting these formulas to the data, as well as validating the robustness of the framework on unseen configurations using cross-validation. 
+
+4.2.1 The Linear & Quadratic Decomposition of Diffusion Models 
+
+Factoring in the theoretical foundation and empirical observations above, we are able to fit the energy scaling formulas using non-negative least squares (NNLS) regression, giving: Edenoise =
+
+S · B · (N1 · T 2 + M · T ) + G · B for the denoising stage; for the VAE stage, denoising steps do not affect decoding, so EVAE = B · (M · T + G). However, since HunyuanVideo VAE employs a spatiotemporal mid-block attention mechanism (scales with O(T 2)) [ 16 ] with temporal tiling, the attention scaling turns to (W HC )2 · F/C ∝ W 2H2F – meaning that it is quadratic in spatial resolution but linear in frame count 5 – resulting in EVAE = B · (N · (W · H)2 · F + M · T + G).Since both stages share the same functional forms in T , and given the limited variation in S across experiments, we fit a single unified formula on total energy, merging VAE contributions into the denoising coefficients to avoid collinearity, giving: 
+
+E = N1 · T 2 · S · B
+
+| {z }
+
+> denoising self-attn
+
++ N2 · (W · H)2 · F · B
+
+| {z }
+
+> VAE mid-block attn
+
++ M · T · S · B| {z }
+
+> FFN + VAE Conv
+
++ G · B| {z } 
+
+> overhead
+
+(1) where N1 captures the denoising self-attention cost, N2 the VAE spatiotemporal mid-block attention cost relevant only to HunyuanVideo (zero for all other models), M both denoising FFN and VAE convolutions, and G the fixed per-video overhead.                                                                                                                                                       
+
+> 8H2
+> Model N1 SE N1 MSE M N2 SE N2 GSE G err % CV %
+> HunyuanVideo 2.40E-10 1.82E-12 8.5E-06 5.80E-07 3.20E-13 1.63E-14 0.22 1.62 1.709 1.803 HunyuanVideo-1.5 3.00E-10 1.10E-11 1.05E-05 3.20E-06 ––18.61 9.56 0.672 1.157 Wan2.1 5.25E-10 2.42E-12 2.52E-05 6.90E-07 ––9.52 2.01 0.093 0.132 Wan2.2 5.36E-10 1.01E-12 2.32E-05 4.01E-07 ––12.93 1.49 0.137 0.169
+> H2
+> HunyuanVideo-1.5 2.82E-10 3.99E-12 8.29E-06 6.91E-07 ––0.00 0.00 0.154 0.471 Wan2.1 5.42E-10 1.14E-12 1.64E-05 1.97E-07 ––2.29 0.30 0.021 0.085 Wan2.2 5.48E-10 4.93E-12 1.67E-05 8.54E-07 ––1.85 1.32 0.091 0.365 LTX-2-T2VA 4.56E-13 –7.79E-07 –1.83E-11 –1.00 –2.065 2.088 LTX-2-T2V 4.56E-13 8.57E-14 6.47E-07 5.17E-08 1.83E-11 2.31E-12 0.56 0.44 1.896 2.431
+> B2
+> HunyuanVideo-1.5 1.88E-10 2.87E-12 4.46E-06 4.97E-07 ––2.25 0.77 0.160 0.639 Wan2.1 3.31E-10 1.38E-12 1.31E-05 2.38E-07 ––0.94 0.37 0.039 0.156 Wan2.2 3.33E-10 2.33E-13 1.32E-05 4.03E-08 ––1.07 0.06 0.007 0.026 LTX-2-T2VA 2.29E-13 –6.11E-07 –1.35E-11 –1.01 –3.123 3.220 LTX-2-T2V 2.29E-13 6.26E-14 5.00E-07 3.77E-08 1.35E-11 1.68E-12 0.65 0.32 2.280 2.859
+
+Table 2: Estimated coefficients and accuracy across all measured models. err % refers to MAPE and CV % refers to cross-validation MAPE Since LTX-2 model variants follow a two-stage generation pipeline, the second-stage FFN term and VAE decoding share the same functional forms in T as the first stage, so they are absorbed into the fitted coefficients to avoid collinearity. The second-stage self-attention cost at full resolution is instead captured by a separate N2 · T 2 · B term, reflecting the quadratic attention cost of the 3 
+
+> 5
+
+C denotes the fixed temporal tile size. 
+
+70 1,000 2,000 3,000  
+
+> 0
+> 1,000
+> 2,000
+> 3,000
+> MAPE = 1.23% Max = 6.95%
+> Actual energy (Wh)
+> Predicted energy (Wh)
+
+8H2      
+
+> 0100 200 300 400
+> 0
+> 100
+> 200
+> 300
+> 400 MAPE = 1.52% Max = 5.27%
+> Actual energy (Wh)
+
+H2   
+
+> 0100 200
+> 0
+> 100
+> 200
+> MAPE = 2.13% Max = 5.94%
+> Actual energy (Wh)
+
+B2      
+
+> Perfect fit HunyuanVideo HunyuanVideo-1.5 LTX-2-T2VA LTX-2-T2V Wan2.1 Wan2.2
+
+Figure 3: Predicted versus actual energy consumption (Wh) across all measured configurations. The dashed diagonal indicates the perfect-fit line. Per-panel MAPE and maximum APE shown inset; per-panel sample sizes are n=99 , n=50 , and n=54 from left to right. full-resolution denoising steps independently of S. For LTX-2 models with no audio generation, we first fit the NS variant: 
+
+ENS = N1 · T 2 · S · B
+
+| {z }
+
+> 1st-stage self-attn
+
++ N2 · T 2 · B
+
+| {z }
+
+> 2nd-stage self-attn
+
++ M · T · S · B| {z }
+
+> FFN (1st & 2nd stage)+VAE Conv
+
++ G · B| {z } 
+
+> overhead
+
+(2) The key difference between LTX-2-T2V and LTX-2-T2VA lies in the model’s multimodal classifier-free guidance (CFG) formulation [ 19 ]. For video-only generation, CFG requires two forward passes per step – one conditioned on the text input and one on an empty or negative prompt – to compute the guidance direction. Joint audio-video generation introduces a third pass to independently modulate cross-modal influence (with and without audio), bringing the total to 3 passes per step. Differencing T2V and T2VA models’ measurements under identical configurations isolates this overhead as 
+
+∆M · T · S · B + ∆ G · B. The audio waveform itself takes under 0.1 seconds to generate for 10 seconds of audio on a single H200 [ 32 , 33 ] and is therefore not modeled; the overhead does not stem from the audio generation itself nor from the audio-video cross-attention term but entirely from the additional video transformer forward pass introduced by the multimodal CFG formulation. To account for this overhead in the full T2VA formula, we add ∆M to the M term and ∆G to the G
+
+term. 
+
+4.2.2 Forward Validation of the Scaling Laws 
+
+The fitted scaling laws achieve strong accuracy across all models and hardware configurations, as reported in Figure 3 and Table 2. On the full 8H2 station, Mean Average Percentage Error (MAPE) ranges from 0.093% (Wan 2.1) to 1.709% (HunyuanVideo), with maximum errors of 0.285% and 6.953%, respectively; the latter is driven by HunyuanVideo’s VAE tiling effects at high resolutions and batch sizes, which introduce some variability due to the memory-bound nature of the decoding phase. On single GPUs, Wan models achieve a near-perfect fit (0.021–0.091% MAPE on H2, 0.007-0.039% on B2), while LTX-2 variants reach 1.896–3.123% MAPE and up to 5.943% maximum due to the two-stage pipeline introducing additional variance across configurations. Additionally, the LTX-2 T2VA fitting accuracy showcases that the energy overhead of audio generation is driven mainly by the additional video transformer forward pass, not the audio terms themselves. Across all models and hardware configurations, the leave-one-out cross-validation MAPE remains within a small margin of the in-sample MAPE (e.g., 1.803% vs. 1.709% for HunyuanVideo, 0.132% vs. 0.093% for Wan2.1), confirming that the fitted scaling coefficients are stable and generalize reliably to unseen configurations, making this framework a robust basis to compare models. 8In terms of full node testing, although the 8H2 configuration generates videos at substantially shorter times (roughly 8× faster than H2), the compute-bound nature of the process means that doubling the number of GPUs roughly halves generation time while simultaneously doubling power draw, leaving total energy consumption similar or higher due to inter-GPU communication overhead. This overhead manifests directly in the fitted M coefficient, which is higher on the full station than on a single GPU (2.52 ×10 −5 vs. 1.64 ×10 −5 for Wan 2.1; 2.32 ×10 −5 vs. 1.67 ×10 −5 for Wan 2.2), consistent with the inter-GPU synchronization cost growing with the number of tokens processed. At 40 steps and 121 frames, this translates to 383 vs. 345 W h for Wan 2.1, 383 vs. 349 W h for Wan 2.2, and 215 vs. 177 W h for HunyuanVideo-1.5, revealing a consistent energy penalty for multi-GPU inference. 
+
+Property 4. The energy consumption profile of video diffusion models is fully characterized by the quadratic scaling of self-attention, the linear scaling of FFN, VAE convolutions, batch size, and denoising steps. This confirms that energy consumption and thus generation time are determined by architectural decisions and observable generation parameters alone. 
+
+Property 5. Multi-GPU inference is a latency optimization solution, not an energy one. Additionally, the energy overhead of joint audio-video generation is driven by the additional video forward pass required by the CFG, not the audio terms themselves. 
+
+4.3 Backward Validation via Architectural Ablation 
+
+The backward direction of the framework rests on a single principle: fit quality is diagnostic of architectural correctness. A scaling law derived from the wrong architectural assumptions will therefore fail to capture the computational structure of the forward pass, manifesting as degraded accuracy. We demonstrate this by ablating architectural terms for two models – HunyuanVideo on the full 8H2 station and LTX-2-T2V on a single H2 – and observing how fit quality responds. For HunyuanVideo, removing the VAE mid-block attention term ( N2) causes a moderate degradation from 1.709% to 3.768% mean MAPE (6.953% to 10.426% max), reflecting the secondary but real contribution of the spatiotemporal tiled attention in the decoding phase. Further removal of the FFN term ( M ) while keeping the VAE term absent causes a collapse to 12.50% mean and 81.32% max MAPE. The same pattern holds for LTX-2-T2V: removing the second-stage attention term (N2) degrades fit from 1.896% to 4.424% mean MAPE (5.267% to 14.987% max), and additionally, removing the primary FFN term collapses accuracy to 14.215% mean and 80.012% maximum MAPE. In both cases, this collapse indicates a systematic failure: the formula can no longer capture how energy scales, because an imperative term governing that scaling has been removed. 
+
+Property 6. A scaling law only achieves strong accuracy when it correctly reflects the true model architecture. This indicates that the fit quality is its validation criterion – i.e., the formula that best fits inference times is the one whose architectural assumptions are correct. 
+
+4.4 Case Study: Extending the Framework to Proprietary Models 
+
+While direct energy measurement is infeasible for proprietary T2V systems such as Sora [ 34 ] and Veo [ 35 ], the framework established above forms a complete chain that enables this estimation: since video diffusion models run near TDP making time and energy interchangeable (Property 1), energy is governed by architectural scaling behavior rather than parameter count (Property 2); API providers are assumed to operate at batch size 1 (Property 3), and energy is fully characterized by generation parameters (Property 4). In principle, Properties 1 and 3 alone already reduce closed-model energy estimation to E ≈ P · t simply multiplying observed latency by a near-TDP power value. However, we go further; by fitting the full scaling law formula to observed inference times, we aim to recover the architectural scaling behavior of each model, enabling energy prediction across arbitrary unseen configurations based on predictive accuracy reflecting architectural validity (Property 6). We pursue this as a case study to demonstrate the framework’s broader applicability, while flagging upfront that the resulting estimates carry additional uncertainty from assumed hardware deployment and power 9draw – neither of which can be directly verified for closed APIs. We evaluate 8 API-based T2V models, combining publicly available architectural information with generation-time measurements collected via the Fal.ai API [ 36 ]. Specific per-model formulas, hardware deployment assumptions, and the Monte Carlo procedure used to propagate uncertainty are detailed in Appendix E. Our estimations show that the energy cost of generating a single 8-second 720p video can span over an order of magnitude between models: Veo 3 consumes 19.8–43.4 W h (mean 30.8 W h ), Seedance-1 72.1–87.9 W h (mean 80.0 W h ), Gen-4.5 241.6–410.9 W h (mean 322.0 W h ), and Sora 2.0 Pro 315.1–534.4 W h (mean 418.5 W h ). Veo 3’s efficiency is consistent with its reported TPU v6e deployment (mean machine power 2.173 kW [ 37 ], well below DGX-class GPUs at 5.6–10 kW ), while Seedance’s lead among GPU-based models (2.5 × less than Gen 4.5) suggests architectural choices matter as much as hardware. Gen 4.5 is the most methodologically clean estimate: Runway explicitly separates queuing time from generation time in API responses, yielding a near-perfect time fit (MAPE <0.10%) that directly validates the backward estimation procedure on a single proprietary model where ground-truth-adjacent timing is available. Sora 2.0 Pro is the most energy-intensive model in our case study, requiring on average 1,313 Wh per 12-second 1080p video. This is consistent with the fact that OpenAI announced the discontinuation of Sora in March 2026 [ 38 ], and the energy profile estimated here offers a view on its costs: 4M users [ 39 ] generating two 720p 8-second videos per day over six months would require an estimated 453.8–769.5 GWh (mean 602.6 GWh) – equivalent to the consumption of 84k–142k US households [ 29 ]. Across the 8 commercial systems evaluated, this case study illustrates that the framework can be extended to API-only models when hardware and power-draw uncertainty can be estimated via Monte Carlo approaches. 
+
+## 5 Discussion and Limitations 
+
+This study presents a framework to empirically characterize the energy required by T2V models across a range of architectures, obtained via prompting and direct energy measurement and extended to proprietary systems via API-derived generation times. This contributes to a more rigorous empirical and architectural understanding of a modality whose footprint continues to grow. While video generation may represent a small fraction of overall AI usage today, adoption is accelerating – driven by integration into established platforms such as Meta [ 40 ] and OpenAI [ 41 ], as well as the emergence of platforms dedicated to AI-generated content like Pika [ 42 ]. Furthermore, AI is increasingly used in the advertising domain – as illustrated by the AI-generated Coca-Cola ad, whose final product reportedly entailed prompting and refining over 70,000 videos [43]. With that being said, we acknowledge that our study has two principal limitations. Firstly, the memory-bound nature of the decoding phase is not fully captured by our derived scaling laws, a direction that we are currently exploring for more robust estimations during the decoding phase. Secondly, due to high collinearity between terms, VAE and FFN cost cannot be entangled clearly, hindering phase-level coefficient interpretation; expanding the benchmark to a broader set of configurations by varying the generation parameters more independently would reduce collinearity among design matrix terms, yielding better-identified coefficients and tighter uncertainty bounds. Finally, future research is needed to map the factors that we have established to more types of models, modalities, and use cases (e.g., upscaling, object removal, image-to-video), as well as to further explore the various factors that influence proprietary models. We are actively pursuing these research directions and hope to publish further results and insights on the topic in the near future to build a ground basis for sustainability reporting in the AI community through empirically-grounded frameworks. 10 References 
+
+[1] OpenAI. GPT-4 technical report, 2024. [2] Jaehyeon Kim, Jungil Kong, and Juhee Son. Conditional variational autoencoder with adversar-ial learning for end-to-end text-to-speech. In International conference on machine learning ,pages 5530–5540. PMLR, 2021. [3] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 10684–10695, 2022. [4] Josh Cowls, Andreas Tsamados, Mariarosaria Taddeo, and Luciano Floridi. The ai gambit: leveraging artificial intelligence to combat climate change—opportunities, challenges, and recommendations. Ai & Society , 38(1):283–307, 2023. [5] Emma Strubell, Ananya Ganesh, and Andrew McCallum. Energy and policy considerations for deep learning in nlp. In Proceedings of the 57th annual meeting of the association for computational linguistics , pages 3645–3650, 2019. [6] Alexandra Sasha Luccioni, Sylvain Viguier, and Anne-Laure Ligozat. Estimating the carbon footprint of BLOOM, a 176b parameter language model. arXiv preprint arXiv:2211.02001 ,2022. [7] Jared Fernandez, Clara Na, Vashisth Tiwari, Yonatan Bisk, Sasha Luccioni, and Emma Strubell. Energy considerations of large language model inference and efficiency optimizations. arXiv preprint arXiv:2504.17674 , 2025. [8] Jared Fernandez, Clara Na, Yonatan Bisk, and Emma Strubell. Evaluating the environmental impact of language models with life cycle assessment. [9] Jacob Morrison, Clara Na, Jared Fernandez, Tim Dettmers, Emma Strubell, and Jesse Dodge. Holistically evaluating the environmental impact of creating language models. arXiv preprint arXiv:2503.05804 , 2025. [10] K Pronk and Q Zhao. Benchmarking energy efficiency of large language models using vllm. 
+
+arXiv preprint arXiv:2509.08867 , 2025. [11] Nidhal Jegham, Marwan Abdelatti, Chan Young Koh, Lassad Elmoubarki, and Abdeltawab Hendawi. How hungry is ai? benchmarking energy, water, and carbon footprint of llm inference. 
+
+arXiv preprint arXiv:2505.09598 , 2025. [12] Sasha Luccioni, Yacine Jernite, and Emma Strubell. Power hungry processing: Watts driving the cost of ai deployment? In The 2024 ACM Conference on Fairness Accountability and Transparency , FAccT ’24, page 85–99. ACM, June 2024. [13] Maria Ulan, Erik Johannes Husom, and Jeriek Van den Abeele. Talk is cheap, energy is not: Towards a green, context-aware metrics framework for automatic speech recognition. In Joint European Conference on Machine Learning and Knowledge Discovery in Databases , pages 36–54. Springer, 2025. [14] Baolin Li, Yankai Jiang, and Devesh Tiwari. Carbon in motion: Characterizing open-sora on the sustainability of generative ai for video generation. ACM SIGENERGY Energy Informatics Review , 4(5):160–165, 2024. [15] Julien Delavande, Regis Pierrard, and Sasha Luccioni. Video killed the energy budget: Characterizing the latency and power regimes of open text-to-video models. arXiv preprint arXiv:2509.19222 , 2025. [16] Weijie Kong, Qi Tian, Zijian Zhang, Rox Min, Zuozhuo Dai, Jin Zhou, Jiangfeng Xiong, Xin Li, Bo Wu, Jianwei Zhang, et al. Hunyuanvideo: A systematic framework for large video generative models. arXiv preprint arXiv:2412.03603 , 2024. 11 [17] Pol G Recasens, Ferran Agullo, Yue Zhu, Chen Wang, Eun Kyung Lee, Olivier Tardieu, Jordi Torres, and Josep Ll Berral. Mind the memory gap: Unveiling gpu bottlenecks in large-batch llm inference. In 2025 IEEE 18th International Conference on Cloud Computing (CLOUD) ,pages 277–287. IEEE, 2025. [18] Yan Wang, Shijie Zhao, Junlin Li, and Li Zhang. Eliminating vae for fast and high-resolution generative detail restoration. arXiv preprint arXiv:2602.10630 , 2026. [19] Yoav HaCohen, Benny Brazowski, Nisan Chiprut, Yaki Bitterman, Andrew Kvochko, Avishai Berkowitz, Daniel Shalem, Daphna Lifschitz, Dudu Moshe, Eitan Porat, et al. Ltx-2: Efficient joint audio-visual foundation model. arXiv preprint arXiv:2601.03233 , 2026. [20] Artificial Analysis. Artificial analysis. https://artificialanalysis.ai , 2026. [21] Tencent. Hunyuanvideo. https://huggingface.co/tencent/HunyuanVideo, 2025. [22] Tencent. Hunyuanvideo-1.5. https://huggingface.co/tencent/HunyuanVideo-1.5, 2025. [23] Lightricks. Ltx-2. https://huggingface.co/Lightricks/LTX-2/tree/main, 2025. [24] Wan-AI. Wan 2.2. https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B/, 2025. [25] Wan-AI. Wan 2.1. https://huggingface.co/Wan-AI/Wan2.1-T2V-14B, 2025. [26] EnergyUseCalculator. Energyusecalculator, 2026. [27] Cooper Elsworth, Keguo Huang, David Patterson, Ian Schneider, Robert Sedivy, Savannah Goodman, Ben Townsend, Parthasarathy Ranganathan, Jeff Dean, Amin Vahdat, et al. Measuring the environmental impact of delivering ai at google scale. arXiv preprint arXiv:2508.15734 ,2025. [28] Andrew Gebhart. Google’s ai filmmaker program, flow, helped creators make 100 million videos, 2025. [29] U.S. Energy Information Administration. How much electricity does an american home use?, 2024. [30] Electricity Maps. Electricity maps. https://app.electricitymaps.com/, 2024. [31] United States Environmental Protection Agency. Greenhouse gas emissions from a typi-cal passenger vehicle. https://www.epa.gov/greenvehicles/greenhouse-gas-emissions-typical-passenger-vehicle. [32] Shijia Liao, Yuxuan Wang, Tianyu Li, Yifan Cheng, Ruoyi Zhang, Rongzhi Zhou, and Yijin Xing. Fish-speech: Leveraging large language models for advanced multilingual text-to-speech synthesis. arXiv preprint arXiv:2411.01156 , 2024. [33] Mistral AI. Voxtral-4b-tts-2603. https://huggingface.co/mistralai/ Voxtral-4B-TTS-2603 , 2025. [34] OpenAI. Video generation models as world simulators. https://openai.com/index/ video-generation-models-as-world-simulators/ , February 15 2024. [35] Google DeepMind. Veo: a text-to-video generation system. https://storage.googleapis. com/deepmind-media/veo/Veo-3-Tech-Report.pdf , 2025. [36] fal. fal.ai, 2026. [37] Ian Schneider, Hui Xu, Stephan Benecke, David Patterson, Keguo Huang, Parthasarathy Ran-ganathan, and Cooper Elsworth. Life-cycle emissions of ai hardware: A cradle-to-grave approach and generational trends. arXiv preprint arXiv:2502.01671 , 2025. [38] Victor Tangermann. The real reason openai shut sora down is a warning to every ai startup. 
+
+Futurism , April 4 2026. 12 [39] Rashi Shrivastava. Here’s how much cash OpenAI is burning on AI video app Sora. What it means. Forbes , Nov 2025. [40] Reuters. Meta unveils new ai video feed vibes, 2025. [41] The Associated Press. Openai launches sora social media app for ai-generated videos, raising ’ai slop’ and copyright worries, 2025. [42] Sharon Goldman. This 27-year-old’s tiktok-like ai app makes playful, creative short videos from just a few words—it’s built for gen z, 2025. [43] Jess Weatherbed. Coca-cola’s new ai holiday ad is a sloppy eyesore, 2025. [44] Reuters. Nvidia has not yet sold its H200 AI chips to China, Lutnick says. https://www.reuters.com/technology/ nvidia-has-not-yet-sold-its-h200-ai-chips-china-lutnick-says-2026-04-22/ ,April 22 2026. [45] Emergent Mind. Frontier video foundation model: Veo. https://www.emergentmind.com/ topics/frontier-video-foundation-model-veo , 2026. [46] Yu Gao, Haoyuan Guo, Tuyen Hoang, Weilin Huang, Lu Jiang, Fangyuan Kong, Huixia Li, Jiashi Li, Liang Li, Xiaojie Li, et al. Seedance 1.0: Exploring the boundaries of video generation models. arXiv preprint arXiv:2506.09113 , 2025. [47] EvoLink AI. Seedance 1.5 pro api – 1080p cinematic video with native audio. https: //www.evolink.ai/models/seedance-1.5-pro , 2026. [48] fal.ai. Kling 3.0 pro vs. sora 2 pro: What’s the difference? https://fal.ai/blog/ kling-3-pro-vs-sora-2-pro-difference , April 2026. 13 Supplementary Materials A Packages & Libraries 
+
+• Python == 3.12 
+
+• torch == 2.10.0 
+
+• torchao == 0.16.0 
+
+• xDiT == 0.4.5 (Cloned from GitHub) • diffusers == 0.37.0.dev0 (Cloned from GitHub) • transformers == 4.57.6 
+
+• accelerate == 1.12 
+
+• pynvml == 13.0.1 
+
+• huggingface hub == 0.36.2 
+
+• OpenCV == 4.13.0 
+
+• numpy == 2.4.2 
+
+• pandas == 3.0.0 
+
+## B Hardware Details 
+
+• 8H2 : a DGX H200 node equipped with 8 Nvidia H200 SXM GPU (5.6 kW TDP, 1128GB VRAM, 3016GB RAM, 192vCPUs) • H2 : one H200 SXM GPU (0.7 kW TDP, 141GB VRAM, 181GB RAM, 12vCPUs) • B2 : one B200 GPU (1 kW TDP, 180GB VRAM, 283GB RAM, 28vCPUs) 
+
+## C List of Prompts 
+
+• In a symmetrical Wes Anderson style, a vintage library where all the books suddenly begin to float and rotate in mid-air. A young librarian with glasses looks up in awe. Static camera, pastel color palette, soft natural lighting through tall windows, perfectly centered framing. • A cinematic, slow-motion tracking shot of a crystal glass falling onto a marble floor. The glass shatters into hundreds of sharp, reflective shards that fly toward the camera, while red wine splashes in realistic fluid ribbons across the white marble. High-speed photography style, 4K, realistic physics. • A high-speed FPV drone shot weaving through a dense cyberpunk market at night. The camera zips between neon-lit stalls, under holographic signs, and through clouds of thick white steam rising from street food vendors. Motion blur, vibrant blue and magenta lighting, wet pavement reflections. • A group of penguins on a bright Antarctic ice shelf performing a synchronized rhythmic dance. They are flapping their flippers, hopping in place, and kicking up powdery snow. Cinematic lighting, 4k, high detail, realistic textures, soft sunlight reflecting off the ice. • Exactly two astronauts in white EVA suits walking on the surface of Mars during a massive dust storm. Red sand whips around their boots. One astronaut stops to pick up a glowing blue mineral. The camera does a slow 360-degree orbital rotation around them, maintaining sharp focus on the mineral. 14 D Batch Size Effect 
+
+Figure 4 showcases the energy consumption per video for HunyuanVideo across different batch sizes on 8H2. These results showcase that energy consumption scales linearly with batch size with no per-video efficiency gains. 
+
+Figure 4: Energy Consumption for HunyuanVideo per configuration normalized by batch size (Energy Consumption / Batch Size) 
+
+## E Proprietary Model Estimation: Methodology and Per-Model Derivations 
+
+This appendix details the methodology used in Section 4.4 to estimate energy consumption for propri-etary T2V models. We first describe the measurement procedure, hardware deployment assumptions, and Monte Carlo uncertainty propagation, then present the per-model formula derivations and full results. 
+
+E.1 Methodology Measurement procedure. For each of the 8 proprietary models, we query the API across 3–9 configurations spanning resolution and frame count (Table 3). Because API latency conflates true generation time with queuing delays, each configuration was measured three times and the minimum latency retained – queuing effects are strictly additive, so the minimum most faithfully approximates true generation time. We did not run identical configurations sequentially: the full configuration set was run, then re-run, to ensure variability in queueing conditions for any given configuration. Coefficients are fit to these minimum times using the same NNLS procedure applied to open models in Section 4.2. 
+
+Denoising steps. For all proprietary models, we assume the number of denoising steps is fixed across configurations (consistent with API-level consistency guarantees). Since energy scales linearly with S by construction, step count is absorbed into the fitted coefficients and treated as a model-level constant. 
+
+Hardware deployment assumptions. We assume all models are deployed on DGX or equivalent multi-accelerator infrastructure to support user-facing generation times. This is consistent with our open-model benchmarks: on a full 8H2 station, generating a 5-second 720p video already takes 105 s for HunyuanVideo and 190 s for Wan 2.1/2.2 – single-GPU generation would be proportionally slower and incompatible with consumer expectations. The consistently long queuing times observed across proprietary APIs further support this assumption, as queuing overhead is characteristic of high-demand shared infrastructure rather than single-device deployment. Specific assignments: 15 • Veo models : TPU v6e node (8 TPUs), reflecting Google’s latest production infrastruc-ture [37]. • Seedance 1 and 1.5 : DGX H800 ( 8H8), reflecting GPU export restrictions limiting access to newer Nvidia hardware in China [44]. • All remaining models : DGX B200 ( 8B2) or DGX H200 ( 8H2), with equal deployment likelihood assigned to each. 
+
+Power-draw model and Monte Carlo uncertainty. Energy is estimated by modeling power draw as P ∼ N (0 .9 · TDP , (0 .05 · TDP )2), consistent with Property 1 and accounting for possible tiling effects. Where multiple hardware configurations are plausible candidates, each is assigned a deployment likelihood weight and sampled independently. Running 10,000 Monte Carlo simulations per model yields a weighted energy distribution and 95% confidence interval for each configuration. 
+
+Audio-video models. Property 4 implies no dedicated audio terms need to be estimated – the overhead is absorbed into the fitted linear coefficient. For models with native audio generation, all measurements were collected with audio enabled. To estimate video-only energy, we use the proportional pricing between audio-video and video-only API tiers as a proxy; while absolute prices likely reflect competitive pressures rather than true cost, we assume the ratio is indicative of the relative computational overhead. We note explicitly that this is a proxy and less scientifically grounded than the audio-video estimations. 
+
+E.2 Per-Model Formula Derivations Veo variants. Veo models employ a decoupled spatial-temporal attention mechanism rather than standard joint spatiotemporal self-attention [ 45 ]. Instead of scaling as T 2 ∝ W 2H2F 2, the attention decomposes into a spatial term scaling as W H 2 · F and a temporal term scaling as F 2 · W H . Given the limited variability in frame counts across tested configurations, the temporal term is collinear with the spatial term and cannot be reliably disentangled; we therefore retain only the dominant spatial attention term, yielding E = N · F · (W H )2 + M · T + G. For Veo 3.1, inference time measurements were heavily contaminated by queuing noise despite the min-of-3 procedure, making the attention terms unreliable; we therefore fit a linear formula E = M · T + G only, and note that this variant carries lower estimation accuracy than the others. 
+
+Seedance 1. Seedance 1 follows a two-stage pipeline: primary generation at 480p followed by upscaling to the target resolution with fewer denoising steps [ 46 ]. The full formula would be 
+
+E = N1 · F 2 + M1 · F + M2 · T + N2 · T 2 + G, where N1 captures the 480p self-attention cost and M1 the corresponding FFN. Given the limited configuration variability and the likely negligible contribution of the second-stage attention, both the N2 and M1 terms are dropped to avoid collinearity, giving E = N1 · F 2 + M · T + G.
+
+Seedance 1.5. Seedance 1.5 also employs decoupled attention [ 47 ], yielding a full formula of 
+
+E = M · T + N1 · W H · F 2 + N2 · F · W H 2 + G. To avoid collinearity between the two attention terms, we decouple them by retaining N1 · F 2 and N2 · W H 2 independently, dropping the shared 
+
+W H and F prefactors that cannot be separately identified from the available configurations, giving 
+
+E = N1 · F 2 + M2 · W H 2 + G.
+
+Sora 2.0 Pro. Sora 2.0 Pro natively supports up to 1080p but is known to generate at a lower internal resolution before upscaling – the API explicitly distinguishes between 1080p and “true” 1080p [ 48 ]. We model the generation cost as a combination of a fixed lower-resolution term scaling linearly with 
+
+F and a full-resolution attention term with its corresponding FFN, dropping the lower-resolution attention due to its negligible and collinear contribution, giving E = M1 · F + N2 · T 2 + M2 · T .
+
+Gen 4.5. Gen 4.5 uses a standard spatiotemporal self-attention architecture with no documented multi-stage or decoupled design, and is fit with the standard formula E = N · T 2 + M · T . This is supported by Property 5: the accuracy of the formula reflects the validity of the architectural assumptions. 16 E.3 Full Results Model API Capabilities FPS Count Hardware err % err % max 
+
+Veo 3.1 Fal.AI V/A 24 6 TPUv6e 9.65% 18.21% Veo 3.1 Fast Fal.AI V/A 24 6 TPUv6e 11.09% 23.17% Veo 3 Fal.AI V/A 24 6 TPUv6e 8.22% 20.80% Veo 3 Fast Fal.AI V/A 24 6 TPUv6e 10.33% 19.81% Sora 2.0 Pro Fal.AI V/A 24 6 8B2, 8H2 3.99% 9.45% Seedance 1.0 Fal.AI V 24 9 8H8 3.08% 8.57% Seedance 1.5 Fal.AI V/A 24 5 8H8 3.80% 7.28% Gen 4.5 Runway V 24 3 8B2, 8H2 0.08% 0.10% Table 3: List of proprietary models tested. V: Video only; V/A : Video and Audio. Hardware abbreviations: 8B2 (DGX B200), 8H2 (DGX H200), 8H8 (DGX H800). 
+
+Figure 5: Estimated energy consumption (Wh) for all proprietary models across configurations 17
