@@ -1,0 +1,844 @@
+Title: QuTuner: Feature- and Learning-Guided Optimization Pass Tuning for Quantum Compilers
+
+URL Source: https://arxiv.org/pdf/2607.04586v1
+
+Published Time: Tue, 07 Jul 2026 02:30:06 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# QuTuner : Feature- and Learning-Guided Optimization Pass Tuning for Quantum Compilers 
+
+## Ming Zhong 
+
+mzhong25@cse.cuhk.edu.hk 
+
+The Chinese University of Hong Kong Hong Kong SAR, China 
+
+## Xiangyu Ren 
+
+xiyu.ren@outlook.com 
+
+The Chinese University of Hong Kong Hong Kong SAR, China 
+
+## Jinglei Cheng 
+
+chengjl14@outlook.com 
+
+Nebius The United States 
+
+## Shaohua Li 
+
+shaohuali@cse.cuhk.edu.hk 
+
+The Chinese University of Hong Kong Hong Kong SAR, China 
+
+## Zhiding Liang ∗
+
+zliang@cse.cuhk.edu.hk 
+
+The Chinese University of Hong Kong; State Key Laboratory of Quantum Information Technologies and Materials (CUHK) Hong Kong SAR, China 
+
+## Abstract 
+
+Quantum compilers play a key role in transforming quantum circuits into lower-cost implementations with improved exe-cution fidelity. This process is commonly guided by circuit-level metrics, such as gate counts and circuit depth. Although compiler pass tuning has been widely studied in classical compilation, directly transferring these techniques to quan-tum compilers is challenging, because quantum programs are expressed as circuits and exhibit optimization behav-iors that are shaped by quantum-specific structures. Prior quantum compiler tuning approaches have begun to use circuit features to guide pass selection, but they remain lim-ited in two aspects: they search only a small portion of the optimization-pass space, and they mainly rely on static fea-tures that do not explicitly reflect how a circuit reacts to compiler optimizations. We present QuTuner , a feature-guided quantum compiler pass tuning framework that searches the full optimization pass space and generalizes across compilers and tuning ob-jectives. QuTuner first builds a large optimization dataset by running Bayesian Optimization on 8,111 quantum cir-cuits and collecting the resulting optimized pass sequences. It then characterizes each circuit from two complementary views: static circuit features that describe circuit structure, and optimization-aware pass embeddings that summarize the circuit’s responses to individual optimization passes. Using these representations, QuTuner trains two offline models to retrieve and rank candidate pass sequences for unseen circuits, followed by lightweight refinement. We eval-uate QuTuner on Qiskit and PyTKET using two benchmark suites. On Qiskit, QuTuner improves the evaluation-metric reduction by up to 84.85% over the strongest baseline while reducing tuning time by 73.59%. On PyTKET, it improves metric reduction by up to 18.68% with a 64.49% reduction in tuning time. These results show that QuTuner provides 
+
+> ∗Corresponding Author.
+
+an effective approach to adaptive pass tuning for quantum compilers. 
+
+## 1 Introduction 
+
+Quantum computing has emerged as a promising paradigm for solving problems intractable to classical computers [ 5,15 , 19 , 34 , 50 ]. Similar to classical software development, quantum programming relies on software development kits (SDKs) and compilers, such as Qiskit [ 26 ] and PyTKET [ 52 ], to implement quantum algorithms and execute them on quan-tum computers. In classical computing, compilers optimize programs by reducing code size and execution time [ 6, 10 , 70 ], typically guided by program features such as control flow, data dependencies, and loop structures. However, quantum programs typically define computa-tions in the form of quantum circuits, whose characteristics are fundamentally different from those of classical programs. As shown in Fig. 1a, a quantum circuit consists of qubits and quantum gates, and its computation is realized through a sequence of one-qubit (1Q) and two-qubit (2Q) quantum operations. Therefore, quantum compilation transforms cir-cuits into hardware executable forms through qubit map-ping, routing, scheduling, and circuit optimization. Instead of focusing mainly on classical execution time, quantum compilers aim to reduce circuit-level metrics such as 2Q gate count, 1Q gate count, and circuit depth. Reducing these metrics can mitigate accumulated gate errors and decoher-ence, thereby improving the execution fidelity of quantum programs [32, 66]. As illustrated in Fig. 1b, a quantum compiler (e.g., Qiskit) consists of stages including initial, layout, routing, transla-tion, optimization, and scheduling. Initial stage lowers multi-qubit operations down to a series of 1Q and 2Q operations. Layout maps logical qubits in quantum circuits to physical qubits in quantum backends, routing enables interactions between unconnected qubits, translation converts gates to 
+
+> arXiv:2607.04586v1 [quant-ph] 6 Jul 2026 Ming Zhong, Xiangyu Ren, Jinglei Cheng, Shaohua Li, and Zhiding Liang
+
+q1 
+
+q2 
+
+q3 
+
+H
+
+H
+
+H RX 
+
+Layer 1  Layer 2  Layer 3  Qubits Number: 3 
+
+One -Qubit Gates: 4 
+
+Two -Qubit Gates: 2 
+
+Circuit Depth: 3         
+
+> (a) An example quantum circuit with quantum-specific features. 9
+> 29
+> 5
+> 6
+> 11
+> 5
+> Layout
+> Routing
+> Translation
+> Optimization
+> Scheduling
+> Stages
+> X
+> 030 Pass Numbe r
+> Y
+> This work :all 29 optimization passes
+> Prior work tuned up to
+> 10 optimization passes
+> Init ial
+> (b) Compilation stages of the Qiskit compiler (V2.2.3).
+
+Figure 1. Challenges of quantum compiler pass tuning. (a) Quantum circuits have specific features distinct from clas-sical programs, such as gate counts and circuit depth. (b) Existing studies do not cover the full optimization pass tun-ing space. hardware-supported bases, optimization applies analysis and transformation passes to reduce circuit cost, and schedul-ing assigns execution times to operations under hardware constraints. Among these stages, the optimization stage con-tains the largest number of passes (e.g., 29 in Fig. 1b), making it the most complex component. In contrast, other stages such as layout and routing typically rely on well-established heuristics, such as SABRE [ 32 ], which balances performance and efficiency. Additionally, both classical and quantum compilers typ-ically provide a set of predefined optimization levels, such as O3, to enable users to quickly apply compilation opti-mizations. Each optimization level corresponds to a fixed pass sequence designed for general use. However, such fixed pass sequences may not achieve optimal performance for ev-ery input, because different inputs can exhibit diverse struc-tural characteristics and optimization opportunities. There-fore, compiler pass tuning aims to identify effective pass sequences, including both pass combinations and orderings, for each input program or circuit, thereby improving the compilation performance. In classical compilers, prior studies have investigated both pass and option tuning. Existing approaches include heuris-tic search methods such as Bayesian optimization (BO) and genetic algorithms (GA) [ 6 , 16 , 21 , 48 , 69 , 70 ], reinforcement learning (RL) for sequential pass selection [ 9 , 13 , 41 , 49 ], and similarity-based retrieval using program features [ 33 , 60 ]. Re-cent studies further leverage large language models (LLMs) combined with retrieval-augmented-generation (RAG) tech-niques to guide compiler optimization through their reason-ing capabilities [ 12 , 46 , 47 , 51 ]. Some studies use the term “phase-ordering" to emphasize the ordering aspect of pass tuning [2, 8, 18, 23, 29, 68]. In quantum compiler pass tuning, existing studies have attempted to adapt heuristic and RL methods from traditional compiler tuning to quantum circuits by using partial circuit-level features, like structure or DAG features [ 14 , 20 , 36 , 40 ,53 , 54 ]. However, their optimization pass coverage remains limited. For example, [ 40 ] explores only four optimization passes in PyTKET V2.9.3. Although [ 53 ] and [ 20 ] tune passes across multiple compilation stages, their optimization-stage search spaces cover only 9 out of 23 optimization passes in Qiskit V0.39.2 and 10 out of 28 optimization passes in Qiskit V2.1.2, respectively. These studies therefore do not fully cover the quantum compiler optimization-pass space. In this paper, we present the first tuning work that cov-ers the full optimization pass space of studied quantum compilers. We propose a feature-guided framework, namely 
+
+QuTuner , that extracts both structural and optimization-aware features from quantum circuits. Based on these fea-tures, we train graph transformer-based models to learn circuit representations, retrieve similar circuits from a large-scale optimization dataset, and identify promising optimiza-tion pass sequences. We further apply lightweight BO to refine the retrieved sequences, achieving better optimization performance while balancing the time cost of the optimiza-tion pass tuning process. Specifically, we first construct an optimization dataset by performing BO tuning over all 29 optimization passes in Qiskit V2.2.3 (the latest version available when this work began) on 8,111 circuits from QCircuitBench [ 67 ]. Based on this dataset, QuTuner represents each circuit’s optimiza-tion characteristics by combining static circuit features with optimization-aware pass embeddings obtained through pass profiling. For a new circuit, QuTuner trains a pruning model and a ranker model to retrieve and rank promising pass se-quences from the dataset, followed by lightweight BO refine-ment to further explore the optimization space beyond the optimization dataset and produce the final optimized pass sequence. Our contributions are summarized as follows: 
+
+• We construct a large-scale optimization dataset by performing BO-tuning on the QCircuitBench quan-tum circuit dataset [ 67 ], providing a foundation for quantum compiler optimization pass tuning. 
+
+• We introduce optimization-aware pass embeddings through the pass profiling mechanism, and combine pass embeddings with static circuit features to model circuit-specific optimization characteristics. 
+
+• We propose QuTuner , a feature-guided framework that retrieves, ranks, and refines optimization pass sequences, achieving strong optimization effective-ness and time efficiency across quantum compilers and tuning objectives. QuTuner : Feature- and Learning-Guided Optimization Pass Tuning for Quantum Compilers 
+
+• We evaluate QuTuner on two benchmarks containing 180 cases. Results show that QuTuner improves the evaluation metric reduction by up to 84.85% over the strongest baseline and reduces tuning time by 73.59% on Qiskit, and improves the metric reduction by up to 18.68% with 64.49% reduction in tuning time on PyTKET. 
+
+## 2 Motivation 
+
+Compiler pass tuning is well established in classical compil-ers and is also important for quantum compilers. However, as discussed in Sec. 1, existing quantum compiler pass tuning studies remain limited due to insufficient optimization-pass coverage and partial circuit feature modeling. Therefore, we detail our motivation from two aspects: exploring the full optimization pass space and modeling circuit features more comprehensively to better capture optimization behavior. 
+
+2.1 Exploring the Full Optimization Pass Space 
+
+As introduced in Sec. 1, existing studies explore only a lim-ited subset of optimization passes in quantum compilers. This is mainly because they usually target specific optimiza-tion metrics, such as 2Q gate reduction, and therefore select only passes directly related to these objectives. For exam-ple, the work [ 40 ] focuses on reducing 2Q gates and thus tunes only four 2Q-related optimization passes in PyTKET. Other studies also tune layout and routing options together with optimization passes [ 20 , 53 , 54 ]. In such cases, cover-ing all optimization passes would further enlarge the search space, so these methods restrict tuning to a selected subset of passes. However, tuning only passes directly related to a single metric, or only a subset of optimization passes, can overlook global effectiveness. Since the effectiveness of a pass often de-pends on its cooperation with other passes and its position in the global pass sequence, exploring the full optimization pass space is crucial for discovering globally effective sequences and further improving quantum circuit optimization. 
+
+2.2 Comprehensive Feature Modeling of Quantum Circuits 
+
+In classical compilers, a program can be characterized by various features, such as control flow and data dependen-cies. However, these features cannot be directly applied to quantum circuits due to the fundamental differences in quan-tum computation. Existing quantum compiler pass tuning studies [ 20 , 36 , 40 , 53 , 54 ] have therefore adopted specific types of quantum circuit features, such as structure features including entanglement ratio, liveness, and parallelism, or DAG features that model qubit-gate dependencies as a di-rected acyclic graph. Although these features can effectively characterize the static properties of quantum circuits, they ...  (b) Circuit     
+
+> Feature
+> H
+> (c) Pass
+> Embedding (d) BO Optimized
+> Pass Sequences
+> Pass 1,…, Pass n
+> Bayesian
+> Opt. (BO)
+> Pass
+> Profiling
+> Extraction
+> Optimization Dataset
+> Pass 1,…, Pass n
+> Pass 1,…, Pass n
+
+...  (e) Pruning Model   
+
+> Input
+> Input
+> Model Creation
+> Offline
+> Stage
+> Online Stage
+> (a) OpenQASM
+> Dataset
+> (g) Input OpenQASM File
+> Feature
+> Extraction
+> Selected Pass Sequence
+> (h) Two -Stage Pass Selection
+> Predicted Pass
+> Embedding Optimized Pass Sequence
+> Input
+> (f) Ranker Model
+> (i) Output Pass Sequences
+> Lightweight BO
+
+Figure 2. The overall workflow of QuTuner . In the figure, 
+
+→ denotes the flow of circuit features, → denotes pass em-beddings, and → denotes optimized pass sequences. cannot directly capture how a circuit responds to different optimization passes. To address this limitation, we are motivated to directly measure how a quantum circuit responds to different passes, leading to a pass profiling mechanism. Specifically, we in-dependently apply each optimization pass to a circuit and calculate the changes in circuit metrics, before and after applying the pass. These changes reflect the optimization effect of each pass on the circuit. We then concatenate the metric changes across all passes to obtain the pass embed-ding for each circuit. Compared with static circuit features, pass embeddings provide more direct optimization-aware features. Although optimization passes can interact with each other, profiling pass combinations would substantially increase both the profiling cost and the embedding dimension. There-fore, we profile each pass independently as a practical trade-off between capturing optimization-aware features and keep-ing the profiling process efficient and scalable. 
+
+## 3 Our Methodology: QuTuner 
+
+3.1 Overview of QuTuner 
+
+Fig. 2 illustrates the overall workflow of QuTuner , which consists of an offline stage and an online stage. In the offline stage, QuTuner constructs an optimization dataset contain-ing various quantum circuits. For each circuit, it extracts static circuit features, profiles pass embeddings, and records BO-optimized pass sequences (Fig. 2(b)–(d)). Based on this dataset, QuTuner trains two models for pass sequence selec-tion: a pruning model for efficient candidate retrieval and a ranker model for candidate sequence ranking (Fig. 2(e)–(f)). In the online stage, QuTuner takes a quantum circuit as input and first extracts its static circuit features. The pruning model then predicts its pass embedding and retrieves a small set of similar circuits from the optimization dataset. The optimized pass sequences of these retrieved circuits are used as candidates and scored by the ranker model. Finally, the highest-ranked valid sequence is refined by lightweight BO to generate the final optimized pass sequence (Fig. 2(h)–(i)). Ming Zhong, Xiangyu Ren, Jinglei Cheng, Shaohua Li, and Zhiding Liang OPENQASM 2.0;                           
+
+> include "qelib1.inc";
+> gate rzz_0(gamma_0) ... {
+> ...
+> }
+> creg meas[2];
+> qreg q[2];
+> h q[0]; h q[1];
+> rzz_0(2*pi/8) q[0], q[1];
+> rx(2*pi/4) q[0];
+> rx(2*pi/4) q[1];
+> barrier q[0], q[1];
+> measure q[0] -> meas[0];
+> measure q[1] -> meas[1];
+> (a) QAOA Maxcut -n2 OpenQASM Code
+> Program
+> Communication
+> 1.0
+> Critical
+> Depth
+> 1.0
+> Entanglem -
+> Ent Ratio
+> 0.25
+> Parallelism
+> 0.6
+> Liveness Measurement
+> 0.2 1.0
+> Qubits
+> 2.0
+> Circuit Depth
+> 5.0
+> Gates Number
+> 8.0
+> Entanglement Number
+> 2.0
+> (c) Structure Feature
+> (b) Scale Feature
+> Average Shortest
+> Path Length
+> 1.0 1.0
+> Standard Deviation
+> of Adjacency Matrix
+> 1.0
+> (d) Interaction Graph Feature
+> Gate 1
+> (12 , 0.125)
+> (e) DAG Feature: [Nodes (Gate ID, Position), Edges (Gate i, Gate j)]
+> Max Degree Min Degree
+> 1.0
+> Pass 1
+> (Δ2Q ,Δ1Q ,ΔDepth )
+> (f) Pass Embedding ( Δ2Q Gates, Δ1Q Gates, ΔCircuit Depth)
+> ...
+> Pass 2Pass 3
+> (Δ2Q ,Δ1Q ,ΔDepth )(Δ2Q ,Δ1Q ,ΔDepth )
+> (12 , 0.25)
+> Gate 2Gate 8
+> ... (14, 1.0)
+> Edge 1
+> (1,3) ... (6,8)
+> Edge 8
+
+Figure 3. Feature representations of an example quantum circuit, QAOA MaxCut-n2, in OpenQASM. OpenQASM is a unified representation for quantum circuits [11]. 
+
+3.2 Offline Stage 3.2.1 Tuning Objective. Existing quantum compiler tun-ing works consider various metrics including the 2Q gate counts [ 36 , 40 ], 1Q gate counts [ 36 ], circuit depth [ 36 , 53 , 54 ], and estimated fidelity [20, 53, 54]. In this work, we adopt a weighted tuning objective that jointly considers 2Q gate count, 1Q gate count, and circuit depth: 𝑂𝑏 𝑗𝑒𝑐𝑡𝑖𝑣𝑒 = 𝛼 · Δ2Q + 𝛽 · Δ1Q + 𝛾 · ΔDepth , where Δ2Q ,
+
+Δ1Q , and ΔDepth denote the reductions in 2Q gate count, 1Q gate count, and circuit depth over O3, respectively. This objective provides a straightforward evaluation of cir-cuit optimization quality across circuit-level metrics. We do not use estimated fidelity [ 20 , 53 , 54 ] as the tuning objective, which estimates fidelity by multiplying the backend-specific fidelity of each gate in the compiled circuit. Since it is tightly coupled with a particular quantum device, we instead op-timize hardware-agnostic circuit-level metrics, which are directly affected by optimization-stage pass tuning. Notably, we further evaluate QuTuner under an estimated-fidelity tuning objective in Sec. 5.6.2, demonstrating that QuTuner 
+
+can support different tuning objectives. 
+
+3.2.2 Static Circuit Feature Representation. Quantum circuit features are essential for modeling optimization be-havior. Unlike classical programs, quantum circuits run on noisy and resource-constrained quantum devices, where hardware constraints such as limited qubit connectivity can significantly affect compilation results [ 30 , 59 ]. Thus, dif-ferent circuits may exhibit different optimization behaviors even under the same compiler and backend, making effective feature modeling necessary for selecting suitable optimiza-tion strategies. To effectively optimize a quantum circuit, we characterize it from multiple perspectives, including circuit scale, oper-ation structure, qubit interactions, and gate dependencies. Circuit scale reflects the basic optimization difficulty, while operation structure captures properties such as entangle-ment, parallelism, and qubit liveness. Qubit interactions, mainly induced by 2Q gates, are critical because 2Q gates are typically more costly and error-prone than 1Q gates. Gate de-pendencies further determine execution order and potential simplification opportunities. Together, these features pro-vide a comprehensive circuit representation for modeling optimization similarity. Inspired by prior works on characterizing quantum cir-cuits [ 30 , 38 , 59 , 62 ], we unify four types of static circuit features. We use a simplified quantum circuit (Fig. 3(a)) as an example to illustrate the selected features. The four types of static circuit features and their compu-tation methods are detailed as follows: 1. Scale features . Scale features describe the basic size of a quantum circuit, including the number of qubits, circuit depth, total gate count, and the number of entangling op-erations, as shown in Fig. 3(b). These features are directly extracted from the circuit by counting the corresponding circuit elements and the circuit depth. 2. Structure features . Structure features describe the or-ganization and resource usage patterns of quantum op-erations. Following SupermarQ [ 59 ], we use all six struc-ture features, including program communication, criti-cal depth, entanglement ratio, parallelism, liveness, and measurement, as shown in Fig. 3(c). These features are computed by analyzing qubit interactions, gate dependen-cies, 2Q gates ratio, operation parallelism, qubit activity, and measurement usage. Specifically, we follow the fea-ture definitions and computation formulas proposed in SupermarQ [59]. 3. Interaction graph features . Interaction graph features capture the interaction patterns among qubits, including average shortest path length, maximum degree, minimum degree, and the standard deviation of the adjacency ma-trix, as shown in Fig. 3(d). We first convert each quantum circuit into a qubit interaction graph, where each node represents a qubit and each edge represents a 2Q oper-ation between two qubits. If multiple 2Q operations are applied to the same qubit pair, the corresponding edge weight records the number of interactions. Based on this interaction graph, we compute the four interaction graph features. These four features are selected following the empirical analysis in [ 30 ], which shows that they are informative enough for characterizing quantum circuit interaction behaviors. 4. DAG features . DAG features capture the execution de-pendency relationships among quantum gates in a quan-tum circuit. We convert each quantum circuit into a circuit DAG, where each node represents a quantum gate and each directed edge represents a dependency between two gates. Specifically, an edge (𝑔 𝑖 , 𝑔 𝑗 ) indicates that gate 𝑔 𝑖 
+
+must be executed before gate 𝑔 𝑗 , because they operate on at least one common qubit and follow this order in the original circuit. Each node is encoded with a gate-type index (gate ID) and a normalized positional value, as shown in Fig. 3(e), where the gate-type index is later mapped to a learnable embedding in the model and the QuTuner : Feature- and Learning-Guided Optimization Pass Tuning for Quantum Compilers 0.44       
+
+> 0.58
+> 0.72
+> Feature Similarity Interval
+> [0, 0.2) [0.2, 0.4) [0.4, 0.6) [0.6, 0.8) [0.8, 1.0]
+> Pass Sequen-
+> ce  Similarity  Pass Embeddi ngs Static Circuit Features (1) - (4) Y
+> X
+
+Figure 4. Static feature-based and pass embedding-based measurements of BO optimized pass sequence similarity (measured by edit similarity, higher is better). positional value indicates the relative order of the gate in the circuit DAG. For the edge structure, we use an edge list of gate-index pairs to represent gate dependencies. These four types of static circuit features jointly capture various circuit characteristics, but they do not explicitly re-flect how circuits respond to optimization passes, which moti-vates our design of pass embeddings introduced in Sec. 3.2.4. 
+
+3.2.3 Optimization Dataset. The optimization dataset is built from QCircuitBench [ 67 ], a large-scale quantum circuit dataset, and serves as the retrieval basis for QuTuner . Each circuit is represented by static circuit features (Sec. 3.2.2) and pass embeddings (Sec. 3.2.4), associated with its best BO-optimized pass sequence. These BO-optimized pass se-quences are obtained through long-term BO tuning on the QCircuitBench in the offline stage. In the online stage, QuTuner 
+
+retrieves similar circuits from this dataset and uses their op-timized pass sequences as candidates for refinement. The de-tailed dataset construction process is described in Sec. 4.1.5. 
+
+3.2.4 Pass Embeddings. To better model the optimiza-tion behavior of quantum circuits beyond static features, we introduce pass embeddings, as shown in Fig. 3(f). Specifically, we apply each optimization pass individually to a circuit and record the relative changes in three metrics: 2Q gate count, 1Q gate count, and circuit depth, e.g., ( Δ2𝑄 , Δ1𝑄 , Δ𝐷𝑒𝑝𝑡ℎ ). The changes across all passes are concatenated to form a pass embedding. It is also worth noting that pass profiling is time-consuming. For each circuit, it requires independently applying each op-timization pass once to obtain its pass embedding. Therefore, pass profiling is only performed in the offline stage to obtain accurate pass embeddings for circuits in the optimization dataset. In the online stage, QuTuner uses a trained model (the pruning model) to predict the pass embedding of a new circuit from its static features, avoiding the high overhead of applying all optimization passes individually. We next empirically demonstrate that pass embeddings provide a more effective representation of the relationship between circuits and optimization passes, compared to four types of static circuit features. Specifically, we aim to ex-amine whether pass embeddings or static circuit features better reflect the similarity of optimized pass sequences. Our intuition is that a useful representation for retrieval should assign higher similarity to circuit pairs whose optimized pass sequences are also similar. To evaluate this, we first randomly sample 2,000 circuits from QCircuitBench and construct all circuit pairs among them, resulting in 4,000,000 pairs in total. We use sampling because constructing pairs from all circuits would produce more than 64 million pairs, leading to pro-hibitively high analysis cost. For each pair, we compute two inner-product similarity scores (normalized to [0,1] using min-max): one between their pass embeddings and the other between their static circuit features, where static circuit fea-tures are obtained by concatenating circuit features (1)–(4). We then group these similarity scores into intervals with a step size of 0.2 and compute, for each interval, the average edit similarity [ 56 ] between the corresponding optimized pass sequences. In Fig. 4, we observe that as the similarity between pass embeddings increases, the edit similarity between the corre-sponding pass sequences also consistently increases. More-over, across all intervals, the pass sequence similarity corre-sponding to pass embedding similarity is consistently higher than that corresponding to static circuit feature similarity. These results suggest that pass embeddings are more corre-lated with pass sequence similarity than static circuit fea-tures. 
+
+3.2.5 Model Creation. For a new circuit, QuTuner needs to match it with circuits in the optimization dataset and retrieve their corresponding optimized pass sequences as candidates. A straightforward solution is to train a model to score all optimized pass sequences in the dataset and select the best one. However, ranking all pass sequences for every input would introduce substantial computational and time overhead. Therefore, QuTuner adopts a two-stage selection strategy. The pruning model first retrieves a small set of similar circuits from the optimization dataset, and the ranker model then scores the optimized pass sequences associated with these circuits. Specifically, as illustrated in Fig. 5, the pruning model pre-dicts the pass embedding of the new circuit, thereby avoiding the costly process of pass profiling. Based on the predicted pass embedding and the profiled pass embeddings of circuits in the optimization dataset, QuTuner computes their inner-product similarities. It then selects the top-𝑘 most similar circuits according to the similarity scores and retrieves their corresponding optimized pass sequences from the dataset. Next, the ranker model takes the static circuit features, the predicted pass embedding, and the retrieved top-𝑘 can-didate pass sequences as input. It scores these candidates according to their relative optimization effectiveness for the input circuit, i.e., their ranking among the 𝑘 candidate pass sequences, and selects the most promising one for further refinement. We describe the two models in detail as follows. 
+
+• Pruning Model . As shown in Fig. 5(a), the pruning model takes circuit features as input and predicts the pass embed-dings. It first encodes the gate ID and normalized position Ming Zhong, Xiangyu Ren, Jinglei Cheng, Shaohua Li, and Zhiding Liang ...    
+
+> Circuit
+> Feature
+> (a) Pruning Model
+> DAG
+> Feature Position
+> +
+> Embedding Layer
+> 5 x Graph
+> Transformer
+> Mean
+> Pooling
+> Linear
+> Projection
+> Concatenation
+> 4 x FC Layers
+> Scale, Structure, Interaction Graph Feature
+> Optimized Pass Sequence 1
+> (c) Optimized Pass Sequences Corresponding to the Top -KMatched Circuits
+> GRU Encoder Layer
+> Cross Attention Layer
+> Pass
+> Embeddings
+> (b) Ranker Model
+> Mean Pooling
+> 4 x FC Layers
+> Ranking  Score Gate IDs
+> Concatenation
+> Linear Projection
+> Optimized Pass Sequence 2 Optimized Pass Sequence n
+> Edges
+
+Figure 5. Two-stage selection model design of QuTuner , including the pruning model (a) and the ranker model (b). of each node in the DAG features into node embeddings, and then feeds the node embeddings together with the DAG edge list into graph transformer layers. The graph transformer produces DAG representations, which are then aggregated by mean pooling and projected into a global DAG-level representation. This representation is then concatenated with scale, structure, and interaction graph features to form a unified circuit embedding. Fi-nally, four fully connected (FC) layers are used to predict the pass embedding. This graph-transformer-based design has been adopted in existing studies to capture DAG-level circuit features [38, 62]. 
+
+• Ranker Model . As shown in Fig. 5(b), the ranker model ranks the relative optimization effectiveness of pass se-quences from the top-𝑘 candidates (Fig. 5(c)). It takes static circuit features, predicted pass embeddings, and top-𝑘 can-didate pass sequences as input. The circuit features and predicted pass embeddings are concatenated and projected into a unified circuit-level representation, while each can-didate sequence is encoded by a GRU encoder to capture pass ordering and composition. The circuit-level repre-sentation then interacts with each candidate sequence representation through a cross-attention layer to estimate the candidate’s suitability for the input circuit. The at-tended representations are aggregated by mean pooling and passed through four FC layers to produce one ranking score for each candidate sequence. Since these ranking scores are used to compare the relative effectiveness of the top-𝑘 candidates rather than predict absolute optimization scores, we train the ranker as a 𝑘 -way candidate selection task with cross-entropy loss. The trained two-stage models can be directly deployed in the online stage for effective pass retrieving on new circuits. 
+
+3.3 Online Stage 
+
+In the online stage, QuTuner takes a quantum circuit as input (Fig. 2(g)) and extracts its static circuit features. The pruning model predicts its pass embedding and retrieves the top-𝑘 candidate pass sequences from the optimization dataset. The ranker model then scores these candidates, and 
+
+QuTuner selects the highest-ranked valid sequence as the seed for lightweight BO refinement (Fig. 2(h)). If no valid candidate is found, QuTuner falls back to the default O3 sequence. The lightweight BO further explores the input-circuit-specific optimization space, rather than being limited to the optimized pass sequences retrieved from the dataset (Fig. 2(i)). 
+
+## 4 Implementations 
+
+4.1 Offline Stage 4.1.1 SDK and Optimization Pass Selection. We select Qiskit V2.2.3 as the base compiler for tuning. The optimiza-tion stage of Qiskit V2.2.3 contains 29 passes, as listed in the official documentation [ 27 ]. We carefully examine the documentation to ensure that the selected passes do not alter circuit semantics. Qiskit explicitly marks passes that may change semantics, such as RemoveBarriers [ 28 ], which is not included in the optimization stage. Since none of the 29 optimization passes are marked as semantics-changing, we use all of them as the optimization pass tuning search space. 
+
+4.1.2 Simulator and Compilation Settings. We use the FakeWashingtonV2 backend [ 25 ] as our primary simulator. It models a 127-qubit heavy-hex device and has been widely adopted as an evaluation simulator in related studies [ 38 ,62 ]. Across all experiments, including optimization dataset construction, BO tuning, and evaluation, the layout, routing, translation, and scheduling configurations in Qiskit follow the default highest optimization levels (e.g., O3 in Qiskit). 
+
+4.1.3 Tuning Objective. In Sec. 3.2.1, we adopt a compos-ite metric based on the reductions in 2Q gates, 1Q gates, and circuit depth. Since prior studies have shown that 2Q gates are more costly and error-prone, and thus dominate execu-tion cost [ 66 ], we assign weights of 80%, 10%, and 10% to the three metrics, respectively, as shown in Eq. (1), where 𝑆 (𝑐 )
+
+calculates the weighted average reduction of the compiled circuit 𝑐 produced by the optimized pass sequence over the O3 baseline, and 𝑁 represents the number of 2Q or 1Q gates.                         
+
+> S(𝑐 )=80% ·1−𝑁 2𝑄 (𝑐 )
+> 𝑁 O3 2𝑄
+> !
+> +10% ·1−𝑁 1𝑄 (𝑐 )
+> 𝑁 O3 1𝑄
+> !
+> +10% ·
+> 
+> 1−𝐷𝑒𝑝𝑡ℎ (𝑐 )
+> 𝐷𝑒𝑝𝑡ℎ O3
+> 
+> (1)
+
+4.1.4 Pass Embeddings. For pass embeddings, we first compile each circuit with optimization_level=0 . We then apply each optimization pass individually to the compiled circuit and compute its relative metric changes as Δ𝑚 𝑝 =
+
+(𝑚 before − 𝑚 after )/ max (𝑚 before , 1), where 𝑚 denotes 2Q gate count, 1Q gate count, or circuit depth, and 𝑚 before and 𝑚 after QuTuner : Feature- and Learning-Guided Optimization Pass Tuning for Quantum Compilers 
+
+are measured before and after applying pass 𝑝 , respectively. If a pass fails, its embedding entry is set to (0.0, 0.0, 0.0).The pass embedding is formed by concatenating the three relative changes of all optimization passes. 
+
+4.1.5 Optimization Dataset. We choose the QCircuit-Bench [ 67 ] as our dataset. QCircuitBench includes imple-mentations of representative quantum algorithms as well as a large collection of randomly generated circuits, provided in OpenQASM formats (both in OpenQASM 2.0 and 3.0). Open-QASM serves as a unified representation and a common input format for different quantum SDKs and compilers [ 11 ]. We first convert all OpenQASM 3.0 circuits to OpenQASM 2.0 using the open_qasm_file_conversion_3_to_2 API from the “mpqp" library in Python 3.11, as OpenQASM 2.0 is more compatible across different SDKs [ 43 ]. To match the back-end constraints, we retain only circuits with no more than 127 qubits, resulting in a final dataset of 8,111 circuits. For each circuit, we extract the four types of circuit features in Sec. 3.2.2 and obtain pass embeddings via pass profiling. Next, we implement BO as a configuration-space search over optimization pass sequences. Each sequence is encoded by the selected passes, their relative ordering, and their rep-etition counts. The final sequence is obtained by expanding selected passes according to their repetition counts and sort-ing them by priority. We allow each pass to appear up to three times, as repeated applications may expose additional optimization opportunities. During tuning, BO starts from the default O3 sequence and 19 random configurations, re-sulting in 20 initial samples in total. It then iteratively fits a Gaussian-process surrogate model and selects candidates by maximizing the expected-improvement acquisition func-tion. Each candidate is evaluated using Eq. (1). For offline dataset construction, we run BO for 500 iterations with early stopping after 50 consecutive rounds without improvement. Following prior work [ 36 , 54 ], we further check the hard-ware validity of each candidate pass sequence, including backend gate-set compatibility and 2Q topology constraints of the compiled circuit. Finally, we obtain 8,111 optimized pass sequences as the optimization dataset. Constructing the optimization dataset requires 447 CPU-core hours of BO tuning in total, measured as accumulated time over all circuits. Since per-circuit tuning tasks are inde-pendent, we parallelize them using 10 workers, resulting in approximately 72 hours of wall-clock time due to workload imbalance, as some circuits require long tuning time. 
+
+4.1.6 Model Creation. In Fig. 5(a), the pruning model first maps DAG features to 192-dimensional embeddings and processes them with five graph transformer layers. The resulting representations are mean-pooled and projected to 256 dimensions, then concatenated with the other three circuit features to form a 270-dimensional circuit represen-tation. Finally, four FC layers map this representation to an 87-dimensional pass embedding. In Fig. 5(b), the ranker model fuses the 270-dimensional circuit feature with the 87-dimensional pass embedding and projects them into a 256-dimensional circuit representation. Each candidate pass sequence is also encoded into a 256-dimensional sequence representation by a GRU encoder. A cross-attention layer then models the interaction between the circuit representa-tion and each sequence representation, followed by mean pooling and four FC layers to produce a ranking score for each candidate sequence. In Fig. 5(c), we use FAISS for efficient inner product similar-ity search [ 39 ] over 8,111 circuits based on pass embeddings, retrieving top-𝑘 most similar circuits ( 𝑘 = 10 ), and use their corresponding optimized pass sequences as candidates. In addition, for each circuit, we precompute the optimization effects of its retrieved top-𝑘 candidate pass sequences by com-piling them individually and recording each metric, which further accelerates the training of the ranker model. For training objectives, the pruning model is trained with MSE loss between the predicted pass embeddings and the ground-truth pass embeddings. For the ranker model, we for-mulate candidate selection as a 𝑘 -way classification problem. Given the predicted ranking scores of the 𝑘 candidate pass sequences, we use the candidate with the highest ground-truth optimization score as the target label and compute the cross-entropy loss over the predicted scores. During train-ing, we split the 8,111 circuits into 95% for training and 5% for validation for both models. The pruning model uses a learning rate of 2 × 10 −3 and weight decay of 1 × 10 −2, while the ranker model uses a learning rate of 1 × 10 −4 and weight decay of 1 × 10 −3. Both models use a maximum input length of 2,048 tokens, a batch size of 128, and 200 training epochs. 
+
+4.2 Online Stage 
+
+We first extract circuit features from the input circuit and use the pruning model to retrieve the top-𝑘 candidate se-quences ( 𝑘 = 10 ) from the optimization dataset, which are then scored by the ranker model. Based on the ranking re-sults, we perform lightweight BO tuning based on the rank-ing: pass sequence candidates are evaluated in descending order, and the first valid sequence, i.e., the first sequence that is successfully compiled and passes the hardware validity checks described in Sec. 4.1.5, is selected as the initial seed. If all fail, we fall back to the Qiskit O3 sequence. From this seed, we generate 10 initial samples via sequence perturba-tions (insertion, deletion, replacement), followed by 20 BO iterations with early stopping at 5. The resulting optimized pass sequence is the final output. 
+
+## 5 Evaluation 
+
+We investigate the following research questions (RQs): 
+
+• RQ1: Can QuTuner achieve better optimization perfor-mance compared to existing baselines? (Sec. 5.2) Ming Zhong, Xiangyu Ren, Jinglei Cheng, Shaohua Li, and Zhiding Liang 
+
+Table 1. Selected OpenQASM benchmarks in evaluation.                   
+
+> Benchmark Size Case Qubits Description
+> QASMBench Small 38 3 – 10 Quantum algorithms Medium 20 11 – 27 Large 33 28 – 118 VeriQBench Variational 47 4 – 121 Variational circuits Combinational 42 1 – 100 Random circuits Total 180
+
+Table 2. Baseline settings in the evaluation.         
+
+> Methods Abbr. Settings
+> Bayesian Optimization BO Initial samples: 10, iterations: 50, early stopping: 20, other settings are detailed in Sec. 4.1.5. Genetic Algorithm GA Initial samples: 20, iterations: 50, population size: 8, generation size: 12, elite size: 4, crossover rate: 0.5, mutation rate: 0.5, keep_improved: 5, tournament size:3 Reinforcement Learning RL Train a PPO agent on 4,000 random samples from the QCircuitBench with 2,000,000 steps, batch size 2048, learning rate 1e −4, clip_range 0.2, step penalty 0.015 LLMs GPT QWen CoT+RAG Prompts; RAG: retrieving top-5 optimized pass sequences; CoT: guides the LLM to analyze the circuit, features, pass documentation, tuning objectives, and examples before generating a pass sequence
+> QuTuner Top-K sample: 10, BO Initial samples: 10, iteration: 20, early stopping: 5
+
+• RQ2: Does QuTuner maintain consistent performance across backends with different qubit sizes? (Sec. 5.3) 
+
+• RQ3: Does each component of QuTuner contribute ef-fectively to the overall performance? (Sec. 5.4) 
+
+• RQ4: How sensitive is QuTuner to key hyperparameters and dataset size? (Sec. 5.5) 
+
+• RQ5: Can QuTuner be adapted to different quantum com-pilers and tuning objectives? (Sec. 5.6) 
+
+5.1 Evaluation Settings Benchmarks . We select two open-source benchmarks, QASM-Bench [ 31 ] and VeriQBench [ 7 ] (Table 1), both based on OpenQASM and are widely used in prior studies [ 22 , 35 ,44 , 58 ]. From QASMBench, we select all circuits with no more than 127 qubits, covering representative quantum algo-rithms. From VeriQBench, we include variational and com-binational circuits under the same 127-qubit limit, comple-menting QASMBench with variational and random circuits. We convert all OpenQASM 3.0 circuits to 2.0 using the tool described in Sec. 4.1.5. To avoid data leakage, we ensure that no circuit file in the selected benchmarks has exactly the same OpenQASM code as any circuit file in our optimization dataset. In total, we use 180 circuits for evaluation. 
+
+Evaluation Metrics . We compare the numbers of 2Q gates, 1Q gates, and circuit depth with those produced by the Qiskit O3 baseline, and report their reduction percentages relative to the baseline. For pass sequences that fail to compile , we assign 0% reduction to all three metrics. 
+
+Baselines . We consider several representative baselines based on existing traditional and quantum compiler tuning works, including heuristic-based methods such as BO [ 6, 69 ,70 ] and GA [ 16 , 21 , 48 ], a RL approach based on prior quan-tum compiler tuning work [ 36 , 40 , 53 , 54 ], and LLM-based approaches inspired by works of using LLMs for traditional compiler tuning [ 46 , 51 ]. Detailed configurations are pro-vided in Table 2, with all random seeds set to 42. We limit the BO and GA baselines to practical online tun-ing budgets (e.g., 50 iterations), because our evaluation fo-cuses on online tuning for unseen circuits. The 500-iteration BO used for dataset construction (Sec. 4.1.5) incurs substan-tial time overhead and is therefore not performed at evalua-tion time. For the RL baseline, we follow prior PPO-based designs [ 36 ,53 , 54 ] and formulate pass tuning as a Markov decision pro-cess. The state includes static circuit features, normalized circuit metrics, the current step index, and selected-pass counts. The action space contains 29 optimization passes plus STOP. The terminal reward is the weighted reduction over O3 using Eq. (1) with a step penalty and failure penalties. Hyperparameters are listed in Table 2. For the LLM baseline, we construct CoT+RAG prompts to guide LLMs in generating optimized pass sequences, inspired by prior work on classical compiler tuning [ 51 ]. Specifically, the CoT process instructs the LLM to first analyze the input circuit, features, pass documentation and tuning objective (Eq. (1)), then learn optimization patterns from the RAG-retrieved examples, and finally generate an optimized pass sequence. The prompt includes the input OpenQASM 2.0 cir-cuit, four types of static circuit features, Qiskit optimization pass documentation, and the top-5 retrieved examples. For RAG, we retrieve the top-5 similar circuits from the optimiza-tion dataset using inner-product similarity over mean-pooled static circuit features, and use their optimized pass sequences as examples. 
+
+LLMs . We select GPT-OSS-120B [ 45 ] as a general-purpose LLM, and QWen3-Coder-480B [ 55 ] as a code-oriented LLM as baselines. To ensure consistency across LLMs, we limit all prompts to 128K tokens, which is the maximum length for GPT-OSS-120B. Since the evaluation prompts require full OpenQASM 2.0 circuit input, we preserve the prompt template and other inputs, and truncate only the OpenQASM 2.0 content when the total length exceeds the 128K limit. 
+
+Evaluation Platforms . Our experiments are conducted on a server equipped with a 64-core Intel Xeon Gold CPU and one NVIDIA H100 GPU (80GB memory). For LLMs, we perform inference using Eigen AI [ 1 ]. For both LLMs, we set the temperature to 0.0, the seed to 42, and the maximum output length to 1,024. Setting the temperature to 0.0 and the seed to 42 helps improve the reproducibility of our experiments. 
+
+5.2 Main Tuning Results (RQ.1) 
+
+As shown in Fig. 6, QuTuner achieves higher reduction percentages over the O3 baseline across all three metrics compared to other baselines. Specifically, compared with the strongest baseline (BO), QuTuner improves the 2Q-gate QuTuner : Feature- and Learning-Guided Optimization Pass Tuning for Quantum Compilers 0%                             
+
+> 50%
+> 100%
+> 2Q Gates 1Q Gates Depth 2Q Gates 1Q Gates Depth 2Q Gates 1Q Gates Depth 2Q Gates 1Q Gates Depth 2Q Gates 1Q Gates Depth 2Q Gates 1Q Gates Depth
+> Small Medium Large Variational Combinational
+> QASMBench VeriQBench Average
+> GA BO RL GPT QWen QTuner
+> Reduction Over -O3
+
+Benchmarks 
+
+> 69.2%
+> 61.4%
+> 40.4%
+> 38.1%
+> 47.6%
+> 44.5%
+> 52.2%
+> 42.0%
+> 31.3%
+> 15.0%
+> 19.7%
+> 30.9%
+> 28.4%
+> 15.3%
+> 12.6%
+> 2.6%
+> 3.2%
+> 13.4%
+> Y
+> X
+> Qu Tuner
+
+Figure 6. Comparison of tuning effectiveness between QuTuner and baselines in Qiskit V2.2.3. GA BO RL GPT QWen QTuner 
+
+> Reduction Over -O3
+
+Benchmarks                    
+
+> Y
+> X
+> 2Q Gates 1Q Gates Depth 2Q Gates 1Q Gates Depth 2Q Gates 1Q Gates Depth 2Q Gates 1Q Gates Depth 2Q Gates 1Q Gates Depth
+> Small Medium Large Combinational Variational
+> QASMBench VeriQBench
+> 0%
+> 100%
+> -10%
+> Qu Tuner
+
+Figure 7. Per-case optimization distribution of QuTuner and baselines. A slight x-axis jitter improves visibility of overlapping points. Many RL, GPT, and QWen cases concentrate at 0% reduction because of failed compilations, as described in Sec. 5.1. 
+
+Table 3. Time comparison in the Qiskit tuning. 
+
+Benchmark GA BO RL GPT QWen QuTuner 
+
+QASM-Bench Small 598.5 s 196.7 s 18.6 s 1.1 s 1.4 s 27.9 s Medium 1,652.6 s 292.2 s 8.2 s 1.1 s 1.3 s 95.5 s Large 1,837.1 s 808.3 s 54.5 s 1.2 s 1.0 s 331.7 s VeriQ-Bench Variational 1,109.7 s 379.2 s 3.4 s 1.1 s 1.1 s 53.4 s Combinational 1,665.6 s 535.3 s 6.9 s 1.2 s 1.1 s 75.7 s Average 1,372.5 s 442.3 s 18.3 s 1.1 s 1.2 s 116.8 s reduction by 84.85%, the 1Q-gate reduction by 12.67%, and the depth reduction by 24.30%. QuTuner also consistently surpasses the other four baselines. In Fig. 7, we further report the distribution of the per-case optimization effectiveness relative to Qiskit O3. Compared with the GA, BO, and RL baselines, QuTuner has fewer cases below O3 and shows smaller degradation when underper-forming. It also produces more cases that outperform O3, with larger metric reductions than all five baselines, indi-cating that QuTuner more effectively identifies beneficial pass sequences. For RL, GPT, and QWen, many cases con-centrate at 0% because their generated pass sequences often 
+
+fail to compile , whose reductions are set to 0% as described in Sec. 5.1. For time efficiency, we report online inference and tuning time only. As shown in Table 3, QuTuner requires an average of 116.8 seconds, reducing the time cost by 73.59% compared to BO. Although QuTuner is slower than RL (18.3 seconds on average) and LLM-based methods (less than 2 seconds), it achieves significantly better reductions across all three metrics. Further analysis shows that 11.67% of the 180 cases (21 cases) trigger the fallback mechanism because all candidate pass sequences produced by the two-stage selection models are invalid. This indicates that the two-stage selection models 0%       
+
+> 50%
+> 100%
+> 2Q
+> 1Q
+> Depth
+> 2Q
+> 1Q
+> Depth
+> 2Q
+> 1Q
+> Depth
+> 2Q
+> 1Q
+> Depth
+> 2Q
+> 1Q
+> Depth
+> 2Q
+> 1Q
+> Depth
+> Small Medium Large Variational Combinational
+> QASMBench VeriQBench Average
+> Reduction Over -O3
+
+Benchmarks   
+
+> 32.7%
+> 27.6%
+> 25.3%  71.5%
+> 70.6%
+> 61.9%
+> 56.1%
+> 53.3%
+> 52.1%
+> Y
+> X
+> FakeBrooklynV2 FakeWashington V2 Fake Fez
+
+Figure 8. Scalability analysis across different quantum back-ends. can identify valid pass sequences for most cases, while the fallback mechanism remains necessary for robustness. 
+
+5.3 Scalability Analysis of QuTuner (RQ.2) 
+
+As introduced in Sec. 4.1.5, our optimization dataset is con-structed on the 127-qubit FakeWashingtonV2 backend and used for pass retrieval in QuTuner . To evaluate scalability, we further test QuTuner on two backends: FakeBrooklynV2 (65 qubits) and FakeFez (156 qubits), using benchmark cir-cuits in Table 1 with no more than 65 qubits for consistency. As shown in Fig. 8, QuTuner achieves better reductions on the FakeBrooklynV2 backend than on FakeWashingtonV2 across all three metrics. On the FakeFez backend, the reduc-tion effectiveness decreases, but the gaps remain small, with only a 2.37% gap on 2Q gates, the most weighted metric. This suggests that QuTuner remains effective across different backend sizes, although its effectiveness slightly decreases on larger backends. A possible reason is that larger backends introduce a larger layout and routing search space, mak-ing pass sequences learned from one backend slightly less transferable. Nevertheless, fake backends with more than 127 qubits are limited in practice. Among all 67 IBM fake backends, only Ming Zhong, Xiangyu Ren, Jinglei Cheng, Shaohua Li, and Zhiding Liang 
+
+Table 4. Input-feature ablation study measured by validation loss during training. Lower is better. 
+
+Model MSE Model Cross-Entropy 
+
+Pruning Model 7.5x 10 −3 Ranker Model 1.5606 
+
+-W/O DAG Node 11.5x 10 −3 -W/O Static Feature 1.7881 -W/O Structure 8.0x 10 −3
+
+-W/O Scale 7.7x 10 −3 -W/O Pass Embedding 1.9414 -W/O Interaction Graph 8.5x 10 −30%          
+
+> 50%
+> 100%
+> 2Q
+> 1Q
+> Depth
+> 2Q
+> 1Q
+> Depth
+> 2Q
+> 1Q
+> Depth
+> 2Q
+> 1Q
+> Depth
+> 2Q
+> 1Q
+> Depth
+> 2Q
+> 1Q
+> Depth
+> Small Medium Large Variational Combinational
+> QASMBench VeriQBench Average
+> -W/O Pruning Model -W/O Ranker Model -W/O BO QTuner
+> Reduction Over -O3
+> Benchmarks
+> 69.2%
+> 64.3%
+> 52.2%
+> 42.8%
+> 28.4%
+> 16.0%
+> 16.7%
+> 19.5%
+> 65.4%
+> 59.0%
+> 44.6%
+> 43.7%
+> Y
+> X
+> Qu Tuner
+
+Figure 9. Ablation study of the QuTuner workflow. six have 156 qubits and one has 133 qubits, while the rest 61 have no more than 127 qubits [ 24 ]. Therefore, the small per-formance gaps across backend sizes indicate that QuTuner 
+
+has good scalability for most available fake backends. 
+
+5.4 Ablation Study (RQ.3) 
+
+The ablation study aims to validate the design of QuTuner 
+
+from two aspects: (1) input feature selection, (2) the workflow including the two models and lightweight BO refinement. 
+
+5.4.1 Input Feature. As shown in Table 4, we perform feature ablation by removing each of the four circuit feature types for the pruning model, and circuit features and pass embeddings separately for the ranker model. Results on the validation set show that removing any feature degrades per-formance, indicating that all features contribute positively. Therefore, all features are retained in the final design. 
+
+5.4.2 Overall Workflow. We conduct ablation studies by separately removing each component of QuTuner : the pruning model, the ranker model, and lightweight BO. To keep the pipeline functional after removing each compo-nent, we replace the pruning model with circuit-feature-similarity-based retrieval, order candidates by retrieval sim-ilarity when removing the ranker, and directly output the first valid ranked sequence when removing lightweight BO. In all settings, O3 is used as the fallback if all candidates fail. As shown in Fig. 9, removing any component degrades performance, with 2Q gate reduction dropping by 8.86% – 12.38% in terms of absolute value, which demonstrates the necessity of all components. 
+
+5.5 Sensitivity Analysis (RQ.4) 
+
+We conduct all sensitivity analyses in the following subsec-tions using all 20 cases from QASMBench/Medium .10%                        
+
+> 40%
+> 70%
+> 10%
+> 40%
+> 70%
+> Top-K
+> 510 15 20
+> Reduc. Over -O3  1Q Gates Depth 2Q Gates
+> 10%
+> 40%
+> 70%
+> BO Initial
+> 510 15 20
+> BO Iteration, Early Stopping
+> 10, 2 20, 5 30, 7 40, 10
+> Y
+> X
+> 1Q Gates Depth 2Q Gates
+> Y
+> X
+> 1Q Gates Depth 2Q Gates
+> Y
+> X
+> Reduc. Over -O3
+> Reduc. Over -O3
+
+Figure 10. Hyperparameter analysis of QuTuner .10% 
+
+> 30%
+> 50%
+> 70%
+
+Dataset Size (Random Sampling Ratio)      
+
+> 20% 40% 60% 80% 100%
+> Reduc. Over -O3  1Q Gates 2Q Gates Y
+> X
+> Circuit Depth
+
+Figure 11. Dataset size sampling analysis of QuTuner .
+
+5.5.1 Hyperparameter. The sensitivity evaluation results of the three key hyperparameters are shown in Fig. 10. For Top-𝑘 , the default value is 10. Reducing 𝑘 to 5 achieves comparable performance on 2Q gates and depth, with only a slight decrease on 1Q gates. Increasing 𝑘 to 15 or 20 leads to minor degradation, because QuTuner uses the first valid ranked sequence as the initial seed for lightweight BO and falls back to the default O3 sequence if all candidates fail (Sec. 4.2). A larger 𝑘 may introduce lower-quality candidates, increasing the risk of suboptimal BO initialization. Overall, the small performance variation indicates that QuTuner is not highly sensitive to 𝑘 .For BO initial samples , increasing the number of initial samples slightly improves the reduction of all metrics due to a larger search space, but also increases time cost. We therefore choose 10 as a balance between efficiency and performance. For BO iterations , we vary the iteration count in steps of 10 and adjust early stopping accordingly. Reduction improves from (iteration=10, early stopping=2) to (20, 5), but shows no significant gain beyond (30, 7) or (40, 10). This indicates that 
+
+QuTuner already provides strong initialization, allowing BO to converge within a small number of iterations. Thus, we select 20 iterations with early stopping at 5 as a good trade-off. 
+
+5.5.2 Dataset Size. We further evaluate the sensitivity of 
+
+QuTuner to the optimization dataset size by randomly sam-pling 20%, 40%, 60%, 80%, and 100% of the dataset. As shown in Fig. 11, the 2Q gate reduction improves noticeably from 20% to 40%, while the gains become marginal beyond 40%. This indicates that QuTuner becomes stable once the dataset reaches 40%, as this subset already covers representative op-timized pass sequences for diverse quantum circuits. 
+
+5.6 Adaptability of QuTuner (RQ.5) 5.6.1 Adaptation to a Different Quantum Compiler. 
+
+We conduct an adaptability experiment on the PyTKET com-piler V2.13.0. We include all 22 PyTKET optimization passes [ 52 ]as the tuning search space and use its highest optimization QuTuner : Feature- and Learning-Guided Optimization Pass Tuning for Quantum Compilers 0%            
+
+> 50%
+> 100%
+> 2Q
+> 1Q
+> Depth
+> 2Q
+> 1Q
+> Depth
+> 2Q
+> 1Q
+> Depth
+> 2Q
+> 1Q
+> Depth
+> 2Q
+> 1Q
+> Depth
+> 2Q
+> 1Q
+> Depth
+> Small Medium Large Variational Combinational
+> QASMBench VeriQBench Average
+> Reduc tion Over -O2
+> Benchmarks
+> 46.0%
+> Y
+> X
+> BO: Avg Time Cost --664.29 s QuT uner: Avg Time Cost --235.92 s
+> 39.1%
+> 59.9%
+> 50.5%
+> 13.8%
+> 13.5%
+
+Figure 12. Comparison between QuTuner and BO in PyTKET V2.13.0 over its highest optimization level O2. 2Q         
+
+> 1Q
+> Depth
+> Est. Fid.
+> 2Q
+> 1Q
+> Depth
+> Est. Fid.
+> 2Q
+> 1Q
+> Depth
+> Est. Fid.
+> 2Q
+> 1Q
+> Depth
+> Est. Fid.
+> 2Q
+> 1Q
+> Depth
+> Est. Fid.
+> 2Q
+> 1Q
+> Depth
+> Est. Fid.
+> Small Medium Large Variational Combinational
+> QASMBench VeriQBench Average
+> Reduc tion Over -O3
+> Benchmarks
+> 52.2% Estimated Fidelity Circuit-Level Metrics (Eq.(1))
+> 30.9%
+> 28.4%
+> 19.4%
+> 69.2%
+> 55.6% 100%
+> 0%
+> 50%
+> 0.122
+> 0.144  0.5
+> 1.0
+> Est. Fid.
+> 0.0
+
+Figure 13. Comparison of estimated fidelity (EF) and circuit-level metrics (Eq. (1)) as tuning objectives. level O2 as the reduction baseline. We still use IBM FakeWash-ingtonV2 as the target backend for both dataset construction and evaluation, accessed through the IBMQBackend interface in pytket-qiskit v0.77.0. We continue to use QCircuitBench to construct the PyTKET-specific optimization dataset, and apply the long-term BO optimization with the same BO settings as in Sec. 4.1.5. We then profile PyTKET-specific pass embeddings, and train the pruning and ranker models from scratch following the same workflow as in the Qiskit compiler. For evaluation, we compare QuTuner with BO, the strongest baseline in Sec. 5.2, using the same settings as in Table 2. In Fig. 12, QuTuner achieves better reduction effectiveness, reducing 2Q gates by 18.68% over BO on average, while reducing tuning time by 64.49%. Notably, PyTKET shows larger 2Q gate reductions but smaller 1Q gate reductions than Qiskit. This may be because PyTKET’s default O2 op-timization already performs strong 1Q gate simplification, whereas 2Q gates still benefit from pass tuning. 
+
+5.6.2 Adaptation to a Different Tuning Objective. As discussed in Sec. 3.2.1, our main experiments use circuit-level metrics as the tuning objective. Here, we further adapt 
+
+QuTuner to an estimated-fidelity-oriented objective. Follow-ing prior work [ 20 , 54 ], estimated fidelity (EF) is computed as the product of the expected fidelities of all gates on the tar-get backend. Specifically, we still use the FakeWashingtonV2 backend and reconstruct the optimization dataset using EF as the objective, while keeping the BO settings consistent with Sec. 4.1.5. During pass profiling, we represent the pass-induced relative change as ΔEF , retrain two models, and use EF as the objective for lightweight BO refinement. In Fig. 13, we compare the two objectives using circuit-level reductions and average EF. We report EF as an absolute value because complex circuits often have very low EF (e.g., 0.001), where small absolute gains may lead to overly large relative improvements. The results show that the circuit-level objective achieves larger reductions in gate counts and depth, while the EF objective achieves higher average EF by explicitly targeting gates with higher backend-specific error rates. Meanwhile, the circuit-level objective achieves an aver-age EF only 0.022 lower in absolute value, indicating that reducing overall gate counts can also effectively improve EF. These results show that QuTuner can be adapted to different optimization objectives by rerunning the workflow with the corresponding objective. 
+
+5.7 Limitations 
+
+One limitation of QuTuner is that its offline stage must be reconstructed when adapting to a new compiler or tuning objective. However, this process is performed only once of-fline, and the resulting dataset and models can be reused for future circuits. Compared with per-circuit exhaustive tuning, 
+
+QuTuner still substantially reduces online tuning cost by retrieving and refining promising pass sequences. 
+
+## 6 Related Work 
+
+Compiler Auto-tuning. Traditional compiler auto-tuning has explored heuristic search, including BO and GA [ 6, 16 ,21 , 48 , 69 , 70 ], RL-based pass selection [ 9 , 13 , 23 , 29 , 41 , 49 ], similarity-based retrieval [ 33 , 60 ], and LLM-guided optimiza-tion [ 12 , 46 , 47 , 51 ]. Quantum compiler tuning also adopts heuristic and RL-based methods [ 14 , 20 , 36 , 40 , 53 , 54 ], but existing studies tune only limited optimization pass subsets. 
+
+QuTuner instead tunes the full Qiskit optimization-pass space with a similarity-based design. 
+
+Quantum Software Engineering . Recent advances in quan-tum computing have led to increasing interest in quantum software engineering [ 42 ], encompassing areas such as quan-tum compiler tuning [ 14 , 36 , 40 , 53 ], execution performance and time prediction [ 38 , 62 ], testing [ 37 , 63 – 65 ], program repair [57], and quantum code generation [3, 4, 17, 61]. 
+
+## 7 Threats to Validity 
+
+Internal Validity. A primary threat to internal validity lies in baseline construction. Existing quantum compiler tun-ing studies do not target the full optimization pass space considered in this work, and some key implementation hy-perparameters are not available. Therefore, we re-implement the baselines based on their core designs, which may intro-duce deviations from the original methods. To mitigate this threat, we preserve their main optimization strategies and adopt commonly used hyperparameter settings when details are missing. Another threat lies in the LLM variance, which is Ming Zhong, Xiangyu Ren, Jinglei Cheng, Shaohua Li, and Zhiding Liang 
+
+reduced by setting temperature to 0.0 and seed to 42. Finally, our weighted objective may favor 2Q gates optimization, but aligns with prior work emphasizing its importance [40, 66]. 
+
+External Validity. Our evaluation focuses on Qiskit, PyTKET, and IBM fake backends with heavy-hex architectures. There-fore, the results may not fully generalize to other SDKs and hardware topologies. Since our evaluation metrics focus on circuit structural properties, the results are expected to re-main comparable as long as the simulator and real quantum machine share the same gate set and coupling topology. 
+
+## 8 Conclusion 
+
+In this paper, we present QuTuner , a feature-guided AI-driven framework for tuning quantum compiler optimization passes over the full pass space. QuTuner constructs a large-scale optimization dataset, represents circuits with static fea-tures and optimization-aware pass embeddings, and uses two models to retrieve and rank promising pass sequences, fol-lowed by lightweight BO refinement. Experiments on Qiskit and PyTKET show that QuTuner improves circuit optimiza-tion effectiveness while reducing online tuning cost. 
+
+## References 
+
+[1] Eigen AI. 2026. High - Performance AI for Enterprises. https://www. eigenai.com/ .[2] Amir H. Ashouri, Andrea Bignoli, Gianluca Palermo, Cristina Silvano, Sameer Kulkarni, and John Cavazos. 2017. MiCOMP: Mitigating the Compiler Phase-Ordering Problem Using Optimization Sub-Sequences and Machine Learning. ACM Trans. Archit. Code Optim. 14, 3, Article 29 (Sept. 2017), 28 pages. doi: 10.1145/3124452 
+
+[3] Abdul Basit, Minghao Shao, Muhammad Haider Asif, Nouhaila Innan, Muhammad Kashif, Alberto Marchisio, and Muhammad Shafique. 2025. PennyCoder: Efficient Domain-Specific LLMs for PennyLane-Based Quantum Code Generation. In 2025 IEEE International Conference on Quantum Computing and Engineering (QCE) . IEEE, Albuquerque, New Mexico, USA, 229–234. doi: 10.1109/qce65121.2025.10324 
+
+[4] Charlie Campbell, Hao (Mark) Chen, Wayne Luk, and Hongxiang Fan. 2025. Enhancing LLM-Based Quantum Code Generation with Multi-Agent Optimization and Quantum Error Correction. In Proceedings of the 62nd Annual ACM/IEEE Design Automation Conference (DAC ’25) . IEEE Press, San Francisco, California, United States, Article 414, 7 pages. doi: 10.1109/DAC63849.2025.11133316 
+
+[5] Yudong Cao, Jonathan Romero, Jonathan P. Olson, Matthias De-groote, Peter D. Johnson, Mária Kieferová, Ian D. Kivlichan, Tim Menke, Borja Peropadre, Nicolas P. D. Sawaya, Sukin Sim, Libor Veis, and Alán Aspuru-Guzik. 2019. Quantum Chemistry in the Age of Quantum Computing. Chemical Reviews 119, 19 (2019), 10856– 10915. arXiv:https://doi.org/10.1021/acs.chemrev.8b00803 doi: 10.1021/ acs.chemrev.8b00803 PMID: 31469277. [6] Junjie Chen, Ningxin Xu, Peiqi Chen, and Hongyu Zhang. 2021. Effi-cient Compiler Autotuning via Bayesian Optimization. In Proceedings of the 43rd International Conference on Software Engineering (Madrid, Spain) (ICSE ’21) . IEEE Press, 1198–1209. doi: 10.1109/ICSE43902.2021. 00110 
+
+[7] Kean Chen, Wang Fang, Ji Guan, Xin Hong, Mingyu Huang, Junyi Liu, Qisheng Wang, and Mingsheng Ying. 2022. VeriQBench: A Benchmark for Multiple Types of Quantum Circuits. arXiv:2206.10880 [quant-ph] 
+
+https://arxiv.org/abs/2206.10880 
+
+[8] Yihan Chen, Huanhuan Chen, Yuan Yao, Ping Yu, Feng Xu, and Xi-aoxing Ma. 2025. Exploiting Booster Pass Chain for Compiler Phase Ordering. In Proceedings of the 16th International Conference on In-ternetware (Internetware ’25) . Association for Computing Machinery, New York, NY, USA, 175–185. doi: 10.1145/3755881.3755899 
+
+[9] Katherine E. Coons, Behnam Robatmili, Matthew E. Taylor, Bertrand A. Maher, Doug Burger, and Kathryn S. McKinley. 2008. Feature selection and policy optimization for distributed instruction placement using reinforcement learning. In Proceedings of the 17th International Con-ference on Parallel Architectures and Compilation Techniques (Toronto, Ontario, Canada) (PACT ’08) . Association for Computing Machinery, New York, NY, USA, 32–42. doi: 10.1145/1454115.1454122 
+
+[10] Keith D. Cooper, Philip J. Schielke, and Devika Subramanian. 1999. Optimizing for Reduced Code Space Using Genetic Algorithms. In 
+
+Proceedings of the ACM SIGPLAN 1999 Workshop on Languages, Com-pilers, and Tools for Embedded Systems (Atlanta, Georgia, USA) (LCTES ’99) . Association for Computing Machinery, New York, NY, USA, 1–9. doi: 10.1145/314403.314414 
+
+[11] Andrew W. Cross, Lev S. Bishop, John A. Smolin, and Jay M. Gambetta. 2017. Open Quantum Assembly Language. arXiv:1707.03429 [quant-ph] https://arxiv.org/abs/1707.03429 
+
+[12] Chris Cummins, Volker Seeker, Dejan Grubisic, Baptiste Roziere, Jonas Gehring, Gabriel Synnaeve, and Hugh Leather. 2025. LLM Compiler: Foundation Language Models for Compiler Optimiza-tion. In Proceedings of the 34th ACM SIGPLAN International Confer-ence on Compiler Construction (Las Vegas, NV, USA) (CC ’25) . As-sociation for Computing Machinery, New York, NY, USA, 141–153. doi: 10.1145/3708493.3712691 
+
+[13] Chris Cummins, Bram Wasti, Jiadong Guo, Brandon Cui, Jason Ansel, Sahir Gomez, Somya Jain, Jia Liu, Olivier Teytaud, Benoit Steiner, Yuan-dong Tian, and Hugh Leather. 2022. CompilerGym: robust, performant compiler optimization environments for AI research. In Proceedings of the 20th IEEE/ACM International Symposium on Code Generation and Optimization (Virtual Event, Republic of Korea) (CGO ’22) . IEEE Press, 92–105. doi: 10.1109/CGO53902.2022.9741258 
+
+[14] Siddharth Dangwal, Gokul Subramanian Ravi, Lennart Maximilian Seifert, Poulami Das, James Sud, and Frederic T. Chong. 2025. Clif-ford Assisted Optimal Pass Selection for Quantum Transpilation. arXiv:2306.15020 [quant-ph] https://arxiv.org/abs/2306.15020 
+
+[15] Daniel J. Egger, Claudio Gambella, Jakub Marecek, Scott McFaddin, Martin Mevissen, Rudy Raymond, Andrea Simonetto, Stefan Woerner, and Elena Yndurain. 2020. Quantum Computing for Finance: State-of-the-Art and Future Prospects. IEEE Transactions on Quantum Engi-neering 1 (2020), 1–24. doi: 10.1109/TQE.2020.3030314 
+
+[16] Unai Garciarena and Roberto Santana. 2016. Evolutionary Optimiza-tion of Compiler Flag Selection by Learning and Exploiting Flags Interactions. In Proceedings of the 2016 on Genetic and Evolutionary Computation Conference Companion (Denver, Colorado, USA) (GECCO ’16 Companion) . Association for Computing Machinery, New York, NY, USA, 1159–1166. doi: 10.1145/2908961.2931696 
+
+[17] Xiaoyu Guo, Minggu Wang, and Jianjun Zhao. 2025. QuanBench: Benchmarking Quantum Code Generation with Large Language Mod-els. In 2025 40th IEEE/ACM International Conference on Automated Software Engineering (ASE) . IEEE Press, Seoul, South Korea. [18] Ruobing Han and Hyesoon Kim. 2024. Exponentially Expanding the Phase-Ordering Search Space via Dormant Information. In Pro-ceedings of the 33rd ACM SIGPLAN International Conference on Com-piler Construction (Edinburgh, United Kingdom) (CC 2024) . Asso-ciation for Computing Machinery, New York, NY, USA, 250–261. doi: 10.1145/3640537.3641582 
+
+[19] Aram W. Harrow, Avinatan Hassidim, and Seth Lloyd. 2009. Quantum Algorithm for Linear Systems of Equations. Phys. Rev. Lett. 103 (Oct 2009), 150502. Issue 15. doi: 10.1103/PhysRevLett.103.150502 QuTuner : Feature- and Learning-Guided Optimization Pass Tuning for Quantum Compilers 
+
+[20] Mohammad Abrarul Hasanat, Ludmir Jason, Patel Tirthak, and Ro-han Basu Roy. 2026. TuniQ: Autotuning Compilation Passes for Quan-tum Workloads at Scale for Effectiveness and Efficiency. In Proceedings of the 39th ACM International Conference on Supercomputing (Belfast, Northern Ireland) (ICS ’26) . Association for Computing Machinery, New York, NY, USA. [21] Kenneth Hoste and Lieven Eeckhout. 2008. Cole: compiler optimiza-tion level exploration. In Proceedings of the 6th Annual IEEE/ACM In-ternational Symposium on Code Generation and Optimization (Boston, MA, USA) (CGO ’08) . Association for Computing Machinery, New York, NY, USA, 165–174. doi: 10.1145/1356058.1356080 
+
+[22] Fei Hua, Yuwei Jin, Yanhao Chen, Suhas Vittal, Kevin Krsulich, Lev S. Bishop, John Lapeyre, Ali Javadi-Abhari, and Eddy Z. Zhang. 2023. CaQR: A Compiler-Assisted Approach for Qubit Reuse through Dy-namic Circuit. In Proceedings of the 28th ACM International Confer-ence on Architectural Support for Programming Languages and Op-erating Systems, Volume 3 (Vancouver, BC, Canada) (ASPLOS 2023) .Association for Computing Machinery, New York, NY, USA, 59–71. doi: 10.1145/3582016.3582030 
+
+[23] Qijing Huang, Ameer Haj-Ali, William Moses, John Xiang, Ion Stoica, Krste Asanovic, and John Wawrzynek. 2019. AutoPhase: Compiler Phase-Ordering for HLS with Deep Reinforcement Learning. In 2019 IEEE 27th Annual International Symposium on Field-Programmable Custom Computing Machines (FCCM) . 308–308. doi: 10.1109/FCCM. 2019.00049 
+
+[24] IBM. 2026. Fake Provider. https://quantum.cloud.ibm.com/docs/en/ api/qiskit-ibm-runtime/fake-provider .[25] IBM. 2026. FakeWashingtonV2 Backend. https://quantum.cloud. ibm.com/docs/en/api/qiskit-ibm-runtime/fake-provider-fake-washington-v2 .[26] IBM. 2026. Introduction to Qiskit and IBM Quantum. https://quantum. cloud.ibm.com/docs/en/guides .[27] IBM. 2026. Optimization Passes in Qiskit Transpiler. https://quantum. cloud.ibm.com/docs/en/api/qiskit/2.2/transpiler_passes .[28] IBM. 2026. RemoveBarriers Pass. https://quantum.cloud.ibm.com/ docs/en/api/qiskit/2.2/qiskit.transpiler.passes.RemoveBarriers .[29] Sameer Kulkarni and John Cavazos. 2012. Mitigating the compiler optimization phase-ordering problem using machine learning. In Pro-ceedings of the ACM International Conference on Object Oriented Pro-gramming Systems Languages and Applications (Tucson, Arizona, USA) 
+
+(OOPSLA ’12) . Association for Computing Machinery, New York, NY, USA, 147–162. doi: 10.1145/2384616.2384628 
+
+[30] Antonis Kyprianidis, A J Rasmusson, and Philip Richerme. 2024. Interaction graph engineering in trapped-ion quantum simulators with global drives. New Journal of Physics 26, 2 (feb 2024), 023033. doi: 10.1088/1367-2630/ad264d 
+
+[31] Ang Li, Samuel Stein, Sriram Krishnamoorthy, and James Ang. 2023. QASMBench: A Low-Level Quantum Benchmark Suite for NISQ Eval-uation and Simulation. ACM Transactions on Quantum Computing 4, 2, Article 10 (Feb. 2023), 26 pages. doi: 10.1145/3550488 
+
+[32] Gushu Li, Yufei Ding, and Yuan Xie. 2019. Tackling the Qubit Map-ping Problem for NISQ-Era Quantum Devices. In Proceedings of the Twenty-Fourth International Conference on Architectural Support for Programming Languages and Operating Systems (Providence, RI, USA) 
+
+(ASPLOS ’19) . ACM, NY, USA, 1001–1014. [33] Lingda Li, Thomas Flynn, and Adolfy Hoisie. 2024. Learning Gener-alizable Program and Architecture Representations for Performance Modeling. In Proceedings of the International Conference for High Per-formance Computing, Networking, Storage, and Analysis (Atlanta, GA, USA) (SC ’24) . IEEE Press, Article 66, 15 pages. doi: 10.1109/SC41406. 2024.00072 
+
+[34] Zhiding Liang, Zhixin Song, Jinglei Cheng, Hang Ren, Tianyi Hao, Rui Yang, Yiyu Shi, and Tongyang Li. 2024. Combining Parameterized Pulses and Contextual Subspace for More Practical VQE. In Proceedings of the 61st ACM/IEEE Design Automation Conference . 1–6. [35] Wan-Hsuan Lin, Daniel Bochen Tan, and Jason Cong. 2025. Reuse-Aware Compilation for Zoned Quantum Architectures Based on Neu-tral Atoms. In 2025 IEEE International Symposium on High Performance Computer Architecture (HPCA) . 127–142. doi: 10.1109/HPCA61900.2025. 00021 
+
+[36] Yi Liu, Yuqiong Jin, and Jinchen Xu. 2025. A Portable Auto-Tuning Framework for Quantum Compilation Optimization Based on D3QN. In Proceedings of the 2025 6th International Conference on Computer Information and Big Data Applications (CIBDA ’25) . Association for Computing Machinery, New York, NY, USA, 1422–1428. doi: 10.1145/ 3746709.3746950 
+
+[37] Peixun Long and Jianjun Zhao. 2024. Testing Multi-Subroutine Quan-tum Programs: From Unit Testing to Integration Testing. ACM Trans. Softw. Eng. Methodol. 33, 6, Article 147 (June 2024), 61 pages. doi: 10.1145/3656339 
+
+[38] Ning Ma and Heng Li. 2025. Understanding and Estimating the Exe-cution Time of Quantum Circuits. ACM Trans. Softw. Eng. Methodol. 
+
+(Nov. 2025). doi: 10.1145/3778031 Just Accepted. [39] Meta. 2026. Faiss Documentation. https://faiss.ai/index.html .[40] Daniel Mills, Ifan Williams, Jacob Swain, Gabriel Matos, Enrico Ri-naldi, and Alexander Koziell-Pipe. 2026. Reinforcement Learning for Adaptive Composition of Quantum Circuit Optimisation Passes. arXiv:2601.21629 [quant-ph] https://arxiv.org/abs/2601.21629 
+
+[41] Azalia Mirhoseini, Hieu Pham, Quoc V. Le, Benoit Steiner, Rasmus Larsen, Yuefeng Zhou, Naveen Kumar, Mohammad Norouzi, Samy Bengio, and Jeff Dean. 2017. Device placement optimization with rein-forcement learning. In Proceedings of the 34th International Conference on Machine Learning - Volume 70 (Sydney, NSW, Australia) (ICML’17) .JMLR.org, 2430–2439. [42] Juan Manuel Murillo, Jose Garcia-Alonso, Enrique Moguel, Johanna Barzen, Frank Leymann, Shaukat Ali, Tao Yue, Paolo Arcaini, Ricardo Pérez-Castillo, Ignacio García-Rodríguez de Guzmán, Mario Piattini, Antonio Ruiz-Cortés, Antonio Brogi, Jianjun Zhao, Andriy Miranskyy, and Manuel Wimmer. 2025. Quantum Software Engineering: Roadmap and Challenges Ahead. ACM Trans. Softw. Eng. Methodol. 34, 5, Article 154 (May 2025), 48 pages. doi: 10.1145/3712002 
+
+[43] Paul Nation, Abdullah Ash Saki, Sebastian Brandhofer, Luciano Bello, Shelly Garion, Matthew Treinish, and Ali Javadi-Abhari. 2025. Bench-marking the performance of quantum computing software for quan-tum circuit creation, manipulation and compilation. Nature Computa-tional Science 5 (04 2025), 427–435. doi: 10.1038/s43588-025-00792-y 
+
+[44] Siyuan Niu, Adrien Suau, Gabriel Staffelbach, and Aida Todri-Sanial. 2020. A Hardware-Aware Heuristic for the Qubit Mapping Problem in the NISQ Era. IEEE Transactions on Quantum Engineering 1 (2020), 1–14. doi: 10.1109/TQE.2020.3026544 
+
+[45] OpenAI. 2026. GPT-OSS-120B. https://huggingface.co/openai/gpt-oss-120b .[46] Haolin Pan, Lianghong Huang, Jinyuan Dong, Mingjie Xing, and Yanjun Wu. 2026. ECCO: Evidence-Driven Causal Reasoning for Compiler Optimization. arXiv:2602.00087 [cs.LG] https://arxiv.org/ abs/2602.00087 
+
+[47] Haolin Pan, Hongyu Lin, Haoran Luo, Yang Liu, Kaichun Yao, Libo Zhang, Mingjie Xing, and Yanjun Wu. 2025. Compiler-R1: Towards Agentic Compiler Auto-tuning with Reinforcement Learning. In The Thirty-ninth Annual Conference on Neural Information Processing Sys-tems . https://openreview.net/forum?id=tY8ctrD4W2 
+
+[48] Haolin Pan, Yuanyu Wei, Mingjie Xing, Yanjun Wu, and Chen Zhao. 2025. Towards Efficient Compiler Auto-tuning: Leveraging Synergis-tic Search Spaces. In Proceedings of the 23rd ACM/IEEE International Symposium on Code Generation and Optimization (Las Vegas, NV, USA) 
+
+(CGO ’25) . Association for Computing Machinery, New York, NY, USA, 614–627. doi: 10.1145/3696443.3708961 Ming Zhong, Xiangyu Ren, Jinglei Cheng, Shaohua Li, and Zhiding Liang 
+
+[49] Sunghyun Park, Salar Latifi, Yongjun Park, Armand Behroozi, Byung-soo Jeon, and Scott Mahlke. 2022. SRTuner: effective compiler opti-mization customization by exposing synergistic relations. In Proceed-ings of the 20th IEEE/ACM International Symposium on Code Generation and Optimization (Virtual Event, Republic of Korea) (CGO ’22) . IEEE Press, 118–130. doi: 10.1109/CGO53902.2022.9741263 
+
+[50] Alberto Peruzzo, Jarrod McClean, Peter Shadbolt, Man-Hong Yung, Xiao-Qi Zhou, Peter J. Love, Alán Aspuru-Guzik, and Jeremy L. O’Brien. 2014. A Variational Eigenvalue Solver on a Photonic Quantum Processor. Nature Communications 5, 1 (7 2014), 7 pages. doi: 10.1038/ncomms5213 
+
+[51] Lei Qiu, Zi Yang, Fang Lyu, Ming Zhong, Huimin Cui, and Xiaobing Feng. 2026. Beyond Pass-by-Pass Optimization: Intent-Driven IR Optimization with Large Language Models. arXiv:2602.18511 [cs.PL] 
+
+https://arxiv.org/abs/2602.18511 
+
+[52] Quantinuum. 2026. PyTKET API documentation. https://docs. quantinuum.com/tket/api-docs/index.html .[53] Nils Quetschlich, Lukas Burgholzer, and Robert Wille. 2025. Compiler Optimization for Quantum Computing Using Reinforcement Learn-ing. In Proceedings of the 60th Annual ACM/IEEE Design Automation Conference (San Francisco, California, United States) (DAC ’23) . IEEE Press, 1–6. doi: 10.1109/DAC56929.2023.10248002 
+
+[54] Nils Quetschlich, Lukas Burgholzer, and Robert Wille. 2025. MQT Predictor: Automatic Device Selection with Device-Specific Circuit Compilation for Quantum Computing. ACM Transactions on Quantum Computing 6, 1, Article 10 (Jan. 2025), 26 pages. doi: 10.1145/3673241 
+
+[55] QWen. 2026. Qwen3-Coder: Agentic Coding in the World. https: //qwenlm.github.io/blog/qwen3-coder/ .[56] Alexey Svyatkovskiy, Shao Kun Deng, Shengyu Fu, and Neel Sun-daresan. 2020. IntelliCode Compose: Code Generation Using Trans-former. In Proceedings of the 28th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering (Virtual Event, USA) (ESEC/FSE 2020) . Asso-ciation for Computing Machinery, New York, NY, USA, 1433–1443. doi: 10.1145/3368089.3417058 
+
+[57] Siwei Tan, Liqiang Lu, Debin Xiang, Tianyao Chu, Congliang Lang, Jintao Chen, Xing Hu, and Jianwei Yin. 2025. HornBro: Homotopy-Like Method for Automated Quantum Program Repair. Proc. ACM Softw. Eng. 2, FSE, Article FSE034 (June 2025), 23 pages. doi: 10.1145/3715751 
+
+[58] Runzhou Tao, Yunong Shi, Jianan Yao, Xupeng Li, Ali Javadi-Abhari, Andrew W. Cross, Frederic T. Chong, and Ronghui Gu. 2022. Gi-allar: push-button verification for the qiskit Quantum compiler. In 
+
+Proceedings of the 43rd ACM SIGPLAN International Conference on Programming Language Design and Implementation (San Diego, CA, USA) (PLDI 2022) . Association for Computing Machinery, New York, NY, USA, 641–656. doi: 10.1145/3519939.3523431 
+
+[59] Teague Tomesh, Pranav Gokhale, Victory Omole, Gokul Subramanian Ravi, Kaitlin N. Smith, Joshua Viszlai, Xin-Chuan Wu, Nikos Hardavel-las, Margaret R. Martonosi, and Frederic T. Chong. 2022. SupermarQ: A Scalable Quantum Benchmark Suite. In 2022 IEEE International Sym-posium on High-Performance Computer Architecture (HPCA) . 587–603. doi: 10.1109/HPCA53966.2022.00050 
+
+[60] Lukas Trümper, Tal Ben-Nun, Philipp Schaad, Alexandru Calotoiu, and Torsten Hoefler. 2023. Performance Embeddings: A Similarity-Based Transfer Tuning Approach to Performance Optimization. In Pro-ceedings of the 37th ACM International Conference on Supercomputing 
+
+(Orlando, FL, USA) (ICS ’23) . Association for Computing Machinery, New York, NY, USA, 50–62. doi: 10.1145/3577193.3593714 
+
+[61] Sanjay Vishwakarma, Francis Harkins, Siddharth Golecha, Vishal Sharathchandra Bajpe, Nicolas Dupuis, Luca Buratti, David Kremer, Ismael Faro, Ruchir Puri, and Juan Cruz-Benito. 2024. Qiskit HumanEval: An Evaluation Benchmark For Quan-tum Code Generative Models. arXiv:2406.14712 [quant-ph] 
+
+https://arxiv.org/abs/2406.14712 
+
+[62] Hanrui Wang, Zhiding Liang, Jiaqi Gu, Zirui Li, Yongshan Ding, Wei-wen Jiang, Yiyu Shi, David Z. Pan, Frederic T. Chong, and Song Han. 2022. TorchQuantum Case Study for Robust Quantum Circuits. In Pro-ceedings of the 41st IEEE/ACM International Conference on Computer-Aided Design (San Diego, California) (ICCAD ’22) . Association for Computing Machinery, New York, NY, USA, Article 136, 9 pages. doi: 10.1145/3508352.3561118 
+
+[63] Jiyuan Wang, Qian Zhang, Guoqing Harry Xu, and Miryung Kim. 2021. QDiff: Differential Testing of Quantum Software Stacks. In 
+
+2021 36th IEEE/ACM International Conference on Automated Software Engineering (ASE) . IEEE Press, Melbourne, Australia, 692–704. doi: 10. 1109/ASE51524.2021.9678792 
+
+[64] Xinyi Wang, Shaukat Ali, Tao Yue, and Paolo Arcaini. 2024. Quantum Approximate Optimization Algorithm for Test Case Optimization. 
+
+IEEE Transactions on Software Engineering 50, 12 (2024), 3249–3264. doi: 10.1109/TSE.2024.3479421 
+
+[65] Shangzhou Xia, Jianjun Zhao, Fuyuan Zhang, and Xiaoyu Guo. 2025. Quantum Concolic Testing. Proc. ACM Softw. Eng. 2, ISSTA, Article ISSTA051 (June 2025), 21 pages. doi: 10.1145/3728926 
+
+[66] Amanda Xu, Abtin Molavi, Swamit Tannu, and Aws Albarghouthi. 2025. Optimizing Quantum Circuits, Fast and Slow. In Proceedings of the 30th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 1 (Rotterdam, Netherlands) (ASPLOS ’25) . Association for Computing Machinery, New York, NY, USA, 777–793. doi: 10.1145/3669940.3707240 
+
+[67] Rui Yang, Ziruo Wang, Yuntian Gu, Yitao Liang, and Tongyang Li. 2025. QCircuitBench: A Large-Scale Dataset for Benchmarking Quantum Algorithm Design. In The Thirty-ninth Annual Conference on Neural Information Processing Systems Datasets and Benchmarks Track . https: //openreview.net/forum?id=NkiLldW2bi 
+
+[68] Jiayu Zhao, Chunwei Xia, and Zheng Wang. 2025. Leveraging Com-pilation Statistics for Compiler Phase Ordering. In 2025 IEEE Interna-tional Parallel and Distributed Processing Symposium (IPDPS) . 533–545. doi: 10.1109/IPDPS64566.2025.00054 
+
+[69] Mingxuan Zhu, Dan Hao, and Junjie Chen. 2024. Compiler Autotuning through Multiple-phase Learning. ACM Trans. Softw. Eng. Methodol. 
+
+33, 4, Article 100 (April 2024), 38 pages. doi: 10.1145/3640330 
+
+[70] Mingxuan Zhu, Zeyu Sun, and Dan Hao. 2025. PDCAT: Preference-Driven Compiler Auto-tuning. Proc. ACM Softw. Eng. 2, FSE, Article FSE039 (June 2025), 21 pages. doi: 10.1145/3715756
