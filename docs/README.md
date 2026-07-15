@@ -6,97 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-14
-- 运行时间：2026-07-14 20:40:18 UTC
+- 最新运行日期：2026-07-15
+- 运行时间：2026-07-15 20:30:19 UTC
 - 运行状态：成功
-- 本次总论文数：25
-- 精读区：14
+- 本次总论文数：17
+- 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日精选 25 篇前沿成果，深度聚焦硬件感知 NAS 与类脑计算框架的最新突破。
-重点推荐高保真低成本的延迟预测器 HiFi-LLP，以及助力混合信号脉冲神经网络设计的开源探索框架。
-建议关注 MoE 推理优化与触觉感知系统的跨界结合，把握软硬协同设计的能效新趋势。
-- 详情：[/202607/14/README](/202607/14/README)
+今日深度研读 17 篇 AI 架构与系统论文，重点攻克 Transformer 稀疏推理与边缘协同学习难题。
+满分论文提出的 N:M 稀疏搜索-内核协同设计，为大模型在边缘设备上的极速推理提供了全新范式。
+建议优先关注软硬件协同优化趋势，探索如何将高效稀疏化技术引入低延迟实时交互场景。
+- 详情：[/202607/15/README](/202607/15/README)
 
 ### 精读区论文标签
-1. [HiFi-LLP: High-Fidelity, Low-Cost Latency Predictors with Confidence for Robust HW-NAS](/202607/14/2607.11746v1-hifi-llp-high-fidelity-low-cost-latency-predictors-with-confidence-for-robust-hw-nas)  
+1. [Realizable N:M Sparse Transformer Inference via Search-Kernel Co-Design](/202607/15/2607.12505v1-realizable-nm-sparse-transformer-inference-via-search-kernel-co-design)  
    标签：评分：10.0/10、query:hwnas
-   evidence：用于鲁棒硬件感知神经架构搜索的高保真延迟预测器
-2. [A Hardware-Aware Open-Source Framework for Design Space Exploration of Mixed-Signal Spiking Neural Networks](/202607/14/2607.06456v2-a-hardware-aware-open-source-framework-for-design-space-exploration-of-mixed-signal-spiking-neural-networks)  
+   evidence：针对稀疏Transformer推理的软硬件协同设计
+2. [Collate: Collaborative Neural Network Learning for Latency-Critical Edge Systems](/202607/15/2607.08013v1-collate-collaborative-neural-network-learning-for-latency-critical-edge-systems)  
    标签：评分：9.0/10、query:hwnas
-   evidence：用于混合信号SNN设计空间探索的硬件感知仿真框架
-3. [Agentic Neural Architecture Search](/202607/14/2607.07984v1-agentic-neural-architecture-search)  
+   evidence：针对延迟敏感边缘系统的异构模型协作学习
+3. [Low-Power License Plate Detection and Recognition on a RISC-V Multi-Core MCU-Based Vision System](/202607/15/2607.09768v1-low-power-license-plate-detection-and-recognition-on-a-risc-v-multi-core-mcu-based-vision-system)  
    标签：评分：9.0/10、query:hwnas
-   evidence：LLM驱动的NAS自动化搜索空间定义
-4. [EvoLP: Self-Evolving Latency Predictor for Model Compression in Real-Time Edge Systems](/202607/14/2607.09063v1-evolp-self-evolving-latency-predictor-for-model-compression-in-real-time-edge-systems)  
+   evidence：基于低功耗MCU的边缘设备视觉任务
+4. [Improving Autonomous Nano-drones Performance via Automated End-to-End Optimization and Deployment of DNNs](/202607/15/2607.12593v1-improving-autonomous-nano-drones-performance-via-automated-end-to-end-optimization-and-deployment-of-dnns)  
    标签：评分：9.0/10、query:hwnas
-   evidence：实时边缘系统中用于模型压缩的延迟预测器
-5. [DynaFilter: Cloud-driven Dynamic Filtering for Satellite Edge Intelligence](/202607/14/2607.10098v1-dynafilter-cloud-driven-dynamic-filtering-for-satellite-edge-intelligence)  
+   evidence：在超低功耗并行处理器上自动进行DNN端到端优化与部署
+5. [HeteroMosaic: Exposing and Exploiting Heterogeneous Execution Opportunities for Energy-Efficient Edge LLM Inference](/202607/15/2607.12839v1-heteromosaic-exposing-and-exploiting-heterogeneous-execution-opportunities-for-energy-efficient-edge-llm-inference)  
    标签：评分：9.0/10、query:hwnas
-   evidence：卫星边缘智能与遥感的动态过滤技术
-6. [Adaptive Model Compression (AMC): Saliency-Driven Resource Allocation for Ultra-Low-Power Transformer Inference](/202607/14/2607.10109v1-adaptive-model-compression-amc-saliency-driven-resource-allocation-for-ultra-low-power-transformer-inference)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：动态硬件资源分配以降低能耗
-7. [Automated Tensor Scheduling for Hybrid CPU-GPU LLM Inference on Consumer Devices](/202607/14/2607.10183v1-automated-tensor-scheduling-for-hybrid-cpu-gpu-llm-inference-on-consumer-devices)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：通过自动化张量调度实现LLM推理的软硬协同设计
-8. [FlashAccel: Leveraging High-Bandwidth Flash for High-Throughput LLM Inference](/202607/14/2607.10186v1-flashaccel-leveraging-high-bandwidth-flash-for-high-throughput-llm-inference)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对大模型推理的闪存硬件与软件协同设计
-9. [NanoVSR: Towards Real-Time Video Super-Resolution on Edge Devices](/202607/14/2607.10495v1-nanovsr-towards-real-time-video-super-resolution-on-edge-devices)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对边缘设备和硬件加速器的高效架构
-10. [ARMOR-IMC: Adaptive Resource Mapping for Operational Robustness via Secure In-Memory Computing](/202607/14/2607.10938v1-armor-imc-adaptive-resource-mapping-for-operational-robustness-via-secure-in-memory-computing)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：安全内存计算的硬件和软件协同设计
-11. [Edge Physical AI Deployment of Vision Transformers on Heterogeneous Edge GPU Targeting Autonomous Vehicles](/202607/14/2607.10942v1-edge-physical-ai-deployment-of-vision-transformers-on-heterogeneous-edge-gpu-targeting-autonomous-vehicles)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：硬件感知调度以提高边缘GPU的利用率和每瓦吞吐量
-12. [GPU-Tile-Sim: A Tile-Centric GPU Simulation Framework for LLM Hardware-Software Co-Design](/202607/14/2607.11262v1-gpu-tile-sim-a-tile-centric-gpu-simulation-framework-for-llm-hardware-software-co-design)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：大模型软硬件协同设计的仿真框架
-13. [Towards Efficient Convolutional Neural Network for Embedded Hardware via Multi-Dimensional Pruning](/202607/14/2607.11473v1-towards-efficient-convolutional-neural-network-for-embedded-hardware-via-multi-dimensional-pruning)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对嵌入式硬件执行效率的协同剪枝框架
-14. [Transformer-Guided Swarm Intelligence for Frugal Neural Architecture Search](/202607/14/2607.11826v1-transformer-guided-swarm-intelligence-for-frugal-neural-architecture-search)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：针对消费级硬件的轻量化NAS
+   evidence：异构资源利用与能效边缘推理
+6. [Latency-Constrained Hardware-Aware Quantum Error Correction Co-Design with Adaptive Confidence-Gated Neural Decoding for the Rotated Surface Code](/202607/15/2607.05814v2-latency-constrained-hardware-aware-quantum-error-correction-co-design-with-adaptive-confidence-gated-neural-decoding-for-the-rotated-surface-code)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：神经解码的硬件感知协同设计
 
 ### 速读区论文标签
-1. [Communication-Aware Placement and Pruning for Efficient Mixture-of-Experts Inference](/202607/14/2607.05116v1-communication-aware-placement-and-pruning-for-efficient-mixture-of-experts-inference)  
+1. [EeveeDark: A Binary Neural Framework for Low-Light Video Enhancement via Event-Guided Sensor-Level Fusion](/202607/15/2607.06217v1-eeveedark-a-binary-neural-framework-for-low-light-video-enhancement-via-event-guided-sensor-level-fusion)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对MoE推理的通信感知放置与剪枝
-2. [GelNeuro: A Sensing-Computing Integrated Neuromorphic Tactile System for Texture Recognition](/202607/14/2607.05241v2-gelneuro-a-sensing-computing-integrated-neuromorphic-tactile-system-for-texture-recognition)  
+   evidence：用于能效视频增强的二值神经网络
+2. [Separation Logic for Memory Conflict Detection in High-Level Synthesis](/202607/15/2607.07126v1-separation-logic-for-memory-conflict-detection-in-high-level-synthesis)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对类脑芯片部署的硬件感知权重裁剪策略
-3. [Optimized Adaptive Loop Filter in Versatile Video Coding](/202607/14/2607.05737v2-optimized-adaptive-loop-filter-in-versatile-video-coding)  
+   evidence：高层综合中的内存冲突检测与带宽优化
+3. [Dynamic neural manifolds for flexible closed-loop control on neuromorphic hardware](/202607/15/2607.07373v1-dynamic-neural-manifolds-for-flexible-closed-loop-control-on-neuromorphic-hardware)  
    标签：评分：8.0/10、query:hwnas
-   evidence：视频编码硬件设计中的内存访问优化
-4. [DepthWeave-KV: Token-Adaptive Cross-Layer Residual Factorization for Long-Context KV Cache Compression](/202607/14/2607.06523v1-depthweave-kv-token-adaptive-cross-layer-residual-factorization-for-long-context-kv-cache-compression)  
+   evidence：在类脑硬件上实现实时控制
+4. [Are Machine Learning Interatomic Potentials Truly Practical? A Benchmark of 23 Mainstream Models](/202607/15/2607.07647v1-are-machine-learning-interatomic-potentials-truly-practical-a-benchmark-of-23-mainstream-models)  
    标签：评分：8.0/10、query:hwnas
-   evidence：KV 缓存的内存带宽和容量优化
-5. [Terastate-per-second QUBO Brute-Force on a Single GPU: A Matrix Prefix-Suffix Decomposition](/202607/14/2607.04857v1-terastate-per-second-qubo-brute-force-on-a-single-gpu-a-matrix-prefix-suffix-decomposition)  
+   evidence：基准测试推理效率和硬件可扩展性
+5. [Optimized Adaptive Loop Filter in Versatile Video Coding](/202607/15/2607.05737v1-optimized-adaptive-loop-filter-in-versatile-video-coding)  
    标签：评分：7.0/10、query:hwnas
-   evidence：将问题从内存受限转为计算受限以最大化利用率
-6. [KVpop -- Key-Value Cache Compression with Predictive Online Pruning](/202607/14/2607.05061v1-kvpop----key-value-cache-compression-with-predictive-online-pruning)  
+   evidence：视频编码的软硬件设计优化
+6. [Think Before You Grid-Search: Floor-First Triage for LLM Serving](/202607/15/2607.05876v1-think-before-you-grid-search-floor-first-triage-for-llm-serving)  
    标签：评分：7.0/10、query:hwnas
-   evidence：自回归解码中KV缓存的内存与带宽优化
-7. [An event-driven framework for fly-inspired visual motion detection](/202607/14/2607.05205v1-an-event-driven-framework-for-fly-inspired-visual-motion-detection)  
+   evidence：针对LLM推理优化的资源感知评估
+7. [Think Before You Grid-Search: Floor-First Triage for LLM Serving](/202607/15/2607.05876v2-think-before-you-grid-search-floor-first-triage-for-llm-serving)  
    标签：评分：7.0/10、query:hwnas
-   evidence：用于实时嵌入式实现和低功耗传感的高效神经模型
-8. [FourTune: Towards Fully 4-Bit Efficient Post-Training for Diffusion Models](/202607/14/2607.05711v1-fourtune-towards-fully-4-bit-efficient-post-training-for-diffusion-models)  
+   evidence：针对大模型推理优化的资源驱动型分流工作流
+8. [UBEP: Re-architecting Expert Parallelism Communication Library for Production Superpods](/202607/15/2607.06202v1-ubep-re-architecting-expert-parallelism-communication-library-for-production-superpods)  
    标签：评分：7.0/10、query:hwnas
-   evidence：使用4位量化的内存高效后训练框架
-9. [QuTuner: Feature- and Learning-Guided Optimization Pass Tuning for Quantum Compilers](/202607/14/2607.04586v1-qutuner-feature--and-learning-guided-optimization-pass-tuning-for-quantum-compilers)  
+   evidence：重构通信库以优化计算利用率和负载均衡
+9. [HiFuzz: Hierarchical Reinforcement Learning for Semantic-Aware and Adaptive CPU Fuzzing](/202607/15/2607.06619v1-hifuzz-hierarchical-reinforcement-learning-for-semantic-aware-and-adaptive-cpu-fuzzing)  
    标签：评分：6.0/10、query:hwnas
-   evidence：量子编译器的优化路径调优
-10. [Empirical Minimal-Realisation Compression of Deep Neural Networks via Controllability-Observability Tests](/202607/14/2607.05457v1-empirical-minimal-realisation-compression-of-deep-neural-networks-via-controllability-observability-tests)  
+   evidence：用于自适应CPU模糊测试和处理器验证的分层强化学习
+10. [Enhancing deep learning models for time series classification via knowledge distillation](/202607/15/2607.06796v1-enhancing-deep-learning-models-for-time-series-classification-via-knowledge-distillation)  
    标签：评分：6.0/10、query:hwnas
-   evidence：通过状态阶数缩减实现深度神经网络的自动压缩
-11. [ResonatorLM: Causal Resonant Field Mixing for Efficient Long-Context Language Modeling](/202607/14/2607.05583v2-resonatorlm-causal-resonant-field-mixing-for-efficient-long-context-language-modeling)  
+   evidence：通过知识蒸馏在资源受限环境下实现高效的学生模型
+11. [From Custom-Fit to Portable: Bridging the Gap Between Synthesized and Engineered GPU Query Execution](/202607/15/2607.07632v1-from-custom-fit-to-portable-bridging-the-gap-between-synthesized-and-engineered-gpu-query-execution)  
    标签：评分：6.0/10、query:hwnas
-   evidence：利用物理衍生的注意力替代方案进行高效长文本建模
+   evidence：针对特定硬件（GPU）合成专门的查询执行代码
 
 
 <div class="dpr-home-promo-card">
