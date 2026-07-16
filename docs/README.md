@@ -6,73 +6,82 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-15
-- 运行时间：2026-07-15 20:30:19 UTC
+- 最新运行日期：2026-07-16
+- 运行时间：2026-07-16 20:25:13 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
+- 本次总论文数：20
+- 精读区：9
 - 速读区：11
 
 ### 今日简报（AI）
-今日深度研读 17 篇 AI 架构与系统论文，重点攻克 Transformer 稀疏推理与边缘协同学习难题。
-满分论文提出的 N:M 稀疏搜索-内核协同设计，为大模型在边缘设备上的极速推理提供了全新范式。
-建议优先关注软硬件协同优化趋势，探索如何将高效稀疏化技术引入低延迟实时交互场景。
-- 详情：[/202607/15/README](/202607/15/README)
+今日深度解析 20 篇前沿成果，重点聚焦视频生成模型（Video DiT）的软硬协同优化与量子纠错技术突破。
+满分论文 Kaleido 揭示了利用潜空间相关性加速视频生成的巨大潜力，而华为昇腾在 MoE 推理中的实测表现为非 GPU 芯片应用提供了关键参考。
+建议关注底层架构与算法的深度耦合，特别是视频生成与量子计算领域的软硬一体化趋势。
+- 详情：[/202607/16/README](/202607/16/README)
 
 ### 精读区论文标签
-1. [Realizable N:M Sparse Transformer Inference via Search-Kernel Co-Design](/202607/15/2607.12505v1-realizable-nm-sparse-transformer-inference-via-search-kernel-co-design)  
+1. [Kaleido: Algorithm-Hardware Co-Design for Video Diffusion Transformers by Exploiting Latent Space Correlations](/202607/16/2607.13770v1-kaleido-algorithm-hardware-co-design-for-video-diffusion-transformers-by-exploiting-latent-space-correlations)  
    标签：评分：10.0/10、query:hwnas
-   evidence：针对稀疏Transformer推理的软硬件协同设计
-2. [Collate: Collaborative Neural Network Learning for Latency-Critical Edge Systems](/202607/15/2607.08013v1-collate-collaborative-neural-network-learning-for-latency-critical-edge-systems)  
+   evidence：视频扩散Transformer的算法-硬件协同设计
+2. [MDQEC-QAS: Meta-Decoding for Quantum Error Correction with Hardware-Aware VQC Search and Confidence-Gated Recovery](/202607/16/2607.10707v1-mdqec-qas-meta-decoding-for-quantum-error-correction-with-hardware-aware-vqc-search-and-confidence-gated-recovery)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对延迟敏感边缘系统的异构模型协作学习
-3. [Low-Power License Plate Detection and Recognition on a RISC-V Multi-Core MCU-Based Vision System](/202607/15/2607.09768v1-low-power-license-plate-detection-and-recognition-on-a-risc-v-multi-core-mcu-based-vision-system)  
+   evidence：硬件感知量子架构搜索
+3. [FastTPS: An Optimized Method for LLM Token Phase for AI accelerators](/202607/16/2607.11211v1-fasttps-an-optimized-method-for-llm-token-phase-for-ai-accelerators)  
    标签：评分：9.0/10、query:hwnas
-   evidence：基于低功耗MCU的边缘设备视觉任务
-4. [Improving Autonomous Nano-drones Performance via Automated End-to-End Optimization and Deployment of DNNs](/202607/15/2607.12593v1-improving-autonomous-nano-drones-performance-via-automated-end-to-end-optimization-and-deployment-of-dnns)  
+   evidence：针对AI加速器优化LLM令牌阶段
+4. [HCRMap: Pressure-Aware Hot-Expert Residency Mapping for 3.5D MoE Chiplet Inference](/202607/16/2607.11586v1-hcrmap-pressure-aware-hot-expert-residency-mapping-for-35d-moe-chiplet-inference)  
    标签：评分：9.0/10、query:hwnas
-   evidence：在超低功耗并行处理器上自动进行DNN端到端优化与部署
-5. [HeteroMosaic: Exposing and Exploiting Heterogeneous Execution Opportunities for Energy-Efficient Edge LLM Inference](/202607/15/2607.12839v1-heteromosaic-exposing-and-exploiting-heterogeneous-execution-opportunities-for-energy-efficient-edge-llm-inference)  
+   evidence：针对芯粒上MoE的内存带宽和计算利用率优化
+5. [Emulated Integrity Replica: Enabling Self-Healing on FPGA SoCs via Hierarchical Twins](/202607/16/2607.12298v1-emulated-integrity-replica-enabling-self-healing-on-fpga-socs-via-hierarchical-twins)  
    标签：评分：9.0/10、query:hwnas
-   evidence：异构资源利用与能效边缘推理
-6. [Latency-Constrained Hardware-Aware Quantum Error Correction Co-Design with Adaptive Confidence-Gated Neural Decoding for the Rotated Surface Code](/202607/15/2607.05814v2-latency-constrained-hardware-aware-quantum-error-correction-co-design-with-adaptive-confidence-gated-neural-decoding-for-the-rotated-surface-code)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：神经解码的硬件感知协同设计
+   evidence：FPGA SoC上的硬件加速推理和自愈边缘计算
+6. [Realizable N:M Sparse Transformer Inference via Search-Kernel Co-Design](/202607/16/2607.12505v2-realizable-nm-sparse-transformer-inference-via-search-kernel-co-design)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对 N:M 稀疏 ViT 推理的软硬件协同设计框架，包含自定义 CUDA 内核
+7. [No Attention, No Problem: DPU-Aware Attention Approximation in Modern YOLO on FPGA](/202607/16/2607.13106v1-no-attention-no-problem-dpu-aware-attention-approximation-in-modern-yolo-on-fpga)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：FPGA上感知DPU的架构和硬件兼容的注意力近似
+8. [CIMERA: Compute-in-Interconnect and Memory with Reconfigurable Precision for LLM Inference](/202607/16/2607.13649v1-cimera-compute-in-interconnect-and-memory-with-reconfigurable-precision-for-llm-inference)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：具有可重构精度的LLM推理软硬件协同设计
+9. [Jack of All Scales: A Versatile FPGA Tensor Block for MXFP Precisions](/202607/16/2607.13898v1-jack-of-all-scales-a-versatile-fpga-tensor-block-for-mxfp-precisions)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：针对低精度格式的FPGA张量块设计
 
 ### 速读区论文标签
-1. [EeveeDark: A Binary Neural Framework for Low-Light Video Enhancement via Event-Guided Sensor-Level Fusion](/202607/15/2607.06217v1-eeveedark-a-binary-neural-framework-for-low-light-video-enhancement-via-event-guided-sensor-level-fusion)  
+1. [On the Limitations of Non-GPU AI Accelerators for Large-Model Inference: A Field Study of MoE and Multimodal Serving on Huawei Ascend](/202607/16/2607.08215v1-on-the-limitations-of-non-gpu-ai-accelerators-for-large-model-inference-a-field-study-of-moe-and-multimodal-serving-on-huawei-ascend)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于能效视频增强的二值神经网络
-2. [Separation Logic for Memory Conflict Detection in High-Level Synthesis](/202607/15/2607.07126v1-separation-logic-for-memory-conflict-detection-in-high-level-synthesis)  
+   evidence：在华为昇腾等非GPU AI加速器上部署大模型
+2. [On Exploring Input Resolution Scaling For Anytime LiDAR Object Detection](/202607/16/2607.08391v1-on-exploring-input-resolution-scaling-for-anytime-lidar-object-detection)  
    标签：评分：8.0/10、query:hwnas
-   evidence：高层综合中的内存冲突检测与带宽优化
-3. [Dynamic neural manifolds for flexible closed-loop control on neuromorphic hardware](/202607/15/2607.07373v1-dynamic-neural-manifolds-for-flexible-closed-loop-control-on-neuromorphic-hardware)  
+   evidence：用于LiDAR检测的内存高效随时计算
+3. [Who Needs DRAM? We Have Fiber](/202607/16/2607.08407v1-who-needs-dram-we-have-fiber)  
    标签：评分：8.0/10、query:hwnas
-   evidence：在类脑硬件上实现实时控制
-4. [Are Machine Learning Interatomic Potentials Truly Practical? A Benchmark of 23 Mainstream Models](/202607/15/2607.07647v1-are-machine-learning-interatomic-potentials-truly-practical-a-benchmark-of-23-mainstream-models)  
+   evidence：利用光纤作为存储器的软硬件协同设计
+4. [It Takes Few to TANGO: A Quantized Distributed Model for Binaural Speech Enhancement](/202607/16/2607.08645v1-it-takes-few-to-tango-a-quantized-distributed-model-for-binaural-speech-enhancement)  
    标签：评分：8.0/10、query:hwnas
-   evidence：基准测试推理效率和硬件可扩展性
-5. [Optimized Adaptive Loop Filter in Versatile Video Coding](/202607/15/2607.05737v1-optimized-adaptive-loop-filter-in-versatile-video-coding)  
+   evidence：针对资源受限设备的量化感知训练
+5. [Small Language Model-based Control for BBR over Low Earth Orbit Satellite Internet](/202607/16/2607.07142v1-small-language-model-based-control-for-bbr-over-low-earth-orbit-satellite-internet)  
    标签：评分：7.0/10、query:hwnas
-   evidence：视频编码的软硬件设计优化
-6. [Think Before You Grid-Search: Floor-First Triage for LLM Serving](/202607/15/2607.05876v1-think-before-you-grid-search-floor-first-triage-for-llm-serving)  
+   evidence：低轨卫星互联网拥塞控制
+6. [Embedded Blockchain Infrastructure Management (eBIM): A RISC-V-Empowered Hardware--Software Co-Design Framework Towards Trustworthy Blockchain](/202607/16/2607.07625v1-embedded-blockchain-infrastructure-management-ebim-a-risc-v-empowered-hardware--software-co-design-framework-towards-trustworthy-blockchain)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对LLM推理优化的资源感知评估
-7. [Think Before You Grid-Search: Floor-First Triage for LLM Serving](/202607/15/2607.05876v2-think-before-you-grid-search-floor-first-triage-for-llm-serving)  
+   evidence：基于RISC-V的区块链软硬件协同设计
+7. [CTA-Pipelining: A Latency-Oriented Spatial Scaling Method for Multi-GPU Systems](/202607/16/2607.07862v1-cta-pipelining-a-latency-oriented-spatial-scaling-method-for-multi-gpu-systems)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对大模型推理优化的资源驱动型分流工作流
-8. [UBEP: Re-architecting Expert Parallelism Communication Library for Production Superpods](/202607/15/2607.06202v1-ubep-re-architecting-expert-parallelism-communication-library-for-production-superpods)  
+   evidence：面向延迟的多GPU计算利用率空间缩放
+8. [Linear Attention Architectures: Mechanisms, Trade-offs, and Cross-Layer Routing](/202607/16/2607.07953v1-linear-attention-architectures-mechanisms-trade-offs-and-cross-layer-routing)  
    标签：评分：7.0/10、query:hwnas
-   evidence：重构通信库以优化计算利用率和负载均衡
-9. [HiFuzz: Hierarchical Reinforcement Learning for Semantic-Aware and Adaptive CPU Fuzzing](/202607/15/2607.06619v1-hifuzz-hierarchical-reinforcement-learning-for-semantic-aware-and-adaptive-cpu-fuzzing)  
+   evidence：内存、吞吐量和实现复杂度的权衡
+9. [URS-Stereo: Uncertainty-Guided Residual Search for Real-Time Stereo Matching](/202607/16/2607.06779v1-urs-stereo-uncertainty-guided-residual-search-for-real-time-stereo-matching)  
    标签：评分：6.0/10、query:hwnas
-   evidence：用于自适应CPU模糊测试和处理器验证的分层强化学习
-10. [Enhancing deep learning models for time series classification via knowledge distillation](/202607/15/2607.06796v1-enhancing-deep-learning-models-for-time-series-classification-via-knowledge-distillation)  
+   evidence：嵌入式系统的实时视觉匹配
+10. [Intrinsic-Noise Consolidation: A Doob-Barrier-Conditioned Diffusion Turns Analog Device Noise into a Continual-Learning Resource](/202607/16/2607.06924v1-intrinsic-noise-consolidation-a-doob-barrier-conditioned-diffusion-turns-analog-device-noise-into-a-continual-learning-resource)  
    标签：评分：6.0/10、query:hwnas
-   evidence：通过知识蒸馏在资源受限环境下实现高效的学生模型
-11. [From Custom-Fit to Portable: Bridging the Gap Between Synthesized and Engineered GPU Query Execution](/202607/15/2607.07632v1-from-custom-fit-to-portable-bridging-the-gap-between-synthesized-and-engineered-gpu-query-execution)  
+   evidence：模拟类脑硬件与突触规则
+11. [Quantum Sampling Architecture for Protein Structure Reconstruction on Utility-Scale Hardware](/202607/16/2607.06971v1-quantum-sampling-architecture-for-protein-structure-reconstruction-on-utility-scale-hardware)  
    标签：评分：6.0/10、query:hwnas
-   evidence：针对特定硬件（GPU）合成专门的查询执行代码
+   evidence：实用级硬件上的蛋白质重建架构
 
 
 <div class="dpr-home-promo-card">

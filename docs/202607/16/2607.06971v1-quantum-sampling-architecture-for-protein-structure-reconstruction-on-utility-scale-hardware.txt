@@ -1,0 +1,903 @@
+Title: Quantum Sampling Architecture for Protein Structure Reconstruction on Utility-Scale Hardware
+
+URL Source: https://arxiv.org/pdf/2607.06971v1
+
+Published Time: Thu, 09 Jul 2026 00:25:27 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# QUANTUM SAMPLING ARCHITECTURE FOR PROTEIN 
+
+# STRUCTURE RECONSTRUCTION ON UTILITY -S CALE HARDWARE 
+
+Yuqi Zhang 
+
+Kent State University Kent, OH, USA Cleveland Clinic Cleveland, OH, USA 
+
+Bo Fang 
+
+University of Texas at Arlington Arlington, TX, USA 
+
+Yuxin Yang 
+
+Cleveland Clinic Cleveland, OH, USA 
+
+Feixiong Cheng 
+
+Cleveland Clinic Cleveland, OH, USA 
+
+Jieyang Chen 
+
+University of Oregon Eugene, OR, USA 
+
+Sherry Fang 
+
+Regailator Inc. Stow, OH, USA 
+
+Siwei Chen 
+
+University of Chicago Chicago, IL, USA 
+
+Junhan Zhao 
+
+University of Chicago Chicago, IL, USA 
+
+Qiang Guan ∗
+
+Kent State University Kent, OH, USA 
+
+qguan@kent.edu 
+
+July 9, 2026 
+
+ABSTRACT 
+
+Predicting the structure of short peptides in protein binding pockets remains difficult because this regime requires physics-based conformational search, yet existing methods do not provide a practical way to carry out that search on current hardware. We present QSAD , a quantum-classical framework that reformulates peptide structure prediction as amino-acid-level Hamiltonian sampling and replaces iterative optimization with non-iterative Hamiltonian evolution. Executed entirely on IBM Heron R2 across 101 binding-pocket peptides (5–18 residues), QSAD improves prediction accuracy by 27–71% over all evaluated AI and quantum baselines while maintaining the lowest variance across tested lengths. QSAD also tolerates noise levels 3–5 × beyond typical hardware error rates, where iterative methods fail, and reduces mean quantum execution time by 27 × relative to VQE. The sampled ensemble further supports approximate reconstruction of protein energy landscapes. These results establish coarse-grained quantum sampling as a practical computational path for structure prediction in regimes where data-driven methods lack sufficient signal. 
+
+1 Introduction 
+
+Predicting the three-dimensional structure of a protein from its amino-acid sequence is a central problem in computa-tional biology, with direct importance for understanding biological function, disease mechanisms, and drug design [ 1]. Within this broad problem, one specific regime remains particularly difficult in practice: short peptides of 5–20 residues located in binding-pocket regions. These segments mediate interactions between proteins and drugs, substrates, or partner proteins, so that their geometry directly influences binding affinity and biological activity. They are difficult to predict because protein folding is fundamentally a process of exploring the energy landscape to identify stable conformational basins. However, such systems lack the intuitive sequence and evolutionary patterns that enable modern prediction methods, such as deep learning, to work effectively, and their energy landscapes are substantially more complex than those of protein systems that follow more general structural regularities. As a result, existing methods perform poorly in this regime [ 2, 3]. Figure 1 shows 6OIM, a representative pocket–ligand structure of the cancer target KRAS G12C. arXiv:2607.06971v1 [cs.ET] 8 Jul 2026 A PREPRINT - J ULY 9, 2026 
+
+Figure 1: Pocket–ligand structure of 6OIM, a KRAS G12C system. This example shows the local binding-pocket region studied in this work. An effective solution must satisfy two conditions at once. First, it must derive structure by mapping the underlying energy landscape from physical principles, because short peptides do not provide enough sequence signal to support reliable statistical learning. Second, it must search an exponentially large and highly complex energy landscape efficiently enough to recover low-energy structures without exhaustive enumeration. The conformational search space in binding-pocket regions is extremely complex. Their rich biochemical characteristics give rise to a highly rugged energy landscape, significantly increasing the problem complexity. Classical methods such as molecular dynamics [ 4] and Monte Carlo sampling [ 5] therefore incur very high computational cost, and the search process is highly prone to becoming trapped in local optima [ 6 ]. Deep learning methods such as AlphaFold2 [ 7] and AlphaFold3 [ 8] rely heavily on informative long-sequence patterns, and thus fail to produce reliable predictions in short-peptide settings where information is limited and structural variability is high [2, 3]. 0 100 200 300 400 500 600        
+
+> VQE Iteration
+> −200
+> 0
+> 200
+> 400
+> 600
+> Energy
+> (a) Simulated VQE (0%-5% noise)
+> GT = -655
+> (off-scale)
+> ε=0%
+> ε=0.5%
+> ε=1%
+> ε=2%
+> ε=5%
+> 020 40 60 80 100 120 140
+> VQE Iteration
+> 10
+> 11
+> 12
+> 13
+> 14
+> 15
+> 16
+> Energy
+> (b) Real QPU VQE on 3ans
+> Energy
+> Best so far
+
+Figure 2: VQE convergence trajectories. (a) Simulated VQE on a 6-residue peptide under increasing per-gate depolarizing noise ( ε = 0% to 5% ). The ground-state energy ( −655 ) lies far below the plotted range. At ε ≥ 2% ,VQE cannot approach the ground state. (b) Real QPU VQE on protein 3ans (IBM Heron R2). The measured energy (gray) oscillates throughout optimization; the best energy found (red) plateaus after ∼25 iterations with no further improvement. Quantum computing offers an alternative route. The superposition property of a quantum processor allows it to explore all states in the eigenstate space mapped onto the measurement basis simultaneously [ 9 ]. With an appropriate Hamiltonian formulation, quantum entanglement enables efficient exploration of the entire reachable conformational search space. However, current quantum methods still fall short. Variational quantum eigensolvers (VQE) [ 10 ], which 2A PREPRINT - J ULY 9, 2026 have been applied to protein structure prediction [ 11 , 12 ] and can outperform deep learning in certain cases, are highly sensitive to quantum noise. As shown in Figure 2(a), the convergence breaks down when the per-gate error exceeds 2%, and on real hardware the optimizer exhibits persistent oscillations without stable improvement, as shown in Figure 2(b). Non-iterative quantum methods such as sample-based quantum diagonalization (SQD) [ 13 ] and probabilistic quantum eigensolver (PQE) [ 14 ] avoid this optimization loop, but operate at the atomic orbital level and are not well aligned with the present problem. For an 18-residue peptide, they require 1,800–5,700 qubits, which is 12–39 × beyond current hardware capabilities [13]. We present QSAD (Quantum Sampling And Decomposed Reconstruction), a quantum–classical framework designed to address this gap. QSAD formulates protein structure prediction through an amino-acid-level coarse-grained Hamiltonian, mapping the protein energy landscape into the eigenstate space while reducing the qubit cost to O(N 2). Through multi-level one-way evolution and measurement, QSAD projects the energy landscape encoded in the eigenstate space onto a chosen measurement basis, represented as a distribution over candidate structures. Structural information is then inferred from ensemble statistics, enabling robustness to hardware noise without relying on error mitigation. QSAD is implemented as an end-to-end system that integrates quantum sampling with classical decoding, ranking, and reconstruction, producing both a predicted structure and an energy landscape projected onto the measurement basis. We evaluate QSAD on 101 binding-pocket peptides of 5–18 residues with experimentally resolved crystal structures, executed entirely on the IBM Heron R2 quantum processor. QSAD outperforms all evaluated baselines, improving prediction accuracy by 27–71% over both AI and quantum methods while maintaining the lowest variance across all tested lengths. It also recovers the ground-state energy at noise levels 3–5 × beyond typical device error rates, where VQE fails to converge, and reduces mean quantum execution time by 27 ×. These results show that amino-acid-level, non-iterative quantum sampling is a practical and effective computational path for short peptide structure prediction on current superconducting hardware. Our contributions are as follows: (1) An amino-acid-level Hamiltonian encoding that reduces qubit requirements by modeling residue interactions through an implicit physical formulation, enabling mapping of the sequence confor-mational space into the quantum system; (2) A non-iterative quantum sampling architecture that replaces iterative optimization with one-way Hamiltonian evolution, achieving noise resilience through statistical patterns over measure-ment outcomes; (3) Experimental validation on 101 binding-pocket peptides executed on IBM Heron R2, achieving a 27–71% improvement over all evaluated AI and quantum baselines; (4) Reconstruction of an approximate protein energy landscape from the ensemble of measured structures, revealing the distribution of accessible conformational states encoded in the underlying eigenstate space. 
+
+2 Background 
+
+2.1 Protein Folding and Energy Landscape 
+
+Protein folding is governed by thermodynamics: a polypeptide chain adopts the conformation that minimizes its free energy [ 15 ]. Predicting the native structure is therefore equivalent to finding the global minimum of an energy function that combines covalent geometry, non-covalent interactions, and solvent effects [ 16 ]. The conformational space grows exponentially with chain length, making exhaustive search intractable [ 17 ]. This energy function defines a high-dimensional surface over all possible conformations, known as the energy landscape [ 18 ]. Its topology determines the native fold, folding kinetics, metastable states, and conformational flexibility. For binding-pocket peptides, the landscape is shaped by evolutionary pressure: sequences that cannot adopt pocket-compatible geometries do not persist as functional binding motifs [ 19 ]. The intrinsic energy landscape of such peptides therefore encodes binding-relevant structural information even without explicit modeling of the receptor. Characterizing this landscape as a conformational ensemble, rather than a single minimum, reveals the distribution of accessible states underlying binding affinity and mutational robustness [20]. 
+
+2.2 Quantum Computing and the Energy Landscape 
+
+The protein folding energy landscape can be mapped onto a quantum system through a Hamiltonian [ 21 ]. A Hamiltonian is essentially a function: it takes a candidate conformation as input, where that conformation is represented as a string of qubit values, and returns a single number, namely the energy of that conformation. Each possible fold of the peptide corresponds to a different qubit string, and the Hamiltonian scores it according to the underlying physics, such as whether neighboring residues form favorable contacts, whether any two residues collide, and whether the backbone geometry is physically plausible. The qubit string with the lowest score is called the ground state, and it corresponds to the most stable folded conformation. A quantum processor can prepare a superposition of many conformations 3A PREPRINT - J ULY 9, 2026 simultaneously and measure it, thereby sampling the protein energy space mapped by this Hamiltonian. Sampling the Hamiltonian is therefore, in essence, equivalent to exploring the energy landscape. 
+
+2.3 Evaluation Metric 
+
+Structural prediction accuracy in protein science is measured by root-mean-square deviation (RMSD) [ 22 ], reported in angstroms (Å). RMSD is the sole universally accepted metric for comparing predicted and experimentally determined protein structures: it quantifies the average distance between corresponding atoms after optimal superposition. One angstrom equals 0.1 nm, roughly the length of a single covalent bond. Values below 3 Å indicate high-accuracy predictions, 3–4 Å reflects reasonable structural agreement, and values above 5 Å generally indicate incorrect folds [ 23 ]. Throughout this paper, all reported RMSD values are computed over backbone C α atoms in the binding-pocket region. Cα positions capture the overall backbone conformation, so computing C α distances effectively measures the global structural deviation of the predicted backbone. 
+
+3 System Overview Quantum Sampling        
+
+> Protein
+> sequence
+> Classical Reconstruction
+> 156 -qubit superconducting
+> quantum processor ( Heron r2 )
+> Backend: IBM -cleveland
+> State Preparation Phase Evolution
+> Sequence encoding
+> defines the number
+> of qubits
+> The Hamiltonian
+> determines the
+> evolution circuit
+> Scoring &
+> ranking
+> Ala
+> Leu
+> Arg
+> Lys
+> Asn
+> Gly
+> 12
+> 3Weighted fitting and
+> reconstruction of
+> protein landscape
+> Decoding &
+> energy feature
+> computation
+> Predicted
+> protein
+> structure
+> Reconstructed
+> energy
+> landscape
+> Phase 1 Phase 2
+
+Figure 3: End-to-end architecture of QSAD. Left: The input protein sequence is encoded into a coarse-grained Hamiltonian. Center-left: Quantum sampling executes on the IBM Heron R2 processor (156 qubits), producing an ensemble of measured bitstrings. Center-right: Classical post-processing decodes bitstrings into lattice structures (Stage 1), scores and ranks candidates with diversity preservation (Stage 2), and reconstructs all-atom models (Stage 3). 
+
+Right: The framework outputs both a predicted structure and a reconstructed energy landscape. QSAD takes an amino acid sequence as input and produces a predicted three-dimensional structure together with an approximate energy landscape. The system has two phases: quantum sampling on superconducting hardware, followed by classical post-processing that converts raw measurements into all-atom protein models. Figure 3 illustrates the architecture. Technical details of each component are given in Section 4. 
+
+3.1 Phase 1: Quantum Sampling 
+
+Given a peptide of length N , QSAD constructs a coarse-grained Hamiltonian that encodes folding physics into a qubit register. QSAD drives a single forward Hamiltonian evolution: randomized ansatz circuits prepare diverse initial states, and multiple evolution strengths β are swept to sample different energy regimes. All circuits run independently with no classical feedback. 
+
+3.2 Phase 2: Classical Reconstruction 
+
+The measured bitstrings are converted into all-atom structures through three stages: decoding into backbone C α
+
+coordinates (Stage 1), filtering, diversity-preserving selection, and physics-based ranking (Stage 2), and all-atom reconstruction (Stage 3). Backbone coordinates are fixed throughout this pipeline; reported RMSD values reflect the quantum-sampled lattice backbone directly. The sampled conformational ensemble is also fitted with a continuous energy surface, revealing energy basins, funnel structure, and the distribution of metastable states. By constructing a Hamiltonian based on the problem structure, the approximately reconstructed energy surface in the measurement basis can map, along a relevant dimension, all energy information accessible to the Hamiltonian. The resulting structures further support chemical validation and downstream applications. 4A PREPRINT - J ULY 9, 2026 
+
+4 System Design 
+
+4.1 Coarse-Grained Protein Hamiltonian 4.1.1 Tetrahedral Lattice Representation 
+
+QSAD models a peptide of length N as a self-avoiding walk on a tetrahedral lattice. Each residue is a single backbone bead, and the folded conformation is determined by N −1 discrete turns, each taking one of four directions encoded by two binary variables: 
+
+a 7 −→ v(a) =  v(0) (a), v (1) (a) ∈ { 0, 1}2, (1) so the configuration register requires 2( N −1) qubits. The tetrahedral lattice is chosen because its coordination number of four matches the sp 3 backbone geometry, and each turn needs only two qubits [24]. 
+
+4.1.2 Implicit Side-Chain Model 
+
+Side chains are not modeled as geometric variables. Their physicochemical effects are absorbed into sequence-dependent coefficients derived from a fixed amino acid feature table (volume, charge, hydrophobicity, aromaticity, hydrogen-bond tendency, conformational propensity). These features produce four coefficient classes: a pair coefficient 
+
+αpair  
+
+> ij
+
+encoding contact preference via hydrophobic, electrostatic, and aromatic terms; a node coefficient αnode  
+
+> i
+
+for burial/exposure preference; a local propensity αloc  
+
+> i
+
+for residue-specific backbone preferences (with special treatment of glycine and proline); and a steric coefficient αster  
+
+> i
+
+for excluded volume. All weights are fixed constants derived from established residue contact potentials [ 25 , 26 ], lattice folding theory [ 27 ], and backbone conformational statistics [ 28 ]. No per-sequence tuning is needed; the same weight set is applied to all 101 proteins. This design eliminates explicit side-chain qubits and is the primary source of QSAD’s qubit efficiency. 
+
+4.1.3 Qubit Register Structure 
+
+The Hilbert space factorizes as H = Hcont ⊗ H conf , where Hconf stores turn variables and Hcont stores contact indicators. Admissible contacts are pairs (i, j ) with j − i ≥ 5 and j − i odd, reflecting the lattice bipartite structure. Each admissible pair gets a contact qubit cij with projector cij = ( I − Zkij )/2. After symmetry reduction (fixing the first two turns) and removing inactive qubits, the count ranges from 7 ( N =5 ) to 145 ( N =18 ). 
+
+4.1.4 Hamiltonian Terms 
+
+The complete Hamiltonian is: 
+
+H = Hback + Hdist + Hpair + Hnode + Hloc + Hster . (2) 
+
+Hback = λback 
+
+PN −2 
+
+> i=1
+
+Ti,i +1 penalizes immediate backbone reversals, where Tpq is the turn-alignment operator. Hdist 
+
+enforces unit lattice distance at declared contacts via a primary penalty Φ1(i, j ) = λ0(i, j )( D(i, j ) − I) and second-neighbour overlap penalties. The four effective terms couple the registers through sequence-dependent coefficients: 
+
+Hpair = P 
+
+> (i,j )∈A
+
+αpair  
+
+> ij
+
+ˆcij for contact preferences, Hnode = P 
+
+> i
+
+αnode  
+
+> i
+
+ˆNi for burial bias, and Hloc , Hster for local propensities and steric corrections. 
+
+4.2 Quantum Sampling Circuit 4.2.1 Circuit Architecture 
+
+The sampling circuit applies two stages to the n-qubit register: 
+
+|Ψ( s, β )⟩ = UH (β) Uans (θ(s)) |0⟩⊗n, (3) followed by computational-basis measurement. 
+
+State preparation The first stage uses an EfficientSU2 ansatz with R repetition layers and linear entanglement. Each layer l applies single-qubit rotations and nearest-neighbour entangling gates: 
+
+U (l)ans =
+
+> n−1
+
+Y
+
+> j=1
+
+CNOT j,j +1 ·
+
+> n
+
+O
+
+> j=1
+
+RZ (θ(z) 
+
+> j,l
+
+) RY (θ(y) 
+
+> j,l
+
+), (4) so the full ansatz is Uans = QRl=1 U (l)ans with 2nR parameters. The parameters θ(s) are not optimized: for each seed s,they are drawn uniformly from [0 , 2π) using a deterministic random generator. Multiple seeds produce diverse initial states that explore different regions of the Hilbert space, trading optimization guarantees for sampling diversity. 5A PREPRINT - J ULY 9, 2026 
+
+Hamiltonian phase evolution The second stage applies 
+
+UH (β) = e−iβH D e−iβH , HD =
+
+> n
+
+X
+
+> j=1
+
+Xj , (5) implemented via second-order Suzuki–Trotter decomposition [ 29 ] with r repetitions. Multiple values of β (default: 
+
+{1, 2, 3, 4}) are swept to sample the landscape at different energy resolutions: small β preserves broad exploration across conformational space, while large β increases bias toward low-energy configurations.The physical mechanism is as follows. The phase kick e−iβH assigns each computational-basis component |x⟩ a phase factor e−iβE (x), and the transverse driver e−iβH D rotates the phase-encoded state out of the Z-eigenbasis so that these phase differences translate into Z-basis probability differences favouring low-energy conformations. As a result, the probability of observing a computational-basis bitstring x depends on β through 
+
+px(β) = ⟨x|UH (β) Uans |0⟩⊗n 2 , (6) where x denotes a measured bitstring. Different β values therefore reshape the observed distribution in the measurement basis and emphasize different regions of the conformational landscape.A set of β values spanning [βmin , β max ] therefore covers a wider band of the energy landscape than any single value. In our experiments, we find that the results are not highly sensitive to the specific choice of β values, provided that the set spans a sufficient range: the ablation study in Table 4 confirms that the multi-β strategy consistently outperforms any single β in both coverage and effective sample size. The default set {1, 2, 3, 4} has not been optimized for individual proteins, and the same values are used across all 101 cases. Tuning β per system or using a finer sweep could yield further improvements, which we leave to future work. 
+
+4.2.2 Batch Execution and Transpilation 
+
+For S seeds and |β| evolution strengths, QSAD builds sampling circuits by combining randomized state preparation with Hamiltonian phase evolution. The sequence is encoded as a coarse-grained Hamiltonian on the tetrahedral lattice, decomposed into Pauli operators, and compiled into a Trotterized circuit. Different seeds explore different regions of Hilbert space, while different β values bias sampling toward low-energy states. With the default setting S=3 ,
+
+β ∈ 1, 2, 3, 4, and G=10 , QSAD generates 120 circuits per protein. Each circuit uses 2,000 shots, for a total of 240,000 shots. Circuits in each group are submitted together as a batch job and transpiled to the IBM Heron R2 native gate set at optimization level 3. Figure 4 shows the circuit-construction logic, and Figure 5 shows an example transpiled circuit. Evolution -term Construction                
+
+> Input
+> Tetrahedral lattice encoding &
+> Implicit side -chain model
+> Amino acid sequence
+> (length N = 5 -18)
+> 6-term Hamiltonian:
+> 𝐻 !"#$ +𝐻 %&'( +𝐻 )"&* +𝐻 +,%-+𝐻 .,# +𝐻 '(-*
+> H → Σ cᵢ Pᵢ
+> Pauli operator sum
+> Pauli Decomposition
+> 2nd -order
+> Suzuki -Trotter
+> Circuit Synthesis
+> EfficientSU2 (reps=1, linear entanglement)
+> Random θ ~ U[0, 2π) per seed
+> Multiple seeds explore different Hilbert space regions
+> Rᵧ(θ) Rᵨ(θ) → CNOT chain
+> State Preparation (Randomized Ansatz) Hamiltonian Phase Evolution
+> U(H,β) = exp( -iβH) via Trotterization
+> β sweep: {1.0, 2.0, 3.0, 4.0} Small; β → broad exploration; Large β → low -energy concentration
+> p(E
+> ₖ) depends on β via interference
+
+Figure 4: Circuit-construction workflow of QSAD. The input amino-acid sequence is encoded to form a coarse-grained Hamiltonian. The Hamiltonian is decomposed into Pauli operators and compiled into a second-order Suzuki–Trotter circuit. 6A PREPRINT - J ULY 9, 2026 q0     
+
+> q1
+> q2
+> q3
+> q4
+> U
+> U
+> U
+> U
+> U
+> U
+> U
+> U
+> U
+> U
+> UU
+> UU
+> U
+> U
+> U
+> U
+> U
+> U
+> U
+> P
+> P
+> U
+> U
+> UPPP
+> U
+> U
+> U
+> P
+> U
+> P
+> U
+> U
+> U
+> U
+> U
+
+Figure 5: Transpiled QSAD circuit for protein with 4 residues (5 qubits, β = 2 .0) on IBM Heron R2. Blue: single-qubit rotations; magenta: two-qubit ECR gates. Left portion: randomized ansatz; right portion: Trotterized Hamiltonian evolution. 
+
+4.3 Classical Post-Processing Pipeline 4.3.1 Step 1, Bitstring Decoding 
+
+Each measured bitstring is decoded in three steps: (i) the backbone configuration bits are extracted and mapped back to the turn sequence; (ii) counts from bitstrings that differ only in contact-qubit assignments are aggregated to obtain the marginal frequency of each backbone conformation; (iii) the turn sequence is converted into C α coordinates on the tetrahedral lattice. Coordinates are rescaled so that the median C α–C α distance matches the physical peptide-bond length of 3.8 Å. This aggregation step is important because the contact register is auxiliary: multiple contact-qubit patterns can correspond to the same backbone fold. 
+
+4.3.2 Step 2, Filtering, Diversity Preservation, and Ranking 
+
+Decoded conformations are first filtered for self-avoiding walk validity by rejecting any structure with non-adjacent bead overlaps. A greedy MaxMin procedure then selects diverse representatives: starting from the lowest-energy conformation, it iteratively adds the candidate most distant (in RMSD) from the current set, preserving distinct conformational basins that might otherwise be lost to energy-only ranking. Candidates are ranked by a composite physics-based score that sums six terms: backbone overlap penalty, Miyazawa–Jernigan contact energy [ 30 ], radius-of-gyration compactness, burial consistency (hydrophobic residues interior, polar residues exposed), contact order, and cross-group consensus (conformations found independently across multiple batch groups receive a bonus). 
+
+4.3.3 Step 3, All-Atom Reconstruction 
+
+Lattice C α coordinates are scaled to physical distances, and backbone heavy atoms (N, C α, C, O) are placed using ideal peptide-bond geometry ( dCα-C = 1 .52 Å, dC-N = 1 .33 Å) via a NERF (Natural Extension Reference Frame)-style coordinate builder that positions each atom from the preceding three via bond length, bond angle, and dihedral angle [ 31 ]. Side chains are added from a backbone-dependent rotamer library. Backbone C α coordinates are fixed throughout this stage: reported RMSD values reflect the quantum-sampled lattice backbone directly, with no classical refinement bias. An optional Stage 4 supports full-atom energy minimization via OpenMM [ 32 ] and PyRosetta [ 33 ] but is not used in this work. 
+
+4.4 Energy Landscape Reconstruction 
+
+Through the Hamiltonian, a native mapping can be established between the protein energy landscape and the eigenstate space. The energy modes in the eigenstate space correspond to the energy features on the protein energy surface. Finding the ground state in this eigenstate space with a quantum processor is equivalent to identifying the lowest-energy conformational mode on the protein energy landscape. At the same time, superposition allows these energy states to coexist simultaneously. Leveraging this property, the quantum system represents the entire protein energy surface defined by the Hamiltonian, and the resulting measurement distribution can be interpreted as a projection of this high-dimensional energy landscape onto the measurement basis. Figure 6 illustrates the mapping between contact potential and conformational space. The lowest-energy conformations correspond to structures in which no steric conflicts occur in structural space. Each valid conformation yields a coordinate vector xk ∈ R3N . PCA (Principal Component Analysis) on the set of M
+
+valid conformations produces a 2-D embedding zk; in our experiments the top two components capture 60–75% of structural variance. A continuous energy surface is fitted via thin-plate-spline RBF (Radial Basis Function interpolation) interpolation: 
+
+ˆE(z) = 
+
+> M
+
+X
+
+> k=1
+
+wk ϕ ∥z − zk∥, (7) 7A PREPRINT - J ULY 9, 2026 & & &     
+
+>   
+> &
+> &
+> &
+> 
+>    
+>   "% #!
+>   
+> $!
+> 
+> 
+> 
+
+Figure 6: Mapping the energy surface in protein structures using 2A5S (14 amino acids, pocket-region ligand-bound structure) as an example. The reconstructed energy space maps the contact potential of the real conformation by Euclidean distance, showing how the energy surface guides folding. In the left panel, red indicates high-energy regions and blue indicates low-energy regions. Because high-energy regions are already occupied by other atoms, the real conformation avoids them and instead lies in the blue low-energy region. where ϕ(r) = r2 ln r. Each landscape is characterized by a funnel score (Pearson correlation between distance from the energy minimum and energy) and a basin count (connected components on a gridded energy map at the 35th percentile). As a consistency check, we verify that sampling frequencies follow an approximate Boltzmann distribution [ 34 ](ln p ≈ − βeff E + const ). 
+
+5 Evaluation 
+
+5.1 Experimental Setup Dataset We evaluate QSAD on 101 binding-pocket peptide structures with experimentally resolved crystal structures, drawn from two sources: 55 cases from the QDockBank [ 3] benchmark (5–14 residues, 7–97 qubits), which also have published VQE results for direct comparison, and 46 cases from PDBbind [ 35 ] (14–18 residues, 97–145 qubits). Lengths range from 5 to 18 residues with 3–18 cases per length. 
+
+Hardware and baselines All QSAD experiments run on the IBM Heron R2 processor ( ibm_cleveland , 156 qubits), using 120 circuits at 2,000 shots each (240,000 total shots per protein) submitted as 10 independent batch jobs. We compare against seven baselines spanning three paradigms. (i) Multiple Sequence Alignment(MSA)-based: 
+
+ColabFold-MSA [ 36 ] uses the AlphaFold2 architecture with a full MSA pipeline (MMseqs2, ∼500 GB database), inferring residue contacts from co-evolutionary patterns across homologous sequences. (ii) Single-sequence: ESM-Fold [ 37 , 38 ] and OmegaFold [ 39 ] extract structural information from protein language models; ColabFold [ 40 ] and OpenFold [ 41 ] use the AlphaFold2 architecture in single-sequence mode to test whether the structure module alone suffices for short peptides. (iii) Diffusion-based: AlphaFold3 [ 8] replaces AF2’s structure module with a diffusion model that iteratively denoises atomic coordinates, representing the current state of the art. On the quantum side, we compare against VQE from the QDockBank benchmark (55 cases, up to 14 residues). 
+
+Metric Structural quality is measured by backbone C α RMSD [ 22 ] against the crystal structure, computed over the binding-pocket region only. 
+
+5.2 QPU Execution Summary 
+
+The 120 circuits per protein (Section 5.1) produce 24.2 million shots across the full campaign. Table 1 lists the ansatz circuit depth for each peptide length. The EfficientSU2 ansatz ( reps=1 , linear entanglement) grows from depth 10 (5 residues, 7 qubits) to 148 (18 residues, 145 qubits). For the 101 proteins with complete IBM Runtime telemetry, the total quantum execution time is 23.0 hours (mean 22.3 min per protein), with a mean queue wait of 3.3 s per job 8A PREPRINT - J ULY 9, 2026 Table 1: Ansatz depth and mean QPU time by peptide length. Ansatz uses EfficientSU2 ( reps=1 , linear entanglement). Values in parentheses denote the number of cases. 
+
+N Depth (cases) Qubits QPU time N Depth (cases) Qubits QPU time 5 10(4) 7 0.5 12 80(3) 77 9.0 6 21(6) 18 0.9 13 90(3) 87 12.6 7 36(3) 33 1.8 14 100(18) 97 16.0 8 44(8) 41 2.4 15 111(9) 108 20.4 9 52(4) 49 3.6 16 123(9) 120 26.3 10 61(11) 58 4.8 17 135(9) 132 33.4 11 70(5) 67 6.3 18 148(9) 145 44.1 
+
+group, indicating near-zero queuing overhead under batch submission mode. The total classical post-processing time is 1.1 hours across all 101 proteins (mean 5.9 min per protein). 
+
+5.3 Structural Prediction Accuracy 
+
+For each of the 101 proteins, QSAD runs the full pipeline: quantum sampling on Heron R2, followed by classical post-processing (decoding, filtering, scoring, and all-atom reconstruction). Backbone coordinates are fixed during reconstruction, and the optional refinement stage is not used. All reported RMSD values therefore reflect the quantum-sampled lattice backbone directly. AI baselines are evaluated with default configurations, and VQE results are taken from the published QDockBank benchmark. 0 3 6 9 12                           
+
+> 0
+> 3
+> 6
+> 9
+> 12
+> Baseline (Å)
+> QSAD
+> AF3
+> (a) vs AF3
+> QSAD (95)
+> AF3 (6)
+> 0510 15 20
+> 0
+> 5
+> 10
+> 15
+> 20
+> QSAD
+> ColabFold-MSA
+> (b) vs ColabFold-MSA
+> QSAD (100)
+> ColabFold-MSA (1)
+> 0510 15 20
+> 0
+> 5
+> 10
+> 15
+> 20 QSAD
+> ColabFold
+> (c) vs ColabFold
+> QSAD (100)
+> ColabFold (1)
+> 0510 15 20
+> 0
+> 5
+> 10
+> 15
+> 20 QSAD
+> ESMFold
+> (d) vs ESMFold
+> QSAD (101)
+> ESMFold (0)
+> 0816 24 32
+> 0
+> 8
+> 16
+> 24
+> 32 QSAD
+> OmegaFold
+> (e) vs OmegaFold
+> QSAD (98)
+> OmegaFold (3)
+> 0510 15 20
+> QSAD (Å)
+> 0
+> 5
+> 10
+> 15
+> 20
+> Baseline (Å)
+> QSAD
+> OpenFold
+> (f) vs OpenFold
+> QSAD (101)
+> OpenFold (0)
+> 0.0 1.5 3.0 4.5
+> QSAD (Å)
+> 0.0
+> 1.5
+> 3.0
+> 4.5
+> QSAD
+> VQE
+> (g) vs VQE
+> QSAD (52)
+> VQE (3)
+> QSAD
+> AF3
+> ColabFold-MSA
+> ColabFold
+> ESMFold
+> OmegaFold
+> OpenFold
+> VQE
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> RMSD (Å)
+> 3 Å
+> 5 Å
+> (h) RMSD Distribution
+> Median
+> Mean
+
+Figure 7: Comparison of QSAD against structure-prediction baselines across 101 proteins. (a)–(g) Pairwise RMSD comparisons between QSAD and each baseline; points above the diagonal indicate cases where QSAD achieves lower RMSD. The legends report win counts for each method pair: 95/101 vs. AF3, 100/101 vs. ColabFold-MSA, 100/101 vs. ColabFold, 101/101 vs. ESMFold, 98/101 vs. OmegaFold, 101/101 vs. OpenFold, and 52/55 vs. VQE on shared cases. (h) RMSD distributions for all methods, with violin plots showing the full spread and markers indicating mean and median values. QSAD has the lowest central error and the narrowest distribution among all compared methods. Figure 7 summarizes both pairwise and distributional comparisons against all baselines. In the scatter panels, most points lie above the diagonal, showing that QSAD achieves lower RMSD than AF3, ColabFold-MSA, ColabFold, ESMFold, OmegaFold, OpenFold, and VQE on the large majority of cases. The violin panel further shows that QSAD has the lowest median RMSD at 2.7 Å and mean RMSD at 2.6 Å, compared with AF3 at 4.8 Å (mean 5.2 Å), ColabFold-MSA at 6.1 Å, ColabFold at 7.5 Å, ESMFold at 8.6 Å, OmegaFold at 9.4 Å, and OpenFold at 5.9 Å. QSAD 9A PREPRINT - J ULY 9, 2026 also exhibits the tightest distribution, with RMSD concentrated in a narrow low-error range, whereas all other baselines show substantially broader spreads. VQE reaches a median RMSD of 3.7 Å on its 55 shared cases, but remains limited to shorter proteins and shows larger variability. 
+
+5.4 Execution Time and Scalability 
+
+We compare execution time on the 55 shared QDockBank cases. QSAD completes each case with a mean of 1,966 s (33 min) and median 1,470 s (25 min). VQE requires a mean of 28,036 s (467 min) and median 9,870 s (164 min). QSAD is faster on all 55 cases, with a mean speedup of 27 × and a maximum of 365 ×.20 40 60 80 100 
+
+Number of Qubits 
+
+> 0
+> 50000
+> 100000
+> 150000
+> 200000
+> Execution Time (seconds)
+
+VQE Rises Rapidly While QSAD Stays Near-Linear 
+
+> VQE samples
+> QSAD samples
+> VQE IQR band
+> QSAD IQR band
+> Trend gap (VQE-QSAD)
+> VQE trend (rapid rise)
+> QSAD trend (near-linear)
+
+Figure 8: Execution time vs. qubit count. QSAD shows linear growth with bounded runtime (max 2.1 h); VQE shows unpredictable runtime (max 57.6 h). QSAD’s runtime scales approximately linearly with qubit count, with low variance across groups (CV (Coefficient of Variation) ≈ 0.12 ). VQE shows unpredictable scaling: individual cases range from 67 min to over 57 hours, because convergence depends on noise, optimizer trajectory, and landscape ruggedness (Figure 8). In practical deployment, unpredictable runtime is a significant obstacle for task scheduling and resource planning. The difference in runtime stability between VQE and QSAD stems from their execution models: VQE relies on a session mode that maintains a long-lived bidirectional connection to the QPU, while QSAD submits independent batch jobs with no return communication, making its runtime predictable and controllable. 
+
+5.5 Energy Landscape Analysis 
+
+We reconstruct energy landscapes for all 101 proteins (5–18 residues) with at least 40 valid conformations each (mean 947 per protein). The sampled ensemble is projected via PCA and fitted with a continuous energy surface. Across the 101 landscapes, the mean funnel score, the definition in section 4.4, is 0.619 (median 0.698), with basin counts ranging from 1 to 21 (mean 6.1).Different basin counts correspond to distinct energy landscape topologies and distinct chemical preferences; complex landscapes further explain why most methods fail to produce accurate structures. Figure 9 shows protein 1A0Q (16 residues, funnel score 0.745): a clear primary funnel with subsidiary basins, and a Boltzmann-consistent sampling distribution ( βeff = 0 .005 ). Figure 10 shows a contrasting case, protein 4Y79 (9 residues, funnel score 0.261): a rough, multi-basin landscape suggesting multiple competing conformations. These two cases illustrate that the landscape reconstruction captures qualitatively different conformational regimes. The reconstructed landscapes carry practical value beyond structural prediction. A well-funnelled landscape (high funnel score) suggests that the peptide adopts a dominant bound-state conformation, while a rough, multi-basin landscape may indicate conformational heterogeneity relevant to binding promiscuity or allosteric regulation. Such information is inaccessible to single-structure predictors, which return one conformation and provide no view of the surrounding energy surface. The ability to distinguish funnelled from frustrated landscapes from a single round of quantum sampling is a unique capability of the QSAD framework. 10 A PREPRINT - J ULY 9, 2026 100 75 50 25 0 25 50 75                        
+
+> PC1 (42.1%) 75
+> 50
+> 25
+> 0
+> 25
+> 50
+> 75
+> PC2 (29.0%)
+> 2.5
+> 3.0
+> 3.5
+> 4.0
+> 4.5
+> 5.0
+> 5.5
+> Energy
+> (A) 3-D Energy Surface
+> Min E = 2.633
+> 75 50 25 025 50 75
+> PC1 (42.1%)
+> 60
+> 40
+> 20
+> 0
+> 20
+> 40
+> 60
+> PC2 (29.0%)
+> (B) 2-D Energy Landscape
+> Min E = 2.633
+> Max P p = 0.0010
+> #1
+> #2
+> #3
+> 2.5 3.0 3.5 4.0 4.5 5.0 5.5
+> Energy (a.u.)
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> Density
+> (C) Energy Distribution
+> N = 266
+> KDE
+> Min = 2.63
+> Median = 3.75
+> Top-5% = 2.89
+> 2.5 3.0 3.5 4.0 4.5 5.0 5.5
+> Energy (a.u.)
+> 0.00060
+> 0.00075
+> 0.00090
+> Sampling Probability
+> (D) Sampling Frequency vs Energy
+> Sampled
+> Boltzmann fit = 0.00
+> 3.0
+> 3.5
+> 4.0
+> 4.5
+> 5.0
+> Energy (a.u.)
+
+Figure 9: Reconstructed energy landscape for protein 1A0Q (16 residues, 120 qubits, funnel score 0.745). (A) 3-D fitted energy surface. (B) 2-D contour in PCA space; the red star marks the global minimum and the blue diamond marks the maximum sampling-probability point. (C) Energy distribution of sampled conformations. (D) Sampling frequency versus energy with a fitted Boltzmann trend ( βeff = 0 .005 ), consistent with a dominant funnel. 30 20 10 0 10 20 30                             
+
+> PC1 (34.0%) 30
+> 20
+> 10
+> 0
+> 10
+> 20
+> 30
+> PC2 (33.6%)
+> 2.25
+> 2.50
+> 2.75
+> 3.00
+> 3.25
+> 3.50
+> 3.75
+> 4.00
+> Energy
+> (A) 3-D Energy Surface
+> Min E = 2.342
+> 30 20 10 010 20 30
+> PC1 (34.0%)
+> 20
+> 10
+> 0
+> 10
+> 20
+> 30
+> PC2 (33.6%)
+> (B) 2-D Energy Landscape
+> Min E = 2.342
+> Max P p = 0.3355
+> #1 #2 #3
+> 2.4 2.6 2.8 3.0 3.2 3.4 3.6 3.8 4.0
+> Energy (a.u.)
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> 1.25
+> 1.50
+> 1.75
+> 2.00
+> Density
+> (C) Energy Distribution
+> N = 683
+> KDE
+> Min = 2.34
+> Median = 3.18
+> Top-5% = 2.53
+> 2.4 2.6 2.8 3.0 3.2 3.4 3.6 3.8 4.0
+> Energy (a.u.)
+> 0.00
+> 0.02
+> 0.04
+> 0.06
+> 0.08
+> Sampling Probability
+> (D) Sampling Frequency vs Energy
+> Sampled
+> Boltzmann fit = -0.21
+> 2.4
+> 2.6
+> 2.8
+> 3.0
+> 3.2
+> 3.4
+> 3.6
+> 3.8
+> Energy (a.u.)
+
+Figure 10: Reconstructed energy landscape for protein 4Y79 (9 residues, 49 qubits, funnel score 0.261). (A) 3-D fitted energy surface. (B) 2-D contour in PCA space; multiple local basins are visible, with the maximum sampling-probability point separated from the global minimum. (C) Energy distribution of sampled conformations. (D) Sampling frequency versus energy with a fitted Boltzmann trend ( βeff = −0.209 ), indicating a broader multi-basin landscape. 
+
+5.6 Noise Resilience Fairness and Reproducibility Statement In this set of experiments, running on real QPUs would affect both reproducibility and fairness, because noise on physical quantum backends fluctuates over time and with environmental conditions, and noise levels also vary across physical qubits. In addition, to study system behavior under different noise levels, we cannot directly tune the noise on a real backend, since its noise profile remains within a relatively stable and narrow range. Therefore, under identical conditions, we conduct fair and reproducible experiments on a simulator by emulating different noise levels for both methods. Table 2: Noise levels and real-hardware equivalences. Signal retention α = (1 − ε)d for VQE ( d ≈ 29 ) and QSAD (d ≈ 30 –55 ). 
+
+ε Label VQE α QSAD α Real hardware comparison 0% Fault-tolerant 1.000 1.000 Noiseless simulator 0.5% Near-ideal 0.865 0.76–0.86 ≈ Best trapped-ion 2Q gates 1% Low 0.747 0.58–0.74 ≈ IBM 1Q gate; ion-trap 2Q gate 2% NISQ 0.557 0.33–0.55 ≈ IBM 2Q gate (typical NISQ) 
+
+Setup We compare QSAD and VQE under progressively increasing per-gate depolarizing noise on a 6-residue test system (SAASAS, 18 qubits). Each gate depolarizes the state with probability ε, so a circuit of depth d retains signal fraction α = (1 − ε)d. We test four levels from ε = 0% (ideal) to ε = 2% , spanning noiseless, near-ideal, low-noise, and typical NISQ conditions. Table 2 maps each level to its real-hardware equivalence and signal retention. VQE uses the same EfficientSU2 ansatz with COBYLA (600 iterations, 4,096 shots per iteration, ∼2.5 × 10 6 total shots, 3 repeats per level). QSAD uses the stratified ensemble (48 circuits, 49,152 total shots). 
+
+Results Table 3 presents the detailed comparison. The two methods respond to noise in opposite ways. VQE’s low-energy coverage drops from 2.9% to 1.3%, and energy estimates show increasing variance above ε = 1% . At 11 A PREPRINT - J ULY 9, 2026 0% 0.5% 1% 2%      
+
+> Per-gate Error Rate (ε)
+> −600
+> −400
+> −200
+> 0
+> 200
+> Best Energy
+> (a) Best Energy
+> 0% 0.5% 1% 2%
+> Per-gate Error Rate (ε)
+> 5
+> 10
+> 15
+> Coverage (%)
+> (b) Coverage
+> Sampling (Ours) Ground truth (-655) VQE
+
+Figure 11: Noise resilience comparison. (a) Best energy vs. error rate: QSAD consistently recovers the ground truth, while VQE degrades above ε = 1% . (b) Coverage: QSAD maintains >14% at all levels, while VQE stays below 2%. 
+
+ε = 2% , the typical NISQ regime, VQE convergence becomes unstable. Under ideal conditions, COBYLA converges within approximately 200 iterations, but at ε = 2% the optimizer oscillates without settling (Figure 2). Table 3: QSAD and VQE performance under noise. VQE columns show mean ± std over 3 repeats.                                                  
+
+> QSAD VQE
+> εUnique Cov. Low-E Best EBest ELow-E (%) 0% 37,892 14.5% 13.1% −655 .0−655 .0±0.02.91 ±0.85
+> 0.5% 44,459 17.0% 16.8% −655 .0−655 .0±0.02.42 ±0.97
+> 1% 44,834 17.1% 17.3% −655 .0−653 .8±1.02.13 ±0.34
+> 2% 44,872 17.1% 17.3% −655 .0−654 .2±1.21.27 ±0.08
+
+QSAD shows the opposite behavior: coverage increases from 14.5% to 17.1% under noise, because depolarizing noise acts as a perturbation that broadens conformational exploration. QSAD recovers the ground-state energy ( E∗ = −655 .0)at every noise level tested up to ε = 2% . This robustness follows from the sampling architecture: corrupted individual measurements do not compound, because the ensemble averages them out instead of feeding them back into an optimization loop. 
+
+5.7 System Design Validation 
+
+The preceding sections establish that QSAD achieves high accuracy, fast execution, landscape reconstruction, and noise resilience. This section examines three questions about the origin of these results: where in the pipeline does the structural advantage arise, how does the sampling strategy contribute, and does quantum sampling outperform classical alternatives on the same Hamiltonian. 
+
+Advantage origin We track RMSD through three pipeline stages: (1) lattice C α trace from coarse scoring, (2) after all-atom reconstruction, and (3) after optional energy minimization. Across all 101 proteins, the mean RMSD is 2.462 Å at all three stages. The all-atom step adds backbone heavy atoms and side chains around the existing C α trace but does not move C α positions. Energy minimization shifts coordinates by at most 0.0001 Å. Figure 12 illustrates this for protein 2A14; Figure 13 confirms the flat RMSD band across all 101 cases. The structural quality is determined entirely at the quantum sampling stage; post-processing contributes atomic detail without altering the backbone geometry. 
+
+Sampling strategy ablation We validate that each component of QSAD’s sampling strategy contributes to con-formational exploration through a controlled ablation on a 6-residue peptide (SAASAS, 18 qubits, 218 = 262 ,144 
+
+conformations). Three configurations are compared under the same shot budget (49,152 shots): L0 (Random) : Ansatz only, β = 0 , single seed. L1 (Single Evolved) : Single seed, β = 1 .0. L2 (Stratified) : 3 groups × 4 seeds × 4 β values, the full QSAD strategy. 12 A PREPRINT - J ULY 9, 2026 RMSD=3.06 Å RMSD=3.06 Å RMSD=3.06 Å RMSD=3.06 Å
+
+(a) Backbone (b) Ca2All (c) Polished (d) Overlay 
+
+Figure 12: Structure overlay for protein 2A14 across three pipeline stages. The C α backbone remains identical throughout. Panels a–d show the progression from backbone nodes to full-atom reconstruction and their overlap. No structural change or displacement is introduced during post-processing, and post-processing itself does not improve the protein structure. Lattice CA Ca2All Polished   
+
+> 1.5
+> 2.0
+> 2.5
+> 3.0
+> 3.5
+> CA-RMSD (Å)
+> (a) RMSD Across Stages
+> Mean (n=101)
+> 95% CI
+> −0.1 0.0 0.1
+> ΔRMSD (mÅ)
+> 0
+> 2
+> 4
+> 6
+> 8
+> Count
+> Mean = +0.01 mÅ
+> (b) ΔRMSD Distribution
+
+Figure 13: Per-protein RMSD across three pipeline stages (101 proteins). The band is flat: post-processing introduces negligible change ( < 0.0002 Å). Table 4 shows the results. All three configurations find the ground-truth energy ( E∗ = −655 .0), but coverage quality differs substantially. Adding Hamiltonian evolution (L0 → L1) increases low-energy coverage from 5.5% to 12.6% and reduces mean energy from 272.7 to 179.2, confirming that evolution biases sampling toward low-energy regions. Stratification (L1 → L2) further raises total coverage to 14.5% and ESS (Effective Sample Size) by 1.64 ×, by exploring multiple energy regimes simultaneously. Figure 14 visualizes the progressive improvement; Figure 15 shows L2’s superior discovery rate. Table 4: Sampling strategy comparison (49,152 shots each). All methods found E∗ = −655 .0. (Higher is better)                          
+
+> Method Unique Coverage Low-E Mean EEntropy ESS
+> L0: Random 23,785 9.1% 5.5% 272.7 0.779 10,690 L1: Single Evo. 29,636 11.3% 12.6% 179.2 0.807 17,087 L2: Stratified 37,960 14.5% 13.4% 342.8 0.836 28,112
+
+Quantum vs. classical sampling Having established that the advantage originates at the sampling stage and that the stratified strategy is effective, we compare QSAD directly against three classical sampling baselines: uniform random sampling, greedy local search, and simulated annealing (SA). All methods operate on the same tetrahedral lattice with the same Hamiltonian under a matched pool-size protocol. For each protein, Random generates a pool of the same size as QSAD; Greedy and SA run until their pools reach the same size (within ±20% ), with a cap of 100,000 energy evaluations. 13 A PREPRINT - J ULY 9, 2026 0          
+
+> 1000
+> 2000
+> 3000
+> Energy
+> 050 100
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> 120
+> Energy Rank (row)
+> (a) Landscape
+> 050 100
+> (b) L0 Random
+> 050 100
+> (c) L1 Evolved
+> 050 100
+> (d) L2 Stratified
+> 10 4
+> 10 3
+> Prob.
+> Energy Rank (col)
+
+Figure 14: Sampling heatmaps for three strategy levels versus the true energy landscape. Panel (a) shows the ground-truth landscape ordered by energy rank. Panels (b)–(d) show the sampled probability maps for L0 random, L1 single-seed evolved, and L2 stratified sampling under the same shot budget. From L0 to L2, sampling becomes less concentrated and covers a broader energy range, indicating improved conformational exploration. L2 provides the most balanced coverage across low- and mid-energy regions. 0 10,000 20,000 30,000 40,000 50,000 
+
+Cumulative Shots 
+
+> 0
+> 5,000
+> 10,000
+> 15,000
+> 20,000
+> 25,000
+> 30,000
+> 35,000
+> Unique Conformations Discovered
+> 23,785
+> 29,636
+> 37,960
+
+Cumulative Conformational Discovery 
+
+> L0: Random
+> L1: Single Evolved
+> L2: Stratified (Ours)
+
+Figure 15: Cumulative unique conformations discovered vs. total shots. L2 maintains a consistently higher discovery rate. Random Greedy SA 
+
+0
+
+2
+
+4  
+
+> Δ mean RMSD ( Å) win 87%
+> med 0.50 win 88%
+> med 0.49 win 84%
+> med 0.51
+
+(a) RMSD Improvement 
+
+QSAD Random Greedy SA 
+
+0% 
+
+25% 
+
+50% 
+
+75% 
+
+100%    
+
+> Near-native yield (%)  med 44.4% med 18.2% med 15.8% med 17.8%
+
+(b) Near-Native Yield 
+
+Figure 16: Candidate pool quality under matched pool-size protocol. (a) Pairwise improvement in mean valid RMSD over each classical sampler; positive values indicate QSAD wins. (b) Near-native fraction (RMSD < 4 Å): QSAD median 44% vs. 16–18% for all classical baselines. 14 A PREPRINT - J ULY 9, 2026 Figure 16 compares candidate pool quality. QSAD wins on 87% of proteins against Random, 88% against Greedy, and 84% against SA in mean valid RMSD. The near-native yield (RMSD < 4 Å) shows a larger gap: QSAD achieves a median near-native fraction of 44%, compared with 18% for Random, 16% for Greedy, and 18% for SA. The advantage does not come from generating more valid conformations; rather, QSAD’s valid conformations concentrate closer to the native structure. After selecting the lowest-energy valid conformation from each pool and reconstructing it through the same all-atom pipeline, QSAD achieves a median end-to-end RMSD of 2.51 Å, compared with 4.65 Å for Random, 4.44 Å for Greedy, and 4.49 Å for SA (Figure 17). QSAD produces the lower-RMSD structure on 94% of proteins against Random, 95% against Greedy, and 95% against SA, with median pairwise improvements of 2.20, 1.94, and 1.89 Å respectively. 2.5 5.0 7.5 10.0 12.5 
+
+CA-RMSD (Å) 
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Cumulative proportion (%)
+
+(a) RMSD ECDF     
+
+> QSAD (mini)
+> Random
+> Greedy
+> SA
+> Random Greedy SA
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> 10.0
+> Δ RMSD ( Å)
+> win 94%
+> med 2.20 win 95%
+> med 1.94 win 95%
+> med 1.89
+
+(b) RMSD Improvement 
+
+Figure 17: End-to-end RMSD after energy-based selection and reconstruction. (a) Cumulative distribution: QSAD median 2.51 Å vs. 4.44–4.65 Å for classical baselines. (b) Pairwise improvement: QSAD wins on 94–95% of proteins. 
+
+6 Discussion 
+
+Why physics-driven sampling works for short peptides. The results show that the two requirements identified in the introduction must be satisfied together in this regime. The 44% improvement over AlphaFold3 does not come from a larger model or more training data, but from encoding folding physics directly into the Hamiltonian and sampling that Hamiltonian effectively. The quantum versus classical comparison in Section 5.7 shows that the advantage lies in sampling quality: Hamiltonian evolution concentrates samples near low-energy basins more effectively than random, greedy, or simulated annealing search on the same Hamiltonian, winning on 95–96 out of 101 proteins. The primary quantum contribution is therefore the structure of the sampling distribution, not only faster execution than iterative methods. 
+
+Encoding trade-off and precision ceiling. The central design choice in QSAD is amino-acid-level encoding on a tetrahedral lattice. This keeps qubit cost at O(N 2) and makes execution feasible on current hardware. The trade-off is a precision ceiling: lattice discretization limits the best achievable RMSD to about 1.6 Å, regardless of sampling quality. A finer lattice or continuous coordinate encoding could raise this ceiling, but only at the cost of substantially higher qubit demand. In the current NISQ regime, this trade-off is appropriate because qubit budget remains the main constraint. 
+
+Limitations and scope. QSAD still has important limitations. The β schedule 1, 2, 3, 4 is chosen heuristically rather than optimized per protein. The reconstructed landscapes are 2D PCA projections and should be viewed as approximate structural energy maps, not full thermodynamic free-energy surfaces, although Boltzmann-consistency checks support their utility. 
+
+7 Conclusion 
+
+QSAD shows that current quantum hardware, when paired with an appropriate problem formulation, can solve a meaningful computational biology task with strong accuracy, robustness, and execution efficiency. The key design 15 A PREPRINT - J ULY 9, 2026 choice is to encode folding physics at the amino-acid level rather than the atomic orbital level. This keeps qubit counts within the reach of existing processors while preserving enough physical structure to outperform all evaluated AI and quantum baselines on binding-pocket peptide prediction. More broadly, the results establish amino-acid-level, non-iterative quantum sampling as a practical computational path for short peptides in regimes where data-driven methods lack sufficient signal. 
+
+References 
+
+[1] Song Yin, Xuenan Mi, and Diwakar Shukla. Leveraging machine learning models for peptide–protein interaction prediction. RSC Chemical Biology , 5(5):401–417, 2024. [2] Matteo Manfredi, Castrense Savojardo, Georgii Iardukhin, Davide Salomoni, Alessandro Costantini, Pier Luigi Martelli, and Rita Casadio. Alpha&esmhfolds: a web server for comparing alphafold2 and esmfold models of the human reference proteome. Journal of Molecular Biology , 436(17):168593, 2024. [3] Yuqi Zhang, Yuxin Yang, Cheng-Chang Lu, Weiwen Jiang, Feixiong Cheng, Bo Fang, and Qiang Guan. Qdock-bank: A dataset for ligand docking on protein fragments predicted on utility-level quantum computers. In 
+
+Proceedings of the International Conference for High Performance Computing, Networking, Storage and Analysis ,pages 746–761, 2025. [4] William C Swope, Jed W Pitera, and Frank Suits. Describing protein folding kinetics by molecular dynamics simulations. 1. theory. The Journal of Physical Chemistry B , 108(21):6571–6581, 2004. [5] Ulrich HE Hansmann and Yuko Okamoto. New monte carlo algorithms for protein folding. Current opinion in structural biology , 9(2):177–183, 1999. [6] Zhe Zhang, Christina EM Schindler, Oliver F Lange, and Martin Zacharias. Application of enhanced sampling monte carlo methods for high-resolution protein-protein docking in rosetta. PLoS One , 10(6):e0125941, 2015. [7] Zhenyu Yang, Xiaoxi Zeng, Yi Zhao, and Runsheng Chen. Alphafold2 and its applications in the fields of biology and medicine. Signal Transduction and Targeted Therapy , 8(1):115, 2023. [8] Josh Abramson, Jonas Adler, Jack Dunger, Richard Evans, Tim Green, Alexander Pritzel, Olaf Ronneberger, Lindsay Willmore, Andrew J Ballard, Joshua Bambrick, et al. Accurate structure prediction of biomolecular interactions with alphafold 3. Nature , 630(8016):493–500, 2024. [9] Bela Bauer, Sergey Bravyi, Mario Motta, and Garnet Kin-Lic Chan. Quantum algorithms for quantum chemistry and quantum materials science. Chemical reviews , 120(22):12685–12717, 2020. [10] Ho Lun Tang, VO Shkolnikov, George S Barron, Harper R Grimsley, Nicholas J Mayhall, Edwin Barnes, and Sophia E Economou. qubit-adapt-vqe: An adaptive algorithm for constructing hardware-efficient ansätze on a quantum processor. PRX Quantum , 2(2):020310, 2021. [11] Yuqi Zhang, Yuxin Yang, William Martin, Kingsten Lin, Zixu Wang, Cheng-Chang Lu, Weiwen Jiang, Ruth Nussinov, Joseph Loscalzo, Qiang Guan, et al. A quantum framework for protein binding-site structure prediction on utility-level quantum processors. Advanced Science , 13(12):e13641, 2026. [12] Yuqi Zhang, Yuxin Yang, Feixiong Chen, Cheng-Chang Lu, Nima Saeidi, Samuel L Volchenboum, Junhan Zhao, Siwei Chen, Weiwen Jiang, and Qiang Guan. A hybrid quantum-ai framework for protein structure prediction on nisq devices. arXiv preprint arXiv:2510.06413 , 2025. [13] Javier Robledo-Moreno, Mario Motta, Holger Haas, Ali Javadi-Abhari, Petar Jurcevic, William Kirby, Simon Martiel, Kunal Sharma, Sandeep Sharma, Tomonori Shirakawa, et al. Chemistry beyond the scale of exact diagonalization on a quantum-centric supercomputer. Science Advances , 11(25):eadu9991, 2025. [14] Kazuhiro Seki and Seiji Yunoki. Quantum power method by a superposition of time-evolved states. PRX Quantum ,2(1):010333, 2021. [15] Eugene Shakhnovich. Protein folding thermodynamics and dynamics: where physics, chemistry, and biology meet. Chemical reviews , 106(5):1559–1588, 2006. [16] Kevin W Plaxco, Kim T Simons, Ingo Ruczinski, and David Baker. Topology, stability, sequence, and length: defining the determinants of two-state protein folding kinetics. Biochemistry , 39(37):11177–11183, 2000. [17] Eric Paquet and Herna L Viktor. Molecular dynamics, monte carlo simulations, and langevin dynamics: a computational review. BioMed research international , 2015(1):183918, 2015. [18] José Nelson Onuchic, Zaida Luthey-Schulten, and Peter G Wolynes. Theory of protein folding: the energy landscape perspective. Annual review of physical chemistry , 48(1):545–600, 1997. 16 A PREPRINT - J ULY 9, 2026 [19] Nir London, Dana Movshovitz-Attias, and Ora Schueler-Furman. The structural basis of peptide-protein binding strategies. Structure , 18(2):188–199, 2010. [20] Hans Frauenfelder, Stephen G Sligar, and Peter G Wolynes. The energy landscapes and motions of proteins. 
+
+Science , 254(5038):1598–1603, 1991. [21] Sami Boulebnane, Xavier Lucas, Agnes Meyder, Stanislaw Adaszewski, and Ashley Montanaro. Peptide conformational sampling using the quantum approximate optimization algorithm. npj Quantum Information ,9(1):70, 2023. [22] Cyrus Chothia and Arthur M Lesk. The relation between the divergence of sequence and structure in proteins. 
+
+The EMBO journal , 5(4):823–826, 1986. [23] Christopher M Dobson. Protein folding and misfolding. Nature , 426(6968):884–890, 2003. [24] Anton Robert, Panagiotis Kl Barkoutsos, Stefan Woerner, and Ivano Tavernelli. Resource-efficient quantum algorithm for protein folding. npj Quantum Information , 7(1):38, 2021. [25] Sanzo Miyazawa and Robert L Jernigan. A new substitution matrix for protein sequence searches based on contact frequencies in protein structures. Protein Engineering, Design and Selection , 6(3):267–278, 1993. [26] Sanzo Miyazawa and Robert L Jernigan. Residue–residue potentials with a favorable contact pair term and an unfavorable high packing density term, for simulation and threading. Journal of molecular biology , 256(3):623– 644, 1996. [27] Ken A Dill. Theory for the folding and stability of globular proteins. Biochemistry , 24(6):1501–1509, 1985. [28] Gopalasamudram Narayana Ramachandran. Stereochemistry of polypeptide chain configurations. J. Mol. Biol. ,7:95–99, 1963. [29] Dominic W Berry, Graeme Ahokas, Richard Cleve, and Barry C Sanders. Efficient quantum algorithms for simulating sparse hamiltonians. Communications in Mathematical Physics , 270(2):359–371, 2007. [30] Sanzo Miyazawa and Robert L Jernigan. Estimation of effective interresidue contact energies from protein crystal structures: quasi-chemical approximation. Macromolecules , 18(3):534–552, 1985. [31] Alex D MacKerell Jr, Donald Bashford, MLDR Bellott, Roland Leslie Dunbrack Jr, Jeffrey D Evanseck, Martin J Field, Stefan Fischer, Jiali Gao, Houyang Guo, Sookhee Ha, et al. All-atom empirical potential for molecular modeling and dynamics studies of proteins. The journal of physical chemistry B , 102(18):3586–3616, 1998. [32] Peter Eastman, Raimondas Galvelis, Raúl P Peláez, Charlles RA Abreu, Stephen E Farr, Emilio Gallicchio, Anton Gorenko, Michael M Henry, Frank Hu, Jing Huang, et al. Openmm 8: molecular dynamics simulation with machine learning potentials. The Journal of Physical Chemistry B , 128(1):109–116, 2023. [33] Sidhartha Chaudhury, Sergey Lyskov, and Jeffrey J Gray. Pyrosetta: a script-based interface for implementing molecular modeling algorithms using rosetta. Bioinformatics , 26(5):689–691, 2010. [34] JS Rowlinson*. The maxwell–boltzmann distribution. Molecular Physics , 103(21-23):2821–2828, 2005. [35] Renxiao Wang, Xueliang Fang, Yipin Lu, Chao-Yie Yang, and Shaomeng Wang. The pdbbind database: method-ologies and updates. Journal of medicinal chemistry , 48(12):4111–4119, 2005. [36] Milot Mirdita, Konstantin Schütze, Yoshitaka Moriwaki, Lim Heo, Sergey Ovchinnikov, and Martin Steinegger. Colabfold: making protein folding accessible to all. Nature methods , 19(6):679–682, 2022. [37] Zeming Lin, Halil Akin, Roshan Rao, Brian Hie, Zhongkai Zhu, Wenting Lu, Nikita Smetanin, Allan dos Santos Costa, Maryam Fazel-Zarandi, Tom Sercu, Sal Candido, et al. Language models of protein sequences at the scale of evolution enable accurate structure prediction. bioRxiv , 2022. [38] Alexander Rives, Joshua Meier, Tom Sercu, Siddharth Goyal, Zeming Lin, Jason Liu, Demi Guo, Myle Ott, C. Lawrence Zitnick, Jerry Ma, and Rob Fergus. Biological structure and function emerge from scaling unsuper-vised learning to 250 million protein sequences. PNAS , 2019. [39] Ruidong Wu, Fan Ding, Rui Wang, Rui Shen, Xiwen Zhang, Shitong Luo, Chenpeng Su, Zuofan Wu, Qi Xie, Bonnie Berger, Jianzhu Ma, and Jian Peng. High-resolution de novo structure prediction from primary sequence. 
+
+bioRxiv , 2022. [40] Gyuri Kim, Sewon Lee, Eli Levy Karin, Hyunbin Kim, Yoshitaka Moriwaki, Sergey Ovchinnikov, Martin Steinegger, and Milot Mirdita. Easy and accurate protein structure prediction using colabfold. Nature Protocols ,20(3):620–642, 2025. 17 A PREPRINT - J ULY 9, 2026 [41] Gustaf Ahdritz, Nazim Bouatta, Christina Floristean, Sachin Kadyan, Qinghui Xia, William Gerecke, Timothy J O’Donnell, Daniel Berenberg, Ian Fisk, Niccolò Zanichelli, Bo Zhang, Arkadiusz Nowaczynski, Bei Wang, Marta M Stepniewska-Dziubinska, Shang Zhang, Adegoke Ojewole, Murat Efe Guney, Stella Biderman, An-drew M Watkins, Stephen Ra, Pablo Ribalta Lorenzo, Lucas Nivon, Brian Weitzner, Yih-En Andrew Ban, Peter K Sorger, Emad Mostaque, Zhao Zhang, Richard Bonneau, and Mohammed AlQuraishi. OpenFold: Retraining AlphaFold2 yields new insights into its learning mechanisms and capacity for generalization. bioRxiv , 2022. 18
