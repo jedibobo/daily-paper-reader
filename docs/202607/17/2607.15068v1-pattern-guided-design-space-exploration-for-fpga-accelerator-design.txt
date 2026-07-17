@@ -1,0 +1,236 @@
+Title: Pattern-Guided Design Space Exploration for FPGA Accelerator Design
+
+URL Source: https://arxiv.org/pdf/2607.15068v1
+
+Published Time: Fri, 17 Jul 2026 01:18:06 GMT
+
+Number of Pages: 6
+
+Markdown Content:
+Proc. of the International Conference on Electrical, Computer, Communications and Mechatronics Engineering (ICECCME 2026) 15–17 October 2026, Bali, Indonesia 
+
+# Pattern-Guided Design Space Exploration for FPGA Accelerator Design 
+
+Jialiang Zhang 1, Weiman Yan 1, Yuelin Zou 2
+
+> 1
+
+Dept. of Electrical and Computer Engineering, University of Illinois Urbana-Champaign; 
+
+> 2
+
+Department of Industrial Engineering and Operations Research, Columbia University; 
+
+> 1
+
+Urbana, Illinois, USA 
+
+> 2
+
+Essex Junction, Vermont, USA email: jz23@illinois.edu 
+
+Abstract —High-level synthesis (HLS) raises the abstraction level of FPGA accelerator design from hardware description lan-guages to C/C++, but high-quality results still depend on schedule decisions such as pipelining, unrolling, tiling, reordering, and buffering. These decisions create a combinatorial design space, while many numerical kernels exhibit recurring computation patterns that suggest different optimization strategies. This paper presents PATTERN DSE, a lightweight pattern-guided design space exploration (DSE) framework for FPGA kernels written in Allo, a scheduling-oriented HLS programming system. P ATTERN DSE maps recurring computation patterns, in-cluding elementwise maps, reductions, matrix-vector operations, matrix-matrix operations, and stencil-like updates, to compact schedule spaces. It then applies candidate schedules, validates functional correctness through LLVM execution, checks HLS C code generation, and uses a simple pattern-aware estimator to rank candidates before Vitis HLS synthesis. We evaluate PATTERN DSE on six representative kernels: 
+
+vecadd , axpy , dot , matvec , gemm , and jacobi2d . Compared with an exhaustive-lite baseline, pattern-guided DSE reduces the number of HLS-evaluated candidates from 140 to 29, achieving a 4.83 × overall search reduction and up to 12.0 × reduction for individual kernels. Across all evaluated kernels, P ATTERN DSE recovers the same best valid Vitis HLS latency as the exhaustive-lite baseline, demonstrating that computation-pattern informa-tion can prune unproductive schedule combinations while pre-serving high-quality HLS outcomes. 
+
+Keywords —FPGA, High-level synthesis, Design space explo-ration, Optimization, Hardware accelerator, Software-Hardware Codesign 
+
+I. I NTRODUCTION 
+
+The growing diversity of modern workloads has made data-intensive applications, including machine learning, video processing, graph analytics, genomics, and layout generation, increasingly important across cloud and edge platforms [1]– [4]. Meanwhile, the slowdown of conventional processor scaling has increased the demand for domain-specific accel-eration under tight power and area constraints [5]. Field-programmable gate arrays (FPGAs) address this need by com-bining post-fabrication flexibility with customized datapaths, fine-grained parallelism, and application-specific memory or-ganization. Consequently, FPGAs have been adopted in cloud-scale systems and datacenter services [6], [7], as well as a broad range of data-intensive application domains [8]. High-level synthesis (HLS) reduces the programming bur-den by compiling C/C++ or higher-level descriptions into hard-ware implementations. However, HLS optimization remains highly dependent on architectural and scheduling choices, including pipelining, unrolling, tiling, reordering, memory partitioning, and buffering. Since these choices interact combi-natorially, HLS optimization is fundamentally a design space exploration (DSE) problem rather than a push-button compi-lation task [8], [9]. Recent HLS programming systems expose schedules as first-class objects, allowing algorithms and hardware map-pings to be developed separately. Allo follows this direction by providing a scheduling-oriented interface for generating multiple hardware implementations from a common kernel specification [10]. While this improves programmability, it does not determine which schedules should be explored. This paper argues that schedule exploration can be reduced and made more interpretable by exploiting computation struc-ture. Numerical kernels are not arbitrary programs: element-wise maps, reductions, matrix-vector products, matrix-matrix products, and stencil-like updates exhibit different reuse pat-terns, dependency constraints, and memory bottlenecks. This pattern-oriented view is consistent with the Berkeley “dwarfs” and accelerator benchmark suites such as MachSuite, Rodinia, CHStone, Rosetta, and MLPerf, which organize workloads around recurring computational motifs [11]–[16]. We present PATTERN DSE, a lightweight pattern-guided DSE prototype for FPGA kernels written in Allo. PAT -
+
+TERN DSE maps supported kernel patterns to compact sched-ule spaces, validates generated schedules through LLVM ex-ecution and HLS C/C++ code generation, and ranks valid candidates before Vitis HLS synthesis. Rather than replacing vendor HLS tools, analytical models, or learning-based DSE methods, P ATTERN DSE acts as a front-end pruning layer that forwards fewer and more relevant candidates to expensive synthesis. The contributions of this paper are as follows: 
+
+XXX-X-XXXX-XXXX-X/XX/$XX.00 © 20XX IEEE arXiv:2607.15068v1 [cs.AR] 16 Jul 2026 • We formulate pattern-guided schedule-space pruning as a practical HLS DSE layer for recurring numerical kernels.  
+
+> •
+
+We implement an end-to-end workflow that connects pattern-aware candidate generation, backend valida-tion, estimator-based ranking, and Vitis HLS evaluation through the Allo scheduling interface.  
+
+> •
+
+We evaluate six kernels and show that P ATTERN DSE reduces HLS-evaluated candidates from 140 to 29 while recovering the same best valid Vitis HLS latency found by the exhaustive-lite baseline. II. B ACKGROUND AND MOTIVATION 
+
+A. Schedule Spaces in HLS 
+
+An HLS design is determined not only by the functional kernel but also by a set of schedule decisions. A candidate design can be represented as 
+
+d = ( p, u, r, t, m, b, . . . ), (1) where p denotes pipeline choices, u denotes unroll factors, r
+
+denotes loop reordering, t denotes tiling, m denotes memory partitioning, and b denotes buffering decisions. These knobs interact with each other. Increasing an unroll factor can expose parallelism, but it may also increase memory-port pressure or resource usage. Pipelining a loop can reduce initiation inter-val, but loop-carried dependencies may prevent the intended schedule. Tiling can improve locality, but it may add local storage and control overhead. Compiler frameworks such as ScaleHLS and scheduling lan-guages such as Halide, TVM, HeteroCL, and Allo demonstrate the value of separating what a program computes from how it is scheduled [10], [17]–[20]. However, this separation also shifts part of the optimization burden to DSE. Even when each individual transformation is well-defined, their composition creates a large search space. 
+
+B. Allo-Style HLS Schedule Construction 
+
+Figure 1 shows a simplified Allo-style GEMM fragment adapted from the schedule-construction style in [10]. The algorithm specification defines the loop nest and computation, while the schedule object applies transformations such as pipelining, unrolling, and array partitioning. In this setting, PATTERN DSE does not change the programming model. In-stead, it decides which schedule primitives and parameter values should be instantiated for a given computation pattern. 
+
+C. Computation Patterns as DSE Structure 
+
+Many FPGA kernels exhibit recognizable computational structure. Elementwise kernels have independent iterations and limited data reuse. Reduction kernels contain accumulation dependencies and benefit from reduction-safe unrolling or tree-like accumulation. Matrix-vector and matrix-matrix kernels have structured reuse across rows, columns, and reduction axes. Stencil-like kernels access neighboring elements and often benefit from locality-aware scheduling and buffering. These differences imply that a single generic search tem-plate is unlikely to be efficient across all kernels. For a                                            
+
+> 1def gemm(A: int8[M, K], B: int8[K, N],
+> 2C: int16[M, N]):
+> 3for i, jin allo.grid(M, N, name="C"):
+> 4for kin range (K):
+> 5C[i, j] += A[i, k] * B[k, j]
+> 67s=allo.customize(gemm)
+> 8s.pipeline("k")
+> 9s.unroll("j", factor=UF)
+> 10 s.partition(s.A, dim=1, factor=UF)
+> 11 s.partition(s.B, dim=0, factor=UF)
+> 12 s.partition(s.C, dim=1, factor=UF)
+> Fig. 1. Simplified Allo-style GEMM kernel and schedule fragment. The schedule choices expose the kind of search knobs that P ATTERN DSE con-strains using computation-pattern information.
+
+simple elementwise map, exploring many loop permutations or tiling choices is unnecessary. For matrix multiplication, however, loop order and unroll-axis selection strongly affect reuse and memory bandwidth. For stencil updates, spatial locality matters more than blindly unrolling every loop. Pattern information therefore provides a natural prior over useful schedules. III. S YSTEM OVERVIEW 
+
+Fig. 2 shows the P ATTERN DSE workflow. The input is a kernel written in Allo and a bounded search configuration. In the current prototype, each benchmark kernel is associated with a computation pattern and a small amount of schedule metadata, such as candidate loop axes, reduction axes, and search bounds. The pattern-aware generator maps this pattern information to schedule templates and search bounds. Rather than enu-merating every combination of generic schedule knobs, it generates candidates that match the selected pattern template. The candidate pool stores schedule configurations together with validity, score, rank, and top-k selection status. Backend validation applies each schedule, checks LLVM-level execu-tion, and verifies that HLS C/C++ code can be generated. The estimator/ranker then updates the candidate pool using latency and resource estimates. Finally, the selected top-k candidates are evaluated through Vitis HLS synthesis to obtain latency, initiation interval (II), and resource usage. The feedback loop in Fig. 2 is important. In the current prototype, the estimator is a simple pattern-aware heuristic used to prioritize candidates before synthesis. The same inter-face can later support calibrated analytical models, synthesis-history feedback, or learning-based rankers without changing the rest of the flow. IV. P ATTERN -G UIDED DSE M ETHOD 
+
+A. Pattern Templates 
+
+In this prototype, PATTERN DSE supports five pattern classes: elementwise , reduction , matvec , gemm , and 
+
+stencil . The current implementation does not rely on a complicated standalone extractor. Instead, each supported ker-nel is mapped to a pattern template that specifies the schedule primitives and search bounds worth considering first. Kernels Fig. 2. Overview of P ATTERN DSE workflow. TABLE I PATTERN TEMPLATES USED BY PATTERN DSE Pattern Kernels Schedule focus Elementwise vecadd , axpy Pipeline the main loop and try small unroll factors. Avoid tiling and loop permutations that do not expose reuse. Reduction dot Pipeline the reduction loop and test reduction-safe unroll fac-tors while preserving accumula-tion correctness. MatVec matvec Select between output-axis and reduction-axis parallelism under memory-bandwidth constraints. GEMM gemm Explore selected loop orders and bounded unroll combinations that expose multiply-accumulate paral-lelism. Stencil jacobi2d Pipeline spatial loops and keep the search compact for locality-oriented extensions. 
+
+that do not match the supported templates can fall back to a generic bounded search. Table I summarizes the pattern templates used in the current implementation. The templates are deliberately compact: they encode useful schedule priors without trying to prove every legal transformation before backend validation. 
+
+B. Candidate Generation, Validation, and Ranking 
+
+Algorithm 1 describes the full DSE loop. The pattern class and optional schedule metadata select a rule set from the pattern library. The generator instantiates only bounded schedules allowed by that rule set. Each schedule is applied through the Allo schedule interface. Candidates that fail LLVM execution or HLS C/C++ code generation are removed before synthesis. Valid candidates are scored as 
+
+S(d) = bL(d) ·
+
+
+
+1 + α bR(d)
+
+
+
+, (2) where bL(d) estimates latency, bR(d) estimates normalized resource pressure, and α controls the resource penalty. This 
+
+Algorithm 1 Pattern-Guided Candidate Generation and Rank-ing                                                             
+
+> Require: Kernel K, pattern class c, optional metadata M, rule library R,budget B
+> Ensure: Ranked candidate list Cranked
+> 1: C← ∅ ,Cvalid ← ∅
+> 2: Select pattern rules Rc← R [c]
+> 3: for each template r∈Rcdo
+> 4: Instantiate schedule parameters within budget B
+> 5: Append generated schedules to C
+> 6: end for
+> 7: for each candidate d∈Cdo
+> 8: Apply dto the schedule object 9: if dpasses LLVM execution then
+> 10: if demits HLS C/C++ code then
+> 11: Estimate bL(d)and bR(d)
+> 12: Add (d, S (d)) to Cvalid using Eq. (2) 13: end if
+> 14: end if
+> 15: end for
+> 16: Sort Cvalid by score and mark the top-kcandidates 17: return Cranked
+
+score is used only to prioritize candidates. Final quality is still measured by Vitis HLS. This formulation gives P ATTERN DSE three practical ad-vantages. First, it reduces the initial schedule space before expensive HLS synthesis. Second, it keeps generated candi-dates interpretable because each candidate is associated with a pattern rule. Third, it provides an extension path: supporting a new kernel family only requires adding a pattern rule or mapping it to an existing pattern. V. I MPLEMENTATION 
+
+We implemented P ATTERN DSE as a Python-based DSE layer around the Allo workflow. The prototype contains bench-mark kernels, pattern metadata, schedule templates, valida-tion scripts, ranking utilities, and Vitis HLS batch-evaluation scripts. The implementation separates four concerns: search-space construction, schedule application, backend validation, and candidate ranking. The evaluation pipeline proceeds as follows. First, a count-ing script enumerates the exhaustive-lite and pattern-guided spaces under the same bounds. Second, a DSE script applies each generated schedule and records whether it passes LLVM execution and HLS C/C++ code generation. Third, a rank-ing script computes estimator scores and marks the selected candidates. Fourth, a batch HLS script synthesizes exported candidates with the same Vitis HLS configuration. All HLS evaluations use the same target part and clock set-ting within an experiment. The exported projects are organized by kernel, method, and candidate identifier so that exhaustive-lite and pattern-guided candidates can be compared using the same downstream synthesis flow. This organization also makes it possible to rerun only selected candidates when the ranking heuristic changes. TABLE II CANDIDATE COUNT REDUCTION                                 
+
+> Kernel Pattern Exhaustive-lite PATTERN DSE Reduction
+> vecadd Elementwise 842.00 ×
+> axpy Elementwise 842.00 ×
+> dot Reduction 832.67 ×
+> matvec MatVec 832.67 ×
+> gemm GEMM 72 12 6.00 ×
+> jacobi2d Stencil 36 312.00 ×
+> Total –140 29 4.83 ×
+
+VI. E VALUATION 
+
+A. Experimental Setup 
+
+We evaluate P ATTERN DSE on six kernels: vecadd , axpy ,
+
+dot , matvec , gemm , and jacobi2d . These kernels cover elementwise computation, scalar-vector operations, reductions, matrix-vector computation, matrix multiplication, and stencil-like updates. The baseline is exhaustive-lite , a bounded enu-meration strategy that applies a generic schedule template to each kernel. Exhaustive-lite is not meant to represent a full unbounded exhaustive search; it is a controlled baseline that exposes how many candidates are produced when pattern information is not used. We report three metrics. First, candidate count measures how many designs are sent to HLS evaluation. Second, search-space reduction measures the percentage reduction relative to exhaustive-lite. Third, best valid HLS latency measures whether the smaller pattern-guided space preserves the best synthesized latency found by the baseline. A candidate is considered valid only if it passes backend checks and produces a Vitis HLS result. 
+
+B. Search-Space Reduction 
+
+Table II shows the candidate counts. Across the six kernels, exhaustive-lite evaluates 140 candidates, while P ATTERN DSE evaluates 29 candidates. This corresponds to a 4.83 × overall reduction. The reduction is largest for kernels with richer nested-loop structure: gemm is reduced from 72 to 12 can-didates, and jacobi2d is reduced from 36 to 3 candidates. Fig. 3 visualizes both the absolute candidate counts and the corresponding percentage reduction. The smaller reductions for vecadd and axpy are expected because their baseline spaces are already small. The larger reductions for gemm 
+
+and jacobi2d show the advantage of using computation structure when generic schedule knobs become combinatorial. 
+
+C. Best Valid HLS Latency 
+
+The key question is whether pruning removes useful candi-dates. Fig. 4 compares the best valid Vitis HLS latency found by exhaustive-lite and P ATTERN DSE for each kernel. Across all six kernels, the best valid latency found by P ATTERN DSE matches the best valid latency found by exhaustive-lite. This result indicates that the removed candidates are not necessary for reaching the best latency within the evaluated search bounds. 
+
+D. Discussion 
+
+The results support the central hypothesis that computation patterns can guide HLS schedule exploration. Pattern guidance is most beneficial when the generic schedule space contains many combinations that are structurally legal but unlikely to be productive. For example, matrix multiplication and stencil-like updates have more loop axes and more possible schedule choices than simple elementwise kernels; as a result, PATTERN DSE removes a larger fraction of candidates for these kernels. The current prototype emphasizes pruning and ranking rather than aggressive schedule invention. This choice is de-liberate. By leaving final quality evaluation to Vitis HLS, P AT -
+
+> TERN
+
+DSE remains compatible with standard HLS reporting and avoids overfitting to an internal cost model. The estimator only affects which candidates are prioritized. In future work, synthesis feedback can be used to calibrate the estimator and improve top-k selection. VII. R ELATED WORK 
+
+A. FPGA Accelerator Workloads and AI Systems 
+
+FPGA accelerator research is increasingly shaped by work-load and deployment context. Cloud systems such as Cat-apult and later datacenter FPGA deployments demonstrate how reconfigurable logic can be integrated into production infrastructure, where latency, throughput, resource cost, and flexibility must be considered together [6], [7]. Benchmark suites such as MachSuite, Rodinia, CHStone, and Rosetta provide representative workloads for customized architectures, heterogeneous computing, and HLS research [12]–[15]. AI further highlights the need for workload-aware design: MLPerf standardizes inference evaluation [16], FPGA-oriented frame-works such as fpgaConvNet and DNNBuilder automate neural-network accelerator construction [21], [22], and systems such as TPU and Gemmini show the value of matching architecture, software, and workload structure across the full stack [23], [24]. P ATTERN DSE targets a narrower layer in this land-scape: it uses workload pattern information to constrain HLS schedule-space exploration. 
+
+B. HLS Programming Systems and FPGA Implementation Flows 
+
+HLS has evolved from C/C++-oriented FPGA compila-tion systems such as LegUp into a broader ecosystem of scheduling-oriented and domain-specific programming flows [8], [25]. Halide, TVM, HeteroCL, ScaleHLS, and Allo all separate the algorithm from scheduling or mapping decisions in different domains [10], [17]–[20], while MLIR provides reusable compiler infrastructure for building such domain-specific flows [26]. At the same time, FPGA implementa-tion quality depends on backend effects such as memory banking, placement, routing, and timing closure. VTR pro-vides open FPGA CAD infrastructure [27], and AutoBridge and TAPA show that high-frequency FPGA designs often require coupling HLS-level transformations with floorplan-ning, pipelining, dataflow organization, and physical-design axpy dot gemm jacobi2d matvec vecadd      
+
+> Kernel
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 70
+> # HLS candidates
+> Candidate Count Reduction
+> Exhaustive-lite
+> Pattern-guided axpy dot gemm jacobi2d matvec vecadd
+> Kernel
+> 0
+> 20
+> 40
+> 60
+> 80
+> Candidate reduction (%)
+> 50.0%
+> 62.5%
+> 83.3%
+> 91.7%
+> 62.5%
+> 50.0%
+> Search-space Reduction
+
+Fig. 3. Search-space reduction results. Left: number of HLS candidates evaluated by exhaustive-lite and P ATTERN DSE. Right: percentage reduction achieved by pattern-guided candidate generation. axpy dot gemm jacobi2d matvec vecadd 
+
+> Kernel
+> 10 2
+> 10 3
+> 10 4
+> Best valid HLS latency (cycles, log scale)
+> Best Valid HLS Latency
+> Exhaustive-lite
+> Pattern-guided
+
+Fig. 4. Best valid Vitis HLS latency found by exhaustive-lite and P AT -
+
+> TERN
+
+DSE. Pattern-guided search recovers the same best valid latency while evaluating fewer candidates. The y-axis uses a logarithmic scale. 
+
+awareness [28], [29]. Hardware construction languages and open implementation flows, including Chisel and OpenROAD, reflect the same broader trend toward generator-based design and automation [30], [31]. P ATTERN DSE is complementary to these systems: it filters schedule candidates before expensive backend evaluation. 
+
+C. DSE, Estimation, and Pattern-Guided Search 
+
+HLS DSE has been studied through analytical models, heuristic search, learning-based methods, and pragma opti-mization frameworks [9], [32]–[34]. These methods seek to reduce synthesis cost while still finding high-quality imple-mentations. P ATTERN DSE does not propose a new global optimizer; instead, it reduces the initial candidate pool us-ing computation-pattern information, then relies on backend validation and Vitis HLS to measure final quality. This de-sign is motivated by the fact that programs exhibit recurring structures, as captured by the Berkeley dwarfs [11]. Reduc-tions, dense linear algebra, stencils, convolutions, and neural-network layers each have distinct dependency and data-reuse behavior, so mapping them to the same generic schedule template can waste evaluation budget. P ATTERN DSE applies this idea at the schedule-space level by mapping recurring kernel patterns to compact schedule templates and using a simple estimator/ranker to prioritize valid candidates. VIII. L IMITATIONS AND FUTURE WORK 
+
+The current prototype has several limitations. First, the pattern library is manually defined and covers a small set of numerical kernels. Future work should add convolutions, tensor contractions, sparse kernels, and streaming dataflow patterns. Second, the estimator is intentionally simple. More accurate analytical models or learning-based rankers could improve top-k selection, especially when the pattern-guided candidate set becomes larger. Third, the current templates fo-cus on loop scheduling and bounded unrolling; more advanced memory hierarchy generation, tiling, and buffering strategies should be incorporated. Finally, the evaluation currently com-pares against an exhaustive-lite baseline. Stronger baselines, including Bayesian optimization, genetic search, and prior HLS DSE tools, would further clarify where pattern guidance provides the largest benefit. Despite these limitations, the results suggest that pattern-guided pruning is a useful design point. It preserves the transparency of schedule-based programming while avoiding unnecessary downstream synthesis of structurally mismatched candidates. IX. C ONCLUSION 
+
+This paper presented P ATTERN DSE, a lightweight pattern-guided DSE framework for FPGA kernels written in Allo. PATTERN DSE uses computation structure to instantiate com-pact schedule spaces, validate candidate schedules, rank valid candidates, and evaluate selected designs through Vitis HLS. On six representative kernels, P ATTERN DSE reduces the num-ber of HLS-evaluated candidates from 140 to 29, achieving a 4.83 × overall search reduction and up to 12.0 × reduction for an individual kernel. At the same time, it recovers the same best valid Vitis HLS latency as the exhaustive-lite baseline for all evaluated kernels. These results show that simple computation-pattern information can make HLS schedule ex-ploration more efficient without sacrificing the best observed HLS outcome within the evaluated search bounds. Realizing this at scale will require shared benchmarks that evaluate DSE methods through executable synthesis rather than self-defined search bounds [35]. REFERENCES [1] W. Yan, Y.-C. Chang, and W. Zhao, “Stiff circuit system modeling via transformer,” arXiv preprint arXiv:2510.24727 , 2025. [2] M. Shen, J. Y. Zhang, L. Chen, W. Yan, N. Jani, B. Sutton, and O. Koyejo, “Labeling cost sensitive batch active learning for brain tumor segmentation,” in 2021 IEEE 18th International Symposium on Biomedical Imaging (ISBI) , 2021, pp. 1269–1273. [3] G. Zhou, B. Korrapati, G. R. Reddy, C.-C. Chang, J. Pan, J. Hu, Y. Chen, and D. G. Thakurta, “Patternpaint: Practical layout pattern generation using diffusion-based inpainting,” in 2025 62nd ACM/IEEE Design Automation Conference (DAC) , 2025, pp. 1–7. [4] G. Zhou, C.-C. Chang, J. Zhang, J. Pan, and Y. Chen, “Diffusion-model-enhanced layout pattern generation for sub-3nm dfm,” in 2025 IEEE/ACM International Conference On Computer Aided Design (IC-CAD) , 2025, pp. 1–7. [5] H. Esmaeilzadeh, E. Blem, R. St. Amant, K. Sankaralingam, and D. Burger, “Dark silicon and the end of multicore scaling,” in Proc. 38th Annual International Symposium on Computer Architecture , 2011, pp. 365–376. [6] A. Putnam et al. , “A reconfigurable fabric for accelerating large-scale datacenter services,” in Proc. 41st Annual International Symposium on Computer Architecture , 2014, pp. 13–24. [7] A. M. Caulfield et al. , “A cloud-scale acceleration architecture,” in Proc. 49th Annual IEEE/ACM International Symposium on Microarchitecture ,2016. [8] J. Cong, J. Lau, G. Liu, S. Neuendorffer, P. Pan, K. Vissers, and Z. Zhang, “FPGA HLS today: Successes, challenges, and opportunities,” 
+
+ACM Transactions on Reconfigurable Technology and Systems , vol. 15, no. 4, pp. 1–42, 2022. [9] B. C. Schafer and Z. Wang, “High-level synthesis design space explo-ration: Past, present, and future,” IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems , vol. 39, no. 10, pp. 2628– 2639, 2020. [10] H. Chen, N. Zhang, S. Xiang, Z. Zeng, M. Dai, and Z. Zhang, “Allo: A programming model for composable accelerator design,” Proceedings of the ACM on Programming Languages , vol. 8, no. PLDI, pp. 593–620, 2024. [11] K. Asanovi´ c, R. Bod´ ık, B. Catanzaro, J. Gebis, P. Husbands, K. Keutzer, D. Patterson, W. Plishker, J. Shalf, S. Williams, and K. Yelick, “The landscape of parallel computing research: A view from Berkeley,” University of California, Berkeley, Tech. Rep. UCB/EECS-2006-183, 2006. [12] B. Reagen, R. Adolf, Y. S. Shao, G.-Y. Wei, and D. Brooks, “MachSuite: Benchmarks for accelerator design and customized architectures,” in 
+
+Proc. IEEE International Symposium on Workload Characterization ,2014, pp. 110–119. [13] S. Che, M. Boyer, J. Meng, D. Tarjan, J. W. Sheaffer, S.-H. Lee, and K. Skadron, “Rodinia: A benchmark suite for heterogeneous computing,” in Proc. IEEE International Symposium on Workload Characterization ,2009, pp. 44–54. [14] Y. Hara, H. Tomiyama, S. Honda, H. Takada, and K. Ishii, “CHStone: A benchmark program suite for practical C-based high-level synthesis,” in Proc. IEEE International Symposium on Circuits and Systems , 2008, pp. 1192–1195. [15] Y. Zhou, U. Gupta, S. Dai, R. Zhao, N. Srivastava, H. Jin, J. Feath-erston, Y.-H. Lai, G. Liu, G. A. Velasquez, W. Wang, and Z. Zhang, “Rosetta: A realistic high-level synthesis benchmark suite for software programmable FPGAs,” in Proc. ACM/SIGDA International Symposium on Field-Programmable Gate Arrays , 2018, pp. 269–278. [16] V. J. Reddi et al. , “MLPerf inference benchmark,” in Proc. ACM/IEEE 47th Annual International Symposium on Computer Architecture , 2020, pp. 446–459. [17] H. Ye, H. Jun, H. Jeong, S. Neuendorffer, and D. Chen, “ScaleHLS: A scalable high-level synthesis framework with multi-level transforma-tions and optimizations,” in Proc. 59th ACM/IEEE Design Automation Conference , 2022, pp. 1355–1358. [18] J. Ragan-Kelley, A. Adams, S. Paris, M. Levoy, S. Amarasinghe, and F. Durand, “Decoupling algorithms from schedules for easy optimization of image processing pipelines,” ACM Transactions on Graphics , vol. 31, no. 4, pp. 1–12, 2012. [19] T. Chen, T. Moreau, Z. Jiang, L. Zheng, E. Yan, H. Shen, M. Cowan, L. Wang, Y. Hu, L. Ceze, C. Guestrin, and A. Krishnamurthy, “TVM: An automated end-to-end optimizing compiler for deep learning,” in 
+
+Proc. 13th USENIX Symposium on Operating Systems Design and Implementation , 2018, pp. 578–594. [20] Y.-H. Lai, Y. Chi, Y. Hu, J. Wang, C. H. Yu, Y. Zhou, J. Cong, and Z. Zhang, “HeteroCL: A multi-paradigm programming infrastructure for software-defined reconfigurable computing,” in Proc. ACM/SIGDA International Symposium on Field-Programmable Gate Arrays , 2019, pp. 242–251. [21] S. I. Venieris and C.-S. Bouganis, “fpgaConvNet: A framework for mapping convolutional neural networks on FPGAs,” in Proc. IEEE 24th Annual International Symposium on Field-Programmable Custom Computing Machines , 2016, pp. 40–47. [22] X. Zhang, J. Wang, C. Zhu, Y. Lin, J. Xiong, W.-M. Hwu, and D. Chen, “DNNBuilder: An automated tool for building high-performance DNN hardware accelerators for FPGAs,” in Proc. IEEE/ACM International Conference on Computer-Aided Design , 2018, pp. 1–8. [23] N. P. Jouppi et al. , “In-datacenter performance analysis of a tensor processing unit,” in Proc. 44th Annual International Symposium on Computer Architecture , 2017, pp. 1–12. [24] H. Genc et al. , “Gemmini: Enabling systematic deep-learning archi-tecture evaluation via full-stack integration,” in Proc. 58th ACM/IEEE Design Automation Conference , 2021. [25] A. Canis, J. Choi, M. Aldham, V. Zhang, A. Kammoona, J. H. An-derson, S. Brown, and T. Czajkowski, “LegUp: High-level synthesis for FPGA-based processor/accelerator systems,” in Proc. ACM/SIGDA International Symposium on Field-Programmable Gate Arrays , 2011, pp. 33–36. [26] C. Lattner, M. Amini, U. Bondhugula, A. Cohen, A. Davis, J. Pienaar, R. Riddle, T. Shpeisman, N. Vasilache, and O. Zinenko, “MLIR: A compiler infrastructure for the end of Moore’s law,” arXiv preprint arXiv:2002.11054 , 2020. [27] J. Luu et al. , “VTR 7.0: Next generation architecture and CAD system for FPGAs,” ACM Transactions on Reconfigurable Technology and Systems , vol. 7, no. 2, pp. 1–30, 2014, article 6. [28] L. Guo, Y. Chi, J. Wang, J. Lau, W. Qiao, E. Ustun, Z. Zhang, and J. Cong, “AutoBridge: Coupling coarse-grained floorplanning and pipelining for high-frequency HLS design on multi-die FPGAs,” in 
+
+Proc. ACM/SIGDA International Symposium on Field-Programmable Gate Arrays , 2021, pp. 81–92. [29] L. Guo et al. , “TAPA: A scalable task-parallel dataflow programming framework for modern FPGAs with co-optimization of HLS and physical design,” ACM Transactions on Reconfigurable Technology and Systems ,vol. 16, no. 4, pp. 1–31, 2023, article 63. [30] J. Bachrach, H. Vo, B. Richards, Y. Lee, A. Waterman, R. Aviˇ zienis, J. Wawrzynek, and K. Asanovi´ c, “Chisel: Constructing hardware in a Scala embedded language,” in Proc. 49th Annual Design Automation Conference , 2012, pp. 1216–1225. [31] T. Ajayi et al. , “OpenROAD: Toward a self-driving, open-source digital layout implementation tool chain,” in Proc. Government Microcircuit Applications and Critical Technology Conference , 2019. [32] H.-Y. Liu and L. P. Carloni, “On learning-based methods for design-space exploration with high-level synthesis,” in Proc. 50th Annual Design Automation Conference , 2013, pp. 1–7. [33] A. Sohrabizadeh, C. H. Yu, M. Gao, and J. Cong, “AutoDSE: Enabling software programmers to design efficient FPGA accelerators,” ACM Transactions on Design Automation of Electronic Systems , vol. 27, no. 4, pp. 1–27, 2022. [34] W. Yan, Z. Deng, M. Molter, R. Krishna, N. Rouf, S. S. Sofla, E. Thieme, S. Chatterjee, P. P. P. Linn, Y. Wen, X. Xiao, Z. Zhang, J. Huang, Y. Liu, Y. Zhou, P. Franzon, M. Swaminathan, E. Rosenbaum, and A. Aysu, “From predict to generate: A cross-layer survey of generative ai for ic design and manufacturing,” Preprints , July 2026. [Online]. Available: https://doi.org/10.20944/preprints202607.0874.v1 [35] X. Guo, Y. Li, X. Kong, Y. JIANG, X. Zhao, Z. Gong, Y. Zhang, D. Li, T. Sang, B. Zhu, G. Jun, Y. Huang, Y. Liu, Y. Xue, R. D. Kundu, Q. Lim, Y. Zhao, L. Granger, M. Younis, D. Keivan, N. Sabharwal, S. Sinha, P. Agarwal, K. Vandyck, H. Mai, Z. Wang, A. Venkatesh, A. Barik, J. Yang, C. Yue, J. He, L. Wang, L. Xu, H. Chen, J. Wang, L. Xu, R. Shetty, Z. Guo, D. Song, M. Jha, W. Liang, W. Yan, B. Zhang, S. Bhandary Karnoor, J. Zhang, R. Pandya, X. Gong, M. Ganesh, F. Shi, R. Xu, Y. Zhang, Y. Ouyang, L. Qin, E. Rosenbaum, C. Snyder, P. Seiler, G. Dullerud, X. Zhang, Z. Cheng, P. K. Hanumolu, J. Huang, M. Kulkarni, M. Namazifar, H. Zhang, and B. Hu, “Toward engineering agi: Benchmarking the engineering design capabilities of llms,” in Advances in Neural Information Processing Systems , D. Belgrave, C. Zhang, H. Lin, R. Pascanu, P. Koniusz, M. Ghassemi, and N. Chen, Eds., vol. 38. Curran Associates, Inc., 2025. [Online]. Available: https://proceedings.neurips.cc/paper files/ paper/2025/file/664f777548205fb6e0cbb0965e8d2e16-Paper-Datasets and Benchmarks Track.pdf
