@@ -1,0 +1,760 @@
+Title: CLIP-3D: Closed-Loop Evaluation of Performance and Physical Constraints for 3D ICs
+
+URL Source: https://arxiv.org/pdf/2607.12788v1
+
+Published Time: Wed, 15 Jul 2026 12:02:28 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+> 1
+
+# CLIP-3D: Closed-Loop Evaluation of Performance and Physical Constraints for 3D ICs 
+
+Shuo Ren, Libo Shen, Yaohui Han, Leilei Jin, Chenghan Wang, Zhen Zhuang, Rongliang Fu ∗, Bei Yu, Senior Member, IEEE , Tsung-Yi Ho, Fellow, IEEE 
+
+Abstract —3D integration packs more power into a smaller foot-print, so a candidate design’s actual throughput depends on its layout: which macro sits on which tier, where the hot spot lands, and how cache geometry maps to access cycles. Architectural simulators like gem5 report IPC under idealized timing. They do not produce the per-block power map, the cache cycle counts, or the 3D layout that decide the realized billion-instructions-per-second (BIPS), so early-stage 3D-IC exploration selects designs without accounting for the effects that decide whether they throttle on silicon. We present CLIP-3D, a shift-left flow that exposes 3D layout-driven thermal, wire, and cache effects to early-stage architectural exploration before any sign-off tool is invoked. The first stage lifts an architectural configuration into a physical block representation: McPAT for per-block dynamic and leakage power, CACTI for cache geometry and access cycles, and a HotSpot-compatible 3D stack discretization. The second stage runs an analytical 3D thermal-aware floorplanner over that representation. The floorplanner objective embeds a closed-form sustained-frequency expression derived from the linearity of HotSpot’s steady-state operator and the standard CMOS power-frequency decomposition. Cross-tier macro assignment and in-plane placement are co-optimized for the realized BIPS rather than for a half-perimeter wirelength (HPWL)-plus-temperature surrogate with hand-tuned weights. On an 80-configuration ar-chitecture sweep under stressed cooling, the floorplanner delivers a realized BIPS gain of 13 .75% on average (max 24 .77% ) over the shelf-pack baseline on every one of the 48 thermally-binding configurations and a wire-driven 5.82% on average on the 32 headroom configurations, when each method’s optimized layout is back-annotated into gem5 to capture layout-conditional cache and wire latency. The same realized BIPS plateau is reached by a cool3d-canonical baseline and an SA-plus-𝜆 -mix grid-search baseline at 2.0× and 2.9× more wall time respectively, so in these experiments CLIP-3D lies on the Pareto frontier of wall time versus realized BIPS. 
+
+Index Terms —3D ICs, architecture evaluation, physical con-straints, thermal throttling, design space exploration. 
+
+I. I NTRODUCTION 
+
+Modern workloads keep demanding more compute than a single die can provide, and 3D integration is one architec-tural response: multiple active tiers stack vertically so on-chip compute and cache density grow without enlarging the footprint [1]. Stacking has a cost. Power dissipates into a smaller volume, so a 3D stack heats up faster than a planar die. Once the peak die temperature 𝑇 max crosses a safe threshold, the chip 
+
+Shuo Ren, Libo Shen, Yaohui Han, Leilei Jin, Chenghan Wang, Zhen Zhuang, Rongliang Fu, Bei Yu, and Tsung-Yi Ho are with The Chinese University of Hong Kong. E-mail: {sren, lbshen24, yhhan25, lljin, chwang25, zzhuang21, rlfu, byu, tyho }@cse.cuhk.edu.hk. 
+
+> ∗
+
+Corresponding author: Rongliang Fu. Quick      
+
+> Develop Stage
+> Slow Loop Slow Loop Slow Loop
+> CLIP-3D
+> (ours)
+> Traditional
+> Validation & Tape-out
+> Thermal
+> Analysis
+> Manually Floorplan
+> Architecture
+> Design
+> Feature
+> Extraction
+> 3D Floorplan
+> Validation & Tape-out
+> Physical
+> -aware PPA
+> 3D IC Development Timeline
+> Architecture
+> Design
+> Time Saving
+> How to enable rapid feedback
+> How to evaluate the PPAT
+> How to extract optimization objectives
+> Thermal
+> Simulation
+
+Fig. 1 Two existing 3D-IC exploration regimes and where CLIP-3D fits. The Quick path runs an architectural simulator only and reports power, performance, and area (PPA) without thermal. The Traditional path adds McPAT, CACTI, and HotSpot to produce PPA plus thermal (PPAT), but at much higher wall time per candidate. 
+
+throttles its clock to protect itself. The useful throughput is no longer the nominal IPC · 𝑓 0 that a simulator reports, but the thermally-derated IPC · 𝑓 (𝑇 max ) delivered on silicon, which is the BIPS metric [2]. What 𝑓 (𝑇 max ) ends up being on a given configuration depends on the joint power map across tiers, on which macro sits above which, and on where the hottest concentration of switching activity lands in plane. The 3D layout decides all of this, and an architectural simulator sees none of it before architecture commitment. Yet early-stage 3D-IC exploration still picks candidates from the simulator’s IPC alone. Simulators such as gem5 [3], [4] and SimpleScalar [5] assume idealized interconnect laten-cies and a fixed clock. The architect sees an IPC per candidate but no per-block power map, no cache cycle counts derived from real array geometry, and no layout under which 𝑇 max 
+
+could be defined. This choice can fail in a 3D stack: a design that maximizes IPC under ideal timing can also be the design that concentrates the most power in the hottest tier, throttles the most, and delivers among the lowest realized BIPS. This is a shift-left problem in 3D-IC CAD: the layout-driven physical effects that determine realized BIPS must be exposed to early-stage architectural exploration, not deferred until post-floorplan sign-off. What is missing is a path that turns the simulator’s logic-level output into a physical block representation, plus an optimizer that uses that representation to choose a layout instead of inheriting whatever default the thermal sign-off tool reads from disk. Two prior threads each address half of this gap. 3D thermal-aware floorplanners [6]–[11] optimize a linear cost 
+
+𝑤 HPWL · HPWL + 𝑤 thermal · 𝑇 max (half-perimeter wirelength, HPWL) or a close variant. The weights are not derived from arXiv:2607.12788v1 [cs.AR] 14 Jul 2026 the architectural quantity the system delivers, so the chosen layout is optimal for a surrogate, not for realized BIPS, and the resulting frequency constraints are never fed back to the architectural simulator. 3D thermal frameworks such as Cool-3D [12] and HotGauge [13], and runtime schedulers such as HotLEGO [14], focus on thermal management with the floor-plan held fixed: they manage temperature through dynamic voltage and frequency scaling (DVFS) or task migration on a layout the flow takes as input. Designers therefore still lack a way to answer the concrete question of what BIPS a given microarchitecture and stack deliver under their BIPS-maximizing layout, which depends on physical placement that the simulator never exposes. To solve these problems, we present CLIP-3D, summarized in Fig. 1. The figure frames the gap as two existing regimes. The Quick regime evaluates a candidate using fast architectural simulation alone (gem5 [3], [4], SimpleScalar [5]) and reports PPA without thermal. The Traditional regime invokes the full McPAT [15], CACTI [16], and HotSpot [17]–[19] stack to produce PPAT, but is orders of magnitude slower per candi-date, so it cannot drive a design-space exploration. CLIP-3D answers the three open questions raised by the figure. It lifts each architectural candidate into the PPAT inputs a 3D layout optimizer needs (per-block power map, cache access cycles, and 3D thermal-stack conductance) with one gem5 pass and one HotSpot solve per candidate, evaluates the layout objective in closed form rather than by repeated thermal simulation, and feeds the resulting realized BIPS back to architectural exploration before commitment. Our main contributions are summarized as follows:  
+
+> •
+
+We bridge architectural simulation and 3D layout with a lifting pipeline. It converts a simulator’s IPC trace into the per-block power, cache access cycles, and 3D thermal-stack conductance a layout optimizer needs, with no changes to the upstream simulator (Section III).  
+
+> •
+
+We derive a closed-form expression for the thermally sustainable clock. It is exact under HotSpot’s steady-state model and replaces the temperature-frequency fixed-point iteration that thermal-aware evaluators normally run (Section III-D).  
+
+> •
+
+We build an analytical 3D thermal-aware floorplanner that optimizes realized BIPS directly. The objective needs no HPWL-plus-temperature surrogate weights and no in-loop HotSpot calls, both of which gate prior frameworks (Section III-E).  
+
+> •
+
+We evaluate CLIP-3D on five workloads under two cooling envelopes. It sits on the wall-time vs. realized-BIPS Pareto frontier against three baselines, and a rank-ing diagnostic shows that IPC-only selection becomes roughly uncorrelated with realized BIPS once cooling binds (Section IV). II. P RELIMINARIES 
+
+This section walks through the lifting pipeline CLIP-3D builds on, the 3D IC structure that makes layout a first-order architectural decision, and the design-selection problem we solve via the two-stage formulation of Section II-C. 
+
+A. Architecture-to-Physical Lifting Pipeline 
+
+CLIP-3D drives four open-source EDA tools: gem5 [3], [4], McPAT [15], HotSpot [17], and CACTI [16]. The pipeline turns a candidate architecture into the block-level physical inputs a 3D layout optimizer needs. A candidate design is d = (a, p). a is the architectural vector (core count, L1D/L2 sizes, associativity, pipeline parameters). 
+
+p is the physical vector (die area, per-block tier assignment, in-plane positions). For workload w, the lifting starts with a gem5 run that uses an out-of-order core under idealized cache and interconnect latencies. This first run reports a nominal IPC, denoted IPC 1, and per-block activity statistics (cache accesses, misses, branch events, write-backs) that drive every subsequent stage. McPAT consumes those statistics and returns per-block dynamic power 𝑃 dyn ,𝑏 , leakage power 𝑃 leak ,𝑏 , and an architecture-derived block area 𝐴 𝑏 . In parallel, CACTI char-acterizes the cache hierarchy and converts L1D/L2 geometry into access cycles. Combined with a discrete through-silicon-via (TSV) hop model for inter-tier wiring (Section III), the CACTI cycles form a latency vector L(d) that captures both on-die cache timing and cross-tier communication cost. Back-annotating L(d) into the cache hierarchy and rerunning gem5 returns a calibrated IPC, denoted IPC 2, that reflects the actual memory-system delay. The per-block power map is rasterized onto the 3D thermal stack defined by p and handed to HotSpot, which solves the steady-state heat equation and returns the peak die temperature 
+
+𝑇 max (d; w). Once 𝑇 max exceeds a safe operating threshold 𝑇 safe ,the hardware throttles its clock to avoid thermal damage. We model this throttle with the standard piecewise-linear form 
+
+𝑓 (𝑇 ) = max 
+
+
+
+𝑓 min , 𝑓 0
+
+1 − 𝛼 max  0, 𝑇 − 𝑇 safe 
+
+ 
+
+, (1) with nominal clock 𝑓 0, throttling slope 𝛼 , and floor frequency 
+
+𝑓 min ; specific parameter values are stated in Section IV-A. Section III-D shows that the linearity of HotSpot’s steady-state operator and the CMOS power-frequency decomposition collapse 𝑓 (𝑇 max ) into a closed-form expression in a and p,which lets the floorplanner of Section III-E optimize layout for realized BIPS without invoking HotSpot inside its inner loop. The realized throughput of a design is the thermally-derated BIPS metric [2], BIPS 2 (d; w) = IPC 2 (d; w) · 𝑓  𝑇 max (d; w), (2) which both stages of CLIP-3D compute and optimize. 
+
+B. 3D IC Structure 
+
+CLIP-3D targets monolithic or TSV-based 3D stacks with 
+
+𝑁 𝑡 active device tiers stacked vertically between a bottom sub-strate and a top heat sink. Three physical features distinguish this setting from a planar die. First, vertical interconnects are discrete. Cross-tier signals go through TSVs whose delay, area, and parasitics differ mate-rially from intra-tier wires [20], and the number of TSV hops between two blocks depends on their (tier , 𝑥, 𝑦 ) assignment. A latency model that ignores hop discreteness and uses a 2TABLE I Notation used in the methodology.                                                        
+
+> Symbol Meaning
+> d=(a,p)Candidate design: architecture aand physical pa(𝑁 cores , 𝑠 𝐿 1𝐷 , 𝑠 𝐿 2,assoc , . . . )
+> pDie size, tier assignment {𝑧 𝑖 }, floorplan { ( 𝑥 𝑖 , 𝑦 𝑖 , 𝑤 𝑖 , ℎ 𝑖 ) }
+> w∈WWorkload drawn from the five-kernel suite
+> 𝐵 Set of McPAT microarchitectural blocks (cores, caches, NoC, MCs)
+> 𝑃 𝑖 , 𝐴 𝑖 Per-block steady-state power / area for block 𝑖 ∈𝐵
+> IPC 1First-pass IPC using nominal cache/hop latencies IPC 2Calibrated IPC using L(d)from Equation (6)
+> 𝑇 max Steady-state peak temperature from HotSpot on the grid of Equation (5)
+> 𝑓 0, 𝑓 min , 𝛼, 𝑇 safe Throttling parameters of Equation (1)
+> ℓCACTI CACTI-derived cache access time in cycles (TABLE II)
+> ℎTSV Integer TSV hop count on critical L1 →L2 path
+> L(d)Discrete latency vector back-annotated into Stage-3 gem5
+> 𝜋 0, 𝜋 1, 𝜋 2Level-0/1/2 rankings (Section II-C)
+> 𝜏 (𝜋 𝑎 , 𝜋 𝑏 )Kendall rank correlation 𝜏 =(𝐶 −𝐷 )/  𝑛
+> 2
+> 
+> 𝐺 HotSpot grid resolution per tier (default 32 )
+
+continuous linear-distance proxy systematically misestimates cross-tier access time. Second, vertical thermal coupling is asymmetric. Heat dis-sipates primarily through the top heat sink, so lower tiers ac-cumulate heat from all tiers above them. The peak temperature on the hottest tier therefore depends on the joint power map across tiers, not on any single tier in isolation [21], and is decided as much by which macros sit on which tier as by how much power each macro draws. Third, tier-aware floorplanning changes the design variable. The physical vector p assigns each microarchitectural block 
+
+𝑏 ∈ 𝐵 to a (tier , 𝑥, 𝑦 ) position under non-overlapping, die-area, and tier-consistency constraints. This is a richer design space than a 2D floorplan, and a different choice of p shifts 𝑇 max 
+
+and the realized BIPS even at fixed a.These three features together mean the map p → ( L, 𝑇 max ) is neither separable across tiers nor well-approximated by linear-distance proxies. A meaningful evaluation of architectural choice a has to know the layout p that choice will be deployed under, which motivates the two-stage formulation that the next subsection makes precise. 
+
+C. Problem Formulation 
+
+TABLE I collects the symbols introduced in Sections II-A and II-B for reference throughout the paper. For workload w and an admissible architectural set A,CLIP-3D selects the architecture whose realized BIPS, evalu-ated under the layout that maximizes that BIPS, is highest: 
+
+a★(w) = arg max  
+
+> a∈A
+
+max  
+
+> p∈P(a)
+
+IPC 2 (a, p; w) · 𝑓  𝑇 max (a, p; w)| {z }  
+
+> p★(a;w),the inner layout problem solved by Section III-E
+
+,
+
+(3) subject to a hard thermal bound 𝑇 max (a, p; w) ≤ 𝑇 hard at the junction reliability limit and physical feasibility of the 3D floorplan (non-overlapping blocks, die-area bound, tier-assignment consistency captured by P(a)). The inner max p
+
+defines the layout problem CLIP-3D’s analytical floorplanner solves for each candidate architecture. The outer arg max a is the architectural-DSE loop that consumes the floorplanner’s output. A baseline shelf-pack layout, used in our comparisons, is recovered as the special case where p is fixed by determin-istic rule rather than optimized against the realized BIPS. To quantify how much layout optimization changes the architectural ranking, we additionally report a three-level di-agnostic over the same design set:  
+
+> •
+
+Level-0 (IPC-only): rank designs by IPC 1 alone. Lifting is ignored entirely.  
+
+> •
+
+Level-1 (thermal-only): rank designs by IPC 1 · 𝑓 (𝑇 max ).Only the thermal output of the lifting is used.  
+
+> •
+
+Level-2 (lifted): rank designs by IPC 2 · 𝑓 (𝑇 max ). The full lifting output is used. The Kendall-𝜏 [22] between any pair of these rankings, 
+
+𝜏 = (𝐶 − 𝐷 )/  𝑛 
+
+> 2
+
+ with 𝐶 and 𝐷 counting concordant and discordant design pairs, quantifies how much ranking signal is forfeited when a stage of the pipeline is dropped. We use this diagnostic in Section IV to motivate why both lifting and the layout optimization on top of it are needed. III. M ETHODOLOGY 
+
+CLIP-3D solves the two-stage problem of Equation (3) in three stages (Fig. 2). First, an architecture-to-physical lifting pipeline turns each candidate a into the block-level inputs (per-block dynamic and leakage power, cache access cycles, 3D thermal-stack conductance) that a 3D layout optimizer needs (Sections III-A to III-C). Second, the linearity of HotSpot’s steady-state operator together with the standard CMOS power-frequency decomposition collapse the throttled clock 𝑓 (𝑇 max )
+
+into a closed-form expression in those block-level inputs (Section III-D), which can be evaluated without re-invoking HotSpot. Third, an analytical 3D thermal-aware floorplanner consumes the lifted block representation and embeds the closed form directly inside its objective, so the inner p★(a)
+
+of Equation (3) is solved for the same realized BIPS the rest of the pipeline scores designs on (Section III-E); symbols follow TABLE I throughout. 
+
+A. Overview and Per-Configuration Lifting 
+
+The lifting stage decomposes a candidate a into the two block-level inputs that decide its realized BIPS: a per-block power map plus 3D-stack thermal model that determines 𝑇 max 
+
+and therefore 𝑓 (𝑇 max ), and a CACTI-calibrated cache-and-topology latency vector that is back-annotated into a second gem5 pass for a physically realistic IPC 2. 
+
+> •
+
+The thermal lifting (Section III-B) maps per-block power and the candidate’s stack geometry onto a 3D-stack power grid that HotSpot [17] can solve for the peak die temperature 𝑇 max (d), which drives 𝑓 (𝑇 max ) via the closed-form model of Section III-D.  
+
+> •
+
+The latency lifting (Section III-C) maps the architectural configuration into a discrete latency vector L(d): CACTI-calibrated cache access time plus a shared-cache arbitra-tion term, an integer TSV-hop term, and a pipeline con-stant. L(d) is back-annotated into a second architectural simulation for a calibrated IPC 2.The two lifted outputs are methodologically disjoint: the floorplan modulates temperature only, and the latency vector depends on architectural and topological quantities only. This separation is what lets CLIP-3D replace the linear-distance 3wire-delay proxies of prior flows with a parameter-free discrete model, and it lets the floorplanner of Section III-E treat L as a per-architecture constant while it optimizes layout for 𝑇 max .
+
+a) Shared front-end: architecture → power and IPC 1:
+
+Both lifted outputs start from a single upstream pass. We run gem5 [3] in syscall-emulation mode with an out-of-order X86 core ( 4-wide dispatch, 192 -entry ROB, split L1 I/D) clocked at 𝑓 0=2.0 GHz , with the cache hierarchy set from the architectural vector a (L1 associativity 2, L2 associativity 8). Workloads are warmed up for 10 8 instructions and measured over the following 5×10 8 instructions per core. The resulting 
+
+stats.txt is translated into McPAT’s activity schema [15] configured at the 45 nm node (matching the Cool-3D [23] baseline) to emit per-block dynamic, leakage, and gate-leakage power 𝑃 𝑖 and block areas 𝐴 𝑖 . This pass produces IPC 1 (d) (the nominal IPC under idealized cache timing, used only as the Level-0 score of Section II-C) and the per-block power and area trace consumed by the thermal lifting. 
+
+b) Lifted output: The two lifted outputs combine into the realized throughput BIPS 2 (d; w) = IPC 2 (d; w) · 𝑓  𝑇 max (d; w), (4) which reproduces Equation (2) of the preliminaries. In addition to BIPS 2, we retain IPC 1 and 𝑇 max so that the Level-0, Level-1, and Level-2 rankings of Section II-C can all be reported over the same design set. The Kendall-𝜏 between each pair quantifies how much ranking signal each additional lifting stage contributes; we use this decomposition in Section IV as a diagnostic on why the lifting is necessary in the first place. The analytical floorplanner of Section III-E then takes the lifted block representation as its input. 
+
+c) Per-configuration cost: Each configuration requires two gem5 invocations (dominated by the out-of-order simu-lation at O(𝐼 ) per workload), one McPAT call ( O(| 𝐵 |) ), one HotSpot call per layout queried ( O(𝐺 2) for a 𝐺 ×𝐺 grid), and an O(1) CACTI lookup amortized over the design-space ex-ploration (DSE). gem5 dominates; per-configuration wall time of the lifting stage is ∼ 80 s on our workstation, and the closed-loop sweep across both cooling envelopes (Section IV-A) completes in about 1 h per envelope at 16-way parallelism on 32 physical cores. Per-worker scratch directories isolate McPAT, CACTI, and HotSpot intermediate files so the 24-way speedup runs without cross-worker contention on shared output paths. 
+
+B. Thermal Lifting: Stack, Floorplan Materialization, and HotSpot 
+
+Given the per-block power and area trace from the shared front-end, the thermal lifting produces 𝑇 max (d) for any layout candidate by rasterizing that layout onto a uniform grid and running HotSpot to steady state. For diagnostic experiments that fix layout (Section IV-C) and as the baseline against which Section III-E is compared, we use a deterministic shelf-pack rule. The analytical floorplanner of Section III-E replaces this rule with an L-BFGS-B [24] solver whose objective is the realized BIPS itself. 
+
+a) Shelf-pack baseline floorplan: The baseline layout is a deterministic shelf-pack: a row-based packing rule from VLSI placement, used as the default convention in architectural-stage 3D-DSE flows that lack a thermal-aware placer. It is fully determined by the core count and die geometry, and is what every comparison in the experimental section uses. Blocks of each core are packed as a rectangular cluster on the bottom die according to a fixed rule: a 1-core configuration is centered, 2
+
+cores are split left and right, and 4 cores occupy either the four quadrants (on 12 mm 2 dies, where quadrant area is sufficient to hold the largest per-core cluster) or two side-by-side strips (on the tighter 10 mm 2 dies). The shared L2 and any other memory-side blocks are placed on the top die, which sits closer to the heat sink in the package stack; this mirrors the physical organization used in commercial 3D-stacked products where the cache tier is stacked on top of the compute tier to exploit the shorter thermal path out of the stack. The output is the per-block tuple (𝑥 𝑖 , 𝑦 𝑖 , 𝑤 𝑖 , ℎ 𝑖 , 𝑧 𝑖 ) with 𝑧 𝑖 ∈ { 0, 1} denoting tier assignment in the two-tier stack. Die area not covered by any microarchitectural block is filled with dead-silicon tiles carrying zero power. Leaving those regions empty in the power trace would cause HotSpot to model them as insulating voids and overestimate the peak temperature; the silicon filler restores the correct lateral heat-spreading path without introducing any heat source of its own. 
+
+b) Grid power map: Following the Cool-3D pipeline, we avoid the common HotSpot “block count mismatch” pitfall by rasterizing block powers onto a uniform 𝐺 ×𝐺 grid per tier via area-overlap accounting: grid 𝑧 [ 𝑐 𝑦 , 𝑐 𝑥 ] + =∑︁  
+
+> 𝑖 ∈𝐵 𝑧
+
+overlap  𝑏 𝑖 , cell 𝑐 𝑥 ,𝑐 𝑦 
+
+
+
+𝐴 𝑖 
+
+· 𝑃 𝑖 , (5) where 𝐵 𝑧 is the block set on tier 𝑧 and overlap (·) is the ge-ometric intersection area. This produces a grid representation with identical shape across configurations with different block counts, allowing direct comparison of 𝑇 max across designs. We use 𝐺 =32 in this work, giving ∼ 313 μm cell pitch on a 
+
+10 mm die, fine enough to resolve the fastest thermal gradient observed in our sweep, and at a grid resolution that keeps the per-ptrace line under HotSpot’s internal buffer limits. 
+
+c) HotSpot configuration: HotSpot is invoked in grid mode with detailed_3D enabled on a five-layer stack (in-terposer, bottom die, thermal interface material (TIM), top die, top TIM). We use the default Cool-3D package parameters: 
+
+30 mm spreader, 60 mm heat sink, natural-convection ambient of 45 ◦C, and a silicon thickness of 50 μm per die. The steady-state solution yields the per-cell temperature grid, from which we define 𝑇 max (d) = max 𝑧,𝑐 𝑥 ,𝑐 𝑦 𝑇 𝑧 [𝑐 𝑦 , 𝑐 𝑥 ]. A design that cannot be cooled below 𝑇 safe even at 𝑓 min is clipped at 𝑓 min 
+
+rather than removed from the search, so that the comparison across points stays monotone and there is no discontinuity at the feasibility boundary. The thermal lifting is then complete: the architectural vector a and the physical vector p jointly determine 𝑓 (𝑇 max ) via the closed-form model derived in Sec-tion III-D, which the floorplanner of Section III-E optimizes 
+
+p against on every candidate layout it considers. 4Ideal IPC               
+
+> Simulation Results
+> (Logic Side)
+> Architecture Template & Workload
+> Logic -level Performance Simulation
+> Ideal Parameters
+> CLIP -3D Map
+> (Physical Side)
+> Tile Block
+> Mem Block
+> f = f (Tmax )
+> BIPS = IPC ·f
+> Mapped PPA Info.
+> 3D Floorplan
+> 3D Layout
+> Thermal Map Power Map
+> Block Info.
+> Exploration
+> Top Die
+> Bottom Die
+> CLIP -3D Results
+> CLIP -3D Feedback Interface
+> Physical -level Performance Evaluation
+> Practical IPC Thermal
+> Throtting
+> Practical Physical Parameters
+> Feedback Evaluation
+> Cache Latency
+> Bank Arbitration
+> Feedback Interface
+> TSV Hops
+> Pipeline Cycles
+> Cache Latency
+> Bank Arbitration
+> Feedback Interface
+> TSV Hops
+> Pipeline Cycles
+> System.cpu2.dcache
+> →system.l2.cache
+> …
+> System.l2.cache
+> →system.dram
+> System.cpu1.dcache
+> →system.l2.cache
+> …
+> System.l2.cache
+> →system.dram
+> System.cpu0.dcache
+> →system.l2.cache
+> …
+> System.l2.cache
+> →system.dram
+> Latency Mapping
+> Thermal Eval.
+> Tile Block Mem Block Thermal Map
+> CLIP -3D Evaluation
+> Max Temp.: 363.2K
+> f(T) = 2 GHz
+> IPC = 0.67
+> BIPS = 1.34
+> Stage2 PPAT Evaluation and Exploration Stage3 Physical Feedback Evaluation
+> Physical -side
+> PPAT Info.
+
+Fig. 2 CLIP-3D lifting pipeline: block-level input extraction (Stage 1, left), analytical floorplanning with closed-form 𝑓 (𝑇 max ) in the objective (Stage 2, middle), and gem5 back-annotation for the physically feasible IPC 2 (Stage 3, right). TABLE II CACTI-calibrated cache access latency and area at the 
+
+45 nm node, used to populate ℓCACTI (𝑠 𝐿 1𝐷 , 𝑠 𝐿 2) in Equation (6). 
+
+Cache Access time gem5 cycles Area 
+
+L1D, 16 kB 0.97 2 0.52 L1D, 32 kB 1.01 3 0.74 L1D, 64 kB 1.13 3 1.16 L1D, 128 kB 1.47 3 2.25 L2, 128 kB 2.66 6 2.72 L2, 256 kB 2.78 6 6.29 L2, 512 kB 3.14 7 10.01 L2, 1 MB 3.96 8 16.68 L2, 2 MB 4.97 10 36.99    
+
+> Access time in ns ; area in mm 2. gem5 cycles are integer-rounded at 𝑓 0=2.0 GHz .
+
+C. Latency Lifting: CACTI-Calibrated Discrete Latency 
+
+The latency lifting calibrates IPC against cache and on-chip-network timing derived from device-level simulation, replacing the linear-distance wire-delay proxies used by prior flows. 
+
+a) CACTI-calibrated cache latency: For each cache ge-ometry in our sweep, we run CACTI [16] at the 45 nm 
+
+node with the same technology parameters used by McPAT in the shared front-end (consistent node, consistent transistor model). The resulting access time in nanoseconds is converted into an integer gem5 cycle count at the nominal 𝑓 0=2.0 GHz 
+
+clock (see TABLE II). Because cache geometry is part of the architectural vector a, a single precomputed lookup table 
+
+ℓCACTI (𝑠 𝐿 1𝐷 , 𝑠 𝐿 2) covers the entire design space without re-running CACTI during DSE. 
+
+b) Discrete topology penalties: On top of the CACTI access time, we add three integer penalties that correspond to the three dominant sources of on-chip communication delay in a 3D multi-core stack: 
+
+L(d) = ℓCACTI 
+
+ 𝑠 𝐿 1𝐷 , 𝑠 𝐿 2
+
+| {z }
+
+> cache access
+
++ ( 𝑁 cores −1)
+
+| {z }
+
+> L2 arbitration
+
++ 2 · ℎTSV 
+
+| {z }
+
+> inter-tier
+
++ 1
+
+|{z} 
+
+> L1 pipe
+
+,
+
+(6) where each term is justified as follows.  
+
+> •
+
+ℓCACTI comes from TABLE II. It already absorbs all intra-array wordline and bitline delay so no additional distance scaling is applied.  
+
+> •
+
+The (𝑁 cores −1) term is a standard busy-waiting bound for an 𝑁 -way shared last-level cache under the com-mon MOESI-like coherence assumption, and matches the worst-case per-request arbitration delay reported by prior L2 miss studies [25].  
+
+> •
+
+ℎTSV is the integer number of TSV crossings on the critical path between the requester and the target L2 bank, derived from the floorplan’s tier-assignment vector 
+
+{𝑧 𝑖 }. Each crossing adds 2 cycles, which matches the capacitive-load-limited traversal time of a 50 μm-pitch TSV in 45 nm silicon reported by [10].  
+
+> •
+
+The trailing 1-cycle term is the L1 pipeline stage, con-sistent with the gem5 SimpleMemory model. 
+
+L(d) is back-annotated into gem5 by overrid-ing the tag_latency , data_latency , and 
+
+response_latency parameters of each cache node plus the xbar latency between L1 and L2. The second gem5 pass yields IPC 2 (d) on the same workload trace. 
+
+c) Topology-only scope of L(d): L(d) as defined in (6) captures only architectural and topology-level penalties (CACTI cache access, shared-L2 arbitration, integer TSV crossings, L1 pipeline). It is layout-invariant: it does not depend on block (𝑥, 𝑦 ) coordinates or intra-die wire distances. Three observations justify this decoupling quantitatively: 1) Scale of in-plane delay. At 45 nm and 2 GHz , RC-limited wire propagation across a 10 mm die is under 500 ps , that is, one cycle. Compared to an L2 access of 6 to 10 cycles from TABLE II, any in-plane term is below 15% of the dominant cache latency and well within the empirical IPC sensitivity we bound in Section IV. 2) Dominance of TSV capacitance. In a 3D stack, inter-tier physical distance is below 100 μm and propagation delay is dominated by TSV driver capacitance, not wire length [10]. A discrete “cycles-per-hop” model captures this far more faithfully than a continuous distance-scaled proxy. 3) NoC hop convention. In modern multi-core fabrics, horizontal inter-core and core-to-L2 traffic is routed through router-based networks-on-chip whose per-hop delay is fixed by topology rather than by floorplan coor-dinates [26]. Linear distance is therefore already absent from the latency model of the fabric itself. In summary, floorplan geometry enters the thermal lifting only, 5through the grid of Equation (5); latency depends only on architectural and topological quantities through Equation (6). The two lifted outputs remain methodologically disjoint, and both feed into the realized BIPS through Equation (4). This disjointness is what lets the floorplanner of Section III-E treat L(d) as a per-architecture constant while it varies p
+
+to optimize 𝑇 max without revisiting the latency model. A complementary layout-dependent in-plane wire-delay term, derived from the same Bakoglu–Meindl model, is introduced separately inside the floorplanner objective of Equation (15) and integer-cycled into gem5 at the R2 back-annotation step of Section IV-D; it is not part of L(d) above. 
+
+D. Closed-Form Frequency via Thermal-Operator Linearity 
+
+The piecewise-linear throttle of Equation (1) is convenient, but its slope 𝛼 is a fitted constant that carries no direct physical meaning. We replace it with a closed-form expression by observing that the two physical quantities it compresses, the steady-state response of HotSpot and the power-frequency scaling of McPAT, are both linear. Composing them produces a temperature field whose dependence on 𝑓 is equally trans-parent in closed form. HotSpot’s steady-state solver discretizes the 3D heat equa-tion on the per-tier grid and assembles a sparse thermal-conductance matrix G𝜃 ∈ R𝑁 × 𝑁 whose entries are determined entirely by the floorplan, material stack, TIM, and package. Solving G𝜃 T = P + G𝜃 𝑇 amb 1 is therefore equivalent to applying a fixed linear operator 
+
+T − 𝑇 amb 1 = R𝜃 P, R𝜃 ≜ G−1 
+
+> 𝜃
+
+, (7) to the per-cell power vector P ∈ R𝑁 . The operator R𝜃 
+
+does not depend on P or on 𝑓 ; for a given 3D stack it is effectively a constant. On the McPAT side, per-block power is split into a dynamic component 𝑃 dyn ,𝑏 and a leakage component 𝑃 leak ,𝑏 (sub-threshold and gate combined). At fixed supply voltage, synchronous switching scales linearly with the clock frequency [27], while leakage is 𝑓 -independent. After rasterization onto the thermal grid via Equation (5), the cell-level power vector therefore admits the exact decomposition 
+
+P( 𝑓 ) = Pleak + 𝑓 𝑓 0
+
+Pdyn , (8) where Pleak and Pdyn are both read off directly from the nominal-frequency output of the shared front-end. Substituting Equation (8) into Equation (7) and applying superposition gives a temperature field that is affine in 𝑓 :
+
+T( 𝑓 ) = 𝑇 amb 1 + R𝜃 Pleak + 𝑓 𝑓 0
+
+R𝜃 Pdyn . (9) Every cell temperature traces a straight line in 𝑓 whose inter-cept is the leakage-only self-heat map and whose slope is the dynamic-only self-heat map evaluated at 𝑓 0. A single HotSpot invocation at 𝑓 0 already yields T( 𝑓 0). Evaluating Equation (9) at any other frequency is O(𝑁 ) vector arithmetic, with no need to re-solve G𝜃 at each trial frequency. In the absence of per-block leakage detail, a further simpli-fication is both convenient and empirically accurate. Let 
+
+𝛾 ≜
+
+Í𝑐 𝑃 leak ,𝑐 
+
+Í𝑐 
+
+ 𝑃 leak ,𝑐 + 𝑃 dyn ,𝑐 
+
+ (10) denote the grid-level leakage fraction, which McPAT reports per configuration. If the per-cell ratio 𝑃 leak ,𝑐 /𝑃 𝑐 ( 𝑓 0) is approx-imately uniform across the die, which is reasonable when logic and SRAM share the same process node, then Pleak ≈ 𝛾 P( 𝑓 0)
+
+and Pdyn ≈ ( 1 − 𝛾 )P( 𝑓 0), and Equation (9) collapses into a rigid scaling of a single map: 
+
+T( 𝑓 ) − 𝑇 amb 1 =
+
+h
+
+𝛾 + ( 1 − 𝛾 ) 𝑓 𝑓 0
+
+i  T( 𝑓 0) − 𝑇 amb 1. (11) The scalar factor is the same at every cell and strictly positive, so the peak location is preserved across 𝑓 and the peak temperature obeys 
+
+𝑇 max ( 𝑓 ) − 𝑇 amb =
+
+h
+
+𝛾 + ( 1 − 𝛾 ) 𝑓 𝑓 0
+
+i  𝑇 max ( 𝑓 0) − 𝑇 amb 
+
+. (12) Setting 𝑇 max ( 𝑓 ) = 𝑇 safe in Equation (12) and solving for 𝑓 
+
+gives the highest clock frequency consistent with the thermal budget: 
+
+𝑓 sus (d) = max 
+
+
+
+𝑓 min , 𝑓 0
+
+1 − 𝛾 
+
+ 𝑇 safe − 𝑇 amb 
+
+𝑇 max (d; 𝑓 0) − 𝑇 amb 
+
+− 𝛾 
+
+  
+
+(13) when 𝑇 max (d; 𝑓 0) > 𝑇 safe , and 𝑓 sus (d) = 𝑓 0 otherwise. Equa-tion (13) replaces the fitted slope 𝛼 of Equation (1) with two directly observable parameters: 𝑇 safe , the dynamic ther-mal management (DTM) trigger used by commodity DVFS controllers (typically 85 ◦C on server-class silicon), and 𝛾 , the leakage fraction read straight out of McPAT. CLIP-3D uses this form as the definition of 𝑓 (𝑇 max ) in the BIPS 2 objective of Equation (2) and in the ranking diagnostics of Section IV. Two consequences follow. First, because Equation (13) is closed-form in the single scalar 𝑇 max (d; 𝑓 0), sweeping 𝛾 or 
+
+𝑇 safe at evaluation time costs O(| D|) scalar operations rather than |D| fresh thermal simulations, and the per-configuration HotSpot solve of the thermal lifting is reused. Second, the uniform-𝛾 assumption underlying Equation (11) can be lifted without giving up the closed-form structure: evaluating Equa-tion (9) once with Pdyn = 0 and once with Pleak = 0 calibrates the leakage and dynamic self-heat maps separately, after which the per-cell affine form in 𝑓 is exact. This two-point calibration costs one extra HotSpot solve per configuration and serves as the principled fallback when logic and cache have markedly different leakage profiles across block classes. 
+
+E. Analytical 3D Thermal-Aware Floorplanner with Closed-Form 𝑓 sus Inside the Objective 
+
+The lifted block representation of Sections III-A to III-C and the closed-form sustainable frequency of Equation (13) together make the inner p★(a) of Equation (3) solvable ana-lytically. We can search over p for the layout that maximizes the realized BIPS itself, rather than minimizing a surrogate that approximates it. Prior 3D thermal-aware floorplanning frameworks (e.g., [11]) optimize a linear cost 𝑤 HPWL ·HPWL +
+
+𝑤 thermal ·𝑇 max whose weights (𝑤 HPWL , 𝑤 thermal ) are not derivable from the architectural quantity the system actually delivers. 6Algorithm 1: CLIP-3D floorplanner with closed-form 
+
+𝑓 sus inside the objective and a single end-of-search HotSpot validation. 
+
+Input: base layouts L𝑧 =0, L𝑧 =1; 𝛾 , IPC , 𝑓 0, 𝑇 safe , 𝑇 amb , 𝑓 min ,
+
+𝜆 wire 
+
+Output: optimum tier 𝑧 ★, in-plane L2 position (𝑥 ★𝐿 2, 𝑦 ★𝐿 2),HotSpot-validated layout L† 
+
+> 1
+
+ˆ𝑇 (𝑥 𝐿 2, 𝑦 𝐿 2; 𝑧 ) ← PROX THERMAL (L𝑧 ) ; // Equation (14)  
+
+> 2
+
+ˆ𝑓 sus ( ˆ𝑇 ) ← CLOSED FORM FSUS ( ˆ𝑇, 𝛾 ) ; // Equation (13)  
+
+> 3
+
+¯𝜏 (𝑥 𝐿 2, 𝑦 𝐿 2) ← MEAN WIRE DELAY (𝑥 𝐿 2, 𝑦 𝐿 2; L𝑧 ) ;
+
+// Bakoglu--Meindl, Section III-C  
+
+> 4
+
+L(𝑧, 𝑥 𝐿 2, 𝑦 𝐿 2) ← PLACER LOSS ( ˆ𝑓 sus , ¯𝜏 ) ;
+
+// Equation (15)  
+
+> 5
+
+S★ ← ∅ ; 
+
+> 6
+
+for 𝑧 ∈ { 0, 1} do  
+
+> 7
+
+for each start (𝑥 0, 𝑦 0) ∈ { BL , centre , TR } do  
+
+> 8
+
+u★ ← LBFGSB (L(𝑧, ·, ·) , (𝑥 0, 𝑦 0)) ; // box bounds [0, 𝑑 −𝑤 𝐿 2]2 
+
+> 9
+
+S★ ← S★ ∪ {( 𝑧, u★, L(𝑧, u★))} ; 
+
+> 10
+
+(𝑧 ★, 𝑥 ★𝐿 2, 𝑦 ★𝐿 2) ← arg min (𝑧, u,ℓ ) ∈ S★ ℓ; 
+
+> 11
+
+L† ← REWRITE LAYOUT (L𝑧 ★ , 𝑥 ★𝐿 2, 𝑦 ★𝐿 2) ; // materialize layout at the optimum  
+
+> 12
+
+𝑇 †
+
+> max
+
+, 𝑓 † 
+
+> sus
+
+← HOT SPOT (L†) ; // single end-of-search validation  
+
+> 13
+
+return (𝑧 ★, 𝑥 ★𝐿 2, 𝑦 ★𝐿 2, L†, 𝑇 †
+
+> max
+
+, 𝑓 †
+
+> sus
+
+);
+
+The optimum of that linear cost is in general not the optimum of BIPS 2 = IPC · 𝑓 sus (𝑇 max (d), 𝛾 ), and the gap is workload-and regime-dependent (Section IV). The linear cost also stays positive on configurations with thermal headroom, where there is no 𝑇 max pressure to relieve, so small layout perturbations can move the score in either direction and produce false-positive “improvements”. We therefore embed Equation (13) directly in the floorplanner’s objective, so cross-tier macro assignment and in-plane placement are co-optimized for the same realized BIPS the rest of the pipeline scores designs on. 
+
+a) Decision variables.: For a 𝐾 -tier stack, let 𝑧 ∈ { 0, 1}𝑀 
+
+be the cross-tier assignment of 𝑀 movable macros (the L2 cache and, optionally, large core tiles) and let (𝑥, 𝑦 ) ∈ R2𝑀 be their in-plane coordinates. We treat 𝑧 discretely via Fiduccia– Mattheyses-style 2-way enumeration over the 𝐾 𝑀 tier as-signments and run the continuous L-BFGS-B optimization conditioned on each candidate. For the 4-core 2-tier P1 stack of our experiments ( 𝐾 = 2, 𝑀 = 1 since the 4 cores are pre-grouped into a tile and only the L2 macro is free to migrate), this enumeration reduces to two L-BFGS-B runs and is exact. For larger 𝑀 a standard FM partitioner [28] replaces the enumeration without changing the rest of the pipeline. 
+
+b) Block-level thermal proxy.: Within the inner optimiza-tion loop we need a temperature signal that is monotone in the right direction (hot blocks clustered together or relegated to the bottom tier produce a higher predicted 𝑇 max ) and differentiable in (𝑥, 𝑦 ), but not a high-fidelity simulator. We aggregate the per-sub-block ptrace entries into per-tile centroids (𝑥 𝑡 , 𝑦 𝑡 )
+
+with summed power 𝑃 𝑡 , and predict 
+
+ˆ𝑇 max (𝑥 𝐿 2, 𝑦 𝐿 2; 𝑧 ) = 𝑇 amb + 𝑅 conv 𝑃 tot 
+
++ 𝛼 max 
+
+> 𝑖
+
+∑︁ 𝑗 
+
+𝑃 𝑗 K(𝑑 𝑖 𝑗 ) 𝑤 (𝑧 𝑖 , 𝑧 𝑗 )+ 𝛽 ∑︁  
+
+> 𝑗 ∈bot
+
+𝑃 𝑗 ,
+
+(14) where K(𝑑 ) = 1/√︁ 1 + ( 𝑑 /𝐿 𝑐 )2 is a smooth Pythagorean kernel with 𝐿 𝑐 set to the die half-width, 𝑤 (𝑧 𝑖 , 𝑧 𝑗 ) ∈ { 1, 𝑤 cross } down-weights cross-tier pairs, 𝑅 conv 𝑃 tot is the exact lumped-heatsink rise, and (𝛼, 𝛽 ) are unit-conversion constants chosen once so 
+
+ˆ𝑇 max lands in the 80 to 110 ◦C regime where Equation (13) has non-trivial response. The proxy is intentionally crude: only its gradient direction drives the optimizer, and the absolute 
+
+𝑇 max that enters all paper-reported numbers comes from the validation HotSpot pass below. This separation lets the inner loop be HotSpot-free without committing to any particular thermal-model accuracy claim. 
+
+c) Wire-delay term.: The floorplanner’s wire term reuses the Bakoglu–Meindl [29] distributed-RC line delay 𝜏 (𝐿 ) =
+
+0.69 𝑅𝐶 𝐿 2 of Section III-C, evaluated at the smoothed Man-hattan distance 𝐿 𝑖 =√︁ (𝑥 L2 − 𝑥 𝑖 )2 + 𝜖 2 +√︁ (𝑦 L2 − 𝑦 𝑖 )2 + 𝜖 2 +
+
+ℓTSV from each core 𝑖 to the L2 macro. The vertical TSV traversal ℓTSV is constant within a candidate (since L2 always sits on the opposite tier from the cores in our P1 setup) and the smoothing keeps the term differentiable in (𝑥 𝐿 2, 𝑦 𝐿 2).
+
+d) Objective.: Combining the two pieces yields the an-alytical floorplanner’s loss, conditioned on a fixed discrete 𝑧 
+
+chosen by the outer FM enumeration: 
+
+L(𝑧 ; 𝑥 𝐿 2, 𝑦 𝐿 2) = − IPC · 𝑓 sus 
+
+  ˆ𝑇 max (𝑥 𝐿 2, 𝑦 𝐿 2; 𝑧 ), 𝛾 | {z } 
+
+> BIPS 2proxy (C2 inside obj.)
+
++ 𝜆 wire ·IPC ·𝜏 (𝑥 𝐿 2, 𝑦 𝐿 2),
+
+(15) where 𝜏 is the average 𝜏 (𝐿 𝑖 ) across cores (in cycles, scaled by IPC to share the BIPS unit). We solve Equation (15) with L-BFGS-B subject to the box constraints (𝑥 𝐿 2, 𝑦 𝐿 2) ∈ [ 0, 𝑊 −
+
+𝑤 L2 ]2, multi-started from three initial points (BL corner, die centre, TR corner) for each enumerated 𝑧 . The global optimum is the best of the |{ 𝑧 }|× 3 candidates. Algorithm 1 summarises the full procedure. 
+
+e) Validation pass.: The chosen tier assignment 𝑧 ★ and continuous optimum (𝑥 ★𝐿 2, 𝑦 ★𝐿 2) define a final layout that is materialised by patching the L2-bearing die’s .flp and re-ordering the coremem.ptrace columns. One real HotSpot run on this layout supplies the true 𝑇 ★ 
+
+> max
+
+that enters Equa-tion (13) (Algorithm 1, lines 11–13). The proxy carries the optimizer through the search; the validation pass guarantees the reported BIPS ★ 
+
+> 2
+
+uses exactly the same thermal model as every other configuration in the design space. The analytical floorplanner differs from a wrapper around an existing CAD tool in two ways. First, the closed-form objective is grounded in Equation (13): 𝑓 sus enters the loss directly, not as a downstream score on a layout that was selected for a different criterion. Second, no thermal simulator is invoked during the optimization itself. The inner loop costs only the proxy evaluation and L-BFGS-B’s gradient 7TABLE III Numerical validation of the closed-form throttle model (13) across the two cooling envelopes of Section IV-A. Workload 𝐿 2 𝐿 1𝐷 𝛾 𝑃 ( 𝑓 0) (W) 𝑇 max ( 𝑓 0) 𝑓 sus (GHz ) 𝑇 @ 𝑓 sus (◦C) max |Δlin | |Δsafe |                                                               
+
+> Realistic cooling ( 𝑟 conv =3.5 K W −1)
+> STREAM 256 kB 32 kB 0.694 9.69 63.7 2.000 N/A 0.001 N/A MATMUL 2 MB 128 kB 0.443 16.68 93.7 2.000 N/A 0.013 N/A FFT 256 kB 32 kB 0.444 15.32 94.6 2.000 N/A 0.011 N/A FFT 1 MB 64 kB 0.446 16.24 100.0 1.760 95.00 0.012 0.000
+> Stressed cooling ( 𝑟 conv =5.0 K W −1)
+> STREAM 256 kB 32 kB 0.694 9.69 78.2 2.000 N/A 0.015 N/A MATMUL 2 MB 128 kB 0.443 16.68 118.8 1.090 95.01 0.014 0.010 FFT 1 MB 64 kB 0.446 16.24 124.4 0.932 95.01 0.008 0.010
+
+queries, both microsecond-scale, so the wall-time per layout is dominated by the single validation HotSpot rather than by repeated solver calls inside the inner loop. The 𝜆 wire coefficient is the only weight in Equation (15) and serves a specific unit-conversion role (cycles to BIPS) rather than balancing competing surrogate objectives in the DAC sense. The wire delay itself is parameter-free at the architectural stage, derived from PTM [30] 45-nm metal RC ( 𝑅 =50 Ω/mm, 𝐶 =200 fF /mm for semi-global wires) via Bakoglu–Meindl. IV. E XPERIMENTAL RESULTS 
+
+A. Experimental Setup 
+
+All experiments run on a Linux workstation with dual Intel Xeon Gold 6426Y CPUs (32 physical cores) and 256 GB RAM. We adopt the 45 nm node parameters from Cool-3D [23] and match McPAT, CACTI, and HotSpot to the same node for consistency across the pipeline. 
+
+a) Architectural sweep: We evaluate five workloads on a uniform architectural grid: FFT and CHOLESKY from SPLASH-2 [31] (mixed compute with irregular memory, and sparse Cholesky factorization on the tk14 input, re-spectively), the McCalpin STREAM [32] memory-bandwidth benchmark, dense matrix multiplication (MATMUL), and a 2D Jacobi five-point stencil (STENCIL). The mix covers compute, bandwidth, sparse, and stencil regimes. The architec-tural sweep varies L2 size ∈ { 128 , 256 , 512 , 1024 , 2048 } kB (CACTI access time spans 6 to 10 cycles at 𝑓 0) and L1D size ∈ { 16 , 32 , 64 , 128 } kB, giving 5 × 4 = 20 architectural configurations per workload and 5 × 20 = 100 closed-loop points per cooling envelope. Core count is fixed at four for this study; the 2-tier stack uses pattern P1 (cores on the bottom die, L2 on the top die) with auto die sizing at 70 % utilization. McPAT-derived per-block area is rescaled by a single global calibration factor so that the reference design (4 cores, 32 kB L1D, 512 kB L2 at 45 nm) lands at 150 mm 2, matching Intel Nehalem-EP minus its L3 region. 
+
+b) Cooling envelopes: We evaluate two cooling en-velopes with the same package and silicon limits ( 𝑇 safe =95 ◦C
+
+silicon 𝑇 max  
+
+> 𝑗
+
+, 𝑇 amb =25 ◦C data-center inlet, 𝑓 0=2.0 GHz ,
+
+𝑓 min =0.4 GHz , per-config 𝛾 from McPAT runtime power):  
+
+> •
+
+Baseline , 𝑟 conv =3.5 K W −1. Tower heatsink on the pack-age, the nominal operating envelope.  
+
+> •
+
+Stressed , 𝑟 conv =5.0 K W −1. Reduced cooling headroom, modeling a degraded heatsink such as an aged or partly clogged tower fan, or operation closer to the package thermal limit. This value matches the floorplanner study of Section IV-D. Both envelopes use the same 𝑇 safe , ambient, and architectural sweep. The two-envelope design tests whether IPC ranks remain stable when sustained frequency moves under tighter heat removal. 
+
+c) Per-config pipeline: Each closed-loop point invokes two gem5 passes (front-end for IPC 1 and back-annotated rerun for IPC 2 under CACTI-tuned cache latency), one McPAT power pass, one HotSpot steady-state solve at 𝑓 0, and one closed-form 𝑓 sus evaluation per Equation (13). Total simulation volume across the two envelopes is 200 completed closed-loop points; the sweep completes in about 1 h at 16-way parallelism using per-worker scratch directories to isolate transient files. 
+
+B. Closed-Form Frequency Validation 
+
+Before reporting rankings built on the closed-form 𝑓 sus 
+
+of Equation (13), we confirm that the linearity argument of Section III-D (temperature affine in 𝑓 under the uniform-
+
+𝛾 assumption (11)) holds numerically under both cooling envelopes. We pick four anchor configurations spanning the full ther-mal regime under the baseline envelope: a cool STREAM point ( 𝑇 max =63 .7 ◦C, 𝛾 =0.694 ), a borderline-no-throttle MAT-MUL ( 93 .7 ◦C, 𝛾 =0.443 ), an FFT at the throttle boundary (94 .6 ◦C, 𝛾 =0.444 ), and a heavily throttled FFT ( 100 .0 ◦C,
+
+𝛾 =0.446 ). At each anchor we re-run HotSpot at 𝑓 ∈{0.5, 1.0, 2.0} GHz , scaling the ptrace by 𝛾 +( 1−𝛾 )( 𝑓 / 𝑓 0).We additionally rerun the STREAM, MATMUL, and heavily throttled FFT anchors under the stressed envelope, where the MATMUL anchor crosses from headroom into throttling and the FFT anchor enters deeper throttling. TABLE III reports both envelopes, with the per-anchor linearity er-ror Δlin = 𝑇 HotSpot  
+
+> max
+
+( 𝑓 ) − ( 𝑇 amb + 𝑅 𝜃 𝑃 ( 𝑓 )) taken across 
+
+𝑓 ∈ {0.5, 1.0, 2.0} GHz , and the post-solve safety margin 
+
+Δsafe = |𝑇 HotSpot  
+
+> max
+
+( 𝑓 sus ) − 𝑇 safe |. Rows with 𝑓 sus = 𝑓 0=2.0 GHz 
+
+have 𝑇 max ( 𝑓 0)<𝑇 safe at the nominal frequency, so no throttling applies and 𝑇 @ 𝑓 sus and |Δsafe | are reported as N/A. The linearity prediction 𝑇 max ( 𝑓 )=𝑇 amb + 𝑅 𝜃 𝑃 ( 𝑓 ) matches the measured HotSpot output to within 0.02 ◦C across all 
+
+(4+3) × 3=21 runs, at the level of HotSpot’s Gauss–Seidel convergence tolerance. Under the baseline envelope the heav-ily throttled FFT anchor solves 𝑓 sus =1.76 GHz and HotSpot 8TABLE IV Ranking mismatch on the L2 ×L1D sweep per workload, under both cooling envelopes of Section IV-A.                                                                                                           
+
+> Workload 𝒏 Throttled 𝒇 min
+> sus (GHz) IPC#1 →BIPS 2Top-10 𝜏 0,2𝜏 1,2Best gap
+> Baseline cooling ( 𝑟 conv =3.5 K W −1)
+> CHOLESKY 20 0% 2.000 #2 9 / 10 +0.821 +0.821 1.03 ×
+> FFT 20 75% 1.760 #11 5 / 10 +0.095 +0.611 1.17 ×
+> MATMUL 20 0% 2.000 #3 7 / 10 +0.758 +0.758 1.01 ×
+> STENCIL 20 0% 2.000 #2 10 / 10 +0.716 +0.716 1.09 ×
+> STREAM 20 0% 2.000 #2 8 / 10 +0.537 +0.537 1.08 ×
+> Mean 100 15% 1.760 #4.0 8 / 10 +0.585 +0.688 1.07 ×
+> Stressed cooling ( 𝑟 conv =5.0 K W −1)
+> CHOLESKY 20 100% 1.181 #17 2 / 10 −0.358 +1.000 1.11 ×
+> FFT 20 100% 0.932 #16 4 / 10 +0.105 +1.000 1.08 ×
+> MATMUL 20 80% 1.090 #3 5 / 10 +0.326 +1.000 1.12 ×
+> STENCIL 20 40% 1.143 #8 10 / 10 +0.853 +1.000 1.04 ×
+> STREAM 20 20% 1.801 #3 10 / 10 +0.947 +1.000 1.02 ×
+> Mean 100 68% 0.932 #9.4 6 / 10 +0.375 +1.000 1.07 ×
+
+drives 𝑇 max to exactly 𝑇 safe =95 .00 ◦C, with |Δsafe |=0.0 ◦C.Under the stressed envelope the same FFT anchor solves 
+
+𝑓 sus =0.93 GHz and the regime-transition MATMUL anchor solves 𝑓 sus =1.09 GHz , both landing within 0.01 ◦C of 𝑇 safe . The closed-form claim of Section III-D therefore extends to both cooling regimes without modification, and we use it directly in the ranking experiments of the next two subsections. 
+
+C. Ranking Diagnostic Across Two Cooling Envelopes 
+
+We first quantify how much ranking information an IPC-only evaluator discards under baseline cooling, then repeat the same diagnostic under the stressed envelope to test how the picture changes with cooling headroom. For each of the 100 design points (five workloads at the full 20-config grid each) we record IPC 1, 𝑇 max ( 𝑓 0), the closed-form 𝑓 sus 
+
+from Equation (13), and the closed-loop BIPS 2=IPC 2· 𝑓 sus . We compare three rankings: 𝜋 0 from IPC 1, 𝜋 1 from IPC 1· 𝑓 sus , and 
+
+𝜋 2 from BIPS 2. TABLE IV reports, per workload, the number of configs 𝑛 ; the throttled fraction (configs with 𝑇 max >𝑇 safe ,equivalently 𝑓 sus < 𝑓 0); the BIPS 2-rank of the IPC-best design (column IPC#1 →BIPS 2, ideal value 1, range [1, 𝑛 ]); the top-10 overlap |Top 10 (𝜋 0) ∩ Top 10 (𝜋 2)| ; the Kendall-𝜏 pair 𝜏 0,2
+
+between 𝜋 0 and 𝜋 2 and 𝜏 1,2 between 𝜋 1 and 𝜋 2 (the two coincide in this study because no per-method R2 separates them); and the best-config BIPS 2 ratio of the BIPS-best over the IPC-best design (column “Best gap”, geometric mean across workloads in summary rows). Under baseline cooling, TABLE IV reports the per-workload mismatch. Two regimes appear. CHOLESKY, MATMUL, STENCIL, and STREAM retain full thermal headroom across all 20 configs ( 𝑓 sus = 𝑓 0 throughout), so 𝜋 0, 𝜋 1, and 𝜋 2 collapse to the same ranking up to a frequency constant. FFT is the only workload with throttled configs ( 75 % ), and accordingly is the one workload where the IPC-best design is not the BIPS 2-best: it lands at 𝜏 0,2= + 0.095 with the IPC-best design at 
+
+#11 in BIPS 2. This baseline result is useful as a control: the corrections do not bind on workloads that retain headroom, but they already bind on FFT, whose power map exceeds the package envelope on the larger-L2 configurations at nominal frequency. We then re-run the same architectural sweep, layout model, power model, and temperature limit under the stressed en-velope ( 𝑟 conv =5.0 K W −1); the only quantity that changes is the package thermal resistance. Under stressed cooling, the throttle rate rises across all five workloads, and the ranking metrics that were near-trivial under the baseline envelope now diverge. TABLE IV reports the per-workload metrics in the lower block of the table. The throttle rate climbs from a baseline-envelope mean of 15 % to 68 % under stressed cooling, with two workloads (CHOLESKY, FFT) at 100 % and only STREAM remaining mostly in the headroom regime ( 20 % ). On the throttled side the ranking metrics now diverge: CHOLESKY collapses to 𝜏 0,2= − 0.358 with the IPC-best design ranking #17 in BIPS 2 and a top-10 overlap of 2/10 ;FFT lands at 𝜏 0,2= + 0.105 with the IPC-best design at #16 .CHOLESKY has 𝜏 0,2<0 outright, meaning that picking by IPC 1 ranks designs strictly worse than a uniform random permutation. Across the five workloads the geometric-mean best-config BIPS 2 gap of IPC-only selection is 1.07 × with the largest individual workload at 1.12 × (MATMUL). The qualitative picture is consistent across the two en-velopes. When sustained frequency does not move (baseline), IPC is a serviceable proxy for BIPS. When sustained frequency moves with the architectural choice (stressed), IPC and BIPS diverge, and the divergence carries the full weight of the post-correction structure BIPS 2=IPC 2 · 𝑓 sus , where both factors are configuration-dependent. The stressed envelope is therefore best read as a reduced-headroom test rather than a more realistic baseline, and the result supports two interpretations. In any deployment that runs near the package thermal limit (degraded cooling, high ambient, sustained AVX or vector loads), the IPC-only ranking is no longer aligned with what silicon delivers. Even in deployments that operate well under 
+
+𝑇 safe on average, the BIPS-best architecture under the worst-case cooling differs from the IPC-best, and a designer who picks at the IPC stage forecloses on options that would have won under the binding constraint. Either reading points to the same engineering implication: the two corrections need to be applied before the architecture commitment, not after. 9TABLE V Realized BIPS gain over the shelf-pack baseline on the 80-configuration R2 sweep, broken down by workload and regime (throttled vs. headroom). The shelf-pack column reports absolute BIPS real (mean / max in GIPS) as the baseline anchor.                                                                                                        
+
+> Baseline Method (mean / max Δ% real BIPS, wins) Workload Regime nshelf-pack (GIPS) cool3d-canonical SA + 𝜆 -mix CLIP-3D (ours)
+> FFT throttled 20 11.36 / 13.10 +19.61 / +24.77 (20/20) +18.99 / +24.80 (20/20) +19.71 / +24.77 (20/20)
+> MATMUL throttled 16 6.60 / 8.26 +7.73 / +17.98 (16/16) +6.91 / +14.72 (16/16) +7.71 / +14.62 (16/16)
+> MATMUL headroom 43.58 / 4.13 +12.07 / +31.88 (4/4) +12.07 / +31.88 (4/4) +12.07 / +31.88 (4/4)
+> STENCIL throttled 811.40 / 12.29 +16.03 / +17.75 (8/8) +13.73 / +15.03 (8/8) +15.53 / +17.88 (8/8)
+> STENCIL headroom 12 5.61 / 5.95 +1.65 / +2.68 (12/12) +1.65 / +2.68 (12/12) +1.65 / +2.68 (12/12)
+> STREAM throttled 412.37 / 13.30 +4.19 / +4.51 (4/4) +3.63 / +3.91 (4/4) +4.50 / +4.70 (4/4)
+> STREAM headroom 16 3.49 / 6.14 +7.39 / +79.02 (10/16) +7.39 / +79.02 (10/16) +7.39 / +79.02 (10/16) Overall throttled 48 9.86 / 13.30 +13.77 / +24.77 (48/48) +12.81 / +24.80 (48/48) +13.75 / +24.77 (48/48) Overall headroom 32 4.29 / 6.14 +5.82 / +79.02 (26/32) +5.82 / +79.02 (26/32) +5.82 / +79.02 (26/32)
+> TABLE VI Per-method summary on the 80-configuration sweep against shelf-pack.
+> Method real mean real max paper mean paper max wall (s)
+> cool3d-canonical +10.59 % +79.02 % +2.42 % +7.46 % 443.8 SA + 𝜆 -mix +10.01 % +79.02 % +2.62 % +7.86 % 642.7 CLIP-3D (ours) +10.58 % +79.02 % +2.52 % +7.71 % 220.1
+> TABLE VII Conservative paper formula (IPC 1·𝑓 sus ) vs. realized BIPS (gem5 R2) for CLIP-3D over shelf-pack.
+> CLIP-3D vs. shelf Paper Real (R2)
+> Mean Δ%overall +2.52 % +10.58 %
+> Max Δ%overall +7.71 % +79.02 %
+> Throttled wins 48/48 48/48
+> Headroom wins 0/32 26/32
+
+D. Layout Co-Design Using the Closed-Form Frequency 
+
+The architectural sweep above evaluates each design with a fixed shelf-pack layout. The layout choice is itself a degree of freedom, and the same closed-form 𝑓 sus that drives the ranking experiments above can serve as the thermal term inside an analytical floorplanner objective. We run four floorplanners on the stressed-cooling sweep over the four workloads (FFT, MATMUL, STENCIL, STREAM) that complete the gem5 R2 back-annotation pipeline at the full L2 ×L1D grid, 4 × 20 = 80 
+
+configurations in total: the deterministic shelf-pack baseline (cores on the bottom tier, L2 at the bottom-left corner), the cool3d-canonical layout, an SA-plus-𝜆 -mix grid search that reproduces the prior 3D-IC thermal-aware floorplanning tem-plate, and the CLIP-3D analytical floorplanner of Algorithm 1. The ranking diagnostic of Section IV-C additionally covers CHOLESKY using IPC 1, which is layout-invariant; the layout-side experiment in this subsection is restricted to the four R2-complete workloads. Each method emits a layout, then a single HotSpot pass yields the realized 𝑇 max and the closed-form throttled clock 𝑓 sus from Equation (13). The closed-loop BIPS depends on both the throttled clock and the IPC delivered under the layout’s wire and TSV penalty. The ranking diagnostic above uses BIPS 2=IPC 1 · 𝑓 sus 
+
+with IPC 1 held constant across methods, since gem5 R1 runs before any layout choice. To verify that the layout-conditional IPC also moves in the same direction we re-run gem5 with each method’s optimized wire and TSV cycle counts back-annotated into the cache latency. The realized score is then BIPS real =IPC R2 · 𝑓 sus .TABLE V summarizes the realized BIPS gap over shelf-pack across the 80-configuration sweep, broken down by workload and regime. CLIP-3D wins on every thermally-binding configuration with mean ΔBIPS real =+13 .75 % and max +24 .77 % (FFT at 𝐿 2=128 kB). On the headroom subset, where the shelf-pack layout does not throttle and the closed-form 𝑓 sus = 𝑓 0 collapses the thermal term, the wire term in the floorplanner objective still pulls L2 closer to the cores. Realized IPC therefore rises and CLIP-3D delivers a mean 
+
+ΔBIPS real =+5.82 % even in the headroom regime, with a maximum of 79 .0 % on a STREAM configuration whose shelf-pack placed L2 at the worst-case wire distance. The conser-vative IPC 1 scoring used in the ranking diagnostic undersold this gain because IPC 1 is layout-invariant by construction. TABLE VI compares all three thermal-aware floorplanners on the same sweep against shelf-pack. Cool3d-canonical and SA + 𝜆 -mix both reach essentially the same realized BIPS plateau ( +10 .59 % and +10 .01 % on average), but pay 2.0×
+
+and 2.9× more wall time per configuration than CLIP-3D. The reason is that those methods evaluate three HotSpot candidates each (top-𝐾 winners of an 11-point 𝜆 -grid surrogate search), while CLIP-3D pays one HotSpot validation. The closed-form 
+
+𝑓 sus inside the CLIP-3D objective predicts 𝑇 max at the optimum well enough that a single confirmation suffices. CLIP-3D therefore sits on the Pareto frontier of the (wall, realized BIPS) plane: the same wall as the deterministic shelf-pack and the same realized BIPS as the surrogate methods. TABLE VII quantifies the gap between the conservative paper formula and the realized BIPS for CLIP-3D. The paper formula reports +2.52 % mean because IPC 1 is held fixed across methods. Once each method’s wire and TSV penalty is back-annotated into the cache latency, the realized gap widens to +10 .58 % . The mismatch is sharpest in the headroom bucket: the paper formula scores 0/32 wins because IPC 1
+
+is layout-invariant and 𝑓 sus = 𝑓 0 for every non-throttled config, so paper-BIPS is identical across methods, while R2 back-annotation exposes the wire-driven gain as 26 /32 . The paper formula is therefore a conservative pre-verification estimate, while the realized number is the simulator-backed estimate after layout-dependent cache and wire latency are applied. The realized gap is wider than the paper formula predicts 10 for a concrete reason. IPC 1 uses gem5’s default cache latency, fixed at the architecture stage and independent of layout, while IPC R2 uses the CACTI base latency plus the integer wire and TSV cycles derived from the chosen layout, so a tighter layout (shorter average core-to-L2 wire) reduces effective L2 hit time and lifts IPC. The shelf-pack baseline places L2 in the bottom-left corner, the worst-case wire-distance configuration, so any layout that moves L2 closer to the core cluster pays this penalty back. CLIP-3D’s L-BFGS-B inner loop optimizes the average wire term in addition to the closed-form 𝑓 sus term, which is why it picks up wire-driven IPC even when the configuration is not thermally binding. These two mechanisms ( 𝑓 sus gain and wire optimization) split differently across workloads, and TABLE V resolves them per workload. Throttled rows are dominated by the 𝑓 sus gain, with FFT the largest at mean 19 .7 % and max 24 .8 % . Headroom rows are smaller and dominated by the wire-term contribution; STREAM at +7.4 % headroom mean comes entirely from wire optimization since 𝑓 sus = 𝑓 0 collapses the thermal term, and the 
+
+79 .0 % outlier comes from one configuration whose shelf-pack placed L2 at the worst-case wire distance. Taken together, the ranking diagnostic of Section IV-C and the layout co-design above answer two complementary questions on the same physics-aware pipeline. The ranking di-agnostic shows that IPC-only selection fails when architectural choices change both instruction throughput and sustainable frequency, with the failure growing as cooling headroom shrinks. The layout co-design shows that the same closed-form 𝑓 sus that diagnoses this failure also drives a single-shot floorplanner that matches surrogate-search BIPS at one-third the wall time. The corrections are not bolted on after the fact; they are the architecture-to-physical lifting itself. V. C ONCLUSION 
+
+We presented CLIP-3D, an architecture-to-physical lifting pipeline coupled with an analytical 3D thermal-aware floor-planner whose objective embeds a closed-form sustained-frequency expression in place of the HPWL-plus-temperature linear surrogate that prior 3D thermal-aware floorplanners optimize. Across an 80-configuration sweep under stressed cooling, the floorplanner lies on the wall-time vs. realized BIPS 2 Pareto frontier against shelf-pack, cool3d-canonical, and an SA + 𝜆 -mix HPWL/ 𝑇 max surrogate baseline analogous to recent SA-based 3D thermal-aware floorplanners. ACKNOWLEDGMENT 
+
+This work was conducted in the JC STEM Lab of Intelligent Design Automation, funded by The Hong Kong Jockey Club Charities Trust. This work was supported in part by the Research Grants Council of the Hong Kong Special Admin-istrative Region, China, under Grant Nos. CUHK14211324 and CUHK7010840, and in part by ACCESS – AI Chip Center for Emerging Smart Systems, supported by the InnoHK initiative of the Innovation and Technology Commission of the Hong Kong Special Administrative Region Government. AI assistants were used for language polishing and partial code generation under the authors’ supervision. All research deci-sions and technical contributions were made by the authors. REFERENCES [1] D. Xing et al. , “A high level approach to co-designing 3d ics,” in DAC ,2024. [2] D. Huang et al. , “An evaluation framework for dynamic thermal manage-ment strategies in 3d multiprocessor system-on-chip co-design,” IEEE Transactions on Parallel and Distributed Systems , 2024. [3] N. Binkert et al. , “The gem5 simulator,” ACM SIGARCH computer architecture news , 2011. [4] J. Lowe-Power, A. M. Ahmad, A. Akram, M. Alian, R. Amslinger, M. Andreozzi, A. Armejach, N. Asmussen, B. Beckmann, S. Bharad-waj et al. , “The gem5 simulator: Version 20.0+,” arXiv preprint arXiv:2007.03152 , 2020. [5] D. Burger and T. M. Austin, “The SimpleScalar tool set, version 2.0,” 
+
+SIGARCH Comput. Archit. News , vol. 25, no. 3, pp. 13–25, 1997. [6] J. Cong, J. Wei, and Y. Zhang, “A thermal-driven floorplanning algorithm for 3D ICs,” in IEEE/ACM International Conference on Computer-Aided Design (ICCAD) . IEEE, 2004, pp. 306–313. [7] J. Cong and Y. Zhang, “Thermal-aware physical design flow for 3-D ICs,” in Proc. International VLSI Multilevel Interconnection Conference ,2006, pp. 73–80. [8] J. Cong, A. Jagannathan, Y. Ma, G. Reinman, J. Wei, and Y. Zhang, “An automated design flow for 3D microarchitecture evaluation,” in 
+
+IEEE/ACM Asia and South Pacific Design Automation Conference (ASPDAC) , 2006, pp. 384–389. [9] Y. Liu, Y. Ma, E. Kursun, G. Reinman, and J. Cong, “Fine grain 3D integration for microarchitecture design through cube packing ex-ploration,” in IEEE/ACM International Conference on Computer-Aided Design (ICCAD) . IEEE, 2007, pp. 259–266. [10] J.-M. Lin, W.-Y. Chang, H.-Y. Hsieh, Y.-T. Shyu, Y.-J. Chang, and J.-M. Lu, “Thermal-aware floorplanning and TSV-planning for mixed-type modules in a fixed-outline 3-D IC,” IEEE Transactions on Very Large Scale Integration Systems (TVLSI) , vol. 29, no. 9, pp. 1652–1664, 2021. [11] W. Guan, X. Tang, H. Lu, Y. Zhang, and Y. Zhang, “A novel thermal-aware floorplanning and TSV assignment with game theory for fixed-outline 3-D ICs,” IEEE Transactions on Very Large Scale Integration (VLSI) Systems , vol. 31, no. 11, pp. 1639–1652, 2023. [12] R. Wang, Z. Wang, T. Lin, J. M. Raby, M. R. Stan, and X. Guo, “Cool-3D: An end-to-end thermal-aware framework for early-phase design space exploration of microfluidic-cooled 3DICs,” arXiv preprint arXiv:2503.07297 , 2025. [13] A. Hankin, D. Werner, M. Amiraski, J. Sebot, K. Vaidyanathan, and M. Hempstead, “HotGauge: A methodology for characterizing advanced hotspots in modern and next generation processors,” in IEEE Interna-tional Symposium on Workload Characterization (IISWC) . IEEE, 2021, pp. 163–175. [14] R. Wang, J.-H. Han, M. Stan, and X. Guo, “Hot-LEGO: Architect microfluidic cooling equipped 3DIC with pre-RTL thermal simulation,” in International Green and Sustainable Computing Conference , 2023, pp. 14–17. [15] S. Li et al. , “Mcpat: An integrated power, area, and timing modeling framework for multicore and manycore architectures,” in MICRO , 2009. [16] N. Muralimanohar, R. Balasubramonian, and N. P. Jouppi, “Optimizing NUCA organizations and wiring alternatives for large caches with CACTI 6.0,” in IEEE/ACM International Symposium on Microarchi-tecture (MICRO) . IEEE, 2007, pp. 3–14. [17] M. R. Stan et al. , “Hotspot: A dynamic compact thermal model at the processor architecture level,” Microelectronics Journal , 2003. [18] R. Zhang, M. R. Stan, and K. Skadron, “Hotspot 6.0: Validation, acceleration and extension,” University of Virginia, Tech. Rep , vol. 15, no. 4, pp. 1–8, 2015. [19] J.-H. Han, R. E. West, K. Skadron, and M. R. Stan, “Thermal simulation of processing-in-memory devices using hotspot 7.0,” in 2021 27th international workshop on thermal investigations of ICs and systems (THERMINIC) . IEEE, 2021, pp. 1–5. [20] M. A. Ahmed, S. Mohapatra, and M. Chrzanowska-Jeske, “TSV- and delay-aware 3D-IC floorplanning,” Analog Integrated Circuits and Sig-nal Processing , vol. 87, no. 2, pp. 235–248, 2016. [21] L. Zhu, N. E. Bethur, Y.-C. Lu, Y. Cho, Y. Im, and S. K. Lim, “3d ic tier partitioning of memory macros: Ppa vs. thermal tradeoffs,” in 
+
+IEEE International Symposium on Low Power Electronics and Design (ISLPED) , 2022, pp. 1–6. [22] P. K. Sen, “Estimates of the regression coefficient based on kendall’s tau,” Journal of the American statistical association , 1968. [23] R. Wang et al. , “Cool-3d: An end-to-end thermal-aware framework for early-phase design space exploration of microfluidic-cooled 3dics,” 
+
+11 IEEE Journal on Emerging and Selected Topics in Circuits and Systems ,2025. [24] R. H. Byrd, P. Lu, J. Nocedal, and C. Zhu, “A limited memory algo-rithm for bound constrained optimization,” SIAM Journal on Scientific Computing , vol. 16, no. 5, pp. 1190–1208, 1995. [25] Y.-W. Wu et al. , “Joint exploration of architectural and physical design spaces with thermal consideration,” in Proceedings of the 2005 interna-tional symposium on Low power electronics and design , 2005. [26] W. J. Dally and B. P. Towles, Principles and Practices of Interconnection Networks . Morgan Kaufmann, 2004. [27] A. P. Chandrakasan, S. Sheng, and R. W. Brodersen, “Low-power CMOS digital design,” IEEE Journal of Solid-State Circuits , vol. 27, no. 4, pp. 473–484, 1992. [28] C. M. Fiduccia and R. M. Mattheyses, “A linear-time heuristic for improving network partitions,” in Proc. DAC , 1982, pp. 175–181. [29] H. Bakoglu and J. D. Meindl, “Optimal interconnection circuits for vlsi,” 
+
+IEEE Transactions on Electron Devices , vol. 32, no. 5, pp. 903–909, 1985. [30] W. Zhao and Y. Cao, “Predictive technology model for nano-cmos design exploration,” ACM Journal on Emerging Technologies in Computing Systems (JETC) , vol. 3, no. 1, pp. 1–es, 2007. [31] S. C. Woo, M. Ohara, E. Torrie, J. P. Singh, and A. Gupta, “The SPLASH-2 programs: Characterization and methodological considera-tions,” in IEEE/ACM International Symposium on Computer Architec-ture (ISCA) , 1995, pp. 24–36. [32] J. D. McCalpin, “Memory bandwidth and machine balance in current high performance computers,” IEEE Computer Society Technical Com-mittee on Computer Architecture (TCCA) Newsletter , pp. 19–25, 1995. 
+
+Shuo Ren received his B.S. degree in computer science from the Huazhong University of Science and Technology, Wuhan, China, in 2024. He is currently working toward the Ph.D. degree in the Department of Computer Science and Engineering, The Chinese University of Hong Kong. His current research focuses on electronic design automation, with particular interests in 3D integrated circuit design and physical design optimization. 
+
+Libo Shen received his B.S. degree in communica-tion engineering from Beijing University of Posts and Telecommunications, Beijing, China, in 2021 and his M.S. degree in computer technology from the University of Chinese Academy of Sciences, Beijing, China, in 2024. He is currently a Ph.D. student at the Department of Computer Science and Engineering, The Chinese University of Hong Kong. His research interests include electronic design au-tomation and computer architecture. 
+
+Yaohui Han is currently pursuing the Ph.D. degree with the Department of Computer Science and En-gineering, The Chinese University of Hong Kong, under the supervision of Prof. Tsung-Yi Ho. He received the B.Sc. degree in physics from Cen-tral South University, Changsha, China. His current research interest is electronic design automation (EDA), especially EDA for physical design, and large language model-assisted EDA. 
+
+Leilei Jin is currently a postdoctoral researcher affiliated with the Department of Computer Science and Engineering at The Chinese University of Hong Kong. She received her Ph.D. degree from Southeast University in 2024, where her doctoral work focused on foundational theories and practical methodologies in integrated circuit design automation. Her research interests include static timing analysis, crosstalk prediction, PPA optimization for Backside PDN and 3DICs under advanced process nodes. 
+
+Chenghan Wang received the B.E. degree in elec-tronic science and technology from Harbin Institute of Technology (Weihai) in 2021, and the M.E. degree in circuits and systems from the Institute of Microelectronics, Chinese Academy of Sciences in 2024. He is currently working toward the Ph.D. degree at The Chinese University of Hong Kong. His research interests include electronic design au-tomation (EDA), especially multiphysics simulation, numerical computing, and GPU acceleration. 
+
+Zhen Zhuang received his M.Eng. and B.Eng. from Fuzhou University in 2021 and 2018, respectively. He obtained his Ph.D. from the Chinese University of Hong Kong in 2025 under the supervision of Prof. Tsung-Yi Ho. His current research interest is Electronic Design Automation (EDA), especially EDA for advanced packaging and 3D IC. He was a recipient of three ICCAD/ISPD contest awards. 
+
+Rongliang Fu received his Ph.D. in Computer Sci-ence and Engineering from The Chinese University of Hong Kong in January 2026, following an M.S. from the University of Chinese Academy of Sciences in June 2021 and a B.S. in Software Engineering from Northwestern Polytechnical University in June 2018. He has authored over 30 papers across major journals (IEEE TC and IEEE TCAD) and confer-ences (DAC, DATE, ICCAD, etc.). His research spans electronic design automation and EDA for superconducting electronics. 
+
+Bei Yu (M’15-SM’22) received the Ph.D. degree from The University of Texas at Austin in 2014. He is currently a Professor in the Department of Computer Science and Engineering, The Chinese University of Hong Kong. He has served as TPC Chair of ACM/IEEE Workshop on Machine Learn-ing for CAD, and in many journal editorial boards and conference committees. He received ten Best Paper Awards from IEEE TSM 2022, DATE 2022, ICCAD 2021 & 2013, ASPDAC 2021 & 2012, ICTAI 2019, Integration, the VLSI Journal in 2018, ISPD 2017, SPIE Advanced Lithography Conference 2016, and many other awards, including DAC Under-40 Innovator Award (2024), IEEE CEDA Ernest S. Kuh Early Career Award (2022), and Hong Kong RGC Research Fellowship Scheme (RFS) Award (2024). 
+
+Tsung-Yi Ho (F’24) is a Professor in the Depart-ment of Computer Science and Engineering, The Chinese University of Hong Kong (CUHK). He received his Ph.D. in Electrical Engineering from National Taiwan University in 2005. His research interests include several areas of computing and emerging technologies, especially in the design au-tomation of microfluidic biochips. He was a recipient of the Best Paper Award at the IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems in 2015. Currently, he serves as the VP Conferences of IEEE CEDA, and the Executive Committee of ASP-DAC and ICCAD. He is a Distinguished Member of ACM and a Fellow of IEEE. 
+
+12

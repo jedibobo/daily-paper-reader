@@ -1,0 +1,328 @@
+Title: Cross-Core Inference Offload as an Operating-System Service on Dual-Core Microcontrollers
+
+URL Source: https://arxiv.org/pdf/2607.12620v1
+
+Published Time: Wed, 15 Jul 2026 12:01:42 GMT
+
+Number of Pages: 10
+
+Markdown Content:
+# Cross-Core Inference Offload as an Operating-System Service on Dual-Core Microcontrollers 
+
+Dimitrios Kafetzis 
+
+SynapticOS Project, Hamburg, Germany 
+
+Abstract —Commodity dual-core microcontrollers are asymmet-ric in a way their marketing rarely admits: on NXP’s MCXN947, the second Cortex-M33 has no floating-point unit, no DSP extension, no TrustZone — and no memory protection unit. We argue this asymmetry is a design input, not an obstacle, and present the Phase 3 dual-core architecture of SynapticOS, an open-source AI-native runtime built on Zephyr: the entire AI runtime (models, NPU and DSP access, the priority scheduler) is confined to the capable core, and the application core reaches inference exclusively through a message-based operating-system service — inference as a remote system call. The transport is a pair of lock-free single-producer/single-consumer rings in shared SRAM: every ring index has exactly one writer, free-running 32-bit counters make wraparound safe by unsigned arithmetic, and ordering needs only data-memory barriers — no cross-core atomics, which the platform does not offer. Because ring state lives in the shared region rather than in either core’s private memory, an application core that reboots mid-conversation rejoins the ring without runtime-core involvement. Requests carry the scheduler’s priority classes across the core boundary, errors and timeouts propagate to the caller’s return value, and tensors stage zero-copy in a shared exchange slot — a 27 KB camera frame cannot afford to exist twice in the application core’s 64 KB of RAM. Measured on the FRDM-MCXN947 (both cores at 150 MHz): the application core boots in 1,514 μs from release and completes the IPC handshake in 2,554 μs, bit-identical across 11 consecutive boots; message round-trip time is 15 μs typical and 81 μs worst-case against a 50 μs budget; ring operations cost 25 cycles per push; a 1,913-serve alternating two-model soak completed with zero errors (stub-NPU latencies, labeled — these numbers bracket the runtime and transport, not silicon inference throughput). A read-only MPU region on the runtime core guards the application core’s RAM — verified by an on-board fault-injection self-test — and we state the architectural limits honestly: the protection is one-directional because the application core has no MPU, and ARMv8-M offers no way to block privileged reads with the background map enabled. Two defects that only the hardware could reveal are reported in full: releasing the second core into erased flash wedges the entire chip including the debug port (the fallback now blank-checks the flash bank through the ROM API before release), and a Zephyr flash-driver Kconfig silently disarmed the devicetree-declared MPU guard (the guard is now programmed at runtime). The dual-core firmware fits in 98.9 KB of flash on the runtime core and 32.4 KB on the application core (42.6 KB of its 64 KB RAM); a 108-test suite across 13 suites passes 100% under emulation. SynapticOS is released under Apache 2.0 at https://github.com/Dimitrios-Kafetzis/SynapticOS. 
+
+Index Terms —asymmetric multiprocessing, inter-processor com-munication, real-time operating systems, lock-free data structures, memory protection, neural processing units, edge AI, embedded systems 
+
+I. I NTRODUCTION 
+
+The first two papers in this project established an operating system that treats neural inference as a first-class workload on a single microcontroller core: Phase 1 [ 1 ] built the tensor-aware memory manager, the NPU hardware-abstraction layer, the model registry, and the profiling surface; Phase 2 [ 2]promoted the inference pipeline itself to an OS object and put a priority job scheduler in front of the accelerator. Both phases ran entirely on one of the NXP MCXN947’s two Cortex-M33 cores while the other sat in reset — which is how the overwhelming majority of deployed dual-core MCU designs ship, because using the second core means solving inter-processor communication, shared-memory layout, boot orchestration, and cross-core fault containment before the first application line runs. This paper is about putting that second core to work — and about what the second core actually is. On the MCXN947, the two cores that share a part number do not share a feature set: the CMSIS device header for 
+
+cm33_core1 sets __FPU_PRESENT , __DSP_PRESENT ,
+
+__SAUREGION_PRESENT , and __MPU_PRESENT all to zero. The second core cannot run float-heavy preprocessing efficiently, cannot use the DSP extension, sees the memory map through a different (non-secure) address lens than its TrustZone-enabled sibling, and cannot protect so much as a byte of its own RAM. A symmetric-multiprocessing mindset treats each of these as a defect to work around. We take the opposite position: the asymmetry is the architecture. 
+
+A. Inference as a Cross-Core Service 
+
+Our design confines everything that needs the capable core to the capable core: model storage and lifecycle, NPU and PowerQuad access, the Phase 2 pipeline engine and priority scheduler, and the shell. The application core — the natural home for sensor polling, protocol handling, and product logic — gets none of that machinery and needs none of it. What it gets instead is a service interface: load a model by name, submit a tensor with a priority class, block for the result with a timeout. The runtime core answers requests from the application core through the same scheduler that serves its own local jobs, so remote and local work contend in a single priority space. In effect, inference becomes a remote system call — with the OS, not the application, owning the transport, the staging memory, the priority semantics, and the failure modes. arXiv:2607.12620v1 [cs.OS] 14 Jul 2026 Three properties of the platform shape the transport. First, there is no cross-core lock or atomic worth trusting on this part, so the message layer must need neither: two single-producer/single-consumer rings — one per direction — give every index exactly one writer, and data-memory barriers are the only ordering primitive used. Second, the application core has 64 KB of RAM and a 96 ×96 ×3 camera frame is 27 KB, so the request path must not copy: tensors stage directly in a shared exchange slot. Third, either core can reset while the other runs, so the ring state itself lives in the shared region — a rebooting application core rejoins the conversation without the runtime core doing anything at all. 
+
+B. Contributions 
+
+Building on the Phase 1 and Phase 2 subsystems behind the same frozen public headers, this paper contributes: 1) An asymmetric AMP architecture for MCU inference 
+
+(section III): the AI runtime confined to the capable core, the application core accessing it exclusively through a message-based service interface, with the capability asymmetry of commodity dual-core silicon treated as a design input rather than an obstacle. 2) A lock-free SPSC message layer in shared SRAM 
+
+(section III-B ) requiring no cross-core lock or atomic support: per-direction rings with single-writer indices, free-running 32-bit counters (wraparound-safe by un-signed arithmetic, tested at UINT32_MAX ), DMB-only ordering, and 64-byte index separation against false sharing. Measured cost: 25 cycles per push. Ring state resides in shared SRAM, yielding reset resilience by construction. 3) Inference-as-syscall semantics across cores (sec-tion III-D ): requests carry the Phase 2 scheduler’s priority class so remote and local jobs contend in one priority space; errors and timeouts propagate to the caller’s return value; input and output tensors stage zero-copy in a shared slot sized by the application core’s RAM constraint. 4) One-directional hardware memory protection, hon-estly scoped (section III-E ): a read-only MPU region on the runtime core guards the application core’s RAM, with a fault policy that aborts only the offending thread while both cores continue — verified by fault injection on the board. The architectural limits are stated plainly: ARMv8-M offers no privileged-no-access encoding while the background map is enabled (reads are not blockable), and the application core has no MPU at all. 5) Out-of-tree second-core enablement on mainline Zephyr 3.7 (section IV): a board port supplying the missing cpu1 target, the missing CPU-architecture Kconfig selects, a corrected non-secure devicetree view, and per-core address aliasing (secure +0x1000_0000 
+
+versus plain) folded into one shared layout header that both images compile against, with build-time asserts pinning every cross-core structure offset. 6) An honest-baseline evaluation (section V) continuing the Phase 1/2 methodology: all inference latencies run through the deterministic stub NPU and are labeled as runtime-and-transport baselines; the acceptance criteria the measurements did not meet — an NPU duty-cycle target predicated on a saturation workload our demo deliberately is not, and two negative paths not separately staged on the board — are reported as misses, not re-scoped. Two defects only the hardware could reveal are documented in full (section VII-A). 
+
+C. Scope 
+
+This paper reports the Phase 3 system as validated on the qemu_cortex_m3 continuous-integration target (SPSC ring logic and shared-layout ABI, which are core-count-independent) and live on the FRDM-MCXN947 board (all cross-core behaviour; transcripts captured 2026-07-14, released as v0.3.0). The model stage executes the deterministic stub NPU kernel inherited from Phase 1: every latency that includes inference is a runtime-and-transport baseline, not a silicon throughput claim. The IPC timing numbers — boot, handshake, round-trip, ring cost — measure real mechanisms end to end and are not stub-dependent. One request is in flight at a time by design (section III-D ); the protection story is one-directional by silicon (section III-E ); both limits are discussed rather than hidden (section VII-C). 
+
+D. Paper Organisation 
+
+Section II lays out the dual-core reality of the MCXN947 and the gaps in mainline Zephyr 3.7 that had to be filled. Section III presents the shared-memory contract, the SPSC rings, the boot protocol, the cross-core inference semantics, and the protection model. Section IV covers the board port and the implementation of the zero-copy slot. Section V reports the measurements; section VI positions the design against OpenAMP/RPMsg, Zephyr’s IPC services, and the lock-free queue literature; section VII reconstructs the two board-found defects and collects limitations. Section VIII concludes. II. B ACKGROUND : W HAT A DUAL -C ORE MCU A CTUALLY 
+
+IS
+
+A. The MCXN947’s Two Unequal Cores 
+
+The MCXN947 [ 3 ] advertises two Cortex-M33 cores at 150 MHz. The datasheet’s fine print, concentrated in the per-core CMSIS device headers, is where the system architecture is actually decided. CPU0 has a hardware FPU, the DSP extension, TrustZone-M with SAU regions, and an 8-region MPU; it also owns the eIQ Neutron NPU and PowerQuad DSP integration paths established in Phases 1–2 [ 1 ], [ 2]. CPU1’s header sets __FPU_PRESENT , __DSP_PRESENT ,
+
+__SAUREGION_PRESENT , and __MPU_PRESENT to zero. Those four zeros reshaped three of this phase’s five deliverables before any code ran:  
+
+> •
+
+No FPU/DSP on CPU1 means float-heavy preprocessing and the Phase 2 DSP paths must not migrate there — confirming the service architecture in which all tensor work stays on CPU0.  
+
+> •
+
+No TrustZone on CPU1 means the two cores see the same physical memory at different addresses: CPU0 runs Secure and uses the +0x1000_0000 secure aliases (RAM at 0x3xxx_xxxx , flash at 0x1xxx_xxxx ), while CPU1 addresses RAM at 0x2xxx_xxxx and flash at 0x0xxx_xxxx . Every shared pointer, every boot vector, and every devicetree region must be expressed in the right lens for the right core (section IV-A).  
+
+> •
+
+No MPU on CPU1 means cross-core memory protection can only ever be one-directional: CPU0 can be prevented from corrupting CPU1’s RAM, but nothing on this silicon can stop CPU1 from writing anywhere it likes (section III-E). Memory is similarly less symmetric than the headline “512 KB SRAM” suggests: 416 KB is contiguous main SRAM at 0x2000_0000 (banks RAMA–RAMH), while the remaining 96 KB is RAMX on the code bus at 0x0400_0000 .The phase plan’s original sketch gave CPU1 a 160 KB region ending at 0x2007_FFFF — an address that does not exist on the main-SRAM bus. The map that ships (section III-A )is 256 KB for CPU0, 96 KB shared, and 64 KB for CPU1, which executes in place from the second 1 MB flash bank at 
+
+0x0010_0000 . We flag this because plan-versus-datasheet corrections are exactly the class of finding that only surfaces when a design is pushed all the way to silicon, and reporting them is part of the methodology. 
+
+B. What Mainline Zephyr 3.7 Does Not Provide 
+
+Zephyr 3.7 [ 4 ] knows the MCXN947 exists — CPU0 is a supported build target — but its second core is unreachable from the mainline tree. Four gaps had to be filled out-of-tree, all carried inside the SynapticOS repository so that a stock Zephyr workspace builds both images: 1) No CPU1 board target. There is no 
+
+frdm_mcxn947/mcxn947/cpu1 board. We supply an out-of-tree board port (boards/nxp/frdm_mcxn947_cpu1 ) with its own devicetree, defconfig, and Kconfig, injected via 
+
+BOARD_ROOT .2) The CPU1 SoC symbol selects no CPU architecture. 
+
+SOC_MCXN947_CPU1 exists in the tree but selects neither CPU_CORTEX_M33 nor its dependencies; the board Kconfig merges the missing selects into the SoC symbol. 3) The non-secure SoC devicetree include is incomplete. 
+
+nxp_mcxn94x_ns.dtsi cannot be included stand-alone (it lacks the memory and ARMv8-M includes its secure sibling gets elsewhere), and it pulls in an Ethernet node whose binding demands pinctrl the CPU1 image does not configure; the board devicetree supplies the missing includes and deletes the offending node. 4) The mailbox driver does not know this SoC. Zephyr’s 
+
+mbox driver lacks the MCXN947’s CPU identifiers, so the inter-core interrupt path uses NXP’s header-only 
+
+fsl_mailbox.h HAL directly (MAILBOX IRQ 54 on both cores), the same pattern Phase 2 used for PowerQuad. None of these is deep; all of them are load-bearing, and each is a small, upstreamable artifact. Their absence explains, in part, why the second core of this popular part so often ships dark. 
+
+C. Inherited Subsystems and the Frozen API 
+
+Phase 3 adds no new public header and modifies none: the IPC surface ( syn_ipc.h ) has been part of the frozen API since Phase 1, when it was specified ahead of implementation — syn_ipc_init() , send() , receive() with timeout, and per-type handler registration over a fixed 20-byte message carrying an ID, a type, a priority, a payload reference, a timestamp, and a status. This phase implements that interface without amendment, which we take as evidence for the Phase 1 bet that the IPC abstraction could be frozen before the transport existed. The Phase 2 pipeline engine and priority scheduler run unmodified on CPU0; cross-core requests enter them through the same submission path local callers use. III. D ESIGN 
+
+A. The Shared-Memory Contract 
+
+Everything the two cores agree on is written down in one private header, syn_shared_layout.h , which both images compile. Figure 1 shows the resulting map: the 416 KB of main SRAM tiles into 256 KB of CPU0-private memory, a 96 KB shared IPC region, and 64 KB of CPU1-private memory, with no gaps and no overlap — and the header carries 
+
+BUILD_ASSERT s proving exactly that, plus asserts pinning the size and every cross-core field offset of each shared structure. A layout mismatch between images is a compile error, not a Heisenbug: the 20-byte message, the 64-byte control block, the ring geometry, and the exchange-slot header are all pinned bit-for-bit. The shared region opens with a control block holding a magic value ( "SYN3" ), a layout version, the ring geometry, two ready flags used by the boot handshake (section III-C ), and four words CPU1 uses to publish round-trip statistics (section V-D ) — a deliberate design for a core with no console of its own. The two rings follow, then a payload pool addressed by offset (never by pointer: an offset means the same thing in both cores’ address lenses; a pointer does not). 
+
+B. Lock-Free SPSC Rings 
+
+The transport must function without cross-core mutual exclusion, because the platform offers none worth trusting: there is no shared lock peripheral used here, and exclusive-monitor semantics across two masters on this interconnect are exactly the kind of thing a correctness argument should not lean on. The design therefore guarantees by construction that no location is ever written by two cores. Two rings, one per direction, give each core a single fixed role per ring: CPU0 produces into ring_c0_to_c1 and consumes from ring_c1_to_c0 ; CPU1 the reverse. Within CPU0 private 
+
+> 256 KB (runtime, 128 KB arena)
+
+Shared IPC region (96 KB, non-cacheable) ctrl block (64 B): magic, ready flags, RTT words ring CPU0 →CPU1 (16 × 20 B msgs) ring CPU1 →CPU0 (16 × 20 B msgs) infer slot: 27,648 B in / 4,096 B out (zero-copy) 
+
+CPU1 private                    
+
+> 64 KB (application)
+> 0x2000_0000
+> 0x2004_0000
+> 0x2005_8000
+> 0x2006_8000
+> MPU guard (RO, reg. 7)
+> Fig. 1. The 416 KB main SRAM tiled between the cores, and the shared region’s internals (CPU1’s plain address lens shown; CPU0, running Secure, sees the same bytes at +0x1000_0000 ). Offsets, sizes, and field layouts are pinned by BUILD_ASSERT s in the one header both images compile; payloads are addressed by offset because the two cores see the same bytes through different address lenses. CPU0’s last MPU region guards CPU1’s RAM read-only (section III-E).
+> typedef struct {
+> volatile uint32_t head; /* producer-written */
+> uint32_t _pad0[15];
+> volatile uint32_t tail; /* consumer-written */
+> uint32_t _pad1[15]; syn_ipc_msg_t slots[SYN_IPC_RING_ENTRIES]; }syn_ipc_ring_t;
+> Listing 1. The shared ring (abridged from syn_shared_layout.h ). Only the producer core writes head ; only the consumer core writes tail ; each index sits alone in a 64-byte block.
+
+a ring (listing 1), the indices are free-running 32-bit counters: slot = head % N , the ring is full when head − tail 
+
+= N, and unsigned wraparound at 232 is handled by the arithmetic itself — a unit test drives the counters across 
+
+UINT32_MAX to hold the claim. This is Lamport’s classic result [ 5] operationalised: a single-producer/single-consumer queue needs no lock, only ordered visibility. On ARMv8-M [ 6 ] that ordering is two DMB barriers: the producer writes the slot, barriers, then publishes head ; the consumer reads 
+
+head , barriers, then reads the slot. The 64-byte separation between head and tail is the false-sharing discipline of the high-performance queue literature [ 7 ], [ 8] applied at MCU scale — cheap insurance on today’s non-coherent-cache parts that becomes load-bearing the moment a cached sibling of this design exists. The measured cost is 25 cycles per push and 41 cycles per push-plus-pop pair including the barriers (section V-C ): at 150 MHz, ring mechanics contribute about 167 ns to a message hop. Everything else in the round-trip budget is interrupt latency and thread wakeup, which is where it belongs. One consequence of keeping ring state in shared SRAM deserves promotion to a design principle: the ring is the durable party in the conversation . Neither core’s private state is needed to resume messaging, so when the application core reboots — watchdog, brownout, deliberate reset — it re-attaches to live indices and the conversation continues. Section V-H exercises this eleven times on the board. Above the rings, a thin dispatch layer preserves the frozen API’s two consumption styles without breaking the single-consumer invariant: one dispatch thread per core is the sole ring consumer, woken by the MAILBOX inter-core interrupt; registered per-type handlers run on it, and message types without a handler are forwarded to an internal queue that 
+
+syn_ipc_receive() blocks on with a timeout. Handlers therefore execute in thread context (not ISR context), and one slow handler delays only its own core’s dispatch — a documented trade (section VII-C). 
+
+C. Boot Protocol 
+
+CPU0 owns the boot sequence end to end. After the runtime initialises, it (1) zeroes and stamps the shared control block, (2) sets cpu0_ready , (3) verifies that flash bank 1 actually contains an image , (4) writes CPU1’s vector-table address into SYSCON’s CPBOOT — expressed in CPU1’s plain address lens, 0x0010_0000 — and releases the core via CPUCTRL ,then (5) polls cpu1_ready with a timeout. CPU1’s image, on booting, attaches to the shared region, validates magic, version, and ring geometry, sets its ready flag, and sends a 
+
+STATUS_REQ as a first-light handshake message. On the board, release-to-ready is 1,514 μs and release-to-handshake 2,554 μs (section V-B) — against budgets of 100 and 200 ms. Step (3) is not defensive boilerplate; it is the scar tissue of the most instructive failure of the phase. The original fallback design — release CPU1, wait for the handshake, time out, log, continue single-core — is unsurvivable on this silicon: reads of erased flash raise ECC bus errors, and a CPU1 vector fetch from a blank bank stalls the flash controller that CPU0 is executing in place from. The observable result is a chip with no serial output and a dead debug port (section VII-A ). The shipped fallback therefore interrogates bank 1 through the MCX ROM API’s flash-controller commands ( FLASH_VerifyErase plus a 
+
+FLASH_Read and a vector sanity check) — commands that go through the flash management controller rather than the bus, and so are safe against erased pages — before touching CPBOOT . A blank bank logs CPU1 image absent: single-core mode and the full single-core system comes up, shell included (section V-G). 
+
+D. Inference as a Remote System Call 
+
+The application core’s inference interface is deliberately shaped like a blocking system call, because that is the semantics application code wants: name a model, hand over a tensor and a priority, block with a timeout, get a return value that is either a result length or a negative errno. Under the hood, four of the frozen message types carry the protocol. MODEL_LOAD resolves a model name to a handle on the runtime core (the model itself already lives there; nothing crosses but the name and the handle). INFER_REQ 
+
+stakes the request: the caller’s tensor is already staged in the shared exchange slot at that point, written there directly by the application — the slot is the working buffer, not a copy target. The 27,648-byte camera frame that motivates this cannot exist twice on a 64 KB core; zero-copy staging is not an optimisation here but an admission requirement, and it removes a memcpy from the hot path as a side effect. On the runtime core, the serving layer resolves the handle, submits the tensor to the Phase 2 scheduler with the priority class carried by the message 
+
+— remote REALTIME outranks local NORMAL , because there is one priority space, not one per core — and answers with 
+
+INFER_RESP , whose status field carries the inference result code. Timeouts surface as -ETIMEDOUT from the blocking call; a runtime-side failure rides back in the response status. The error path is implemented and unit-tested, though no organic NPU failure occurred on the board to exercise it end to end — reported as such in section V-K. The slot holds one request at a time; the application-core helper serialises callers with a local mutex, so concurrent requesters queue behind the slot rather than interleaving in the ring. This is a documented capacity decision, not an accident (section VII-C ): the target workloads are sensor-cadence request streams, the measured service time is milliseconds, and a second in-flight slot buys nothing until the NPU itself is the bottleneck. 
+
+E. The Protection Model, Honestly Scoped 
+
+What can hardware actually enforce between these two cores? The honest answer — less than the phase plan hoped, for architectural reasons worth publishing — comes in three parts. 
+
+CPU0 writes to CPU1’s RAM: blockable, and blocked. 
+
+The runtime core programs its final MPU region (region 7) over CPU1’s 64 KB at boot, read-only with an explicit any-privilege-level read-only access encoding. A write from any CPU0 thread into CPU1’s memory raises a MemManage fault with the offending address in MMFAR. The fault policy is containment, not panic: an overridden fatal-error handler logs the full dump and aborts only the offending thread; the shell, the runtime, and cross-core traffic all continue. Section V-F shows the self-test doing exactly this on the board while inference serving runs uninterrupted. 
+
+CPU0 reads of CPU1’s RAM: not blockable. ARMv8-M’s MPU has no privileged-no-access encoding when the privileged background map is enabled [ 6], and disabling the background map ( PRIVDEFENA=0 ) on a core that must run ROM API calls and touch peripherals behind Zephyr’s back is a reliability trade we rejected. Confidentiality between the cores is therefore not claimed — only integrity, in one direction. 
+
+CPU1 accesses to CPU0’s RAM: not constrainable at all. CPU1 has no MPU. Nothing on this silicon can stop the application core from writing anywhere in the map. The protection story is one-directional by construction of the part ,and we consider saying so plainly more useful than the common alternative of not mentioning it: on asymmetric silicon, the correct threat model protects the deterministic, multi-tenant runtime core from the application core’s likely bugs where possible — and where the hardware cannot express that, the design must rely on the service interface being the only surface the application is given. One more property of this subsystem was board-taught rather than designed, and became a second design rule: 
+
+the guard is programmed at runtime, not declared in devicetree , because a devicetree-declared read-only attribute turned out to be silently rewritable by an unrelated Kconfig select (section VII-A ). The runtime programming happens in a SYS_INIT hook ordered after the architecture MPU initialisation, and a shell-invocable self-test ( syn mpu test )re-verifies the guard on demand — which is how the regression was caught. IV. I MPLEMENTATION 
+
+Phase 3 adds roughly 2,500 lines to the repository (2,547 insertions since v0.2.0, tests included) behind the frozen public headers: the ring core and dispatch layer, the boot orchestrator, the MPU guard and fault policy, the cross-core serving layer, the out-of-tree CPU1 board port, and the 
+
+dual_model demonstration pair. This section covers the three implementation problems whose solutions are least visible in the design story. 
+
+A. Per-Core Address Aliasing in One Header 
+
+Because CPU0 runs Secure and CPU1 has no TrustZone, the same physical byte has two addresses — and both images must agree on physical layout while each dereferences pointers in its own lens. The shared layout header folds the difference into a single constant: SYN_SHM_ALIAS is 0x1000_0000 
+
+when compiling for CPU0 and zero for CPU1, and every base address in the map is expressed as plain address + alias . Code on either side simply uses SYN_SHM_SHARED_BASE and gets a pointer it can dereference. Two places must escape the fold, and both are annotated loudly in the source: the CPBOOT 
+
+vector CPU0 writes for CPU1 must be in CPU1’s plain lens (CPU1 fetches its own vectors), and payload references inside messages are offsets from the shared-region base rather than pointers, so they are lens-independent by construction. 
+
+B. Measuring Round-Trip Time from a Core with No Console 
+
+The FRDM board’s virtual COM port belongs to CPU0, and giving CPU1 a console would distort exactly the code being measured. The round-trip measurement therefore runs where the latency is experienced — on CPU1 — and publishes where the observer is: CPU1 timestamps a STATUS_REQ send with its cycle counter, computes the delta in its STATUS_RESP 
+
+handler (on the dispatch thread, so the number includes the MAILBOX interrupt, the wakeup, and dispatch — the full price an application pays), and folds last/min/max/count into the four spare words of the shared control block. CPU0’s syn ipc status shell command reads them out. The methodology costs four words of shared RAM and no instrumentation on the measured path beyond one cycle-counter read at each end. 
+
+C. The Serving Layer 
+
+On CPU0, cross-core serving is a registered message handler, not a privileged subsystem: MODEL_LOAD performs a registry lookup by name and answers with the handle; INFER_REQ wraps the staged input in a tensor descriptor pointing into the shared slot (zero-copy on the serving side too), submits it to the Phase 2 scheduler with the message’s priority class, copies the result into the slot’s output area, and answers INFER_RESP 
+
+with the scheduler’s status code. Serve statistics (count, errors, average latency) accumulate for the shell. Since handlers run on the dispatch thread, a long-running inference delays heartbeat handling on the same core — measurably: it is the reason the observed worst-case RTT rises from 15 to 81 μs when a request lands mid-inference (section V-D). 
+
+D. Two Images, One Library 
+
+Both images link the same synaptic_os library; the CPU1 build differs only in configuration (no shell, no Pow-erQuad, no boot orchestrator — guarded by the CPU0-only Kconfig) and in its board target. The CPU1 application is under 200 lines: attach, load two models by name, alternate inference requests at sensor cadence, publish RTT. Everything else — ring discipline, dispatch, staging, timeout handling — is library code identical on both cores, which is what makes the single-core QEMU test suite meaningful for cross-core correctness: the SPSC logic under test is the very object file the board runs. V. E VALUATION 
+
+We evaluate with the methodology of the previous two papers [ 1], [ 2]: numbers that pass through the determin-istic stub NPU are labeled runtime-and-transport baselines rather than silicon inference throughput; the IPC mecha-nism numbers (boot, handshake, ring cost, round-trip) mea-sure real hardware end to end and carry no stub caveat; and acceptance criteria the measurements did not meet are reported as misses. QEMU results were captured on 2026-07-14 ( community/phase3/results-qemu.md ); FRDM-MCXN947 results were captured live on the board the same day from the v0.3.0 release-candidate build, with the raw serial transcripts in the repository (community/phase3/serial-frdm-*.log ) alongside the consolidated results-frdm.md .
+
+A. Experimental Setup 
+
+The board runs the dual_model sample: CPU0 boots the full runtime (128 KB arena, shell, PowerQuad, cross-core serving), registers a face-detection and a keyword-spotting model (stub blobs), releases CPU1, and serves; CPU1 runs the remote image on the out-of-tree board target, alternating  
+
+> REALTIME
+
+face-detection and NORMAL keyword-spotting requests at a 20 Hz sensor cadence. Both cores run at 150 MHz on Zephyr v3.7.0 [ 4] under SDK 0.16.8 with -Os . QEMU (qemu_cortex_m3 ) is single-core: it runs the 108-case unit suite, exercising the SPSC ring logic with both roles driven from one core — the identical object code the board runs cross-core (section IV-D ) — plus the shared-layout ABI asserts and the 10,000-message integrity sweep.                                             
+
+> uart:~$ syn ipc status CPU1 link: UP CPU1 boot time: 1514 us (release to ready) IPC handshake: 2554 us (release to STATUS_REQ) STATUS_REQ answered: 64 Inferences served: 1267 (errors 0, avg 2290 us) IPC round-trip (CPU1-measured, 64 samples): last 15 us, min 15 us, max 81 us
+> Listing 2. syn ipc status on the FRDM-MCXN947 during the release-candidate soak (verbatim from serial-frdm-final.log ).
+
+B. Boot and Handshake 
+
+From CPU0 writing CPUCTRL to CPU1 setting its ready flag: 1,514 μs , a 66 × margin against the 100 ms acceptance budget. From release to the first handshake message completing: 
+
+2,554–2,577 μs against a 200 ms budget. Across a deliberate series of eleven consecutive power-on/reset cycles, every boot logged bit-identical timing (“CPU1 boot 1514 us, handshake 2577 us” eleven times in the transcript) — the dual-core bring-up is not just fast but deterministic, which matters more than the margin: a boot path with variance would be hiding a race. 
+
+C. Ring Operation Cost 
+
+The QEMU cycle-counted benchmark over 10,000 round-trips through the real ring code measures 25 cycles per push ,25 per pop, and 41 per push-plus-pop pair, barriers included (QEMU executes DMB as a no-op, but every load and store on the path is real; the board-side barrier cost is inside the round-trip number below). At 150 MHz, ring mechanics are 
+
+∼167 ns per message hop: the transport’s own cost is two orders of magnitude below the round-trip budget, exactly where a message layer should sit. 
+
+D. Round-Trip Time 
+
+Measured by CPU1 itself (section IV-B ) over 64 heartbeat round-trips during live two-model serving: last 15 μs, mini-mum 15 μs, maximum 81 μs against the 50 μs acceptance budget. The number includes the MAILBOX interrupt, dispatch-thread wakeup, and handler dispatch on both cores — the full application-visible price. The typical case beats the budget by 3.3 ×; the worst case exceeds it, and we report it rather than filtering it: the 81 μs tail occurs when a heartbeat lands while CPU0’s dispatch thread is mid-inference (section IV-C ), a direct, explainable consequence of running handlers on the dispatch thread. Listing 2 shows the shell view, verbatim from the transcript. 
+
+E. Cross-Core Inference and Soak 
+
+End to end — CPU1 stages a 27,648-byte 96 ×96 ×3 frame, sends INFER_REQ , CPU0 schedules and runs the (stub) model, answers, CPU1 wakes with the result — the first face-detection serve completes in 3,470 μs , and the running average across both alternating models settles at 2,290 μs (stub-NPU baseline, labeled; the acceptance budget, set for real workloads, is 150 ms). The alternating soak ran to 1,913 serves with zero errors in its longest single session — roughly 4,000 ring messages including heartbeats — with earlier sessions recording 2,501+ and the final-image capture 1,267, all error-free. The uart:~$ syn mpu test Running cross-core MPU self-test (a MemManage fault dump below is EXPECTED)... MPU self-test PASS: shared region writable, cross-core write faulted <inf> syn_mpu: Shared region write/readback OK <err> os: ***** MPU FAULT ***** <err> os: Data Access Violation <err> os: MMFAR Address: 0x30060000 <err> os: r2/a3: 0xdeadbeef <err> os: >>> ZEPHYR FATAL ERROR 19 <err> syn_mpu: MPU violation (reason 19): aborting offending thread, core continues <inf> syn_mpu: Cross-core write to 0x30060000 faulted as expected 
+
+> Listing 3. The MPU self-test on the board (abridged: interleaved serving-traffic log lines elided). The fault dump is expected output; the offending thread is aborted and both cores continue.
+
+QEMU integrity sweep complements the board soak: 10,000 messages in which every field of every message is derived from its sequence number and checked on pop, across bursts sized to hit every ring fill level, with zero loss and zero corruption. 
+
+F. Memory Protection Under Fire 
+
+Listing 3 reproduces the on-board self-test verbatim: a shared-region write/readback succeeds, then a deliberate write of 
+
+0xdeadbeef into CPU1’s RAM raises a MemManage fault at the guarded address (MMFAR 0x3006_0000 ); the fault policy logs the full dump, aborts the offending thread, and the transcript shows serving traffic continuing across the fault — CPU1 never noticed. This is the containment contract of section III-E demonstrated live, on the runtime-programmed region 7 guard that replaced the Kconfig-vulnerable devicetree version (section VII-A). 
+
+G. Single-Core Fallback 
+
+With flash bank 1 deliberately erased, the release-candidate image boots single-core: the ROM-API blank check detects the missing image before any release, logs CPU1 image absent (flash bank 1 blank): single-core mode , and the full CPU0 system comes up with the shell live and syn ipc status reporting CPU1 link: DOWN . The reason this path exists in its present form — the original release-then-timeout design wedged the entire chip — is reconstructed in section VII-A. 
+
+H. Reset Resilience 
+
+Ring indices live in shared SRAM (section III-B ), so a rebooting CPU1 rejoins without CPU0’s involvement. The eleven whole-chip reset cycles of section V-B exercise the full rejoin path end to end — identical timing, clean handshake, and resumed serving every time. An independent CPU1-only reset mid-conversation cannot be triggered from the board’s buttons and was not separately staged; we report the claim at the strength the evidence supports. 
+
+I. Footprint 
+
+Table I reports the release-candidate images. The application-core image — the complete remote client including the IPC layer and both model bindings — is 32.4 KB of flash and                
+
+> TABLE I RELEASE -CANDIDATE BUILD FOOTPRINTS (FLASH =TEXT +DATA , RAM =
+> DATA +BSS ).
+> Image Target Flash RAM
+> dual_model CPU0 (runtime, shell, serve) FRDM 98.9 KB 205.9 KB dual_model CPU1 (remote client) FRDM 32.4 KB 42.6 KB hello_inference (regression) QEMU 42.0 KB 30.4 KB
+
+fits its working set in 42.6 KB of the core’s 64 KB RAM. The 64 KB constraint earned its keep during development: the first linked remote image overflowed RAM by 4.7 KB with a private frame buffer, which is precisely what forced the zero-copy staging design (section III-D ) — the constraint improved the architecture. 
+
+J. Test Suite 
+
+The suite grows from Phase 2’s 99 cases to 108 cases in 13 suites, 100% pass on qemu_cortex_m3 via twister. The growth is concentrated where the phase worked: 
+
+syn_ipc_suite goes from one placeholder case to ten real ones — 20-byte wire-format ABI pinning, shared-layout offset pinning, memory-map tiling, empty/full -EAGAIN se-mantics, FIFO order, the 10,000-message integrity sweep, index wraparound at UINT32_MAX , and the ring cost benchmark. No existing test changed, consistent with no frozen header changing. 
+
+K. Acceptance Criteria, Including the Misses 
+
+Table II consolidates the phase plan’s acceptance criteria against what was measured. Three rows deserve the honesty the methodology demands. NPU utilisation: the plan’s “ >60%” presumes a saturation workload; dual_model is deliberately cadence-paced at 20 Hz, giving ∼6% NPU duty cycle, while within each inference the NPU is busy 1,049 of 1,050 μs (99.9%, syn prof last ). We report the 6% as measured rather than re-staging the demo to flatter the criterion. Error propagation: the path is implemented and unit-tested, but no NPU failure occurred organically on the board, so the negative path is not board-demonstrated. Priority preemption: request priority is carried and fed to the scheduler throughout (the alternating REALTIME /NORMAL soak), but a staged contention experiment — remote REALTIME arriving mid-flight against a running local NORMAL job — was not separately run; the scheduler’s priority semantics are Phase 2-verified. VI. R ELATED WORK 
+
+The Phase 1 and Phase 2 papers surveyed the MCU inference-runtime landscape and the pipeline/scheduler literature [ 1], [2 ]; this section focuses on the questions Phase 3 answers: how cores talk, how the conversation is protected, and where inference offload sits in the taxonomy of heterogeneous execution. TABLE II PHASE 3 ACCEPTANCE CRITERIA VERSUS MEASUREMENT (FRDM UNLESS NOTED ). S TUB -NPU ROWS ARE RUNTIME -AND -TRANSPORT BASELINES .                     
+
+> Criterion (budget) Measured
+> CPU1 boot ( <100 ms) 1,514 μs; identical over 11 boots Handshake ( <200 ms) 2,554–2,577 μs RTT ( <50 μs) 15 μs typical; 81 μs worst case (mid-inference arrival), reported as measured 10k msgs, no loss QEMU sweep: 0 loss / 0 corruption; board soak:
+> ∼4,000 msgs, 0 errors Full/empty semantics -EAGAIN / timeout paths, QEMU-verified E2E inference ( <150 ms) 3,470 μs first serve; 2,290 μs avg (stub NPU, labeled) 1,000-cycle soak 1,913 serves, 0 errors (longest session) Cross-core write faults PASS: fault + thread abort + both cores continue (listing 3) CPU1 →CPU0 protection NOT POSSIBLE: CPU1 has no MPU (silicon) CPU0 reads blocked NOT POSSIBLE: no ARMv8-M encoding with background map on CPU1-absent fallback PASS: ROM-API blank check, single-core boot NPU utilisation ( >60%) NOT MET as duty cycle: ∼6% (20 Hz cadence-paced demo); 99.9% within each inference Error propagation Implemented +unit-tested; not board-demonstrated (no organic failure) Priority across cores Carried and scheduled throughout; staged preemp-tion experiment not run
+
+A. AMP Messaging Stacks 
+
+OpenAMP [ 9] with RPMsg over virtio [ 10 ] descriptor rings is the standard answer to MCU/MPU asymmetric multiprocessing, with NXP’s RPMsg-Lite [ 11 ] as the vendor-slimmed variant for parts like ours. The comparison is one of generality versus fit. RPMsg provides dynamic endpoint creation, variable-length messages, and name-service discovery — machinery for systems where the set of services is open. Our transport is a fixed-function alternative sized to one service: a 20-byte typed message, two statically laid-out rings whose complete state is under 1 KB apiece, and a single preallocated exchange slot — small enough that the whole shared-memory contract is one header with compile-time asserts, and simple enough that the reset-resilience argument (section III-B ) is inspectable. We would not argue against RPMsg for a multi-service design; we do argue that when the service boundary is known and singular, the fixed layout buys auditability and RAM that generality spends. Zephyr’s own IPC service [ 4] with the icmsg backend is closer kin: also SPSC over shared RAM. Three things separate this work: our ring carries typed fixed-size slots rather than a byte-stream packet buffer (no framing layer to verify); our indices live in the shared region itself, which is what makes the application core’s reboot invisible to the transport; and, more prosaically, neither Zephyr 3.7’s IPC service nor its mbox 
+
+driver supports this SoC’s second core — part of the out-of-tree gap section II-B documents. Classic dual-OS AMP — Linux plus an RTOS on a Cortex-A/Cortex-M pair, the i.MX-class offload literature — addresses a different asymmetry (rich OS versus RTOS); the MCU-to-MCU case, where both cores are resource-poor but unequally so, is comparatively unexamined, and is exactly where treating the asymmetry as a design input pays. 
+
+B. Lock-Free SPSC Queues 
+
+That a single-producer/single-consumer ring needs no lock is Lamport’s result [ 5]; the modern refinements are about memory systems, not logic. FastForward [ 7] slips cache lines between producer and consumer; the LMAX Disruptor [ 8]pads sequence counters onto private cache lines — the same reasoning behind our 64-byte index separation, applied prophylactically on a non-coherent-cache MCU. The transfer of this server-class literature down to a 150 MHz microcontroller is mostly a story of what disappears : no cache coherence protocol to reason about, but also no C11 atomics library one can assume maps to something sensible across two masters — leaving explicit DMB placement per the ARMv8-M memory model [ 6] as the entire ordering story, which our QEMU-hosted suite cannot validate ( DMB is a no-op there) and the board soak therefore must. 
+
+C. Cross-Core Protection on Cortex-M 
+
+MPU-based isolation on Cortex-M is well studied within one core: MINION [ 12 ] switches per-task memory views, ACES [ 13 ] compiles applications into automatically derived compartments, and PSA [ 14 ] standardises isolation levels for TrustZone-M parts. Phase 3’s protection question is the cross-core variant — one core’s MPU guarding another core’s memory — under an asymmetry those systems do not face: the core most in need of constraint (the application core, where arbitrary product code runs) is the one with no MPU at all. Our contribution here is less a mechanism than an honest scoping of what the mechanism can mean on real silicon (section III-E ), a statement we have not found made plainly in vendor documentation for this class of part. 
+
+D. Inference Offload Boundaries 
+
+On application processors, inference-as-a-service behind a process boundary is normal — Android’s NNAPI [15] routes requests to a driver process; server-class systems put models behind RPC. TFLM [ 16 ] and CMSIS-NN [ 17 ] on MCUs assume the caller and the runtime share an address space and a core. Phase 3 occupies the point between: a hardware-enforced (one-directionally, section III-E ) service boundary at MCU scale, where the “RPC” is a 20-byte message plus a shared slot and costs 15 μs of transport round-trip against millisecond service times. The scheduling half of the story — remote requests entering the same priority space as local jobs — extends the Phase 2 scheduler [ 2] across the core boundary rather than replacing it. VII. D ISCUSSION 
+
+A. Case Studies: Two Defects Only the Board Could Find 
+
+The Phase 2 paper argued that QEMU’s cooperative de-terminism finds concurrency bugs emulation is stronger at finding [ 2 ]. Phase 3 supplies the complementary evidence: two defects that no emulator would ever surface, because both live in silicon behaviour below the architecture level. We reconstruct them in detail because each invalidates a design pattern that looks perfectly reasonable in code review. 
+
+Case 1: Releasing a core into erased flash wedges the whole chip. The original single-core fallback was the obvious design: release CPU1, wait for the handshake, time out, log, continue. On this part it is unsurvivable. Erased flash on the MCXN947 reads as ECC errors at the bus level, and CPU1’s very first act after release is a vector fetch from its (blank) flash bank — which stalled the flash system that CPU0 was executing in place from. The observable symptom was a chip with no serial output ever (deferred logs never flushed) and a dead debug port (CoreSight returning fault acknowledgements on every access): indistinguishable from destroyed hardware, recoverable only by ISP-mode reflash. The diagnosis chain is worth recording — hello_inference booted (so not hardware), the same dual-model image booted when bank 1 was programmed (so not the image), the debugger’s bus-level fault signature pointed at the interconnect, and the erased-flash theory completed it. The fix moves the image check before the release and does it through the flash management controller’s command interface (ROM API FLASH_VerifyErase +
+
+FLASH_Read + vector sanity), which is safe against erased pages in a way bus reads are not. The design lesson generalises to any XIP multi-core part: never release a core into memory you have not proven executable, and prove it without bus reads .
+
+Case 2: A Kconfig select silently disarmed the MPU guard. The cross-core guard was originally declared where Zephyr wants static memory attributes declared: a devicetree memory-attribute node marking CPU1’s RAM read-only, com-piled into the static MPU table. It passed its self-test for days — until the flash driver was enabled to implement the Case-1 fix, whereupon syn mpu test failed. The chain: 
+
+SOC_FLASH_MCUX selects MPU_ALLOW_FLASH_WRITE ,which redefines the attribute macro the devicetree node compiles through ( REGION_FLASH_ATTR ) from read-only to read-write — turning a protection declaration into a no-op, with no warning, in a different subsystem from the one being edited. The shipped guard is programmed at runtime into the last MPU region slot with an explicit read-only access encoding, immune to Kconfig macro politics. Two lessons: first, on Zephyr, devicetree-declared protection is only as strong as every Kconfig select that can touch its attribute macros ; second — the one we now treat as policy — a protection mechanism needs a self-test invocable after every configuration change ,because this regression was caught only because syn mpu test existed and was run routinely. 
+
+B. What the Asymmetry Bought 
+
+It is worth stating what fell out of treating the capability asymmetry as a design input rather than fighting it. The service architecture was not merely compatible with CPU1’s missing FPU/DSP — it was selected by it, and the result is a cleaner boundary than a symmetric design would have produced: all tensor math, model state, and accelerator access live behind one interface with exactly one implementation. The 64 KB RAM budget forced zero-copy staging, which removed a copy from the hot path. The missing TrustZone forced offset-based (never pointer-based) payload references, which is also what makes the layout position-independent and assertable. The missing MPU could not be converted into a benefit — but scoping it honestly produced a protection model we can defend, rather than one we would have to qualify under questioning. 
+
+C. Limitations 
+
+As in the previous papers, every known gap in one place. 
+
+Stub NPU baseline. Every latency involving the model stage brackets the deterministic stub kernel on real silicon: these are runtime-and-transport baselines that regression-pin the system’s overhead, not inference throughput claims. The eIQ Neutron invoke path remains the top integration item. The IPC mechanism numbers (boot, handshake, ring cost, RTT) are stub-independent. 
+
+One request in flight. The exchange slot serialises cross-core inference; concurrent callers on CPU1 queue on a local mutex. Ring capacity is not the limit — the slot is, by design (section III-D ). Multi-slot exchange is mechanical future work if a workload demands it. 
+
+Handlers share the dispatch thread. A long inference delays heartbeat dispatch on CPU0, visibly: it is the measured 81 μs RTT worst case (section V-D ). Moving serving off the dispatch thread would shrink the tail at the cost of a thread and a queue; the trade is documented and currently taken in favour of simplicity. 
+
+Protection is one-directional and write-only. CPU1 has no MPU (silicon); CPU0 reads of CPU1 RAM are not blockable (ARMv8-M background map). Integrity of CPU1’s memory against CPU0 bugs is enforced; the converse, and confidentiality in either direction, are not (section III-E). 
+
+Three acceptance rows are not fully board-demonstrated. 
+
+NPU duty cycle measured ∼6% on a criterion presuming saturation (section V-K ); the error-propagation negative path is unit-tested but never fired organically on the board; the staged cross-core priority-preemption experiment was not run. All three are stated in table II at measured strength. 
+
+CPU1-only reset not independently staged. Whole-chip resets exercise the rejoin path (eleven times, clean); a mid-run reset of CPU1 alone has no button on this board and awaits a software-triggered experiment. 
+
+D. Roadmap 
+
+Phase 4 turns to model management and over-the-air up-dates, for which this phase’s flash-controller work is direct groundwork — with one recorded hazard: the OTA staging slot and CPU1’s flash bank must not overlap, and the check is on the books before any OTA write path is enabled. The standing backlog carries the PowerQuad wrapper optimisation (the Phase 2 miss), camera and LCD bring-up for an end-to-end vision demo, and the Neutron invoke path that converts every stub-labeled number in this series into a silicon claim. VIII. C ONCLUSION 
+
+We presented the Phase 3 dual-core architecture of Synapti-cOS, which makes cross-core inference offload an operating-system service on a commodity dual-core microcontroller whose second core — lacking FPU, DSP, TrustZone, and MPU — is treated as a design input rather than an obstacle. The AI runtime is confined to the capable core; the application core reaches it through a message-based interface with system-call semantics: models resolved by name, requests carrying the scheduler’s priority classes into a single cross-core priority space, errors and timeouts propagating to return values, and ten-sors staged zero-copy in a shared slot sized by the application core’s 64 KB reality. The transport is a pair of lock-free SPSC rings in shared SRAM — single-writer indices, free-running counters, DMB-only ordering, no cross-core atomics — whose residence in shared memory makes an application-core reboot invisible to the conversation. Measured on the FRDM-MCXN947: 1,514 μs application-core boot and 2,554 μs handshake, bit-identical across eleven consecutive resets; 15 μs typical / 81 μs worst-case round-trip against a 50 μs budget, with the tail explained rather than excluded; 25 cycles per ring push; a 1,913-serve two-model soak with zero errors (stub-NPU baselines, labeled); a fault-injection-verified one-directional MPU guard whose architectural limits — no CPU1 MPU, no read blocking under the ARMv8-M background map — are stated plainly; and a single-core fallback that survives a blank second flash bank because it proves the bank executable through the flash controller before releasing the core. The dual-core firmware costs 98.9 KB of flash on the runtime core and 32.4 KB on the application core; the test suite grows to 108 cases in 13 suites at 100% pass. Two board-found defects — a whole-chip wedge from releasing into erased flash, and a Kconfig select that silently disarmed a devicetree-declared MPU guard — are reconstructed in full as the phase’s most transferable results. SynapticOS v0.3.0, the out-of-tree CPU1 board port, the test suite, the QEMU and FRDM measurement artifacts (including the raw serial transcripts behind every board number in this paper), and the LaTeX sources of this paper are released under Apache 2.0 at https://github.com/Dimitrios-Kafetzis/ SynapticOS. REFERENCES [1] D. Kafetzis, “SynapticOS: An inference-first runtime architecture for neu-ral processing units on resource-constrained microcontrollers,” Preprint, SynapticOS Project. https://github.com/Dimitrios-Kafetzis/SynapticOS, 2026, phase 1 paper; LaTeX sources and measurement artifacts in the repository. [2] ——, “Inference pipelines as operating-system objects: Priority schedul-ing and constant-footprint streaming for microcontroller neural inference,” Preprint, SynapticOS Project. https://github.com/Dimitrios-Kafetzis/ SynapticOS, 2026, phase 2 paper; LaTeX sources and measurement artifacts in the repository. [3] NXP Semiconductors, “MCX N947 reference manual,” Document MCXNX4XRM, Rev. 5, 2024. [4] Zephyr Project, “Zephyr RTOS,” https://zephyrproject.org, 2024, version 3.7.0 LTS. [5] L. Lamport, “Concurrent reading and writing,” Communications of the ACM , vol. 20, no. 11, pp. 806–811, 1977. [6] Arm, “Armv8-M architecture reference manual,” Document DDI0553B.y, 2024. [7] J. Giacomoni, T. Moseley, and M. Vachharajani, “FastForward for efficient pipeline parallelism: A cache-optimized concurrent lock-free queue,” in ACM SIGPLAN Symposium on Principles and Practice of Parallel Programming (PPoPP) , 2008. [8] M. Thompson, D. Farley, M. Barker, P. Gee, and A. Stewart, “Disruptor: High performance alternative to bounded queues for exchanging data between concurrent threads,” LMAX Exchange technical paper, 2011. [9] OpenAMP Project, “OpenAMP: Open asymmetric multi-processing framework,” https://www.openampproject.org, 2024. [10] R. Russell, “virtio: Towards a de-facto standard for virtual I/O devices,” 
+
+ACM SIGOPS Operating Systems Review , vol. 42, no. 5, pp. 95–103, 2008. [11] NXP Semiconductors, “RPMsg-Lite: Lightweight remote processor messaging,” https://github.com/nxp-mcuxpresso/rpmsg-lite, 2024. [12] C. H. Kim, T. Kim, H. Choi, Z. Gu, B. Lee, X. Zhang, and D. Xu, “Securing real-time microcontroller systems through customized memory view switching,” in Network and Distributed System Security Symposium (NDSS) , 2018. [13] A. A. Clements, N. S. Almakhdhub, S. Bagchi, and M. Payer, “ACES: Automatic compartments for embedded systems,” in USENIX Security Symposium , 2018. [14] Arm, “Platform security architecture: Security model and isolation levels,” https://www.psacertified.org, 2024. [15] Google, “Android neural networks API,” https://developer.android.com/ ndk/guides/neuralnetworks, 2024. [16] R. David, J. Duke, A. Jain, V. Janapa Reddi, N. Jeffries, J. Li, N. Kreeger, I. Nappier, M. Natraj, S. Regev, R. Rhodes, T. Wang, and P. Warden, “TensorFlow Lite Micro: Embedded machine learning on TinyML systems,” in Proceedings of Machine Learning and Systems (MLSys) ,2021. [17] Arm, “CMSIS-NN: Efficient neural network kernels for Arm Cortex-M cpus,” https://github.com/ARM-software/CMSIS-NN, 2023.

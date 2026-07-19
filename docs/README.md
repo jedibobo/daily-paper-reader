@@ -6,73 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-18
-- 运行时间：2026-07-18 19:52:37 UTC
+- 最新运行日期：2026-07-19
+- 运行时间：2026-07-19 20:11:32 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日聚焦自动驾驶感知加速与 AI 能效优化，深度精读了 FlashBEV 与 EMO 等 6 篇高分前沿论文。
-重点推荐 FlashBEV 的 IO 感知 BEV 变换技术及 EMO 能效建模框架，两者在提升复杂任务运行效率与节能方面表现卓越。
-建议关注消费级设备上的 LLM 推理调度与轻量化模型部署，把握端侧 AI 落地的高效能新趋势。
-- 详情：[/202607/18/README](/202607/18/README)
+今日聚焦 17 篇前沿成果，深度解析低轨卫星 AI 信道估计与嵌入式神经处理系统。
+核心突破在于 LEO 卫星星载 AI 的高精度应用，以及针对微控制器（MCU）的推理架构优化与 Mamba 改进方案。
+建议优先研读 9.0 分的星载 AI 论文，并关注轻量化模型在资源受限硬件上的落地实践。
+- 详情：[/202607/19/README](/202607/19/README)
 
 ### 精读区论文标签
-1. [FlashBEV: Fast and Memory-Efficient Exact BEV Transformation with IO-Awareness](/202607/18/2607.10071v1-flashbev-fast-and-memory-efficient-exact-bev-transformation-with-io-awareness)  
+1. [On-board AI-based Channel Estimation for LEO NTNs](/202607/19/2607.15127v1-on-board-ai-based-channel-estimation-for-leo-ntns)  
    标签：评分：9.0/10、query:hwnas
-   evidence：针对视觉任务的IO感知和内存高效的视图转换
-2. [EMO: Energy Efficiency Modeling and Optimization for AI Workloads](/202607/18/2607.12324v1-emo-energy-efficiency-modeling-and-optimization-for-ai-workloads)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：GPU加速AI工作负载的能效建模与优化
-3. [HeteroMosaic: Exposing and Exploiting Heterogeneous Execution Opportunities for Energy-Efficient Edge LLM Inference](/202607/18/2607.12839v2-heteromosaic-exposing-and-exploiting-heterogeneous-execution-opportunities-for-energy-efficient-edge-llm-inference)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：在边缘SoC上结合CPU、GPU和NPU进行异构执行以提高能效
-4. [Toward Energy-Efficient and Low-Power Arrhythmia Detection for Wearable Devices](/202607/18/2607.14747v1-toward-energy-efficient-and-low-power-arrhythmia-detection-for-wearable-devices)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：面向可穿戴设备的节能低功耗架构设计
-5. [NIFA: Nonlinear IMC enhanced FPGA for efficient ML inference](/202607/18/2607.15123v1-nifa-nonlinear-imc-enhanced-fpga-for-efficient-ml-inference)  
-   标签：评分：9.0/10、query:hwnas
-   evidence：基于 ReRAM 的存内计算 FPGA 推理软硬协同设计
-6. [A neuromorphic vision system for open-world visual intelligence](/202607/18/2607.10066v1-a-neuromorphic-vision-system-for-open-world-visual-intelligence)  
+   evidence：低轨非地面网络在功耗限制下的实时星载推理
+2. [Efficient and Robust Spiking Neural Networks for sEMG-Based Muscle Fatigue Detection](/202607/19/2607.11065v1-efficient-and-robust-spiking-neural-networks-for-semg-based-muscle-fatigue-detection)  
    标签：评分：8.0/10、query:hwnas
-   evidence：使用RRAM阵列进行视觉智能的软硬件协同设计
+   evidence：基于脉冲神经网络和量化兼容训练的能效框架
+3. [MobileSAM2: Lightweight Segment Anything for Spatial Intelligence](/202607/19/2607.12297v1-mobilesam2-lightweight-segment-anything-for-spatial-intelligence)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：针对资源受限移动设备的轻量化模型蒸馏
+4. [DeGuNet: Depth-Guided Ultra-Compact Backbones for Efficient LiDAR-Camera 3D Detection](/202607/19/2607.12419v1-degunet-depth-guided-ultra-compact-backbones-for-efficient-lidar-camera-3d-detection)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：专为高效 3D 检测设计的超紧凑骨干网络
+5. [A JoLT for the KV Cache: Near-Lossless KV Cache Compression via Joint Tucker and JL-Residual Allocation for LLMs](/202607/19/2607.12550v1-a-jolt-for-the-kv-cache-near-lossless-kv-cache-compression-via-joint-tucker-and-jl-residual-allocation-for-llms)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：KV 缓存压缩以优化内存成本和吞吐量
+6. [MetaInfer: A Knowledge Only LLM Inference Engine Generator SKILL Toolbox](/202607/19/2607.12875v1-metainfer-a-knowledge-only-llm-inference-engine-generator-skill-toolbox)  
+   标签：评分：8.0/10、query:hwnas
+   evidence：采用LLM作为编译器的方法，根据运行时约束生成推理程序
 
 ### 速读区论文标签
-1. [WaveNet-Style Guitar Amplifier Model Pruning for Real-Time iOS Deployment](/202607/18/2607.10086v1-wavenet-style-guitar-amplifier-model-pruning-for-real-time-ios-deployment)  
+1. [SynapticOS: An Inference-First Runtime Architecture for Neural Processing Units on Resource-Constrained Microcontrollers](/202607/19/2607.12606v1-synapticos-an-inference-first-runtime-architecture-for-neural-processing-units-on-resource-constrained-microcontrollers)  
    标签：评分：8.0/10、query:hwnas
-   evidence：用于实时移动端部署的稀疏推理引擎和剪枝技术
-2. [CoFi-Lite: Pushing the Limits of Ultra-Lightweight Speech Enhancement](/202607/18/2607.10142v1-cofi-lite-pushing-the-limits-of-ultra-lightweight-speech-enhancement)  
+   evidence：针对微控制器NPU的运行时架构，将推理视为一等公民工作负载
+2. [Cross-Core Inference Offload as an Operating-System Service on Dual-Core Microcontrollers](/202607/19/2607.12620v1-cross-core-inference-offload-as-an-operating-system-service-on-dual-core-microcontrollers)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对边缘设备的超轻量级模型及计算复杂度平衡
-3. [Automated Tensor Scheduling for Hybrid CPU-GPU LLM Inference on Consumer Devices](/202607/18/2607.10183v2-automated-tensor-scheduling-for-hybrid-cpu-gpu-llm-inference-on-consumer-devices)  
+   evidence：双核微控制器上作为操作系统服务的推理卸载
+3. [MambaPSA: A Mamba-based Replacement for C2PSA in YOLO26](/202607/19/2607.12681v1-mambapsa-a-mamba-based-replacement-for-c2psa-in-yolo26)  
    标签：评分：8.0/10、query:hwnas
-   evidence：具有负载感知动态传输的 CPU-GPU 混合推理
-4. [HSF-S: Speed-Optimized Compilation and Acceleration for Hybrid Schrodinger-Feynman Quantum Circuit Emulation](/202607/18/2607.10262v1-hsf-s-speed-optimized-compilation-and-acceleration-for-hybrid-schrodinger-feynman-quantum-circuit-emulation)  
+   evidence：旨在提高 CPU 吞吐量的效率架构设计
+4. [CLIP-3D: Closed-Loop Evaluation of Performance and Physical Constraints for 3D ICs](/202607/19/2607.12788v1-clip-3d-closed-loop-evaluation-of-performance-and-physical-constraints-for-3d-ics)  
    标签：评分：8.0/10、query:hwnas
-   evidence：编译器-加速器协同设计框架
-5. [Federated Low-Rank Koopman Learning for Multivariate Time-Series Anomaly Detection in IoT Systems](/202607/18/2607.08978v1-federated-low-rank-koopman-learning-for-multivariate-time-series-anomaly-detection-in-iot-systems)  
+   evidence：考虑热效应和缓存效应的3D集成电路软硬件协同设计
+5. [WeaveEarth: Structured Evidence Construction and Reasoning for Training-Free UHR Remote Sensing Understanding](/202607/19/2607.10120v1-weaveearth-structured-evidence-construction-and-reasoning-for-training-free-uhr-remote-sensing-understanding)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对边缘设备受限计算与内存的资源高效学习
-6. [Latency-Aware Digital Twin-Assisted Cooperative Perception for Autonomous Vehicles](/202607/18/2607.09070v1-latency-aware-digital-twin-assisted-cooperative-perception-for-autonomous-vehicles)  
+   evidence：有限计算预算下的遥感图像理解
+6. [Sharper Analysis of Single-Loop Methods for Bilevel Optimization](/202607/19/2607.10263v1-sharper-analysis-of-single-loop-methods-for-bilevel-optimization)  
    标签：评分：7.0/10、query:hwnas
-   evidence：平衡感知精度与端到端延迟限制
-7. [Attention to Detail: Evaluating Energy, Performance, and Accuracy Trade-offs Across vLLM Configurations](/202607/18/2607.09172v1-attention-to-detail-evaluating-energy-performance-and-accuracy-trade-offs-across-vllm-configurations)  
+   evidence：用于神经架构搜索的双层优化
+7. [Program-Synthesis-Driven Autodesign of Universal Unitary Operators](/202607/19/2607.10295v1-program-synthesis-driven-autodesign-of-universal-unitary-operators)  
    标签：评分：7.0/10、query:hwnas
-   evidence：评估推理引擎的能耗、性能和准确性权衡
-8. [Foveation-Guided Dynamic Token Selection for Robust and Efficient Vision Transformers](/202607/18/2607.09480v1-foveation-guided-dynamic-token-selection-for-robust-and-efficient-vision-transformers)  
+   evidence：自动设计具有最少干涉仪的光子网络
+8. [MemDecay: Region-Aware KV Cache Eviction for Efficient LLM Agent Inference](/202607/19/2607.10582v1-memdecay-region-aware-kv-cache-eviction-for-efficient-llm-agent-inference)  
    标签：评分：7.0/10、query:hwnas
-   evidence：用于节能视觉Transformer的动态Token选择
-9. [Bidirectional Resource Scheduling for Disaggregated and Asynchronous RL Post-Training](/202607/18/2607.09207v1-bidirectional-resource-scheduling-for-disaggregated-and-asynchronous-rl-post-training)  
+   evidence：针对内存瓶颈的KV缓存驱逐策略
+9. [A Symbolic Neural CPU for Quantization-Simulated Writeback and Interpretable Program Execution](/202607/19/2607.10021v1-a-symbolic-neural-cpu-for-quantization-simulated-writeback-and-interpretable-program-execution)  
    标签：评分：6.0/10、query:hwnas
-   evidence：提高整体系统吞吐量和资源利用率
-10. [EcoKube: Simulating Carbon-Aware Scheduling Policies in Heterogeneous Edge-Cloud Environments](/202607/18/2607.09318v1-ecokube-simulating-carbon-aware-scheduling-policies-in-heterogeneous-edge-cloud-environments)  
+   evidence：具有量化模拟回写的神经CPU架构
+10. [FlashTrie: A GPU-Accelerated Constrained Beam Search for Generative Retrieval](/202607/19/2607.10044v1-flashtrie-a-gpu-accelerated-constrained-beam-search-for-generative-retrieval)  
    标签：评分：6.0/10、query:hwnas
-   evidence：异构边缘云环境中的碳感知调度
-11. [LLM for EDA in Front-End Design: Challenges and Opportunities](/202607/18/2607.09616v1-llm-for-eda-in-front-end-design-challenges-and-opportunities)  
+   evidence：GPU加速的约束束搜索以及通过简洁字典树布局减少内存占用
+11. [BucketKD: A Safety-Aware Bucket-Based Knowledge Distillation Framework for End-to-End Motion Planning](/202607/19/2607.10565v1-bucketkd-a-safety-aware-bucket-based-knowledge-distillation-framework-for-end-to-end-motion-planning)  
    标签：评分：6.0/10、query:hwnas
-   evidence：大语言模型用于硬件描述语言生成和设计空间探索
+   evidence：适用于资源受限平台的紧凑型规划器
 
 
 <div class="dpr-home-promo-card">
