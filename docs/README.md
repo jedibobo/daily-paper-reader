@@ -6,73 +6,74 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-19
-- 运行时间：2026-07-19 20:11:32 UTC
+- 最新运行日期：2026-07-20
+- 运行时间：2026-07-20 20:14:02 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日聚焦 17 篇前沿成果，深度解析低轨卫星 AI 信道估计与嵌入式神经处理系统。
-核心突破在于 LEO 卫星星载 AI 的高精度应用，以及针对微控制器（MCU）的推理架构优化与 Mamba 改进方案。
-建议优先研读 9.0 分的星载 AI 论文，并关注轻量化模型在资源受限硬件上的落地实践。
-- 详情：[/202607/19/README](/202607/19/README)
+- 今日共生成 17 篇推荐（精读 6 篇，速读 11 篇）
+- 精读：《BCG-Former: Toward Pareto-Efficient Hyperspectral Image Classification via Band-Contextual Gating》（9.0/10）, 《DSTAR: Accelerating Diffusion Transformers via Spatial and Temporal Redundancy Reduction》（9.0/10）
+- 速读：《Benchmarking Edge Inference Strategies for Deep Learning Models in Industrial Machine Vision》（8.0/10）, 《Decomposing Runtime, Kernel, and Quantization Speedups via a Matched FP16 Intermediate: A Hardware-Conditioned Case Study on Four NVIDIA RTX A5000 GPUs》（8.0/10）, 《MicroCharNet: Less is More for License Plate Character Detection》（8.0/10）
+- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
+- 详情：[/202607/20/README](/202607/20/README)
 
 ### 精读区论文标签
-1. [On-board AI-based Channel Estimation for LEO NTNs](/202607/19/2607.15127v1-on-board-ai-based-channel-estimation-for-leo-ntns)  
+1. [BCG-Former: Toward Pareto-Efficient Hyperspectral Image Classification via Band-Contextual Gating](/202607/20/2607.15639v1-bcg-former-toward-pareto-efficient-hyperspectral-image-classification-via-band-contextual-gating)  
    标签：评分：9.0/10、query:hwnas
-   evidence：低轨非地面网络在功耗限制下的实时星载推理
-2. [Efficient and Robust Spiking Neural Networks for sEMG-Based Muscle Fatigue Detection](/202607/19/2607.11065v1-efficient-and-robust-spiking-neural-networks-for-semg-based-muscle-fatigue-detection)  
+   evidence：用于星载传感器的轻量级高光谱分类混合模型
+2. [DSTAR: Accelerating Diffusion Transformers via Spatial and Temporal Redundancy Reduction](/202607/20/2607.15846v1-dstar-accelerating-diffusion-transformers-via-spatial-and-temporal-redundancy-reduction)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：用于加速扩散Transformer的软硬件协同设计框架
+3. [An MLIR-Based Compilation Method for Large Language Models](/202607/20/2607.15865v1-an-mlir-based-compilation-method-for-large-language-models)  
+   标签：评分：9.0/10、query:hwnas
+   evidence：基于 MLIR 的编译方法，针对大模型进行硬件相关的算子映射
+4. [Xema: Efficient Diffusion Serving through Fine-Grained Memory Management and Auto-Configuration](/202607/20/2607.11136v1-xema-efficient-diffusion-serving-through-fine-grained-memory-management-and-auto-configuration)  
    标签：评分：8.0/10、query:hwnas
-   evidence：基于脉冲神经网络和量化兼容训练的能效框架
-3. [MobileSAM2: Lightweight Segment Anything for Spatial Intelligence](/202607/19/2607.12297v1-mobilesam2-lightweight-segment-anything-for-spatial-intelligence)  
+   evidence：扩散模型的细粒度内存管理和自动配置
+5. [The Economics of AI Decoding Chips: Rebalancing Compute, Capacity, and Bandwidth for Efficient LLM Inference](/202607/20/2607.13068v1-the-economics-of-ai-decoding-chips-rebalancing-compute-capacity-and-bandwidth-for-efficient-llm-inference)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对资源受限移动设备的轻量化模型蒸馏
-4. [DeGuNet: Depth-Guided Ultra-Compact Backbones for Efficient LiDAR-Camera 3D Detection](/202607/19/2607.12419v1-degunet-depth-guided-ultra-compact-backbones-for-efficient-lidar-camera-3d-detection)  
+   evidence：重新平衡计算和内存带宽以实现高效的LLM推理
+6. [Constraint-Driven Model Optimization: An Industry Framework for Selecting Compression and Acceleration Techniques in Modern Machine Learning Systems](/202607/20/2607.13735v1-constraint-driven-model-optimization-an-industry-framework-for-selecting-compression-and-acceleration-techniques-in-modern-machine-learning-systems)  
    标签：评分：8.0/10、query:hwnas
-   evidence：专为高效 3D 检测设计的超紧凑骨干网络
-5. [A JoLT for the KV Cache: Near-Lossless KV Cache Compression via Joint Tucker and JL-Residual Allocation for LLMs](/202607/19/2607.12550v1-a-jolt-for-the-kv-cache-near-lossless-kv-cache-compression-via-joint-tucker-and-jl-residual-allocation-for-llms)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：KV 缓存压缩以优化内存成本和吞吐量
-6. [MetaInfer: A Knowledge Only LLM Inference Engine Generator SKILL Toolbox](/202607/19/2607.12875v1-metainfer-a-knowledge-only-llm-inference-engine-generator-skill-toolbox)  
-   标签：评分：8.0/10、query:hwnas
-   evidence：采用LLM作为编译器的方法，根据运行时约束生成推理程序
+   evidence：针对边缘和云端部署的约束驱动模型优化
 
 ### 速读区论文标签
-1. [SynapticOS: An Inference-First Runtime Architecture for Neural Processing Units on Resource-Constrained Microcontrollers](/202607/19/2607.12606v1-synapticos-an-inference-first-runtime-architecture-for-neural-processing-units-on-resource-constrained-microcontrollers)  
+1. [Benchmarking Edge Inference Strategies for Deep Learning Models in Industrial Machine Vision](/202607/20/2607.11356v1-benchmarking-edge-inference-strategies-for-deep-learning-models-in-industrial-machine-vision)  
    标签：评分：8.0/10、query:hwnas
-   evidence：针对微控制器NPU的运行时架构，将推理视为一等公民工作负载
-2. [Cross-Core Inference Offload as an Operating-System Service on Dual-Core Microcontrollers](/202607/19/2607.12620v1-cross-core-inference-offload-as-an-operating-system-service-on-dual-core-microcontrollers)  
+   evidence：在各种硬件平台上对边缘推理策略进行基准测试
+2. [Decomposing Runtime, Kernel, and Quantization Speedups via a Matched FP16 Intermediate: A Hardware-Conditioned Case Study on Four NVIDIA RTX A5000 GPUs](/202607/20/2607.11368v1-decomposing-runtime-kernel-and-quantization-speedups-via-a-matched-fp16-intermediate-a-hardware-conditioned-case-study-on-four-nvidia-rtx-a5000-gpus)  
    标签：评分：8.0/10、query:hwnas
-   evidence：双核微控制器上作为操作系统服务的推理卸载
-3. [MambaPSA: A Mamba-based Replacement for C2PSA in YOLO26](/202607/19/2607.12681v1-mambapsa-a-mamba-based-replacement-for-c2psa-in-yolo26)  
+   evidence：针对NVIDIA GPU量化与内核加速的硬件受限研究
+3. [MicroCharNet: Less is More for License Plate Character Detection](/202607/20/2607.11830v1-microcharnet-less-is-more-for-license-plate-character-detection)  
    标签：评分：8.0/10、query:hwnas
-   evidence：旨在提高 CPU 吞吐量的效率架构设计
-4. [CLIP-3D: Closed-Loop Evaluation of Performance and Physical Constraints for 3D ICs](/202607/19/2607.12788v1-clip-3d-closed-loop-evaluation-of-performance-and-physical-constraints-for-3d-ics)  
+   evidence：针对资源受限设备的超轻量级模型设计
+4. [SpikeDS: Dual Sparsity Spikformer for Perineural Invasion Prediction in 3D MRI](/202607/20/2607.11986v1-spikeds-dual-sparsity-spikformer-for-perineural-invasion-prediction-in-3d-mri)  
    标签：评分：8.0/10、query:hwnas
-   evidence：考虑热效应和缓存效应的3D集成电路软硬件协同设计
-5. [WeaveEarth: Structured Evidence Construction and Reasoning for Training-Free UHR Remote Sensing Understanding](/202607/19/2607.10120v1-weaveearth-structured-evidence-construction-and-reasoning-for-training-free-uhr-remote-sensing-understanding)  
+   evidence：节能脉冲神经网络架构
+5. [LSTrans: Efficient Knowledge Transfer for Lightweight and Automated ECG Classification](/202607/20/2607.10784v1-lstrans-efficient-knowledge-transfer-for-lightweight-and-automated-ecg-classification)  
    标签：评分：7.0/10、query:hwnas
-   evidence：有限计算预算下的遥感图像理解
-6. [Sharper Analysis of Single-Loop Methods for Bilevel Optimization](/202607/19/2607.10263v1-sharper-analysis-of-single-loop-methods-for-bilevel-optimization)  
+   evidence：针对资源受限可穿戴设备的轻量化模型
+6. [Efficient Tuning Before Low-Bit Post-Training Quantization for Stochastic Gradient Descent-optimized Models](/202607/20/2607.11359v1-efficient-tuning-before-low-bit-post-training-quantization-for-stochastic-gradient-descent-optimized-models)  
    标签：评分：7.0/10、query:hwnas
-   evidence：用于神经架构搜索的双层优化
-7. [Program-Synthesis-Driven Autodesign of Universal Unitary Operators](/202607/19/2607.10295v1-program-synthesis-driven-autodesign-of-universal-unitary-operators)  
+   evidence：通过量化自动设计硬件友好的深度学习模型
+7. [From Wireless SNNs to SN P Systems: A Low-Energy Rule-Based Conversion](/202607/20/2607.11428v1-from-wireless-snns-to-sn-p-systems-a-low-energy-rule-based-conversion)  
    标签：评分：7.0/10、query:hwnas
-   evidence：自动设计具有最少干涉仪的光子网络
-8. [MemDecay: Region-Aware KV Cache Eviction for Efficient LLM Agent Inference](/202607/19/2607.10582v1-memdecay-region-aware-kv-cache-eviction-for-efficient-llm-agent-inference)  
+   evidence：用于能效边缘推理的低能耗规则转换
+8. [Event-based Neural Decoding for Neuroprosthetic Motor Control](/202607/20/2607.11445v1-event-based-neural-decoding-for-neuroprosthetic-motor-control)  
    标签：评分：7.0/10、query:hwnas
-   evidence：针对内存瓶颈的KV缓存驱逐策略
-9. [A Symbolic Neural CPU for Quantization-Simulated Writeback and Interpretable Program Execution](/202607/19/2607.10021v1-a-symbolic-neural-cpu-for-quantization-simulated-writeback-and-interpretable-program-execution)  
+   evidence：神经假体中的低功耗推理与能耗
+9. [Differentiable Proxy Learning for Adaptive Quantization Control in H.264 Video Coding](/202607/20/2607.10478v1-differentiable-proxy-learning-for-adaptive-quantization-control-in-h264-video-coding)  
    标签：评分：6.0/10、query:hwnas
-   evidence：具有量化模拟回写的神经CPU架构
-10. [FlashTrie: A GPU-Accelerated Constrained Beam Search for Generative Retrieval](/202607/19/2607.10044v1-flashtrie-a-gpu-accelerated-constrained-beam-search-for-generative-retrieval)  
+   evidence：针对特定硬件视频编解码器优化的可微分代理
+10. [Learning to Fine-tune Foundation Models under Resource Limitations](/202607/20/2607.10694v1-learning-to-fine-tune-foundation-models-under-resource-limitations)  
    标签：评分：6.0/10、query:hwnas
-   evidence：GPU加速的约束束搜索以及通过简洁字典树布局减少内存占用
-11. [BucketKD: A Safety-Aware Bucket-Based Knowledge Distillation Framework for End-to-End Motion Planning](/202607/19/2607.10565v1-bucketkd-a-safety-aware-bucket-based-knowledge-distillation-framework-for-end-to-end-motion-planning)  
+   evidence：在设备资源受限的情况下微调基础模型
+11. [RTFVE: Realtime Face Video Enhancement](/202607/20/2607.11034v1-rtfve-realtime-face-video-enhancement)  
    标签：评分：6.0/10、query:hwnas
-   evidence：适用于资源受限平台的紧凑型规划器
+   evidence：针对普通CPU和低比特率设置设计的实时模型
 
 
 <div class="dpr-home-promo-card">
